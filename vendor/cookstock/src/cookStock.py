@@ -408,6 +408,7 @@ class algoParas:
     PEG_MIN_EPS_SURPRISE_PCT = 20.0
     PEG_MAX_ENTRY_DISTANCE_PCT = 0.03
     PEG_MIN_CLOSE_POSITION_RATIO = 0.6
+    PEG_REQUIRE_EARNINGS_EVENT = True
     PEG_REQUIRE_GREEN_CANDLE = True
     PEG_PRIMARY_ENTRY_MODE = 'peg_low'
     PEG_SECONDARY_ENTRY_FAST_EMA = 9
@@ -548,6 +549,10 @@ def load_market_config():
     pre_earnings_use_market_memory = config.get('pre_earnings_use_market_memory')
     if isinstance(pre_earnings_use_market_memory, bool):
         algoParas.PRE_EARNINGS_USE_MARKET_MEMORY = pre_earnings_use_market_memory
+
+    peg_require_earnings_event = config.get('peg_require_earnings_event')
+    if isinstance(peg_require_earnings_event, bool):
+        algoParas.PEG_REQUIRE_EARNINGS_EVENT = peg_require_earnings_event
 
     peg_require_green_candle = config.get('peg_require_green_candle')
     if isinstance(peg_require_green_candle, bool):
@@ -2054,7 +2059,8 @@ class cookFinancials(YahooFinancials):
         if len(priceDataStruct) < 60:
             return None
 
-        earningsDates = self._get_earnings_event_dates()
+        require_earnings_event = bool(getattr(algoParas, 'PEG_REQUIRE_EARNINGS_EVENT', True))
+        earningsDates = self._get_earnings_event_dates() if require_earnings_event else []
 
         lookback = max(1, int(algoParas.PEG_LOOKBACK_DAYS))
         tolerance_days = max(0, int(algoParas.PEG_EARNINGS_TOLERANCE_DAYS))
@@ -2080,7 +2086,7 @@ class cookFinancials(YahooFinancials):
                 continue
             if prev_close <= 0:
                 continue
-            if earningsDates and not self._is_near_earnings_event(bar_date, earningsDates, tolerance_days):
+            if require_earnings_event and earningsDates and not self._is_near_earnings_event(bar_date, earningsDates, tolerance_days):
                 continue
 
             earnings_surprise = None

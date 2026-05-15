@@ -22,6 +22,25 @@ class AppConfig:
     default_split_pages: int = 4
     default_montage_columns: int = 2
     default_card_width: int = 700
+    earnings_watchlist_ics_url: str = "https://earnings.beavern.com/ics/all.ics"
+    earnings_watchlist_exclude_ics_urls: tuple[str, ...] = ()
+    earnings_surprise_provider: str = "auto"
+    peg_lookback_days: int = 20
+    peg_earnings_tolerance_days: int = 3
+    peg_min_gap_pct: float = 0.10
+    peg_min_volume_ratio: float = 3.0
+    peg_monster_gap_pct: float = 0.20
+    peg_monster_volume_ratio: float = 4.0
+    peg_min_eps_surprise_pct: float = 20.0
+    peg_max_entry_distance_pct: float = 0.03
+    peg_min_close_position_ratio: float = 0.6
+    peg_require_earnings_event: bool = False
+    peg_require_green_candle: bool = True
+    peg_primary_entry_mode: str = "peg_low"
+    peg_secondary_entry_fast_ema: int = 9
+    peg_secondary_entry_slow_ema: int = 21
+    peg_distribution_lookback_days: int = 10
+    peg_distribution_volume_ratio: float = 1.5
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -41,6 +60,14 @@ def load_app_config(path: str | Path | None = None) -> AppConfig:
     normalized = dict(data)
     if "exchanges" in normalized and isinstance(normalized["exchanges"], list):
         normalized["exchanges"] = tuple(str(value).lower() for value in normalized["exchanges"])
+    if "earnings_watchlist_exclude_ics_urls" in normalized and isinstance(
+        normalized["earnings_watchlist_exclude_ics_urls"], list
+    ):
+        normalized["earnings_watchlist_exclude_ics_urls"] = tuple(
+            str(value).strip()
+            for value in normalized["earnings_watchlist_exclude_ics_urls"]
+            if str(value).strip()
+        )
     return AppConfig(**normalized)
 
 

@@ -1,10 +1,11 @@
 # ticker-screener
 
-Focused RS screen and chart-render workflow for `RS new high before price`.
+Focused chart-screen workflows for `RS new high before price` and `power earnings gap`.
 
 This project keeps the responsibilities narrow:
 
 - screen the US equity universe for `RS new high before price`
+- screen the configured exchange universe for `power earnings gap`
 - emit raw screen results plus a renderer-ready watchlist JSON
 - render daily setup charts from that watchlist
 
@@ -14,6 +15,7 @@ The RS engine is vendored from `cookstock` so GitHub Actions can run without dep
 
 - `src/`: config, universe loading, RS screening, and watchlist building
 - `scripts/run_rs_screen.py`: produces raw results and watchlist JSON
+- `scripts/run_peg_screen.py`: produces PEG raw results and watchlist JSON
 - `scripts/render_rs_watchlist.py`: renders charts from a watchlist JSON
 - `vendor/cookstock/`: vendored RS engine dependencies
 - `vendor/trade_master_signals/`: vendored chart renderer
@@ -39,6 +41,24 @@ Run a smaller smoke test:
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_rs_screen.py --limit 25
 ```
 
+Run the PEG screener across the configured exchange universe:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_peg_screen.py
+```
+
+Run a PEG smoke test:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_peg_screen.py --limit 10
+```
+
+Run the PEG screener against only the next-week earnings watchlist:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_peg_screen.py --source earnings-watchlist
+```
+
 Render charts from the generated watchlist:
 
 ```bash
@@ -53,6 +73,9 @@ The screen step writes:
 - `artifacts/raw/rs_new_high_before_price_<date>.json`
 - `artifacts/raw/run_summary_<date>.json`
 - `artifacts/watchlists/rs_new_high_before_price_<date>.json`
+- `artifacts/raw/peg_earnings_gap_<date>.json`
+- `artifacts/raw/peg_run_summary_<date>.json`
+- `artifacts/watchlists/peg_earnings_gap_<date>.json`
 
 The render step writes:
 
@@ -69,6 +92,8 @@ The workflow in [.github/workflows/rs-screen-render.yml](/Users/Zihao.Guan/Perso
 2. `render`
 
 The `render` job downloads the watchlist artifact produced by `screen` and then renders charts from that exact file.
+
+The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
 
 ### Optional Discord notifications
 
