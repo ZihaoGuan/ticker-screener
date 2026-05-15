@@ -289,7 +289,7 @@ jobs:
           PY
 
       - name: Send Discord notification
-        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
