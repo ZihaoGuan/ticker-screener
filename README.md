@@ -69,3 +69,38 @@ The workflow in [.github/workflows/rs-screen-render.yml](/Users/Zihao.Guan/Perso
 2. `render`
 
 The `render` job downloads the watchlist artifact produced by `screen` and then renders charts from that exact file.
+
+### Optional Discord notifications
+
+If you want GitHub Actions to post run summaries to Discord, add a repository secret named `DISCORD_WEBHOOK_URL`.
+
+The workflow will then send a message with:
+
+- run date
+- screen job result
+- render job result
+- ticker count
+- hit count
+- failure count
+- top hit tickers when available
+- a link to the GitHub Actions run
+
+Without that secret, the notification step is skipped and the rest of the workflow still runs normally.
+
+### Optional Cloudflare R2 publishing
+
+If you want GitHub Actions to upload generated artifacts to Cloudflare R2, add these repository secrets:
+
+- `R2_ACCOUNT_ID`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_BUCKET`
+- `R2_PUBLIC_BASE_URL` for public links in notifications
+
+When those secrets are configured, the workflow uploads each successful run to:
+
+- `rs-screen/<date>/raw/`
+- `rs-screen/<date>/watchlists/`
+- `rs-screen/<date>/rendered/`
+
+The Discord notification will include the public `index.html` link when `R2_PUBLIC_BASE_URL` is set. Without the R2 secrets, the publish job is skipped and the rest of the workflow still runs normally.

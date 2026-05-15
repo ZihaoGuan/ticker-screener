@@ -97,3 +97,203 @@ jobs:
         with:
           name: rs-screen-rendered-${{ needs.screen.outputs.date_label }}
           path: artifacts/output/rs_new_high_before_price_${{ needs.screen.outputs.date_label }}
+
+  publish-r2:
+    runs-on: ubuntu-latest
+    needs:
+      - screen
+      - render
+    if: ${{ needs.screen.result == 'success' && needs.render.result == 'success' }}
+    outputs:
+      r2_prefix: ${{ steps.publish.outputs.r2_prefix }}
+      r2_index_url: ${{ steps.publish.outputs.r2_index_url }}
+    steps:
+      - name: Check R2 configuration
+        id: r2-config
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [ -n "${R2_ACCOUNT_ID}" ] && [ -n "${R2_ACCESS_KEY_ID}" ] && [ -n "${R2_SECRET_ACCESS_KEY}" ] && [ -n "${R2_BUCKET}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Python
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install AWS CLI
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        run: python -m pip install awscli
+
+      - name: Download raw results artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: rs-screen-raw-${{ needs.screen.outputs.date_label }}
+          path: artifacts/raw
+
+      - name: Download watchlist artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: rs-screen-watchlist-${{ needs.screen.outputs.date_label }}
+          path: artifacts/watchlists
+
+      - name: Download rendered charts artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: rs-screen-rendered-${{ needs.screen.outputs.date_label }}
+          path: artifacts/output/rs_new_high_before_price_${{ needs.screen.outputs.date_label }}
+
+      - name: Upload artifacts to R2
+        id: publish
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+          DATE_LABEL: ${{ needs.screen.outputs.date_label }}
+        run: |
+          set -euo pipefail
+          R2_PREFIX="rs-screen/${DATE_LABEL}"
+          ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/raw/" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/raw/" \
+            --recursive
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/watchlists/" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/watchlists/" \
+            --recursive
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/output/rs_new_high_before_price_${DATE_LABEL}/" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/rendered/" \
+            --recursive
+
+          if [ -n "${R2_PUBLIC_BASE_URL}" ]; then
+            BASE_URL="${R2_PUBLIC_BASE_URL%/}"
+            INDEX_URL="${BASE_URL}/${R2_PREFIX}/rendered/index.html"
+          else
+            INDEX_URL=""
+          fi
+
+          {
+            echo "r2_prefix=${R2_PREFIX}"
+            echo "r2_index_url=${INDEX_URL}"
+          } >> "$GITHUB_OUTPUT"
+
+  notify:
+    runs-on: ubuntu-latest
+    needs:
+      - screen
+      - render
+      - publish-r2
+    if: ${{ always() }}
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download raw results artifact
+        if: ${{ needs.screen.result == 'success' && needs.screen.outputs.date_label != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: rs-screen-raw-${{ needs.screen.outputs.date_label }}
+          path: artifacts/raw
+
+      - name: Build Discord payload
+        env:
+          DATE_LABEL: ${{ needs.screen.outputs.date_label }}
+          SCREEN_RESULT: ${{ needs.screen.result }}
+          RENDER_RESULT: ${{ needs.render.result }}
+          PUBLISH_RESULT: ${{ needs.publish-r2.result }}
+          R2_INDEX_URL: ${{ needs.publish-r2.outputs.r2_index_url }}
+          R2_PREFIX: ${{ needs.publish-r2.outputs.r2_prefix }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          date_label = os.getenv("DATE_LABEL") or "unknown-date"
+          screen_result = os.getenv("SCREEN_RESULT", "unknown")
+          render_result = os.getenv("RENDER_RESULT", "unknown")
+          publish_result = os.getenv("PUBLISH_RESULT", "skipped")
+          r2_index_url = os.getenv("R2_INDEX_URL", "").strip()
+          r2_prefix = os.getenv("R2_PREFIX", "").strip()
+          run_url = os.getenv("GITHUB_RUN_URL", "")
+
+          summary_path = Path("artifacts/raw") / f"run_summary_{date_label}.json"
+          total_tickers = "n/a"
+          passed_tickers = "n/a"
+          failed_tickers = "n/a"
+          top_hits: list[str] = []
+
+          if summary_path.exists():
+              summary = json.loads(summary_path.read_text(encoding="utf-8"))
+              total_tickers = summary.get("total_tickers", "n/a")
+              passed_tickers = summary.get("passed_tickers", "n/a")
+              failures = summary.get("failed_tickers", [])
+              failed_tickers = len(failures) if isinstance(failures, list) else "n/a"
+              raw_results_file = summary.get("raw_results_file")
+              if raw_results_file:
+                  raw_path = Path(raw_results_file)
+                  if raw_path.exists():
+                      raw_results = json.loads(raw_path.read_text(encoding="utf-8"))
+                      hits = raw_results.get("hits", [])
+                      if isinstance(hits, list):
+                          top_hits = [
+                              str(hit.get("ticker", "")).strip()
+                              for hit in hits[:5]
+                              if isinstance(hit, dict) and str(hit.get("ticker", "")).strip()
+                          ]
+
+          status_emoji = ":white_check_mark:" if screen_result == "success" and render_result == "success" else ":warning:"
+          lines = [
+              f"{status_emoji} RS screen pipeline finished for `{date_label}`",
+              f"Screen job: `{screen_result}`",
+              f"Render job: `{render_result}`",
+              f"R2 publish job: `{publish_result}`",
+              f"Tickers screened: `{total_tickers}`",
+              f"Hits: `{passed_tickers}`",
+              f"Failures: `{failed_tickers}`",
+          ]
+          if top_hits:
+              lines.append(f"Top hits: {', '.join(f'`{ticker}`' for ticker in top_hits)}")
+          if r2_index_url:
+              lines.append(f"Rendered charts: {r2_index_url}")
+          elif r2_prefix:
+              lines.append(f"R2 prefix: `{r2_prefix}`")
+          if run_url:
+              lines.append(f"Run details: {run_url}")
+
+          payload = {"content": "\n".join(lines)}
+          Path("discord_payload.json").write_text(json.dumps(payload), encoding="utf-8")
+          PY
+
+      - name: Send Discord notification
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            --data @discord_payload.json \
+            "$DISCORD_WEBHOOK_URL"
