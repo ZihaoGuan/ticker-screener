@@ -1,0 +1,20 @@
+{
+  "benchmark_ticker": "SPY",
+  "rs_new_high_daily_lookback_days": 250,
+  "rs_new_high_weekly_lookback_weeks": 52,
+  "rs_new_high_history_days": 400,
+  "rs_new_high_require_before_price": true,
+  "year_high_proximity": 0.15,
+  "request_timeout_seconds": 20,
+  "exchanges": [
+    "nyse",
+    "nasdaq",
+    "amex"
+  ],
+  "max_tickers": null,
+  "default_chart_period": "18mo",
+  "default_chart_lookback": 120,
+  "default_split_pages": 4,
+  "default_montage_columns": 2,
+  "default_card_width": 700
+}
