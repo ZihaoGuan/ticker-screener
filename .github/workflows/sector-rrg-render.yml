@@ -1,0 +1,194 @@
+name: Sector RRG Render
+
+on:
+  workflow_dispatch:
+    inputs:
+      benchmark:
+        description: Optional benchmark ticker
+        required: false
+        default: "SPY"
+        type: string
+      universe:
+        description: ETF universe
+        required: false
+        default: "industry"
+        type: choice
+        options:
+          - industry
+          - sector
+  schedule:
+    - cron: "0 0 * * 0"
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    outputs:
+      date_label: ${{ steps.meta.outputs.date_label }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compute artifact metadata
+        id: meta
+        run: echo "date_label=$(date +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Render sector rotation RRG
+        env:
+          MPLBACKEND: Agg
+          MPLCONFIGDIR: /tmp/mpl
+          BENCHMARK: ${{ github.event.inputs.benchmark }}
+          UNIVERSE: ${{ github.event.inputs.universe }}
+        run: |
+          ARGS=()
+          if [ -n "${BENCHMARK}" ]; then
+            ARGS+=(--benchmark "${BENCHMARK}")
+          fi
+          if [ -n "${UNIVERSE}" ]; then
+            ARGS+=(--universe "${UNIVERSE}")
+          fi
+          python scripts/render_sector_rotation_rrg.py \
+            --output-dir "artifacts/output/sector_rotation_rrg_${{ steps.meta.outputs.date_label }}" \
+            "${ARGS[@]}"
+
+      - name: Upload rendered charts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sector-rrg-rendered-${{ steps.meta.outputs.date_label }}
+          path: artifacts/output/sector_rotation_rrg_${{ steps.meta.outputs.date_label }}
+
+  publish-r2:
+    runs-on: ubuntu-latest
+    needs:
+      - render
+    if: ${{ needs.render.result == 'success' }}
+    outputs:
+      r2_prefix: ${{ steps.publish.outputs.r2_prefix }}
+      r2_index_url: ${{ steps.publish.outputs.r2_index_url }}
+    steps:
+      - name: Check R2 configuration
+        id: r2-config
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [ -n "${R2_ACCOUNT_ID}" ] && [ -n "${R2_ACCESS_KEY_ID}" ] && [ -n "${R2_SECRET_ACCESS_KEY}" ] && [ -n "${R2_BUCKET}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install AWS CLI
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        run: python -m pip install awscli
+
+      - name: Download rendered charts artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: sector-rrg-rendered-${{ needs.render.outputs.date_label }}
+          path: artifacts/output/sector_rotation_rrg_${{ needs.render.outputs.date_label }}
+
+      - name: Upload artifacts to R2
+        id: publish
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+          DATE_LABEL: ${{ needs.render.outputs.date_label }}
+        run: |
+          set -euo pipefail
+          R2_PREFIX="sector-rrg/${DATE_LABEL}"
+          ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          INDEX_URL="/${R2_PREFIX}/rendered/index.html"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/output/sector_rotation_rrg_${DATE_LABEL}/" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/rendered/" \
+            --recursive
+
+          if [ -n "${R2_PUBLIC_BASE_URL}" ]; then
+            BASE_URL="${R2_PUBLIC_BASE_URL%/}"
+            INDEX_URL="${BASE_URL}/${R2_PREFIX}/rendered/index.html"
+          fi
+
+          {
+            echo "r2_prefix=${R2_PREFIX}"
+            echo "r2_index_url=${INDEX_URL}"
+          } >> "$GITHUB_OUTPUT"
+
+  notify:
+    runs-on: ubuntu-latest
+    needs:
+      - render
+      - publish-r2
+    if: ${{ always() }}
+    steps:
+      - name: Build Discord payload
+        env:
+          RENDER_RESULT: ${{ needs.render.result }}
+          PUBLISH_RESULT: ${{ needs.publish-r2.result }}
+          R2_INDEX_URL: ${{ needs.publish-r2.outputs.r2_index_url }}
+          DATE_LABEL: ${{ needs.render.outputs.date_label }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          render_result = os.getenv("RENDER_RESULT", "unknown")
+          publish_result = os.getenv("PUBLISH_RESULT", "skipped")
+          r2_index_url = os.getenv("R2_INDEX_URL", "").strip()
+          date_label = os.getenv("DATE_LABEL", "unknown-date")
+          run_url = os.getenv("GITHUB_RUN_URL", "")
+
+          success = render_result == "success"
+          if success and r2_index_url:
+              payload = {"content": f"Sector RRG: {r2_index_url}"}
+          else:
+              lines = [
+                  f"{':white_check_mark:' if success else ':warning:'} Sector RRG render finished for `{date_label}`",
+                  f"Render job: `{render_result}`",
+                  f"R2 publish job: `{publish_result}`",
+              ]
+              if r2_index_url:
+                  lines.append(f"Rendered charts: {r2_index_url}")
+              if run_url:
+                  lines.append(f"Run details: {run_url}")
+              payload = {"content": "\n".join(lines)}
+          Path("discord_payload.json").write_text(json.dumps(payload), encoding="utf-8")
+          PY
+
+      - name: Send Discord notification
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            --data @discord_payload.json \
+            "$DISCORD_WEBHOOK_URL"

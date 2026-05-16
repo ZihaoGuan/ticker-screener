@@ -250,6 +250,38 @@ def render_root_index(manifest: dict[str, Any]) -> str:
       background: rgba(255,255,255,0.72);
       backdrop-filter: blur(10px);
     }}
+    .philosophy {{
+      margin-top: 24px;
+      padding: 22px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: rgba(255,253,248,0.86);
+    }}
+    .philosophy h2 {{
+      margin: 0 0 12px;
+      font-size: 1.4rem;
+    }}
+    .philosophy-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+    }}
+    .philosophy-card {{
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.6);
+    }}
+    .philosophy-card h3 {{
+      margin: 0 0 8px;
+      font-size: 1.05rem;
+    }}
+    .philosophy-card p {{
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.96rem;
+      line-height: 1.55;
+    }}
     .filters {{
       align-items: end;
     }}
@@ -340,6 +372,24 @@ def render_root_index(manifest: dict[str, Any]) -> str:
         <span class="stat">{run_count} published runs</span>
         <span class="stat">{latest_count} workflow families</span>
         <span class="stat">Updated {escape(updated_at)}</span>
+      </div>
+    </section>
+
+    <section class="philosophy">
+      <h2>Screening Philosophy</h2>
+      <div class="philosophy-grid">
+        <article class="philosophy-card">
+          <h3>RS New High Before Price</h3>
+          <p>This looks for names where the relative-strength line is already breaking to a new high before price does. The idea is that hidden leadership often shows up in RS first, before the chart itself looks obvious to everyone else.</p>
+        </article>
+        <article class="philosophy-card">
+          <h3>PEG Earnings Gap</h3>
+          <p>This focuses on powerful upside earnings gaps with strong volume and strong closes. The goal is to find names where fresh information forced institutions to reprice the stock higher, creating a gap that may continue rather than fade.</p>
+        </article>
+        <article class="philosophy-card">
+          <h3>Pre-Earnings Focus</h3>
+          <p>This is a quality filter ahead of earnings. It favors stocks with healthy trend, tight action, good liquidity, and constructive relative strength, aiming to surface names that are acting well before the catalyst arrives.</p>
+        </article>
       </div>
     </section>
 

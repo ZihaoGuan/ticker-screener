@@ -17,6 +17,7 @@ The RS engine is vendored from `cookstock` so GitHub Actions can run without dep
 - `scripts/run_rs_screen.py`: produces raw results and watchlist JSON
 - `scripts/run_peg_screen.py`: produces PEG raw results and watchlist JSON
 - `scripts/render_rs_watchlist.py`: renders charts from a watchlist JSON
+- `scripts/render_sector_rotation_rrg.py`: renders an RRG-style sector or industry rotation map
 - `vendor/cookstock/`: vendored RS engine dependencies
 - `vendor/trade_master_signals/`: vendored chart renderer
 - `artifacts/`: local outputs and CI handoff artifacts
@@ -66,6 +67,15 @@ python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/render_rs_watchlist.p
   --watchlist-file /Users/Zihao.Guan/Personal/ticker-screener/artifacts/watchlists/rs_new_high_before_price_YYYY-MM-DD.json
 ```
 
+Render a weekly RRG-style rotation map:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/render_sector_rotation_rrg.py \
+  --output-dir /Users/Zihao.Guan/Personal/ticker-screener/artifacts/output/sector_rotation_rrg_YYYY-MM-DD \
+  --benchmark SPY \
+  --universe industry
+```
+
 ## Artifacts
 
 The screen step writes:
@@ -95,7 +105,9 @@ The `render` job downloads the watchlist artifact produced by `screen` and then 
 
 The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
 
-The pre-earnings workflow in [.github/workflows/pre-earnings-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-screen-render.yml) screens the next-week earnings watchlist, renders charts, and follows the same R2/Discord pattern as the RS and PEG workflows. It also supports manual runs with optional `limit` and `reference_date` inputs. Its cron is `0 0 * * 6`, which matches Saturday noon in New Zealand winter and Saturday 1pm during daylight saving because GitHub Actions schedules are UTC-based.
+The pre-earnings workflow in [.github/workflows/pre-earnings-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-screen-render.yml) screens the next-week earnings watchlist, renders charts, and follows the same R2/Discord pattern as the RS and PEG workflows. It currently runs manually with optional `limit` and `reference_date` inputs.
+
+The sector rotation workflow in [.github/workflows/sector-rrg-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/sector-rrg-render.yml) renders an RRG-style rotation map for the configured ETF universe. Its cron is `0 0 * * 0`, which corresponds to Sunday noon in New Zealand winter and Sunday 1pm during New Zealand daylight saving because GitHub Actions schedules are UTC-based.
 
 ### Optional Discord notifications
 
