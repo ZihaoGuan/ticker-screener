@@ -15,6 +15,7 @@ class AppConfig:
     rs_new_high_require_before_price: bool = True
     year_high_proximity: float = 0.15
     request_timeout_seconds: int = 20
+    ticker_timeout_seconds: int = 12
     exchanges: tuple[str, ...] = ("nyse", "nasdaq", "amex")
     max_tickers: int | None = None
     default_chart_period: str = "18mo"
@@ -41,6 +42,7 @@ class AppConfig:
     peg_secondary_entry_slow_ema: int = 21
     peg_distribution_lookback_days: int = 10
     peg_distribution_volume_ratio: float = 1.5
+    pre_earnings_retry_timeout_seconds: int = 24
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

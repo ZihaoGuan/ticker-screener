@@ -34,6 +34,7 @@ def apply_config_to_cookstock(module: ModuleType, config: AppConfig) -> None:
     algo.RS_NEW_HIGH_REQUIRE_BEFORE_PRICE = bool(config.rs_new_high_require_before_price)
     algo.YEAR_HIGH_PROXIMITY = float(config.year_high_proximity)
     algo.REQUEST_TIMEOUT_SECONDS = int(config.request_timeout_seconds)
+    algo.TICKER_TIMEOUT_SECONDS = int(config.ticker_timeout_seconds)
     algo.EARNINGS_WATCHLIST_ICS_URL = str(config.earnings_watchlist_ics_url).strip()
     algo.EARNINGS_WATCHLIST_EXCLUDE_ICS_URLS = [
         str(url).strip() for url in config.earnings_watchlist_exclude_ics_urls if str(url).strip()
@@ -55,6 +56,7 @@ def apply_config_to_cookstock(module: ModuleType, config: AppConfig) -> None:
     algo.PEG_SECONDARY_ENTRY_SLOW_EMA = int(config.peg_secondary_entry_slow_ema)
     algo.PEG_DISTRIBUTION_LOOKBACK_DAYS = int(config.peg_distribution_lookback_days)
     algo.PEG_DISTRIBUTION_VOLUME_RATIO = float(config.peg_distribution_volume_ratio)
+    algo.PRE_EARNINGS_RETRY_TIMEOUT_SECONDS = int(config.pre_earnings_retry_timeout_seconds)
 
 
 def load_configured_cookstock(config: AppConfig) -> ModuleType:

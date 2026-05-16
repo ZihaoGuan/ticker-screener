@@ -6,6 +6,7 @@
   "rs_new_high_require_before_price": true,
   "year_high_proximity": 0.15,
   "request_timeout_seconds": 20,
+  "ticker_timeout_seconds": 12,
   "exchanges": [
     "nyse",
     "nasdaq",
@@ -16,5 +17,6 @@
   "default_chart_lookback": 120,
   "default_split_pages": 4,
   "default_montage_columns": 2,
-  "default_card_width": 700
+  "default_card_width": 700,
+  "pre_earnings_retry_timeout_seconds": 24
 }
