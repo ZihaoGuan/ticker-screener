@@ -2133,10 +2133,11 @@ class cookFinancials(YahooFinancials):
             low_p = bar.get('low')
             close_p = bar.get('close')
             prev_close = prevBar.get('close')
+            prev_high = prevBar.get('high')
             volume = bar.get('volume')
             bar_date = bar.get('formatted_date')
 
-            if None in (open_p, high_p, low_p, close_p, prev_close, volume):
+            if None in (open_p, high_p, low_p, close_p, prev_close, prev_high, volume):
                 continue
             if prev_close <= 0:
                 continue
@@ -2160,8 +2161,8 @@ class cookFinancials(YahooFinancials):
             if close_gap_pct < float(algoParas.PEG_MIN_GAP_PCT):
                 continue
 
-            # For a valid PEG, the up-gap should remain open intraday.
-            if low_p <= prev_close:
+            # Use a true full-gap definition so the bar does not overlap the prior day's range.
+            if low_p <= prev_high:
                 continue
 
             candle_range = high_p - low_p
