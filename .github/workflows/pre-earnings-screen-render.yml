@@ -379,18 +379,18 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          import os
-          import urllib.request
+          from pathlib import Path
 
-          webhook = os.environ["DISCORD_WEBHOOK_URL"]
           payloads = json.loads(open("discord_payloads.json", encoding="utf-8").read())
-          for payload in payloads:
-              request = urllib.request.Request(
-                  webhook,
-                  data=json.dumps(payload).encode("utf-8"),
-                  headers={"Content-Type": "application/json"},
-                  method="POST",
+          for index, payload in enumerate(payloads):
+              Path(f"discord_payload_{index:03d}.json").write_text(
+                  json.dumps(payload),
+                  encoding="utf-8",
               )
-              with urllib.request.urlopen(request) as response:
-                  response.read()
           PY
+          for payload_file in discord_payload_*.json; do
+            curl -sS -X POST \
+              -H "Content-Type: application/json" \
+              --data @"$payload_file" \
+              "$DISCORD_WEBHOOK_URL" || echo "warning: discord webhook send failed for $payload_file"
+          done
