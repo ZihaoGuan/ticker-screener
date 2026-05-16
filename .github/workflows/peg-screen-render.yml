@@ -276,12 +276,9 @@ jobs:
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           python - <<'PY'
-          import datetime as dt
           import json
           import os
           from pathlib import Path
-          import urllib.error
-          import urllib.request
 
           date_label = os.getenv("DATE_LABEL") or "unknown-date"
           screen_result = os.getenv("SCREEN_RESULT", "unknown")
@@ -303,7 +300,6 @@ jobs:
           failed_tickers = "n/a"
           current_hits = []
           hit_summaries = []
-          new_tickers: set[str] = set()
 
           if summary_path.exists():
               summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -318,36 +314,6 @@ jobs:
               if isinstance(hits, list):
                   current_hits = [hit for hit in hits if isinstance(hit, dict)]
 
-          previous_hits_by_ticker: set[str] = set()
-          if r2_public_base_url:
-              try:
-                  previous_date = (dt.date.fromisoformat(date_label) - dt.timedelta(days=1)).isoformat()
-                  previous_url = (
-                      f"{r2_public_base_url}/peg-screen/{previous_date}/raw/"
-                      f"peg_earnings_gap_{previous_date}.json"
-                  )
-                  request = urllib.request.Request(
-                      previous_url,
-                      headers={
-                          "User-Agent": (
-                              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/136.0.0.0 Safari/537.36"
-                          )
-                      },
-                  )
-                  with urllib.request.urlopen(request, timeout=15) as response:
-                      previous_payload = json.loads(response.read().decode("utf-8"))
-                  previous_hits = previous_payload.get("hits", [])
-                  if isinstance(previous_hits, list):
-                      previous_hits_by_ticker = {
-                          str(hit.get("ticker", "")).strip()
-                          for hit in previous_hits
-                          if isinstance(hit, dict) and str(hit.get("ticker", "")).strip()
-                      }
-              except Exception:
-                  previous_hits_by_ticker = set()
-
           def score_of(hit):
               try:
                   return float(hit.get("gap_pct", 0))
@@ -358,17 +324,13 @@ jobs:
               ticker = str(hit.get("ticker", "")).strip()
               if not ticker:
                   continue
-              is_new = ticker not in previous_hits_by_ticker if previous_hits_by_ticker else False
-              if is_new:
-                  new_tickers.add(ticker)
               gap_pct = score_of(hit) * 100.0
               volume_ratio = hit.get("volume_ratio")
               try:
                   volume_ratio_text = f"{float(volume_ratio):.2f}x"
               except (TypeError, ValueError):
                   volume_ratio_text = "n/a"
-              prefix = "NEW " if is_new else ""
-              hit_summaries.append(f"{prefix}`{ticker}` gap {gap_pct:.1f}% vol {volume_ratio_text}")
+              hit_summaries.append(f"`{ticker}` gap {gap_pct:.1f}% vol {volume_ratio_text}")
 
           status_emoji = ":white_check_mark:" if success else ":warning:"
           lines = [
@@ -380,8 +342,6 @@ jobs:
               f"Hits: `{passed_tickers}`",
               f"Failures: `{failed_tickers}`",
           ]
-          if previous_hits_by_ticker:
-              lines.append(f"New vs prior day: `{len(new_tickers)}`")
           if r2_index_url:
               lines.append(f"Rendered charts: {r2_index_url}")
           elif r2_prefix:
@@ -391,7 +351,7 @@ jobs:
 
           payloads: list[dict[str, str]] = [{"content": "\n".join(lines)}]
           if hit_summaries:
-              header = "Hit list (`NEW` means not in prior day PEG hits):" if previous_hits_by_ticker else "Hit list:"
+              header = "Hit list:"
               current = header
               limit = 1800
               for item in hit_summaries:
