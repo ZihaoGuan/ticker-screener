@@ -104,6 +104,9 @@ jobs:
       - screen
       - render
     if: ${{ needs.screen.result == 'success' && needs.render.result == 'success' }}
+    concurrency:
+      group: r2-root-index-update
+      cancel-in-progress: false
     outputs:
       r2_prefix: ${{ steps.publish.outputs.r2_prefix }}
       r2_index_url: ${{ steps.publish.outputs.r2_index_url }}
