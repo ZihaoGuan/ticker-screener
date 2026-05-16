@@ -225,6 +225,7 @@ jobs:
           PUBLISH_RESULT: ${{ needs.publish-r2.result }}
           R2_INDEX_URL: ${{ needs.publish-r2.outputs.r2_index_url }}
           R2_PREFIX: ${{ needs.publish-r2.outputs.r2_prefix }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           python - <<'PY'
@@ -238,8 +239,12 @@ jobs:
           publish_result = os.getenv("PUBLISH_RESULT", "skipped")
           r2_index_url = os.getenv("R2_INDEX_URL", "").strip()
           r2_prefix = os.getenv("R2_PREFIX", "").strip()
+          r2_public_base_url = os.getenv("R2_PUBLIC_BASE_URL", "").strip().rstrip("/")
           run_url = os.getenv("GITHUB_RUN_URL", "")
           success = screen_result == "success" and render_result == "success"
+
+          if not r2_index_url and r2_public_base_url and r2_prefix:
+              r2_index_url = f"{r2_public_base_url}/{r2_prefix}/rendered/index.html"
 
           summary_path = Path("artifacts/raw") / f"peg_run_summary_{date_label}.json"
           total_tickers = "n/a"
@@ -254,7 +259,7 @@ jobs:
               failed_tickers = len(failures) if isinstance(failures, list) else "n/a"
 
           if success and r2_index_url:
-              payload = {"content": r2_index_url}
+              payload = {"content": f"PEG rendered charts: {r2_index_url}"}
               Path("discord_payload.json").write_text(json.dumps(payload), encoding="utf-8")
               raise SystemExit(0)
 

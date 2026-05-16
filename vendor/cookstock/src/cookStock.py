@@ -11,7 +11,8 @@ import json as js
 import datetime as dt
 import os.path
 import multiprocessing as mp
-from time import sleep
+import signal
+from time import sleep, time
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Empty
@@ -424,6 +425,7 @@ class algoParas:
     PRE_EARNINGS_B_SCORE_THRESHOLD = 55
     PRE_EARNINGS_HISTORY_DAYS = 180
     PRE_EARNINGS_USE_MARKET_MEMORY = False
+    PRE_EARNINGS_RETRY_TIMEOUT_SECONDS = 0
     HTF_RUNUP_WINDOW_DAYS = 40
     HTF_MIN_RUNUP_PCT = 100.0
     HTF_MAX_CORRECTION_PCT = 25.0
@@ -512,6 +514,7 @@ def load_market_config():
         'pre_earnings_a_score_threshold': ('PRE_EARNINGS_A_SCORE_THRESHOLD', int),
         'pre_earnings_b_score_threshold': ('PRE_EARNINGS_B_SCORE_THRESHOLD', int),
         'pre_earnings_history_days': ('PRE_EARNINGS_HISTORY_DAYS', int),
+        'pre_earnings_retry_timeout_seconds': ('PRE_EARNINGS_RETRY_TIMEOUT_SECONDS', int),
         'htf_runup_window_days': ('HTF_RUNUP_WINDOW_DAYS', int),
         'htf_min_runup_pct': ('HTF_MIN_RUNUP_PCT', float),
         'htf_max_correction_pct': ('HTF_MAX_CORRECTION_PCT', float),
@@ -829,6 +832,36 @@ class cookFinancials(YahooFinancials):
         if not(self.summaryData[self.ticker]):
             return 'na'
         return self.summaryData[self.ticker]['marketCap']/1000000000
+
+    def get_marketCap_B_safe(self, timeout_seconds=3):
+        timeout_seconds = max(0, int(timeout_seconds))
+        if timeout_seconds <= 0 or not hasattr(signal, 'SIGALRM'):
+            try:
+                value = self.get_marketCap_B()
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+            except Exception as exc:
+                print(f"market cap lookup failed for {self.ticker}: {exc}")
+                return None
+
+        def _timeout_handler(signum, frame):
+            raise TimeoutError(f"market cap lookup timed out after {timeout_seconds}s")
+
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        try:
+            signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(timeout_seconds)
+            value = self.get_marketCap_B()
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+        except Exception as exc:
+            print(f"market cap lookup skipped for {self.ticker}: {exc}")
+            return None
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous_handler)
     
     def get_CF_GR_median(self, totalCash):
         gr = []
@@ -1659,6 +1692,12 @@ class cookFinancials(YahooFinancials):
         }
 
     def get_pre_earnings_focus_summary(self, event_date=None, sectorName=None, benchmarkTicker=None):
+        trace_enabled = bool(getattr(algoParas, 'PRE_EARNINGS_TRACE_TIMING', False))
+
+        def _trace(label, started_at):
+            if trace_enabled:
+                print(f"[pre-earnings:{self.ticker}] {label} {time() - started_at:.2f}s")
+
         priceDataStruct = self._get_clean_price_data()
         if len(priceDataStruct) < 60:
             return None
@@ -1681,18 +1720,37 @@ class cookFinancials(YahooFinancials):
 
         benchmarkTicker = benchmarkTicker or algoParas.BENCHMARK_TICKER
         use_market_memory = bool(getattr(algoParas, 'PRE_EARNINGS_USE_MARKET_MEMORY', False))
+        step_started = time()
         memorySummary = self.get_market_memory_summary() if use_market_memory else None
+        _trace("market_memory", step_started)
+
+        step_started = time()
         distribution = self._get_distribution_warning()
+        _trace("distribution_warning", step_started)
+
+        step_started = time()
         isNearYearHigh, _, yearHigh, distanceFromHigh = self.is_near_year_high()
+        _trace("near_year_high", step_started)
+
+        step_started = time()
         isStrongRs, stockReturn, benchmarkReturn, currentRsLine, rsLineHigh = self.is_relative_strength_strong(benchmarkTicker)
+        _trace("relative_strength", step_started)
+
+        step_started = time()
         isSectorStrong, sectorEtf, sectorEtfNearHigh, _, _, sectorEtfDistance, sectorEtfReturn, sectorBenchmarkReturn = self.is_sector_etf_strong(sectorName, benchmarkTicker)
+        _trace("sector_strength", step_started)
+
+        step_started = time()
         avg_dollar_volume = self._get_average_dollar_volume(liquidity_lookback)
+        _trace("avg_dollar_volume", step_started)
+
+        step_started = time()
         recent_range_pct = self._get_recent_range_pct(compression_lookback)
-        market_cap_b = self.get_marketCap_B()
-        try:
-            market_cap_b = float(market_cap_b)
-        except (TypeError, ValueError):
-            market_cap_b = None
+        _trace("recent_range_pct", step_started)
+
+        step_started = time()
+        market_cap_b = self.get_marketCap_B_safe(timeout_seconds=3)
+        _trace("market_cap", step_started)
 
         liquidity_score = 0
         if avg_dollar_volume >= 100_000_000:
@@ -1891,11 +1949,7 @@ class cookFinancials(YahooFinancials):
         isStrongRs, stockReturn, benchmarkReturn, currentRsLine, rsLineHigh = self.is_relative_strength_strong(benchmarkTicker)
         isSectorStrong, sectorEtf, sectorEtfNearHigh, _, _, sectorEtfDistance, sectorEtfReturn, sectorBenchmarkReturn = self.is_sector_etf_strong(sectorName, benchmarkTicker)
         avg_dollar_volume = self._get_average_dollar_volume(liquidity_lookback)
-        market_cap_b = self.get_marketCap_B()
-        try:
-            market_cap_b = float(market_cap_b)
-        except (TypeError, ValueError):
-            market_cap_b = None
+        market_cap_b = self.get_marketCap_B_safe(timeout_seconds=3)
 
         runup_pct = float(runup_summary['runup_pct'])
         pullback_pct = float(runup_summary['pullback_from_high_pct'])
@@ -2973,6 +3027,15 @@ class batch_process:
     def _get_ticker_timeout_seconds(self):
         return max(0, int(algoParas.TICKER_TIMEOUT_SECONDS))
 
+    def _get_pre_earnings_retry_timeout_seconds(self):
+        configured = int(getattr(algoParas, 'PRE_EARNINGS_RETRY_TIMEOUT_SECONDS', 0))
+        if configured > 0:
+            return configured
+        base = self._get_ticker_timeout_seconds()
+        if base <= 0:
+            return 0
+        return max(base + 60, int(base * 1.5))
+
     def _format_progress_bar(self, completed, total, width=24):
         total = max(1, int(total))
         completed = max(0, min(int(completed), total))
@@ -3171,10 +3234,9 @@ class batch_process:
             raise RuntimeError(payload.get('error', 'unknown worker error'))
         return payload.get('ticker_data')
 
-    def _run_pre_earnings_ticker_with_timeout(self, ticker, date_from):
-        timeout_seconds = self._get_ticker_timeout_seconds()
+    def _run_pre_earnings_ticker_with_timeout_once(self, ticker, date_from, timeout_seconds):
         if timeout_seconds <= 0:
-            return self._analyze_pre_earnings_ticker(ticker, date_from)
+            return self._analyze_pre_earnings_ticker(ticker, date_from), False
 
         ctx = mp.get_context('spawn')
         result_queue = ctx.Queue()
@@ -3194,7 +3256,7 @@ class batch_process:
                 process.join(5)
             result_queue.close()
             result_queue.join_thread()
-            return None
+            return None, True
 
         try:
             payload = result_queue.get_nowait()
@@ -3203,14 +3265,39 @@ class batch_process:
             result_queue.join_thread()
             if process.exitcode not in (0, None):
                 raise RuntimeError(f"worker exited with code {process.exitcode}")
-            return None
+            return None, False
 
         result_queue.close()
         result_queue.join_thread()
 
         if payload.get('status') == 'error':
             raise RuntimeError(payload.get('error', 'unknown worker error'))
-        return payload.get('ticker_data')
+        return payload.get('ticker_data'), False
+
+    def _run_pre_earnings_ticker_with_timeout(self, ticker, date_from):
+        timeout_seconds = self._get_ticker_timeout_seconds()
+        ticker_data, timed_out = self._run_pre_earnings_ticker_with_timeout_once(
+            ticker,
+            date_from,
+            timeout_seconds,
+        )
+        if not timed_out:
+            return ticker_data, False, False
+
+        retry_timeout_seconds = self._get_pre_earnings_retry_timeout_seconds()
+        if retry_timeout_seconds <= timeout_seconds:
+            return ticker_data, True, False
+
+        print(
+            f"retrying {ticker} pre-earnings analysis with longer timeout "
+            f"({retry_timeout_seconds}s)"
+        )
+        retry_data, retry_timed_out = self._run_pre_earnings_ticker_with_timeout_once(
+            ticker,
+            date_from,
+            retry_timeout_seconds,
+        )
+        return retry_data, retry_timed_out, True
 
     def _run_rsnhbp_ticker_with_timeout(self, ticker, date_from):
         timeout_seconds = self._get_ticker_timeout_seconds()
@@ -3946,21 +4033,33 @@ class batch_process:
         total_tickers = len(self.tickers)
         completed = 0
         passed_count = 0
+        timeout_seconds = self._get_ticker_timeout_seconds()
+        retry_timeout_seconds = self._get_pre_earnings_retry_timeout_seconds()
 
         print(
             f"starting pre-earnings batch pipeline: total={total_tickers}, "
-            f"next_week={min(self.earnings_event_by_ticker.values()) if self.earnings_event_by_ticker else 'NA'}"
+            f"next_week={min(self.earnings_event_by_ticker.values()) if self.earnings_event_by_ticker else 'NA'}, "
+            f"timeout={timeout_seconds}s, retry_timeout={retry_timeout_seconds}s"
         )
 
         for ticker in self.tickers:
             try:
                 self._print_progress(completed, total_tickers, ticker, "running", passed_count)
-                ticker_data = self._analyze_pre_earnings_ticker(ticker, date_from)
+                ticker_data, timed_out, retried = self._run_pre_earnings_ticker_with_timeout(ticker, date_from)
                 self._persist_analysis_results(ticker_data)
                 completed += 1
                 if ticker_data:
                     passed_count += 1
-                status = "scored" if ticker_data else "filtered"
+                if timed_out:
+                    status = "timeout"
+                elif retried and ticker_data:
+                    status = "scored_on_retry"
+                elif retried:
+                    status = "filtered_on_retry"
+                elif ticker_data:
+                    status = "scored"
+                else:
+                    status = "filtered"
                 self._print_progress(completed, total_tickers, ticker, status, passed_count)
             except Exception as exc:
                 completed += 1

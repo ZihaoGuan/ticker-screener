@@ -95,6 +95,8 @@ The `render` job downloads the watchlist artifact produced by `screen` and then 
 
 The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
 
+The pre-earnings smoke workflow in [.github/workflows/pre-earnings-smoke.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-smoke.yml) runs the dedicated smoke harness on a limited universe sample, uploads the result JSON as an artifact, and also supports manual runs with a custom `limit`. Its cron is `0 0 * * 6`, which matches Saturday noon in New Zealand winter and Saturday 1pm during daylight saving because GitHub Actions schedules are UTC-based.
+
 ### Optional Discord notifications
 
 If you want GitHub Actions to post run summaries to Discord, add a repository secret named `DISCORD_WEBHOOK_URL`.
