@@ -9,11 +9,19 @@ from pathlib import Path
 @dataclass(frozen=True)
 class AppConfig:
     benchmark_ticker: str = "SPY"
+    engine_version: str = "v1"
+    screen_profile: str = "legacy"
+    rs_lookback_days: int = 90
     rs_new_high_daily_lookback_days: int = 250
     rs_new_high_weekly_lookback_weeks: int = 52
     rs_new_high_history_days: int = 400
     rs_new_high_require_before_price: bool = True
     year_high_proximity: float = 0.15
+    breakout_volume_ratio: float = 1.4
+    final_contraction_max: float = 0.1
+    min_vcp_contractions: int = 2
+    pivot_extension_ratio: float = 0.05
+    volume_threshold: int = 100000
     request_timeout_seconds: int = 20
     ticker_timeout_seconds: int = 12
     exchanges: tuple[str, ...] = ("nyse", "nasdaq", "amex")

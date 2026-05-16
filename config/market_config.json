@@ -1,10 +1,18 @@
 {
   "benchmark_ticker": "SPY",
+  "engine_version": "v1",
+  "screen_profile": "legacy",
+  "rs_lookback_days": 90,
   "rs_new_high_daily_lookback_days": 250,
   "rs_new_high_weekly_lookback_weeks": 52,
   "rs_new_high_history_days": 400,
   "rs_new_high_require_before_price": true,
   "year_high_proximity": 0.15,
+  "breakout_volume_ratio": 1.4,
+  "final_contraction_max": 0.1,
+  "min_vcp_contractions": 2,
+  "pivot_extension_ratio": 0.05,
+  "volume_threshold": 100000,
   "request_timeout_seconds": 20,
   "ticker_timeout_seconds": 12,
   "exchanges": [
