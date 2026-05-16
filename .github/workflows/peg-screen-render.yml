@@ -8,8 +8,7 @@ on:
         required: false
         type: string
   schedule:
-    - cron: "15 0 * * 2-6"
-    - cron: "15 23 * * 1-5"
+    - cron: "0 0 * * 2-6"
 
 jobs:
   screen:

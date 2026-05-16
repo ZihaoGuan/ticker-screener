@@ -1,10 +1,11 @@
 # ticker-screener
 
-Focused chart-screen workflows for `RS new high before price` and `power earnings gap`.
+Focused chart-screen workflows for `RS new high before price`, `VCP`, and `power earnings gap`.
 
 This project keeps the responsibilities narrow:
 
 - screen the US equity universe for `RS new high before price`
+- screen the configured exchange universe for `VCP`
 - screen the configured exchange universe for `power earnings gap`
 - emit raw screen results plus a renderer-ready watchlist JSON
 - render daily setup charts from that watchlist
@@ -15,6 +16,7 @@ The RS engine is vendored from `cookstock` so GitHub Actions can run without dep
 
 - `src/`: config, universe loading, RS screening, and watchlist building
 - `scripts/run_rs_screen.py`: produces raw results and watchlist JSON
+- `scripts/run_vcp_screen.py`: produces VCP raw results and watchlist JSON
 - `scripts/run_peg_screen.py`: produces PEG raw results and watchlist JSON
 - `scripts/render_rs_watchlist.py`: renders charts from a watchlist JSON
 - `scripts/render_sector_rotation_rrg.py`: renders an RRG-style sector or industry rotation map
@@ -52,6 +54,18 @@ Run the PEG screener across the configured exchange universe:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_peg_screen.py
+```
+
+Run the VCP screener across the configured exchange universe:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_vcp_screen.py
+```
+
+Run a VCP smoke test:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_vcp_screen.py --limit 25
 ```
 
 Run a PEG smoke test:
@@ -125,6 +139,9 @@ The screen step writes:
 - `artifacts/raw/rs_new_high_before_price_<date>.json`
 - `artifacts/raw/run_summary_<date>.json`
 - `artifacts/watchlists/rs_new_high_before_price_<date>.json`
+- `artifacts/raw/vcp_<date>.json`
+- `artifacts/raw/vcp_run_summary_<date>.json`
+- `artifacts/watchlists/vcp_<date>.json`
 - `artifacts/raw/peg_earnings_gap_<date>.json`
 - `artifacts/raw/peg_run_summary_<date>.json`
 - `artifacts/watchlists/peg_earnings_gap_<date>.json`
@@ -146,6 +163,8 @@ The workflow in [.github/workflows/rs-screen-render.yml](/Users/Zihao.Guan/Perso
 The `render` job downloads the watchlist artifact produced by `screen` and then renders charts from that exact file.
 
 The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
+
+The VCP workflow in [.github/workflows/vcp-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/vcp-screen-render.yml) follows the same screen, render, publish, and notify pattern. It supports manual runs with an optional `limit` input and is scheduled once per trading day at `UTC 00:00`, which corresponds to New Zealand noon during standard time and 1pm during daylight saving.
 
 The pre-earnings workflow in [.github/workflows/pre-earnings-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-screen-render.yml) screens the next-week earnings watchlist, renders charts, and follows the same R2/Discord pattern as the RS and PEG workflows. It currently runs manually with optional `limit` and `reference_date` inputs.
 
