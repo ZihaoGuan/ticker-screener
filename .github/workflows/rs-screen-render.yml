@@ -197,32 +197,39 @@ jobs:
           fi
 
           mkdir -p artifacts/r2
-          if ! aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+          if aws --endpoint-url "$ENDPOINT_URL" s3 cp \
             "s3://${R2_BUCKET}/watchlist_index_manifest.json" \
-            "artifacts/r2/watchlist_index_manifest.json"; then
+            "artifacts/r2/watchlist_index_manifest.json" 2>/dev/null; then
+            echo "Loaded existing root watchlist manifest from R2"
+          else
+            echo "No existing root watchlist manifest found in R2; starting fresh"
             echo '{"updated_at": null, "entries": []}' > artifacts/r2/watchlist_index_manifest.json
           fi
 
-          python scripts/build_r2_root_index.py \
-            --manifest-in artifacts/r2/watchlist_index_manifest.json \
-            --manifest-out artifacts/r2/watchlist_index_manifest.json \
-            --html-out artifacts/r2/index.html \
-            --pipeline-id rs-screen \
-            --pipeline-name "RS New High Before Price" \
-            --date-label "${DATE_LABEL}" \
-            --summary-file "${SUMMARY_FILE}" \
-            --rendered-index-url "${INDEX_URL}" \
-            --watchlist-url "${WATCHLIST_URL}" \
-            --raw-results-url "${RAW_RESULTS_URL}" \
-            --run-url "${RUN_URL}"
+          if [ -f "scripts/build_r2_root_index.py" ]; then
+            python scripts/build_r2_root_index.py \
+              --manifest-in artifacts/r2/watchlist_index_manifest.json \
+              --manifest-out artifacts/r2/watchlist_index_manifest.json \
+              --html-out artifacts/r2/index.html \
+              --pipeline-id rs-screen \
+              --pipeline-name "RS New High Before Price" \
+              --date-label "${DATE_LABEL}" \
+              --summary-file "${SUMMARY_FILE}" \
+              --rendered-index-url "${INDEX_URL}" \
+              --watchlist-url "${WATCHLIST_URL}" \
+              --raw-results-url "${RAW_RESULTS_URL}" \
+              --run-url "${RUN_URL}"
 
-          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
-            "artifacts/r2/watchlist_index_manifest.json" \
-            "s3://${R2_BUCKET}/watchlist_index_manifest.json"
+            aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+              "artifacts/r2/watchlist_index_manifest.json" \
+              "s3://${R2_BUCKET}/watchlist_index_manifest.json"
 
-          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
-            "artifacts/r2/index.html" \
-            "s3://${R2_BUCKET}/index.html"
+            aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+              "artifacts/r2/index.html" \
+              "s3://${R2_BUCKET}/index.html"
+          else
+            echo "WARNING: scripts/build_r2_root_index.py is missing; skipping root R2 index refresh"
+          fi
 
           {
             echo "r2_prefix=${R2_PREFIX}"
