@@ -168,6 +168,11 @@ jobs:
           set -euo pipefail
           R2_PREFIX="peg-screen/${DATE_LABEL}"
           ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          SUMMARY_FILE="artifacts/raw/peg_run_summary_${DATE_LABEL}.json"
+          RAW_RESULTS_URL="/${R2_PREFIX}/raw/peg_earnings_gap_${DATE_LABEL}.json"
+          WATCHLIST_URL="/${R2_PREFIX}/watchlists/peg_earnings_gap_${DATE_LABEL}.json"
+          INDEX_URL="/${R2_PREFIX}/rendered/index.html"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           aws --endpoint-url "$ENDPOINT_URL" s3 cp \
             "artifacts/raw/" \
@@ -186,10 +191,38 @@ jobs:
 
           if [ -n "${R2_PUBLIC_BASE_URL}" ]; then
             BASE_URL="${R2_PUBLIC_BASE_URL%/}"
+            RAW_RESULTS_URL="${BASE_URL}/${R2_PREFIX}/raw/peg_earnings_gap_${DATE_LABEL}.json"
+            WATCHLIST_URL="${BASE_URL}/${R2_PREFIX}/watchlists/peg_earnings_gap_${DATE_LABEL}.json"
             INDEX_URL="${BASE_URL}/${R2_PREFIX}/rendered/index.html"
-          else
-            INDEX_URL=""
           fi
+
+          mkdir -p artifacts/r2
+          if ! aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "s3://${R2_BUCKET}/watchlist_index_manifest.json" \
+            "artifacts/r2/watchlist_index_manifest.json"; then
+            echo '{"updated_at": null, "entries": []}' > artifacts/r2/watchlist_index_manifest.json
+          fi
+
+          python scripts/build_r2_root_index.py \
+            --manifest-in artifacts/r2/watchlist_index_manifest.json \
+            --manifest-out artifacts/r2/watchlist_index_manifest.json \
+            --html-out artifacts/r2/index.html \
+            --pipeline-id peg-screen \
+            --pipeline-name "PEG Earnings Gap" \
+            --date-label "${DATE_LABEL}" \
+            --summary-file "${SUMMARY_FILE}" \
+            --rendered-index-url "${INDEX_URL}" \
+            --watchlist-url "${WATCHLIST_URL}" \
+            --raw-results-url "${RAW_RESULTS_URL}" \
+            --run-url "${RUN_URL}"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/r2/watchlist_index_manifest.json" \
+            "s3://${R2_BUCKET}/watchlist_index_manifest.json"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/r2/index.html" \
+            "s3://${R2_BUCKET}/index.html"
 
           {
             echo "r2_prefix=${R2_PREFIX}"

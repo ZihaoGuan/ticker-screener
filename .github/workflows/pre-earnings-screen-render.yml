@@ -1,15 +1,18 @@
-name: RS Screen And Render
+name: Pre-Earnings Screen And Render
 
 on:
   workflow_dispatch:
     inputs:
       limit:
-        description: Optional universe limit for smoke runs
+        description: Optional candidate limit for manual runs
+        required: false
+        type: string
+      reference_date:
+        description: Optional reference date for next-week earnings watchlist (YYYY-MM-DD)
         required: false
         type: string
   schedule:
-    - cron: "0 0 * * 2-6"
-    - cron: "0 23 * * 1-5"
+    - cron: "0 0 * * 6"
 
 jobs:
   screen:
@@ -32,30 +35,35 @@ jobs:
         id: meta
         run: echo "date_label=$(date +%F)" >> "$GITHUB_OUTPUT"
 
-      - name: Run RS screen
+      - name: Run pre-earnings screen
         env:
           MPLBACKEND: Agg
           MPLCONFIGDIR: /tmp/mpl
+          LIMIT: ${{ github.event.inputs.limit }}
+          REFERENCE_DATE: ${{ github.event.inputs.reference_date }}
         run: |
-          if [ -n "${{ github.event.inputs.limit }}" ]; then
-            python scripts/run_rs_screen.py --limit "${{ github.event.inputs.limit }}"
-          else
-            python scripts/run_rs_screen.py
+          ARGS=()
+          if [ -n "${LIMIT}" ]; then
+            ARGS+=(--limit "${LIMIT}")
           fi
+          if [ -n "${REFERENCE_DATE}" ]; then
+            ARGS+=(--reference-date "${REFERENCE_DATE}")
+          fi
+          python scripts/run_pre_earnings_screen.py "${ARGS[@]}"
 
       - name: Upload raw results
         uses: actions/upload-artifact@v4
         with:
-          name: rs-screen-raw-${{ steps.meta.outputs.date_label }}
+          name: pre-earnings-screen-raw-${{ steps.meta.outputs.date_label }}
           path: |
-            artifacts/raw/rs_new_high_before_price_${{ steps.meta.outputs.date_label }}.json
-            artifacts/raw/run_summary_${{ steps.meta.outputs.date_label }}.json
+            artifacts/raw/pre_earnings_focus_${{ steps.meta.outputs.date_label }}.json
+            artifacts/raw/pre_earnings_run_summary_${{ steps.meta.outputs.date_label }}.json
 
       - name: Upload watchlist
         uses: actions/upload-artifact@v4
         with:
-          name: rs-screen-watchlist-${{ steps.meta.outputs.date_label }}
-          path: artifacts/watchlists/rs_new_high_before_price_${{ steps.meta.outputs.date_label }}.json
+          name: pre-earnings-screen-watchlist-${{ steps.meta.outputs.date_label }}
+          path: artifacts/watchlists/pre_earnings_focus_${{ steps.meta.outputs.date_label }}.json
 
   render:
     runs-on: ubuntu-latest
@@ -75,12 +83,12 @@ jobs:
       - name: Download watchlist artifact
         uses: actions/download-artifact@v4
         with:
-          name: rs-screen-watchlist-${{ needs.screen.outputs.date_label }}
+          name: pre-earnings-screen-watchlist-${{ needs.screen.outputs.date_label }}
           path: artifacts/watchlists
 
       - name: Resolve watchlist path
         run: |
-          WATCHLIST_FILE="$(find artifacts/watchlists -name 'rs_new_high_before_price_*.json' | head -n 1)"
+          WATCHLIST_FILE="$(find artifacts/watchlists -name 'pre_earnings_focus_*.json' | head -n 1)"
           echo "WATCHLIST_FILE=$WATCHLIST_FILE" >> "$GITHUB_ENV"
 
       - name: Render charts
@@ -90,13 +98,13 @@ jobs:
         run: |
           python scripts/render_rs_watchlist.py \
             --watchlist-file "$WATCHLIST_FILE" \
-            --output-dir "artifacts/output/rs_new_high_before_price_${{ needs.screen.outputs.date_label }}"
+            --output-dir "artifacts/output/pre_earnings_focus_${{ needs.screen.outputs.date_label }}"
 
       - name: Upload rendered charts
         uses: actions/upload-artifact@v4
         with:
-          name: rs-screen-rendered-${{ needs.screen.outputs.date_label }}
-          path: artifacts/output/rs_new_high_before_price_${{ needs.screen.outputs.date_label }}
+          name: pre-earnings-screen-rendered-${{ needs.screen.outputs.date_label }}
+          path: artifacts/output/pre_earnings_focus_${{ needs.screen.outputs.date_label }}
 
   publish-r2:
     runs-on: ubuntu-latest
@@ -136,22 +144,22 @@ jobs:
         if: ${{ steps.r2-config.outputs.enabled == 'true' }}
         uses: actions/download-artifact@v4
         with:
-          name: rs-screen-raw-${{ needs.screen.outputs.date_label }}
+          name: pre-earnings-screen-raw-${{ needs.screen.outputs.date_label }}
           path: artifacts/raw
 
       - name: Download watchlist artifact
         if: ${{ steps.r2-config.outputs.enabled == 'true' }}
         uses: actions/download-artifact@v4
         with:
-          name: rs-screen-watchlist-${{ needs.screen.outputs.date_label }}
+          name: pre-earnings-screen-watchlist-${{ needs.screen.outputs.date_label }}
           path: artifacts/watchlists
 
       - name: Download rendered charts artifact
         if: ${{ steps.r2-config.outputs.enabled == 'true' }}
         uses: actions/download-artifact@v4
         with:
-          name: rs-screen-rendered-${{ needs.screen.outputs.date_label }}
-          path: artifacts/output/rs_new_high_before_price_${{ needs.screen.outputs.date_label }}
+          name: pre-earnings-screen-rendered-${{ needs.screen.outputs.date_label }}
+          path: artifacts/output/pre_earnings_focus_${{ needs.screen.outputs.date_label }}
 
       - name: Upload artifacts to R2
         id: publish
@@ -166,11 +174,11 @@ jobs:
           DATE_LABEL: ${{ needs.screen.outputs.date_label }}
         run: |
           set -euo pipefail
-          R2_PREFIX="rs-screen/${DATE_LABEL}"
+          R2_PREFIX="pre-earnings-screen/${DATE_LABEL}"
           ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          SUMMARY_FILE="artifacts/raw/run_summary_${DATE_LABEL}.json"
-          RAW_RESULTS_URL="/${R2_PREFIX}/raw/rs_new_high_before_price_${DATE_LABEL}.json"
-          WATCHLIST_URL="/${R2_PREFIX}/watchlists/rs_new_high_before_price_${DATE_LABEL}.json"
+          SUMMARY_FILE="artifacts/raw/pre_earnings_run_summary_${DATE_LABEL}.json"
+          RAW_RESULTS_URL="/${R2_PREFIX}/raw/pre_earnings_focus_${DATE_LABEL}.json"
+          WATCHLIST_URL="/${R2_PREFIX}/watchlists/pre_earnings_focus_${DATE_LABEL}.json"
           INDEX_URL="/${R2_PREFIX}/rendered/index.html"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
@@ -185,14 +193,14 @@ jobs:
             --recursive
 
           aws --endpoint-url "$ENDPOINT_URL" s3 cp \
-            "artifacts/output/rs_new_high_before_price_${DATE_LABEL}/" \
+            "artifacts/output/pre_earnings_focus_${DATE_LABEL}/" \
             "s3://${R2_BUCKET}/${R2_PREFIX}/rendered/" \
             --recursive
 
           if [ -n "${R2_PUBLIC_BASE_URL}" ]; then
             BASE_URL="${R2_PUBLIC_BASE_URL%/}"
-            RAW_RESULTS_URL="${BASE_URL}/${R2_PREFIX}/raw/rs_new_high_before_price_${DATE_LABEL}.json"
-            WATCHLIST_URL="${BASE_URL}/${R2_PREFIX}/watchlists/rs_new_high_before_price_${DATE_LABEL}.json"
+            RAW_RESULTS_URL="${BASE_URL}/${R2_PREFIX}/raw/pre_earnings_focus_${DATE_LABEL}.json"
+            WATCHLIST_URL="${BASE_URL}/${R2_PREFIX}/watchlists/pre_earnings_focus_${DATE_LABEL}.json"
             INDEX_URL="${BASE_URL}/${R2_PREFIX}/rendered/index.html"
           fi
 
@@ -207,8 +215,8 @@ jobs:
             --manifest-in artifacts/r2/watchlist_index_manifest.json \
             --manifest-out artifacts/r2/watchlist_index_manifest.json \
             --html-out artifacts/r2/index.html \
-            --pipeline-id rs-screen \
-            --pipeline-name "RS New High Before Price" \
+            --pipeline-id pre-earnings-screen \
+            --pipeline-name "Pre-Earnings Focus" \
             --date-label "${DATE_LABEL}" \
             --summary-file "${SUMMARY_FILE}" \
             --rendered-index-url "${INDEX_URL}" \
@@ -247,7 +255,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: rs-screen-raw-${{ needs.screen.outputs.date_label }}
+          name: pre-earnings-screen-raw-${{ needs.screen.outputs.date_label }}
           path: artifacts/raw
 
       - name: Build Discord payload
@@ -279,11 +287,12 @@ jobs:
           if not r2_index_url and r2_public_base_url and r2_prefix:
               r2_index_url = f"{r2_public_base_url}/{r2_prefix}/rendered/index.html"
 
-          summary_path = Path("artifacts/raw") / f"run_summary_{date_label}.json"
+          summary_path = Path("artifacts/raw") / f"pre_earnings_run_summary_{date_label}.json"
+          raw_results_path = Path("artifacts/raw") / f"pre_earnings_focus_{date_label}.json"
           total_tickers = "n/a"
           passed_tickers = "n/a"
           failed_tickers = "n/a"
-          top_hits: list[str] = []
+          hit_summaries = []
 
           if summary_path.exists():
               summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -291,27 +300,33 @@ jobs:
               passed_tickers = summary.get("passed_tickers", "n/a")
               failures = summary.get("failed_tickers", [])
               failed_tickers = len(failures) if isinstance(failures, list) else "n/a"
-              raw_results_file = summary.get("raw_results_file")
-              if raw_results_file:
-                  raw_path = Path(raw_results_file)
-                  if raw_path.exists():
-                      raw_results = json.loads(raw_path.read_text(encoding="utf-8"))
-                      hits = raw_results.get("hits", [])
-                      if isinstance(hits, list):
-                          top_hits = [
-                              str(hit.get("ticker", "")).strip()
-                              for hit in hits[:5]
-                              if isinstance(hit, dict) and str(hit.get("ticker", "")).strip()
-                          ]
 
-          if success and r2_index_url:
-              payload = {"content": f"RS rendered charts: {r2_index_url}"}
-              Path("discord_payload.json").write_text(json.dumps(payload), encoding="utf-8")
-              raise SystemExit(0)
+          if raw_results_path.exists():
+              raw_results = json.loads(raw_results_path.read_text(encoding="utf-8"))
+              hits = raw_results.get("hits", [])
+              if isinstance(hits, list):
+                  def score_of(hit):
+                      try:
+                          return float(hit.get("focus_score", 0))
+                      except (TypeError, ValueError):
+                          return 0.0
+                  for hit in sorted(hits, key=score_of, reverse=True):
+                      ticker = str(hit.get("ticker", "")).strip()
+                      if not ticker:
+                          continue
+                      score = score_of(hit)
+                      grade = str(hit.get("focus_grade", "")).strip()
+                      plan = str(hit.get("trade_plan", "")).strip()
+                      if grade and plan:
+                          hit_summaries.append(f"`{ticker}` {score:.1f} {grade} {plan}")
+                      elif grade:
+                          hit_summaries.append(f"`{ticker}` {score:.1f} {grade}")
+                      else:
+                          hit_summaries.append(f"`{ticker}` {score:.1f}")
 
           status_emoji = ":white_check_mark:" if success else ":warning:"
           lines = [
-              f"{status_emoji} RS screen pipeline finished for `{date_label}`",
+              f"{status_emoji} Pre-earnings screen pipeline finished for `{date_label}`",
               f"Screen job: `{screen_result}`",
               f"Render job: `{render_result}`",
               f"R2 publish job: `{publish_result}`",
@@ -319,8 +334,6 @@ jobs:
               f"Hits: `{passed_tickers}`",
               f"Failures: `{failed_tickers}`",
           ]
-          if top_hits:
-              lines.append(f"Top hits: {', '.join(f'`{ticker}`' for ticker in top_hits)}")
           if r2_index_url:
               lines.append(f"Rendered charts: {r2_index_url}")
           elif r2_prefix:
@@ -328,8 +341,23 @@ jobs:
           if run_url:
               lines.append(f"Run details: {run_url}")
 
-          payload = {"content": "\n".join(lines)}
-          Path("discord_payload.json").write_text(json.dumps(payload), encoding="utf-8")
+          payloads: list[dict[str, str]] = [{"content": "\n".join(lines)}]
+
+          if hit_summaries:
+              header = "Hit list:"
+              current = header
+              limit = 1800
+              for item in hit_summaries:
+                  candidate = f"{current}\n{item}"
+                  if len(candidate) > limit and current != header:
+                      payloads.append({"content": current})
+                      current = f"{header}\n{item}"
+                  else:
+                      current = candidate
+              if current != header:
+                  payloads.append({"content": current})
+
+          Path("discord_payloads.json").write_text(json.dumps(payloads), encoding="utf-8")
           PY
 
       - name: Send Discord notification
@@ -337,7 +365,20 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          curl -sS -X POST \
-            -H "Content-Type: application/json" \
-            --data @discord_payload.json \
-            "$DISCORD_WEBHOOK_URL"
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          webhook = os.environ["DISCORD_WEBHOOK_URL"]
+          payloads = json.loads(open("discord_payloads.json", encoding="utf-8").read())
+          for payload in payloads:
+              request = urllib.request.Request(
+                  webhook,
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(request) as response:
+                  response.read()
+          PY

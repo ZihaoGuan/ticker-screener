@@ -95,7 +95,7 @@ The `render` job downloads the watchlist artifact produced by `screen` and then 
 
 The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
 
-The pre-earnings smoke workflow in [.github/workflows/pre-earnings-smoke.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-smoke.yml) runs the dedicated smoke harness on a limited universe sample, uploads the result JSON as an artifact, and also supports manual runs with a custom `limit`. Its cron is `0 0 * * 6`, which matches Saturday noon in New Zealand winter and Saturday 1pm during daylight saving because GitHub Actions schedules are UTC-based.
+The pre-earnings workflow in [.github/workflows/pre-earnings-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-screen-render.yml) screens the next-week earnings watchlist, renders charts, and follows the same R2/Discord pattern as the RS and PEG workflows. It also supports manual runs with optional `limit` and `reference_date` inputs. Its cron is `0 0 * * 6`, which matches Saturday noon in New Zealand winter and Saturday 1pm during daylight saving because GitHub Actions schedules are UTC-based.
 
 ### Optional Discord notifications
 
@@ -129,5 +129,12 @@ When those secrets are configured, the workflow uploads each successful run to:
 - `rs-screen/<date>/raw/`
 - `rs-screen/<date>/watchlists/`
 - `rs-screen/<date>/rendered/`
+
+It also maintains these bucket-root files:
+
+- `index.html`
+- `watchlist_index_manifest.json`
+
+The root `index.html` acts as a landing page across published workflows and lets you filter runs by workflow, text, and minimum hit count.
 
 The Discord notification will include the public `index.html` link when `R2_PUBLIC_BASE_URL` is set. Without the R2 secrets, the publish job is skipped and the rest of the workflow still runs normally.
