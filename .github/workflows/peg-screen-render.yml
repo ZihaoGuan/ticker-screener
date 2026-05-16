@@ -125,6 +125,10 @@ jobs:
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Checkout
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/checkout@v4
+
       - name: Setup Python
         if: ${{ steps.r2-config.outputs.enabled == 'true' }}
         uses: actions/setup-python@v5
