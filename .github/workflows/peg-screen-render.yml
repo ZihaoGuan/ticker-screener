@@ -326,7 +326,17 @@ jobs:
                       f"{r2_public_base_url}/peg-screen/{previous_date}/raw/"
                       f"peg_earnings_gap_{previous_date}.json"
                   )
-                  with urllib.request.urlopen(previous_url, timeout=15) as response:
+                  request = urllib.request.Request(
+                      previous_url,
+                      headers={
+                          "User-Agent": (
+                              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/136.0.0.0 Safari/537.36"
+                          )
+                      },
+                  )
+                  with urllib.request.urlopen(request, timeout=15) as response:
                       previous_payload = json.loads(response.read().decode("utf-8"))
                   previous_hits = previous_payload.get("hits", [])
                   if isinstance(previous_hits, list):
@@ -335,7 +345,7 @@ jobs:
                           for hit in previous_hits
                           if isinstance(hit, dict) and str(hit.get("ticker", "")).strip()
                       }
-              except (ValueError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+              except Exception:
                   previous_hits_by_ticker = set()
 
           def score_of(hit):
