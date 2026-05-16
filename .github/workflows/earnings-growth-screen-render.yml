@@ -278,10 +278,5 @@ jobs:
           fi
           export CONTENT
           curl -H "Content-Type: application/json" \
-            -d "$(python - <<'PY'
-import json
-import os
-print(json.dumps({"content": os.environ["CONTENT"]}))
-PY
-)" \
+            -d "$(python -c 'import json, os; print(json.dumps({"content": os.environ["CONTENT"]}))')" \
             "${DISCORD_WEBHOOK_URL}" || echo "WARNING: Discord notification failed"
