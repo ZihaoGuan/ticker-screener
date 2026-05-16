@@ -18,5 +18,16 @@
   "default_split_pages": 4,
   "default_montage_columns": 2,
   "default_card_width": 700,
-  "pre_earnings_retry_timeout_seconds": 24
+  "earnings_enrichment_provider": "auto",
+  "pre_earnings_retry_timeout_seconds": 24,
+  "earnings_growth_move_lookback_quarters": 4,
+  "earnings_growth_min_move_pct": 7.0,
+  "earnings_growth_min_move_occurrences": 2,
+  "earnings_growth_min_revenue_yoy_pct": 100.0,
+  "earnings_growth_min_quarter_revenue": 50000000.0,
+  "earnings_growth_eps_improving_quarters": 3,
+  "earnings_growth_min_institutional_ownership_pct": 10.0,
+  "earnings_growth_ma_short": 20,
+  "earnings_growth_ma_medium": 50,
+  "earnings_growth_ma_long": 200
 }

@@ -390,6 +390,10 @@ def render_root_index(manifest: dict[str, Any]) -> str:
           <h3>Pre-Earnings Focus</h3>
           <p>This is a quality filter ahead of earnings. It favors stocks with healthy trend, tight action, good liquidity, and constructive relative strength, aiming to surface names that are acting well before the catalyst arrives.</p>
         </article>
+        <article class="philosophy-card">
+          <h3>Next-Week Earnings Growth</h3>
+          <p>This hunts for next-week earnings names with explosive revenue growth, repeated large post-earnings reactions, improving but still-negative EPS, meaningful institutional ownership, and a clean bullish moving-average stack. The idea is to find high-beta growth stories that institutions are already respecting before the report hits.</p>
+        </article>
       </div>
     </section>
 

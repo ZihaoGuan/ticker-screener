@@ -30,6 +30,12 @@ Install dependencies:
 python3 -m pip install -r /Users/Zihao.Guan/Personal/ticker-screener/requirements.txt
 ```
 
+For the next-week earnings growth screener, install the extra provider dependencies:
+
+```bash
+python3 -m pip install -r /Users/Zihao.Guan/Personal/ticker-screener/requirements-earnings-growth.txt
+```
+
 Run the full RS screen:
 
 ```bash
@@ -60,12 +66,48 @@ Run the PEG screener against only the next-week earnings watchlist:
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_peg_screen.py --source earnings-watchlist
 ```
 
+Run the next-week earnings growth screener:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_earnings_growth_screen.py
+```
+
+This workflow filters next-week earnings candidates for:
+
+- at least 2 of the last 4 earnings reactions above 7%
+- latest quarterly revenue YoY above 100%
+- latest quarterly revenue above 50M
+- latest EPS still negative but improving over 3 quarters
+- institutional ownership above 10%
+- `close > ma20 > ma50 > ma200`
+
+Provider priority for this workflow is currently:
+
+- `OpenBB` as the primary earnings history and calendar source when the package is available
+- `AInvest` as the next earnings-history fallback when `AINVEST_API_KEY` is present
+- `yfinance` as the default financials / institutional ownership source and final earnings fallback
+- `AKShare` as an additional fallback for quarterly revenue history when `yfinance` comes up empty
+
 Render charts from the generated watchlist:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/render_rs_watchlist.py \
   --watchlist-file /Users/Zihao.Guan/Personal/ticker-screener/artifacts/watchlists/rs_new_high_before_price_YYYY-MM-DD.json
 ```
+
+Enrich an existing watchlist or raw screen JSON with earnings date, recent beat/miss status, and next-two-weeks earnings context:
+
+```bash
+FMP_API_KEY=... python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/enrich_with_earnings.py \
+  --input-file /Users/Zihao.Guan/Personal/ticker-screener/artifacts/watchlists/rs_new_high_before_price_YYYY-MM-DD.json
+```
+
+The enricher supports either:
+
+- a watchlist JSON array in `artifacts/watchlists/*.json`
+- a raw screen payload with `hits[]` in `artifacts/raw/*.json`
+
+Supported providers are `fmp`, `ainvest`, `yfinance`, and `auto`. `auto` prefers `FMP` when `FMP_API_KEY` is present, then `AInvest`, then `yfinance`.
 
 Render a weekly RRG-style rotation map:
 
@@ -106,6 +148,8 @@ The `render` job downloads the watchlist artifact produced by `screen` and then 
 The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
 
 The pre-earnings workflow in [.github/workflows/pre-earnings-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-screen-render.yml) screens the next-week earnings watchlist, renders charts, and follows the same R2/Discord pattern as the RS and PEG workflows. It currently runs manually with optional `limit` and `reference_date` inputs.
+
+The earnings growth workflow in [.github/workflows/earnings-growth-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/earnings-growth-screen-render.yml) screens next-week earnings names for explosive growth plus post-earnings reaction behavior. It currently runs manually with optional `limit` and `reference_date` inputs. It now prefers `OpenBB` for the earnings calendar layer, falls back to `AInvest` when `AINVEST_API_KEY` is available, then falls back to `yfinance`, with `AKShare` as an extra fallback for quarterly revenue history.
 
 The sector rotation workflow in [.github/workflows/sector-rrg-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/sector-rrg-render.yml) renders an RRG-style rotation map for the configured ETF universe. Its cron is `0 0 * * 0`, which corresponds to Sunday noon in New Zealand winter and Sunday 1pm during New Zealand daylight saving because GitHub Actions schedules are UTC-based.
 

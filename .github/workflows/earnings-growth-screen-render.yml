@@ -1,0 +1,287 @@
+name: Earnings Growth Screen And Render
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Optional candidate limit for manual runs
+        required: false
+        type: string
+      reference_date:
+        description: Optional reference date for next-week earnings watchlist (YYYY-MM-DD)
+        required: false
+        type: string
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    outputs:
+      date_label: ${{ steps.meta.outputs.date_label }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-earnings-growth.txt
+
+      - name: Compute artifact metadata
+        id: meta
+        run: echo "date_label=$(date +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Run earnings growth screen
+        env:
+          MPLBACKEND: Agg
+          MPLCONFIGDIR: /tmp/mpl
+          LIMIT: ${{ github.event.inputs.limit }}
+          REFERENCE_DATE: ${{ github.event.inputs.reference_date }}
+          AINVEST_API_KEY: ${{ secrets.AINVEST_API_KEY }}
+        run: |
+          ARGS=()
+          if [ -n "${LIMIT}" ]; then
+            ARGS+=(--limit "${LIMIT}")
+          fi
+          if [ -n "${REFERENCE_DATE}" ]; then
+            ARGS+=(--reference-date "${REFERENCE_DATE}")
+          fi
+          python scripts/run_earnings_growth_screen.py "${ARGS[@]}"
+
+      - name: Upload raw results
+        uses: actions/upload-artifact@v4
+        with:
+          name: earnings-growth-screen-raw-${{ steps.meta.outputs.date_label }}
+          path: |
+            artifacts/raw/earnings_growth_${{ steps.meta.outputs.date_label }}.json
+            artifacts/raw/earnings_growth_run_summary_${{ steps.meta.outputs.date_label }}.json
+
+      - name: Upload watchlist
+        uses: actions/upload-artifact@v4
+        with:
+          name: earnings-growth-screen-watchlist-${{ steps.meta.outputs.date_label }}
+          path: artifacts/watchlists/earnings_growth_${{ steps.meta.outputs.date_label }}.json
+
+  render:
+    runs-on: ubuntu-latest
+    needs: screen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Download watchlist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: earnings-growth-screen-watchlist-${{ needs.screen.outputs.date_label }}
+          path: artifacts/watchlists
+
+      - name: Resolve watchlist path
+        run: |
+          WATCHLIST_FILE="$(find artifacts/watchlists -name 'earnings_growth_*.json' | head -n 1)"
+          echo "WATCHLIST_FILE=$WATCHLIST_FILE" >> "$GITHUB_ENV"
+
+      - name: Render charts
+        env:
+          MPLBACKEND: Agg
+          MPLCONFIGDIR: /tmp/mpl
+        run: |
+          python scripts/render_rs_watchlist.py \
+            --watchlist-file "$WATCHLIST_FILE" \
+            --output-dir "artifacts/output/earnings_growth_${{ needs.screen.outputs.date_label }}"
+
+      - name: Upload rendered charts
+        uses: actions/upload-artifact@v4
+        with:
+          name: earnings-growth-screen-rendered-${{ needs.screen.outputs.date_label }}
+          path: artifacts/output/earnings_growth_${{ needs.screen.outputs.date_label }}
+
+  publish-r2:
+    runs-on: ubuntu-latest
+    needs:
+      - screen
+      - render
+    if: ${{ needs.screen.result == 'success' && needs.render.result == 'success' }}
+    concurrency:
+      group: r2-root-index-update
+      cancel-in-progress: false
+    outputs:
+      r2_prefix: ${{ steps.publish.outputs.r2_prefix }}
+      r2_index_url: ${{ steps.publish.outputs.r2_index_url }}
+    steps:
+      - name: Check R2 configuration
+        id: r2-config
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [ -n "${R2_ACCOUNT_ID}" ] && [ -n "${R2_ACCESS_KEY_ID}" ] && [ -n "${R2_SECRET_ACCESS_KEY}" ] && [ -n "${R2_BUCKET}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install AWS CLI
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        run: python -m pip install awscli
+
+      - name: Download raw results artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: earnings-growth-screen-raw-${{ needs.screen.outputs.date_label }}
+          path: artifacts/raw
+
+      - name: Download watchlist artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: earnings-growth-screen-watchlist-${{ needs.screen.outputs.date_label }}
+          path: artifacts/watchlists
+
+      - name: Download rendered charts artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: earnings-growth-screen-rendered-${{ needs.screen.outputs.date_label }}
+          path: artifacts/output/earnings_growth_${{ needs.screen.outputs.date_label }}
+
+      - name: Upload artifacts to R2
+        id: publish
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+          DATE_LABEL: ${{ needs.screen.outputs.date_label }}
+        run: |
+          set -euo pipefail
+          R2_PREFIX="earnings-growth-screen/${DATE_LABEL}"
+          ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          SUMMARY_FILE="artifacts/raw/earnings_growth_run_summary_${DATE_LABEL}.json"
+          RAW_RESULTS_URL="/${R2_PREFIX}/raw/earnings_growth_${DATE_LABEL}.json"
+          WATCHLIST_URL="/${R2_PREFIX}/watchlists/earnings_growth_${DATE_LABEL}.json"
+          INDEX_URL="/${R2_PREFIX}/rendered/index.html"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/raw/" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/raw/" \
+            --recursive
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/watchlists/" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/watchlists/" \
+            --recursive
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/output/earnings_growth_${DATE_LABEL}/" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/rendered/" \
+            --recursive
+
+          if [ -n "${R2_PUBLIC_BASE_URL}" ]; then
+            BASE_URL="${R2_PUBLIC_BASE_URL%/}"
+            RAW_RESULTS_URL="${BASE_URL}/${R2_PREFIX}/raw/earnings_growth_${DATE_LABEL}.json"
+            WATCHLIST_URL="${BASE_URL}/${R2_PREFIX}/watchlists/earnings_growth_${DATE_LABEL}.json"
+            INDEX_URL="${BASE_URL}/${R2_PREFIX}/rendered/index.html"
+          fi
+
+          mkdir -p artifacts/r2
+          if aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "s3://${R2_BUCKET}/watchlist_index_manifest.json" \
+            "artifacts/r2/watchlist_index_manifest.json" 2>/dev/null; then
+            echo "Loaded existing root watchlist manifest from R2"
+          else
+            echo "No existing root watchlist manifest found in R2; starting fresh"
+            echo '{"updated_at": null, "entries": []}' > artifacts/r2/watchlist_index_manifest.json
+          fi
+
+          if [ -f "scripts/build_r2_root_index.py" ]; then
+            python scripts/build_r2_root_index.py \
+              --manifest-in artifacts/r2/watchlist_index_manifest.json \
+              --manifest-out artifacts/r2/watchlist_index_manifest.json \
+              --html-out artifacts/r2/index.html \
+              --pipeline-id earnings-growth-screen \
+              --pipeline-name "Next-Week Earnings Growth" \
+              --date-label "${DATE_LABEL}" \
+              --summary-file "${SUMMARY_FILE}" \
+              --rendered-index-url "${INDEX_URL}" \
+              --watchlist-url "${WATCHLIST_URL}" \
+              --raw-results-url "${RAW_RESULTS_URL}" \
+              --run-url "${RUN_URL}"
+
+            aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+              "artifacts/r2/watchlist_index_manifest.json" \
+              "s3://${R2_BUCKET}/watchlist_index_manifest.json"
+
+            aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+              "artifacts/r2/index.html" \
+              "s3://${R2_BUCKET}/index.html"
+          else
+            echo "WARNING: scripts/build_r2_root_index.py is missing; skipping root R2 index refresh"
+          fi
+
+          {
+            echo "r2_prefix=${R2_PREFIX}"
+            echo "r2_index_url=${INDEX_URL}"
+          } >> "$GITHUB_OUTPUT"
+
+  notify:
+    runs-on: ubuntu-latest
+    needs:
+      - screen
+      - render
+      - publish-r2
+    if: ${{ always() }}
+    steps:
+      - name: Build Discord payload
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SCREEN_RESULT: ${{ needs.screen.result }}
+          RENDER_RESULT: ${{ needs.render.result }}
+          PUBLISH_RESULT: ${{ needs.publish-r2.result }}
+          R2_INDEX_URL: ${{ needs.publish-r2.outputs.r2_index_url }}
+          DATE_LABEL: ${{ needs.screen.outputs.date_label }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "Discord webhook not configured; skipping"
+            exit 0
+          fi
+          if [ "${SCREEN_RESULT}" = "success" ] && [ "${RENDER_RESULT}" = "success" ] && [ -n "${R2_INDEX_URL}" ]; then
+            CONTENT=":white_check_mark: Earnings growth screen: ${R2_INDEX_URL}"
+          else
+            CONTENT=":warning: Earnings growth screen finished for ${DATE_LABEL}. screen=${SCREEN_RESULT} render=${RENDER_RESULT} r2=${PUBLISH_RESULT}"
+          fi
+          export CONTENT
+          curl -H "Content-Type: application/json" \
+            -d "$(python - <<'PY'
+import json
+import os
+print(json.dumps({"content": os.environ["CONTENT"]}))
+PY
+)" \
+            "${DISCORD_WEBHOOK_URL}" || echo "WARNING: Discord notification failed"

@@ -1,0 +1,4 @@
+-r requirements.txt
+yfinance>=0.2
+akshare>=1.18
+openbb>=4.4

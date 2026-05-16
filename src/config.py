@@ -26,6 +26,7 @@ class AppConfig:
     earnings_watchlist_ics_url: str = "https://earnings.beavern.com/ics/all.ics"
     earnings_watchlist_exclude_ics_urls: tuple[str, ...] = ()
     earnings_surprise_provider: str = "auto"
+    earnings_enrichment_provider: str = "auto"
     peg_lookback_days: int = 20
     peg_earnings_tolerance_days: int = 3
     peg_min_gap_pct: float = 0.10
@@ -43,6 +44,16 @@ class AppConfig:
     peg_distribution_lookback_days: int = 10
     peg_distribution_volume_ratio: float = 1.5
     pre_earnings_retry_timeout_seconds: int = 24
+    earnings_growth_move_lookback_quarters: int = 4
+    earnings_growth_min_move_pct: float = 7.0
+    earnings_growth_min_move_occurrences: int = 2
+    earnings_growth_min_revenue_yoy_pct: float = 100.0
+    earnings_growth_min_quarter_revenue: float = 50_000_000.0
+    earnings_growth_eps_improving_quarters: int = 3
+    earnings_growth_min_institutional_ownership_pct: float = 10.0
+    earnings_growth_ma_short: int = 20
+    earnings_growth_ma_medium: int = 50
+    earnings_growth_ma_long: int = 200
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
