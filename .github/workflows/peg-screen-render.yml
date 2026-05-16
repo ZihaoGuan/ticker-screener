@@ -262,9 +262,12 @@ jobs:
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           python - <<'PY'
+          import datetime as dt
           import json
           import os
           from pathlib import Path
+          import urllib.error
+          import urllib.request
 
           date_label = os.getenv("DATE_LABEL") or "unknown-date"
           screen_result = os.getenv("SCREEN_RESULT", "unknown")
@@ -280,9 +283,13 @@ jobs:
               r2_index_url = f"{r2_public_base_url}/{r2_prefix}/rendered/index.html"
 
           summary_path = Path("artifacts/raw") / f"peg_run_summary_{date_label}.json"
+          raw_results_path = Path("artifacts/raw") / f"peg_earnings_gap_{date_label}.json"
           total_tickers = "n/a"
           passed_tickers = "n/a"
           failed_tickers = "n/a"
+          current_hits = []
+          hit_summaries = []
+          new_tickers: set[str] = set()
 
           if summary_path.exists():
               summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -291,10 +298,53 @@ jobs:
               failures = summary.get("failed_tickers", [])
               failed_tickers = len(failures) if isinstance(failures, list) else "n/a"
 
-          if success and r2_index_url:
-              payload = {"content": f"PEG rendered charts: {r2_index_url}"}
-              Path("discord_payload.json").write_text(json.dumps(payload), encoding="utf-8")
-              raise SystemExit(0)
+          if raw_results_path.exists():
+              raw_results = json.loads(raw_results_path.read_text(encoding="utf-8"))
+              hits = raw_results.get("hits", [])
+              if isinstance(hits, list):
+                  current_hits = [hit for hit in hits if isinstance(hit, dict)]
+
+          previous_hits_by_ticker: set[str] = set()
+          if r2_public_base_url:
+              try:
+                  previous_date = (dt.date.fromisoformat(date_label) - dt.timedelta(days=1)).isoformat()
+                  previous_url = (
+                      f"{r2_public_base_url}/peg-screen/{previous_date}/raw/"
+                      f"peg_earnings_gap_{previous_date}.json"
+                  )
+                  with urllib.request.urlopen(previous_url, timeout=15) as response:
+                      previous_payload = json.loads(response.read().decode("utf-8"))
+                  previous_hits = previous_payload.get("hits", [])
+                  if isinstance(previous_hits, list):
+                      previous_hits_by_ticker = {
+                          str(hit.get("ticker", "")).strip()
+                          for hit in previous_hits
+                          if isinstance(hit, dict) and str(hit.get("ticker", "")).strip()
+                      }
+              except (ValueError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+                  previous_hits_by_ticker = set()
+
+          def score_of(hit):
+              try:
+                  return float(hit.get("gap_pct", 0))
+              except (TypeError, ValueError):
+                  return 0.0
+
+          for hit in sorted(current_hits, key=score_of, reverse=True):
+              ticker = str(hit.get("ticker", "")).strip()
+              if not ticker:
+                  continue
+              is_new = ticker not in previous_hits_by_ticker if previous_hits_by_ticker else False
+              if is_new:
+                  new_tickers.add(ticker)
+              gap_pct = score_of(hit) * 100.0
+              volume_ratio = hit.get("volume_ratio")
+              try:
+                  volume_ratio_text = f"{float(volume_ratio):.2f}x"
+              except (TypeError, ValueError):
+                  volume_ratio_text = "n/a"
+              prefix = "NEW " if is_new else ""
+              hit_summaries.append(f"{prefix}`{ticker}` gap {gap_pct:.1f}% vol {volume_ratio_text}")
 
           status_emoji = ":white_check_mark:" if success else ":warning:"
           lines = [
@@ -306,6 +356,8 @@ jobs:
               f"Hits: `{passed_tickers}`",
               f"Failures: `{failed_tickers}`",
           ]
+          if previous_hits_by_ticker:
+              lines.append(f"New vs prior day: `{len(new_tickers)}`")
           if r2_index_url:
               lines.append(f"Rendered charts: {r2_index_url}")
           elif r2_prefix:
@@ -313,8 +365,22 @@ jobs:
           if run_url:
               lines.append(f"Run details: {run_url}")
 
-          payload = {"content": "\n".join(lines)}
-          Path("discord_payload.json").write_text(json.dumps(payload), encoding="utf-8")
+          payloads: list[dict[str, str]] = [{"content": "\n".join(lines)}]
+          if hit_summaries:
+              header = "Hit list (`NEW` means not in prior day PEG hits):" if previous_hits_by_ticker else "Hit list:"
+              current = header
+              limit = 1800
+              for item in hit_summaries:
+                  candidate = f"{current}\n{item}"
+                  if len(candidate) > limit and current != header:
+                      payloads.append({"content": current})
+                      current = f"{header}\n{item}"
+                  else:
+                      current = candidate
+              if current != header:
+                  payloads.append({"content": current})
+
+          Path("discord_payloads.json").write_text(json.dumps(payloads), encoding="utf-8")
           PY
 
       - name: Send Discord notification
@@ -322,7 +388,20 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          curl -sS -X POST \
-            -H "Content-Type: application/json" \
-            --data @discord_payload.json \
-            "$DISCORD_WEBHOOK_URL"
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          webhook = os.environ["DISCORD_WEBHOOK_URL"]
+          payloads = json.loads(open("discord_payloads.json", encoding="utf-8").read())
+          for payload in payloads:
+              request = urllib.request.Request(
+                  webhook,
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(request) as response:
+                  response.read()
+          PY
