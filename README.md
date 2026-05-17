@@ -1,6 +1,6 @@
 # ticker-screener
 
-Focused chart-screen workflows for `RS new high before price`, `VCP`, and `power earnings gap`.
+Focused chart-screen workflows for `RS new high before price`, `VCP`, `Cup & Handle`, and `power earnings gap`.
 
 The repo also keeps a project-level small-cap exclusion list at [smallcap_exclude_tickers.txt](/Users/Zihao.Guan/Personal/ticker-screener/config/smallcap_exclude_tickers.txt). All screener workflows exclude those tickers by default.
 That file is refreshed by the weekly workflow in [refresh-smallcap-exclusion.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/refresh-smallcap-exclusion.yml), which pulls the latest list from `https://earnings.beavern.com/ics/smallcap.ics` and commits changes back to the repo.
@@ -10,6 +10,7 @@ This project keeps the responsibilities narrow:
 
 - screen the US equity universe for `RS new high before price`
 - screen the configured exchange universe for `VCP`
+- screen the configured exchange universe for `Cup & Handle`
 - screen the configured exchange universe for `power earnings gap`
 - emit raw screen results plus a renderer-ready watchlist JSON
 - render daily setup charts from that watchlist
@@ -22,6 +23,7 @@ The RS engine is vendored from `cookstock` so GitHub Actions can run without dep
 - `scripts/run_rs_screen.py`: produces raw results and watchlist JSON
 - `scripts/run_vcp_screen.py`: produces VCP raw results and watchlist JSON
 - `scripts/run_peg_screen.py`: produces PEG raw results and watchlist JSON
+- `scripts/run_cup_handle_screen.py`: produces Cup & Handle raw results and watchlist JSON
 - `scripts/render_rs_watchlist.py`: renders charts from a watchlist JSON
 - `scripts/render_sector_rotation_rrg.py`: renders an RRG-style sector or industry rotation map
 - `vendor/cookstock/`: vendored RS engine dependencies
@@ -66,10 +68,22 @@ Run the VCP screener across the configured exchange universe:
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_vcp_screen.py
 ```
 
+Run the Cup & Handle screener across the configured exchange universe:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_cup_handle_screen.py
+```
+
 Run a VCP smoke test:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_vcp_screen.py --limit 25
+```
+
+Run a Cup & Handle smoke test:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_cup_handle_screen.py --limit 25
 ```
 
 Run a PEG smoke test:
@@ -149,6 +163,9 @@ The screen step writes:
 - `artifacts/raw/peg_earnings_gap_<date>.json`
 - `artifacts/raw/peg_run_summary_<date>.json`
 - `artifacts/watchlists/peg_earnings_gap_<date>.json`
+- `artifacts/raw/cup_handle_<date>.json`
+- `artifacts/raw/cup_handle_run_summary_<date>.json`
+- `artifacts/watchlists/cup_handle_<date>.json`
 
 The render step writes:
 
@@ -169,6 +186,8 @@ The `render` job downloads the watchlist artifact produced by `screen` and then 
 The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
 
 The VCP workflow in [.github/workflows/vcp-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/vcp-screen-render.yml) follows the same screen, render, publish, and notify pattern. It supports manual runs with an optional `limit` input and is scheduled once per trading day at `UTC 00:00`, which corresponds to New Zealand noon during standard time and 1pm during daylight saving.
+
+The Cup & Handle workflow in [.github/workflows/cup-handle-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/cup-handle-screen-render.yml) follows the same screen and render pattern for daily breakout candidates.
 
 The overlap workflow in [.github/workflows/daily-overlap-summary.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/daily-overlap-summary.yml) runs after the daily `RS`, `PEG`, and `VCP` pipelines and summarizes which tickers appeared in at least two of those watchlists on the same day.
 

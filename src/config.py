@@ -64,6 +64,23 @@ class AppConfig:
     earnings_growth_ma_short: int = 20
     earnings_growth_ma_medium: int = 50
     earnings_growth_ma_long: int = 200
+    cup_handle_history_period: str = "18mo"
+    cup_handle_pivot_span: int = 8
+    cup_handle_min_cup_bars: int = 30
+    cup_handle_max_cup_bars: int = 140
+    cup_handle_min_depth_pct: float = 0.12
+    cup_handle_max_depth_pct: float = 0.45
+    cup_handle_rim_tolerance_pct: float = 0.06
+    cup_handle_min_handle_retrace: float = 0.10
+    cup_handle_max_handle_retrace: float = 0.55
+    cup_handle_max_handle_bars_ratio: float = 0.40
+    cup_handle_min_containment_ratio: float = 0.65
+    cup_handle_curve_tolerance_ratio: float = 0.20
+    cup_handle_breakout_lookback_bars: int = 5
+    cup_handle_require_volume_confirmation: bool = True
+    cup_handle_volume_average_days: int = 50
+    cup_handle_enable_bullish: bool = True
+    cup_handle_enable_bearish: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
