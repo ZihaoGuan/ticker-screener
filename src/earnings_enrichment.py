@@ -218,8 +218,9 @@ class YFinanceEarningsClient:
 
     def fetch_latest(self, ticker: str) -> dict[str, Any]:
         stock = self.yf.Ticker(ticker)
-        release_date: dt.date | None = None
-        release_session: str | None = None
+        reported_release_date: dt.date | None = None
+        upcoming_release_date: dt.date | None = None
+        upcoming_release_session: str | None = None
         eps_actual: float | None = None
         eps_estimate: float | None = None
         eps_surprise_pct: float | None = None
@@ -232,7 +233,7 @@ class YFinanceEarningsClient:
             row = history.iloc[0]
             index_value = history.index[0]
             if hasattr(index_value, "date"):
-                release_date = index_value.date()
+                reported_release_date = index_value.date()
             eps_actual = _safe_float(row.get("epsActual"))
             eps_estimate = _safe_float(row.get("epsEstimate"))
             eps_surprise_pct = _safe_float(row.get("surprisePercent"))
@@ -244,19 +245,20 @@ class YFinanceEarningsClient:
         if earnings_dates is not None and not earnings_dates.empty:
             index_value = earnings_dates.index[0]
             if hasattr(index_value, "date"):
-                release_date = index_value.date()
+                upcoming_release_date = index_value.date()
             hour = getattr(index_value, "hour", None)
             if hour is not None:
                 if hour < 12:
-                    release_session = "before_market"
+                    upcoming_release_session = "before_market"
                 elif hour >= 16:
-                    release_session = "after_market"
+                    upcoming_release_session = "after_market"
                 else:
-                    release_session = "during_market"
+                    upcoming_release_session = "during_market"
 
         return {
-            "release_date": release_date,
-            "release_session": release_session,
+            "reported_release_date": reported_release_date,
+            "upcoming_release_date": upcoming_release_date,
+            "upcoming_release_session": upcoming_release_session,
             "eps_actual": eps_actual,
             "eps_estimate": eps_estimate,
             "eps_surprise_pct": eps_surprise_pct,
@@ -295,6 +297,45 @@ def _date_from_row(row: dict[str, Any], *keys: str) -> dt.date | None:
     return _parse_date(_value_from(row, *keys))
 
 
+def _select_fmp_calendar_row(rows: list[dict[str, Any]], as_of_date: dt.date) -> dict[str, Any] | None:
+    if not rows:
+        return None
+
+    def _row_date(row: dict[str, Any]) -> dt.date:
+        return _date_from_row(row, "date", "reportDate", "reportedDate") or dt.date.min
+
+    reported_rows = [
+        row
+        for row in rows
+        if _row_date(row) <= as_of_date
+        and (
+            _safe_float(_value_from(row, "eps", "epsActual", "actualEps")) is not None
+            or _safe_float(_value_from(row, "epsEstimated", "epsEstimate", "estimatedEps")) is not None
+        )
+    ]
+    if reported_rows:
+        return max(reported_rows, key=_row_date)
+
+    upcoming_rows = [row for row in rows if _row_date(row) >= as_of_date]
+    if upcoming_rows:
+        return min(upcoming_rows, key=_row_date)
+
+    return max(rows, key=_row_date)
+
+
+def _select_fmp_confirmed_row(rows: list[dict[str, Any]], as_of_date: dt.date) -> dict[str, Any] | None:
+    if not rows:
+        return None
+
+    def _row_date(row: dict[str, Any]) -> dt.date:
+        return _date_from_row(row, "date", "reportDate", "reportedDate") or dt.date.max
+
+    future_rows = [row for row in rows if _row_date(row) >= as_of_date]
+    if future_rows:
+        return min(future_rows, key=_row_date)
+    return min(rows, key=_row_date)
+
+
 def _build_fmp_annotation(
     ticker: str,
     calendar_row: dict[str, Any] | None,
@@ -302,8 +343,8 @@ def _build_fmp_annotation(
     next_week_map: dict[str, tuple[dt.date, str | None, str | None]],
     as_of_date: dt.date,
 ) -> EarningsAnnotation:
-    release_date = _date_from_row(calendar_row or {}, "date", "reportDate", "reportedDate")
-    release_session = _parse_session(
+    reported_release_date = _date_from_row(calendar_row or {}, "date", "reportDate", "reportedDate")
+    reported_release_session = _parse_session(
         _value_from(confirmed_row or {}, "time", "publishTime", "session")
         or _value_from(calendar_row or {}, "time", "publishTime", "session")
     )
@@ -316,12 +357,17 @@ def _build_fmp_annotation(
     eps_surprise_pct = _safe_float(_value_from(calendar_row or {}, "epsSurprisePercent", "epsSurprise", "surprisePercent"))
     revenue_surprise_pct = _safe_float(_value_from(calendar_row or {}, "revenueSurprisePercent", "revenueSurprise"))
 
+    release_date = reported_release_date
+    release_session = reported_release_session
     if ticker in next_week_map:
         mapped_date, mapped_session, mapped_summary = next_week_map[ticker]
-        if release_date is None or mapped_date >= as_of_date:
+        if eps_actual is None and eps_estimate is None:
             release_date = mapped_date
-        release_session = release_session or mapped_session
-        source_summary = mapped_summary or source_summary
+            release_session = release_session or mapped_session
+            source_summary = mapped_summary or source_summary
+        elif release_session is None and release_date == mapped_date:
+            release_session = mapped_session
+            source_summary = mapped_summary or source_summary
 
     status, status_label = _classify_status(
         release_date,
@@ -357,7 +403,7 @@ def _build_ainvest_annotation(
     next_week_map: dict[str, tuple[dt.date, str | None, str | None]],
     as_of_date: dt.date,
 ) -> EarningsAnnotation:
-    release_date: dt.date | None = None
+    reported_release_date: dt.date | None = None
     release_session: str | None = None
     source_summary: str | None = None
     eps_actual: float | None = None
@@ -366,10 +412,11 @@ def _build_ainvest_annotation(
     revenue_actual: float | None = None
     revenue_estimate: float | None = None
     revenue_surprise_pct: float | None = None
+    upcoming_release_date: dt.date | None = None
 
     if history:
         latest = history[0]
-        release_date = _parse_date(latest.get("release_date"))
+        reported_release_date = _parse_date(latest.get("release_date"))
         eps_actual = _safe_float(latest.get("eps_actual"))
         eps_estimate = _safe_float(latest.get("eps_forecast"))
         eps_surprise_pct = _safe_float(latest.get("eps_surprise"))
@@ -378,28 +425,27 @@ def _build_ainvest_annotation(
         revenue_surprise_pct = _safe_float(latest.get("revenue_surprise"))
 
     if upcoming is not None:
-        upcoming_date = _parse_date(upcoming.get("date"))
-        if upcoming_date is not None and (release_date is None or upcoming_date >= as_of_date):
-            release_date = upcoming_date
-            if eps_actual is None:
-                eps_actual = _safe_float(upcoming.get("eps_actual"))
-            if eps_estimate is None:
-                eps_estimate = _safe_float(upcoming.get("eps_forecast"))
-            if eps_surprise_pct is None:
-                eps_surprise_pct = _safe_float(upcoming.get("eps_surprise"))
-            if revenue_actual is None:
-                revenue_actual = _safe_float(upcoming.get("revenue_actual"))
-            if revenue_estimate is None:
-                revenue_estimate = _safe_float(upcoming.get("revenue_forecast"))
-            if revenue_surprise_pct is None:
-                revenue_surprise_pct = _safe_float(upcoming.get("revenue_surprise"))
+        upcoming_release_date = _parse_date(upcoming.get("date"))
+
+    release_date = reported_release_date
+    if release_date is None and upcoming_release_date is not None:
+        release_date = upcoming_release_date
+        eps_actual = _safe_float(upcoming.get("eps_actual"))
+        eps_estimate = _safe_float(upcoming.get("eps_forecast"))
+        eps_surprise_pct = _safe_float(upcoming.get("eps_surprise"))
+        revenue_actual = _safe_float(upcoming.get("revenue_actual"))
+        revenue_estimate = _safe_float(upcoming.get("revenue_forecast"))
+        revenue_surprise_pct = _safe_float(upcoming.get("revenue_surprise"))
 
     if ticker in next_week_map:
         mapped_date, mapped_session, mapped_summary = next_week_map[ticker]
-        if release_date is None or mapped_date >= as_of_date:
+        if release_date is None:
             release_date = mapped_date
-        release_session = mapped_session or release_session
-        source_summary = mapped_summary or source_summary
+            release_session = mapped_session or release_session
+            source_summary = mapped_summary or source_summary
+        elif release_session is None and release_date == mapped_date:
+            release_session = mapped_session
+            source_summary = mapped_summary or source_summary
 
     status, status_label = _classify_status(
         release_date,
@@ -434,15 +480,21 @@ def _build_yfinance_annotation(
     next_week_map: dict[str, tuple[dt.date, str | None, str | None]],
     as_of_date: dt.date,
 ) -> EarningsAnnotation:
-    release_date = payload.get("release_date")
-    release_session = payload.get("release_session")
+    release_date = payload.get("reported_release_date")
+    release_session = None
     source_summary: str | None = None
+    if release_date is None:
+        release_date = payload.get("upcoming_release_date")
+        release_session = payload.get("upcoming_release_session")
     if ticker in next_week_map:
         mapped_date, mapped_session, mapped_summary = next_week_map[ticker]
-        if release_date is None or mapped_date >= as_of_date:
+        if release_date is None:
             release_date = mapped_date
-        release_session = release_session or mapped_session
-        source_summary = mapped_summary or source_summary
+            release_session = release_session or mapped_session
+            source_summary = mapped_summary or source_summary
+        elif release_session is None and release_date == mapped_date:
+            release_session = mapped_session
+            source_summary = mapped_summary or source_summary
     status, status_label = _classify_status(
         release_date,
         release_session,
@@ -500,21 +552,56 @@ def build_earnings_annotations(
         print(f"warning: unable to load ICS earnings sessions: {exc}")
         next_week_map = {}
 
-    selected_provider = (provider or config.earnings_enrichment_provider or "auto").strip().lower()
+    selected_provider = (provider or config.earnings_enrichment_provider or "yfinance").strip().lower()
     fmp_key = (fmp_api_key or os.getenv("FMP_API_KEY") or "").strip()
     ainvest_key = (ainvest_api_key or os.getenv("AINVEST_API_KEY") or "").strip()
 
     if selected_provider == "auto":
-        if fmp_key:
-            selected_provider = "fmp"
-        elif ainvest_key:
+        if ainvest_key:
             selected_provider = "ainvest"
+        elif fmp_key:
+            selected_provider = "fmp"
         else:
             selected_provider = "yfinance"
 
+    if selected_provider == "yfinance":
+        client = YFinanceEarningsClient()
+        for ticker in normalized_tickers:
+            try:
+                payload = client.fetch_latest(ticker)
+            except Exception as exc:
+                print(f"warning: unable to load yfinance earnings for {ticker}: {exc}")
+                payload = {
+                    "reported_release_date": None,
+                    "upcoming_release_date": None,
+                    "upcoming_release_session": None,
+                    "eps_actual": None,
+                    "eps_estimate": None,
+                    "eps_surprise_pct": None,
+                    "revenue_actual": None,
+                    "revenue_estimate": None,
+                    "revenue_surprise_pct": None,
+                }
+            annotations[ticker] = _build_yfinance_annotation(
+                ticker,
+                payload,
+                next_week_map,
+                as_of_date,
+            )
+        return annotations
+
     if selected_provider == "fmp":
         if not fmp_key:
-            raise RuntimeError("FMP_API_KEY is not set.")
+            print("warning: FMP_API_KEY is not set; falling back to yfinance for earnings enrichment.")
+            return build_earnings_annotations(
+                normalized_tickers,
+                config,
+                as_of_date=as_of_date,
+                upcoming_days=upcoming_days,
+                provider="yfinance",
+                ainvest_api_key=ainvest_key,
+                fmp_api_key=fmp_api_key,
+            )
         client = FMPEarningsClient(fmp_key, timeout_seconds=config.request_timeout_seconds)
         calendar_rows: list[dict[str, Any]]
         confirmed_rows: list[dict[str, Any]]
@@ -528,21 +615,21 @@ def build_earnings_annotations(
         except Exception as exc:
             print(f"warning: unable to load FMP confirmed earnings calendar: {exc}")
             confirmed_rows = []
-        calendar_by_ticker = {
-            str(_value_from(row, "symbol", "ticker", "companySymbol") or "").upper().strip(): row
-            for row in calendar_rows
-            if str(_value_from(row, "symbol", "ticker", "companySymbol") or "").strip()
-        }
-        confirmed_by_ticker = {
-            str(_value_from(row, "symbol", "ticker", "companySymbol") or "").upper().strip(): row
-            for row in confirmed_rows
-            if str(_value_from(row, "symbol", "ticker", "companySymbol") or "").strip()
-        }
+        calendar_by_ticker: dict[str, list[dict[str, Any]]] = {}
+        for row in calendar_rows:
+            ticker = str(_value_from(row, "symbol", "ticker", "companySymbol") or "").upper().strip()
+            if ticker:
+                calendar_by_ticker.setdefault(ticker, []).append(row)
+        confirmed_by_ticker: dict[str, list[dict[str, Any]]] = {}
+        for row in confirmed_rows:
+            ticker = str(_value_from(row, "symbol", "ticker", "companySymbol") or "").upper().strip()
+            if ticker:
+                confirmed_by_ticker.setdefault(ticker, []).append(row)
         for ticker in normalized_tickers:
             annotations[ticker] = _build_fmp_annotation(
                 ticker,
-                calendar_by_ticker.get(ticker),
-                confirmed_by_ticker.get(ticker),
+                _select_fmp_calendar_row(calendar_by_ticker.get(ticker, []), as_of_date),
+                _select_fmp_confirmed_row(confirmed_by_ticker.get(ticker, []), as_of_date),
                 next_week_map,
                 as_of_date,
             )
@@ -550,7 +637,16 @@ def build_earnings_annotations(
 
     if selected_provider == "ainvest":
         if not ainvest_key:
-            raise RuntimeError("AINVEST_API_KEY is not set.")
+            print("warning: AINVEST_API_KEY is not set; falling back to yfinance for earnings enrichment.")
+            return build_earnings_annotations(
+                normalized_tickers,
+                config,
+                as_of_date=as_of_date,
+                upcoming_days=upcoming_days,
+                provider="yfinance",
+                ainvest_api_key=ainvest_key,
+                fmp_api_key=fmp_api_key,
+            )
         client = AInvestEarningsClient(
             ainvest_key,
             timeout_seconds=config.request_timeout_seconds,
@@ -578,31 +674,6 @@ def build_earnings_annotations(
                 ticker,
                 history,
                 upcoming_by_ticker.get(ticker),
-                next_week_map,
-                as_of_date,
-            )
-        return annotations
-
-    if selected_provider == "yfinance":
-        client = YFinanceEarningsClient()
-        for ticker in normalized_tickers:
-            try:
-                payload = client.fetch_latest(ticker)
-            except Exception as exc:
-                print(f"warning: unable to load yfinance earnings for {ticker}: {exc}")
-                payload = {
-                    "release_date": None,
-                    "release_session": None,
-                    "eps_actual": None,
-                    "eps_estimate": None,
-                    "eps_surprise_pct": None,
-                    "revenue_actual": None,
-                    "revenue_estimate": None,
-                    "revenue_surprise_pct": None,
-                }
-            annotations[ticker] = _build_yfinance_annotation(
-                ticker,
-                payload,
                 next_week_map,
                 as_of_date,
             )

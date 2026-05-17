@@ -180,6 +180,9 @@ def fetch_history(ticker: str, period: str) -> pd.DataFrame:
     else:
         history.index = history.index.tz_localize(None)
     history = history.dropna(subset=["Open", "High", "Low", "Close", "Volume"]).copy()
+    if history.index.has_duplicates:
+        history = history[~history.index.duplicated(keep="last")].copy()
+    history = history.sort_index()
     if history.empty:
         raise ValueError(f"No usable price history returned for {ticker}")
     return history[["Open", "High", "Low", "Close", "Volume"]]

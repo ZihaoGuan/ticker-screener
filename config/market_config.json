@@ -29,7 +29,7 @@
   "peg_min_close_position_ratio": 0.25,
   "peg_require_green_candle": false,
   "peg_primary_entry_mode": "peg_low_or_ema_zone",
-  "earnings_enrichment_provider": "auto",
+  "earnings_enrichment_provider": "yfinance",
   "pre_earnings_retry_timeout_seconds": 24,
   "earnings_growth_move_lookback_quarters": 4,
   "earnings_growth_min_move_pct": 7.0,

@@ -112,7 +112,7 @@ python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/render_rs_watchlist.p
 Enrich an existing watchlist or raw screen JSON with earnings date, recent beat/miss status, and next-two-weeks earnings context:
 
 ```bash
-FMP_API_KEY=... python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/enrich_with_earnings.py \
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/enrich_with_earnings.py \
   --input-file /Users/Zihao.Guan/Personal/ticker-screener/artifacts/watchlists/rs_new_high_before_price_YYYY-MM-DD.json
 ```
 
@@ -121,7 +121,7 @@ The enricher supports either:
 - a watchlist JSON array in `artifacts/watchlists/*.json`
 - a raw screen payload with `hits[]` in `artifacts/raw/*.json`
 
-Supported providers are `fmp`, `ainvest`, `yfinance`, and `auto`. `auto` prefers `FMP` when `FMP_API_KEY` is present, then `AInvest`, then `yfinance`.
+Supported providers are `fmp`, `ainvest`, `yfinance`, and `auto`. The default provider is `yfinance`. `auto` prefers `AInvest` when `AINVEST_API_KEY` is present, then `FMP` when `FMP_API_KEY` is present, then `yfinance`.
 
 Render a weekly RRG-style rotation map:
 

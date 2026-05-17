@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--provider",
         choices=("auto", "fmp", "ainvest", "yfinance"),
-        help="Override earnings provider. Defaults to config or auto.",
+        help="Override earnings provider. Defaults to config or yfinance.",
     )
     parser.add_argument(
         "--no-append-summary",
