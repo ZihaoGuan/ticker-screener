@@ -1,0 +1,6 @@
+# Add one ticker per line to exclude it from all screener workflows.
+# You can also separate multiple tickers with commas or spaces.
+#
+# Example:
+# HUT
+# VIAV, SOUN

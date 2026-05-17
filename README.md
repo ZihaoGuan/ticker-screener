@@ -4,6 +4,7 @@ Focused chart-screen workflows for `RS new high before price`, `VCP`, and `power
 
 The repo also keeps a project-level small-cap exclusion list at [smallcap_exclude_tickers.txt](/Users/Zihao.Guan/Personal/ticker-screener/config/smallcap_exclude_tickers.txt). All screener workflows exclude those tickers by default.
 That file is refreshed by the weekly workflow in [refresh-smallcap-exclusion.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/refresh-smallcap-exclusion.yml), which pulls the latest list from `https://earnings.beavern.com/ics/smallcap.ics` and commits changes back to the repo.
+You can also manually exclude tickers by editing [manual_exclude_tickers.txt](/Users/Zihao.Guan/Personal/ticker-screener/config/manual_exclude_tickers.txt). All screener workflows merge that file with the small-cap exclusion list.
 
 This project keeps the responsibilities narrow:
 
@@ -168,6 +169,8 @@ The `render` job downloads the watchlist artifact produced by `screen` and then 
 The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
 
 The VCP workflow in [.github/workflows/vcp-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/vcp-screen-render.yml) follows the same screen, render, publish, and notify pattern. It supports manual runs with an optional `limit` input and is scheduled once per trading day at `UTC 00:00`, which corresponds to New Zealand noon during standard time and 1pm during daylight saving.
+
+The overlap workflow in [.github/workflows/daily-overlap-summary.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/daily-overlap-summary.yml) runs after the daily `RS`, `PEG`, and `VCP` pipelines and summarizes which tickers appeared in at least two of those watchlists on the same day.
 
 The pre-earnings workflow in [.github/workflows/pre-earnings-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-screen-render.yml) screens the next-week earnings watchlist, renders charts, and follows the same R2/Discord pattern as the RS and PEG workflows. It currently runs manually with optional `limit` and `reference_date` inputs.
 

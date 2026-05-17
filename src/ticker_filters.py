@@ -22,15 +22,35 @@ def excluded_tickers_path(config: AppConfig) -> Path:
     return project_root() / candidate
 
 
-def load_excluded_tickers(config: AppConfig) -> set[str]:
-    path = excluded_tickers_path(config)
+def manual_excluded_tickers_path(config: AppConfig) -> Path:
+    raw_value = str(getattr(config, "manual_excluded_tickers_file", "") or "").strip()
+    if not raw_value:
+        return project_root() / "config" / "manual_exclude_tickers.txt"
+    candidate = Path(raw_value)
+    if candidate.is_absolute():
+        return candidate
+    return project_root() / candidate
+
+
+def _load_ticker_file(path: Path) -> set[str]:
     if not path.exists():
         return set()
     excluded: set[str] = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        ticker = line.strip().upper()
-        if ticker:
-            excluded.add(ticker)
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = [part.strip().upper() for part in line.replace(",", " ").split()]
+        for ticker in parts:
+            if ticker:
+                excluded.add(ticker)
+    return excluded
+
+
+def load_excluded_tickers(config: AppConfig) -> set[str]:
+    excluded: set[str] = set()
+    for path in (excluded_tickers_path(config), manual_excluded_tickers_path(config)):
+        excluded.update(_load_ticker_file(path))
     return excluded
 
 

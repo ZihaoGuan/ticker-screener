@@ -34,6 +34,7 @@ class AppConfig:
     earnings_watchlist_ics_url: str = "https://earnings.beavern.com/ics/all.ics"
     earnings_watchlist_exclude_ics_urls: tuple[str, ...] = ()
     excluded_tickers_file: str = "config/smallcap_exclude_tickers.txt"
+    manual_excluded_tickers_file: str = "config/manual_exclude_tickers.txt"
     earnings_surprise_provider: str = "auto"
     earnings_enrichment_provider: str = "yfinance"
     peg_lookback_days: int = 20
