@@ -195,17 +195,19 @@ def run_peg_screen(config: AppConfig, earnings_events: list[EarningsEvent]) -> P
             peg_setup = financials.find_recent_power_earnings_gap()
             if recent_peg_event:
                 event_trade_plan = financials.get_peg_trade_plan(recent_peg_event)
-                recent_events.append(
-                    _to_hit(
-                        event,
-                        config.benchmark_ticker,
-                        recent_peg_event,
-                        event_trade_plan,
-                        has_peg_event=True,
-                        actionable_now=peg_setup is not None and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")),
-                    )
+                recent_event_hit = _to_hit(
+                    event,
+                    config.benchmark_ticker,
+                    recent_peg_event,
+                    event_trade_plan,
+                    has_peg_event=True,
+                    actionable_now=peg_setup is not None and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")),
                 )
+                recent_events.append(recent_event_hit)
+                hits.append(recent_event_hit)
             if not peg_setup:
+                continue
+            if recent_peg_event and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")):
                 continue
             trade_plan = financials.get_peg_trade_plan(peg_setup)
             hits.append(

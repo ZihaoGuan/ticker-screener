@@ -83,6 +83,8 @@ class WatchlistEntry:
     setup_label: str
     summary: str
     master_note: str
+    event_date: str | None = None
+    event_label: str | None = None
     trigger_price: float | None = None
     trigger_label: str | None = None
     entry_style: str | None = None
@@ -832,6 +834,21 @@ def render_watchlist_chart(
         zone for zone in gap_zones if zone.remaining_upper_price > zone.remaining_lower_price + 1e-6
     ]
 
+    event_index = None
+    event_date = None
+    if entry.event_date:
+        try:
+            parsed_event_date = pd.Timestamp(entry.event_date).normalize()
+            matches = chart.index[chart.index == parsed_event_date]
+            if len(matches) > 0:
+                event_date = matches[-1]
+                event_index = chart.index.get_loc(event_date)
+                if isinstance(event_index, slice):
+                    event_index = event_index.stop - 1
+        except Exception:
+            event_index = None
+            event_date = None
+
     for zone in visible_gap_zones:
         x_start = left + zone.start_index * x_step
         x_end = left + (zone.end_index + 1) * x_step
@@ -881,6 +898,15 @@ def render_watchlist_chart(
             ring_radius = max(min(x_step * 0.24, 11.0), 4.5) + 2.0
             svg.append(
                 f'<circle cx="{x:.1f}" cy="{rs_marker_y:.1f}" r="{ring_radius:.1f}" fill="none" stroke="#93c5fd" stroke-width="1.2" opacity="0.95" />'
+            )
+        if event_index == index and event_date is not None:
+            event_label_y = max(price_top + 16.0, wick_top - 12.0)
+            event_label_text = f"{entry.event_label or 'Event'} {pd.Timestamp(event_date).strftime('%Y-%m-%d')}"
+            svg.append(
+                f'<line x1="{x:.1f}" y1="{price_top:.1f}" x2="{x:.1f}" y2="{price_top + price_height:.1f}" stroke="#fbbf24" stroke-dasharray="2 5" stroke-width="1.0" opacity="0.55" />'
+            )
+            svg.append(
+                f'<text x="{x:.1f}" y="{event_label_y:.1f}" fill="#fde68a" font-size="11" text-anchor="middle" font-family="Menlo, Consolas, monospace">{escape(event_label_text)}</text>'
             )
 
     indicator_specs = [

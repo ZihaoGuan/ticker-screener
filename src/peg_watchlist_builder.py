@@ -6,6 +6,7 @@ from .peg_screen import PegHit
 def _format_note(hit: PegHit) -> str:
     note_parts = [
         f"{hit.setup_type.upper()} on {hit.peg_date}",
+        "Actionable now" if hit.actionable_now else "Event only (not actionable now)",
         f"Gap {hit.gap_pct * 100:.1f}%",
         f"Volume {hit.volume_ratio:.2f}x",
         f"PEG low {hit.peg_low:.2f}",
@@ -27,8 +28,9 @@ def _format_note(hit: PegHit) -> str:
 def build_peg_watchlist(hits: list[PegHit]) -> list[dict[str, object]]:
     watchlist: list[dict[str, object]] = []
     for hit in hits:
+        status_text = "Actionable now" if hit.actionable_now else "Event only"
         summary = (
-            f"PEG event {hit.peg_date}. "
+            f"PEG event {hit.peg_date}. {status_text}. "
             f"Entry distance {hit.entry_distance_pct * 100:.1f}% from PEG low. "
             f"Close position {hit.close_position_ratio:.2f}. "
             f"Volume ratio {hit.volume_ratio:.2f}x."
@@ -42,6 +44,8 @@ def build_peg_watchlist(hits: list[PegHit]) -> list[dict[str, object]]:
             "setup_label": "Power earnings gap",
             "summary": summary,
             "master_note": _format_note(hit),
+            "event_date": hit.peg_date,
+            "event_label": "PEG",
             "trigger_label": "Gap-day high",
             "trigger_price": round(hit.gdh, 4),
             "entry_style": "peg_pullback",

@@ -329,7 +329,9 @@ jobs:
                   volume_ratio_text = f"{float(volume_ratio):.2f}x"
               except (TypeError, ValueError):
                   volume_ratio_text = "n/a"
-              hit_summaries.append(f"`{ticker}` gap {gap_pct:.1f}% vol {volume_ratio_text}")
+              actionable_now = bool(hit.get("actionable_now"))
+              status_text = "actionable" if actionable_now else "event only"
+              hit_summaries.append(f"`{ticker}` {status_text} gap {gap_pct:.1f}% vol {volume_ratio_text}")
 
           status_emoji = ":white_check_mark:" if success else ":warning:"
           lines = [
