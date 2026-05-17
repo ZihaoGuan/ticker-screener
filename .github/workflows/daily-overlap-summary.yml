@@ -13,6 +13,8 @@ on:
 jobs:
   summarize:
     runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,11 +77,8 @@ jobs:
             artifacts/raw/daily_overlap_summary_${{ steps.meta.outputs.date_label }}.txt
 
       - name: Send Discord notification
-        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' }}
         continue-on-error: true
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          DATE_LABEL: ${{ steps.meta.outputs.date_label }}
         run: |
           python - <<'PY'
           import json
