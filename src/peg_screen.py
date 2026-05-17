@@ -23,6 +23,9 @@ class PegHit:
     earnings_summary: str | None
     sector: str | None
     exchange: str | None
+    has_peg_event: bool
+    actionable_now: bool
+    peg_event_age_days: int | None
     benchmark_ticker: str
     setup_type: str
     peg_date: str
@@ -41,6 +44,8 @@ class PegHit:
     hvc5: float
     gdh: float
     gdl: float
+    gap_fill_floor: float | None
+    gap_fully_filled: bool
     earnings_actual_eps: float | None
     earnings_estimated_eps: float | None
     earnings_surprise_pct: float | None
@@ -69,8 +74,10 @@ class PegScreenResult:
     benchmark_ticker: str
     total_tickers: int
     passed_tickers: int
+    recent_event_tickers: int
     failed_tickers: list[dict[str, str]]
     hits: list[PegHit]
+    recent_events: list[PegHit]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -78,8 +85,10 @@ class PegScreenResult:
             "benchmark_ticker": self.benchmark_ticker,
             "total_tickers": self.total_tickers,
             "passed_tickers": self.passed_tickers,
+            "recent_event_tickers": self.recent_event_tickers,
             "failed_tickers": self.failed_tickers,
             "hits": [item.to_dict() for item in self.hits],
+            "recent_events": [item.to_dict() for item in self.recent_events],
         }
 
 
@@ -101,13 +110,34 @@ def _optional_int(value: object) -> int | None:
         return None
 
 
-def _to_hit(event: EarningsEvent, benchmark_ticker: str, peg_setup: dict[str, object], trade_plan: dict[str, object] | None) -> PegHit:
+def _event_age_days(peg_date: object) -> int | None:
+    if peg_date in (None, "", "NA", "n/a"):
+        return None
+    try:
+        event_date = dt.date.fromisoformat(str(peg_date))
+    except ValueError:
+        return None
+    return (dt.date.today() - event_date).days
+
+
+def _to_hit(
+    event: EarningsEvent,
+    benchmark_ticker: str,
+    peg_setup: dict[str, object],
+    trade_plan: dict[str, object] | None,
+    *,
+    has_peg_event: bool,
+    actionable_now: bool,
+) -> PegHit:
     return PegHit(
         ticker=event.ticker,
         earnings_date=event.earnings_date,
         earnings_summary=event.summary,
         sector=event.sector,
         exchange=event.exchange,
+        has_peg_event=has_peg_event,
+        actionable_now=actionable_now,
+        peg_event_age_days=_event_age_days(peg_setup.get("peg_date")),
         benchmark_ticker=benchmark_ticker,
         setup_type=str(peg_setup["setup_type"]),
         peg_date=str(peg_setup["peg_date"]),
@@ -126,6 +156,8 @@ def _to_hit(event: EarningsEvent, benchmark_ticker: str, peg_setup: dict[str, ob
         hvc5=float(peg_setup["hvc5"]),
         gdh=float(peg_setup["gdh"]),
         gdl=float(peg_setup["gdl"]),
+        gap_fill_floor=_optional_float(peg_setup.get("gap_fill_floor")),
+        gap_fully_filled=bool(peg_setup.get("gap_fully_filled", False)),
         earnings_actual_eps=_optional_float(peg_setup.get("earnings_actual_eps")),
         earnings_estimated_eps=_optional_float(peg_setup.get("earnings_estimated_eps")),
         earnings_surprise_pct=_optional_float(peg_setup.get("earnings_surprise_pct")),
@@ -149,6 +181,7 @@ def _to_hit(event: EarningsEvent, benchmark_ticker: str, peg_setup: dict[str, ob
 def run_peg_screen(config: AppConfig, earnings_events: list[EarningsEvent]) -> PegScreenResult:
     cookstock = load_configured_cookstock(config)
     hits: list[PegHit] = []
+    recent_events: list[PegHit] = []
     failures: list[dict[str, str]] = []
 
     for position, event in enumerate(earnings_events, start=1):
@@ -158,11 +191,33 @@ def run_peg_screen(config: AppConfig, earnings_events: list[EarningsEvent]) -> P
                 event.ticker,
                 benchmarkTicker=config.benchmark_ticker,
             )
+            recent_peg_event = financials.find_recent_power_earnings_gap_event(recency_days=30)
             peg_setup = financials.find_recent_power_earnings_gap()
+            if recent_peg_event:
+                event_trade_plan = financials.get_peg_trade_plan(recent_peg_event)
+                recent_events.append(
+                    _to_hit(
+                        event,
+                        config.benchmark_ticker,
+                        recent_peg_event,
+                        event_trade_plan,
+                        has_peg_event=True,
+                        actionable_now=peg_setup is not None and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")),
+                    )
+                )
             if not peg_setup:
                 continue
             trade_plan = financials.get_peg_trade_plan(peg_setup)
-            hits.append(_to_hit(event, config.benchmark_ticker, peg_setup, trade_plan))
+            hits.append(
+                _to_hit(
+                    event,
+                    config.benchmark_ticker,
+                    peg_setup,
+                    trade_plan,
+                    has_peg_event=True,
+                    actionable_now=True,
+                )
+            )
         except Exception as exc:
             failures.append({"ticker": event.ticker, "error": str(exc)})
             print(f"screening failed for {event.ticker}: {exc}")
@@ -172,6 +227,8 @@ def run_peg_screen(config: AppConfig, earnings_events: list[EarningsEvent]) -> P
         benchmark_ticker=config.benchmark_ticker,
         total_tickers=len(earnings_events),
         passed_tickers=len(hits),
+        recent_event_tickers=len(recent_events),
         failed_tickers=failures,
         hits=hits,
+        recent_events=recent_events,
     )

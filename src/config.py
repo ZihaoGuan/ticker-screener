@@ -43,10 +43,10 @@ class AppConfig:
     peg_monster_volume_ratio: float = 4.0
     peg_min_eps_surprise_pct: float = 20.0
     peg_max_entry_distance_pct: float = 0.03
-    peg_min_close_position_ratio: float = 0.6
+    peg_min_close_position_ratio: float = 0.25
     peg_require_earnings_event: bool = False
-    peg_require_green_candle: bool = True
-    peg_primary_entry_mode: str = "peg_low"
+    peg_require_green_candle: bool = False
+    peg_primary_entry_mode: str = "peg_low_or_ema_zone"
     peg_secondary_entry_fast_ema: int = 9
     peg_secondary_entry_slow_ema: int = 21
     peg_distribution_lookback_days: int = 10

@@ -1513,7 +1513,7 @@ class cookFinancials(YahooFinancials):
 
         fast_ema_length = max(1, int(getattr(algoParas, 'PEG_SECONDARY_ENTRY_FAST_EMA', 9)))
         slow_ema_length = max(fast_ema_length, int(getattr(algoParas, 'PEG_SECONDARY_ENTRY_SLOW_EMA', 21)))
-        primary_entry_mode = getattr(algoParas, 'PEG_PRIMARY_ENTRY_MODE', 'peg_low')
+        primary_entry_mode = getattr(algoParas, 'PEG_PRIMARY_ENTRY_MODE', 'peg_low_or_ema_zone')
         primary_entry = float(peg_setup['peg_low'])
         ema_fast = self._get_latest_ema_value(fast_ema_length)
         ema_slow = self._get_latest_ema_value(slow_ema_length)
@@ -1545,6 +1545,37 @@ class cookFinancials(YahooFinancials):
             'latest_distribution_volume_ratio': distribution['latest_distribution_volume_ratio'],
             'distribution_volume_ratio_threshold': float(getattr(algoParas, 'PEG_DISTRIBUTION_VOLUME_RATIO', 1.5)),
         }
+
+    def _is_price_in_peg_secondary_entry_zone(self, currentPrice):
+        if currentPrice is None:
+            return False, None, None
+
+        fast_ema_length = max(1, int(getattr(algoParas, 'PEG_SECONDARY_ENTRY_FAST_EMA', 9)))
+        slow_ema_length = max(fast_ema_length, int(getattr(algoParas, 'PEG_SECONDARY_ENTRY_SLOW_EMA', 21)))
+        ema_fast = self._get_latest_ema_value(fast_ema_length)
+        ema_slow = self._get_latest_ema_value(slow_ema_length)
+        if ema_fast is None or ema_slow is None:
+            return False, None, None
+
+        secondary_low = min(float(ema_fast), float(ema_slow))
+        secondary_high = max(float(ema_fast), float(ema_slow))
+        in_zone = secondary_low <= float(currentPrice) <= secondary_high
+        return in_zone, secondary_low, secondary_high
+
+    def _is_peg_gap_fully_filled_since_index(self, priceDataStruct, gap_index, gap_floor):
+        if gap_index < 0 or gap_index >= len(priceDataStruct):
+            return False
+        try:
+            floor_price = float(gap_floor)
+        except (TypeError, ValueError):
+            return False
+        for later_bar in priceDataStruct[gap_index + 1 :]:
+            low_p = later_bar.get('low')
+            if low_p is None:
+                continue
+            if float(low_p) <= floor_price:
+                return True
+        return False
 
     def get_market_memory_summary(self):
         priceDataStruct = self._get_clean_price_data()
@@ -2108,7 +2139,7 @@ class cookFinancials(YahooFinancials):
             'reasons': reasons,
         }
 
-    def find_recent_power_earnings_gap(self):
+    def _find_recent_power_earnings_gap(self, include_entry_filter=True, recency_days=None):
         priceDataStruct = self._get_clean_price_data()
         if len(priceDataStruct) < 60:
             return None
@@ -2165,6 +2196,14 @@ class cookFinancials(YahooFinancials):
             if low_p <= prev_high:
                 continue
 
+            gap_fully_filled = self._is_peg_gap_fully_filled_since_index(
+                priceDataStruct,
+                idx,
+                prev_high,
+            )
+            if gap_fully_filled:
+                continue
+
             candle_range = high_p - low_p
             if candle_range <= 0:
                 continue
@@ -2193,8 +2232,23 @@ class cookFinancials(YahooFinancials):
             if entry_distance_pct is None:
                 continue
             max_entry_distance_pct = float(algoParas.PEG_MAX_ENTRY_DISTANCE_PCT)
-            if max_entry_distance_pct > 0 and entry_distance_pct > max_entry_distance_pct:
-                continue
+            primary_entry_mode = str(getattr(algoParas, 'PEG_PRIMARY_ENTRY_MODE', 'peg_low_or_ema_zone')).strip().lower()
+            passes_peg_low_entry = True
+            if max_entry_distance_pct > 0:
+                passes_peg_low_entry = entry_distance_pct <= max_entry_distance_pct
+
+            passes_ema_zone_entry, secondary_low, secondary_high = self._is_price_in_peg_secondary_entry_zone(currentPrice)
+
+            if include_entry_filter:
+                if primary_entry_mode == 'ema_zone':
+                    if not passes_ema_zone_entry:
+                        continue
+                elif primary_entry_mode in ('peg_low_or_ema_zone', 'either', 'hybrid'):
+                    if not (passes_peg_low_entry or passes_ema_zone_entry):
+                        continue
+                else:
+                    if not passes_peg_low_entry:
+                        continue
 
             candidates.append({
                 'setup_type': setup_type,
@@ -2214,6 +2268,12 @@ class cookFinancials(YahooFinancials):
                 'hvc5': close_p * 0.95,
                 'gdh': high_p,
                 'gdl': low_p,
+                'gap_fill_floor': prev_high,
+                'gap_fully_filled': gap_fully_filled,
+                'passes_peg_low_entry': passes_peg_low_entry,
+                'passes_ema_zone_entry': passes_ema_zone_entry,
+                'secondary_entry_low': secondary_low,
+                'secondary_entry_high': secondary_high,
                 'earnings_actual_eps': earnings_surprise['actual_eps'] if earnings_surprise else None,
                 'earnings_estimated_eps': earnings_surprise['estimated_eps'] if earnings_surprise else None,
                 'earnings_surprise_pct': earnings_surprise['surprise_pct'] if earnings_surprise else None,
@@ -2223,7 +2283,25 @@ class cookFinancials(YahooFinancials):
             return None
 
         candidates.sort(key=lambda item: item['peg_date'], reverse=True)
-        return candidates[0]
+        latest = candidates[0]
+        if recency_days is not None:
+            try:
+                peg_date = dt.datetime.strptime(str(latest['peg_date']), "%Y-%m-%d").date()
+                age_days = (dt.date.today() - peg_date).days
+            except (TypeError, ValueError):
+                return None
+            if age_days > int(recency_days):
+                return None
+        return latest
+
+    def find_recent_power_earnings_gap(self):
+        return self._find_recent_power_earnings_gap(include_entry_filter=True)
+
+    def find_recent_power_earnings_gap_event(self, recency_days=30):
+        return self._find_recent_power_earnings_gap(
+            include_entry_filter=False,
+            recency_days=recency_days,
+        )
 
     def _resolve_benchmark_ticker(self, benchmarkTicker=None):
         return (benchmarkTicker or self.benchmark_ticker or algoParas.BENCHMARK_TICKER).upper()

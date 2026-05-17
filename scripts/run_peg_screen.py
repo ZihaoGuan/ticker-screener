@@ -121,6 +121,7 @@ def main() -> int:
             "reference_date": str(reference_date) if reference_date else None,
             "total_tickers": result.total_tickers,
             "passed_tickers": result.passed_tickers,
+            "recent_event_tickers": result.recent_event_tickers,
             "failed_tickers": result.failed_tickers,
             "raw_results_file": str(raw_path),
             "watchlist_file": str(watchlist_path),

@@ -90,6 +90,8 @@ class WatchlistEntry:
     entry_label: str | None = None
     entry_timeframe: str | None = None
     secondary_entry_price: float | None = None
+    secondary_entry_low: float | None = None
+    secondary_entry_high: float | None = None
     secondary_entry_label: str | None = None
     secondary_entry_timeframe: str | None = None
     stop_price: float | None = None
@@ -499,7 +501,10 @@ def build_entry_plan(
         ]
         if entry.secondary_entry_price is not None:
             secondary_label = entry.secondary_entry_label or "Secondary support"
-            lines.append(f"{secondary_label}: {entry.secondary_entry_price:.2f}")
+            if entry.secondary_entry_low is not None and entry.secondary_entry_high is not None:
+                lines.append(f"{secondary_label}: {entry.secondary_entry_low:.2f}-{entry.secondary_entry_high:.2f}")
+            else:
+                lines.append(f"{secondary_label}: {entry.secondary_entry_price:.2f}")
         return lines, entry_ref, "#22c55e" if latest_close >= entry_ref else "#f97316"
 
     if above_trigger:
@@ -517,7 +522,10 @@ def build_entry_plan(
             ]
         if entry.secondary_entry_price is not None:
             secondary_label = entry.secondary_entry_label or "Secondary entry"
-            lines.append(f"{secondary_label}: {entry.secondary_entry_price:.2f}")
+            if entry.secondary_entry_low is not None and entry.secondary_entry_high is not None:
+                lines.append(f"{secondary_label}: {entry.secondary_entry_low:.2f}-{entry.secondary_entry_high:.2f}")
+            else:
+                lines.append(f"{secondary_label}: {entry.secondary_entry_price:.2f}")
         return lines, entry_ref, "#22c55e"
 
     if weekly_pullback_reclaim:
@@ -540,7 +548,10 @@ def build_entry_plan(
         ]
     if entry.secondary_entry_price is not None:
         secondary_label = entry.secondary_entry_label or "Secondary entry"
-        lines.append(f"{secondary_label}: {entry.secondary_entry_price:.2f}")
+        if entry.secondary_entry_low is not None and entry.secondary_entry_high is not None:
+            lines.append(f"{secondary_label}: {entry.secondary_entry_low:.2f}-{entry.secondary_entry_high:.2f}")
+        else:
+            lines.append(f"{secondary_label}: {entry.secondary_entry_price:.2f}")
     return lines, entry_ref, "#f97316"
 
 
@@ -942,7 +953,25 @@ def render_watchlist_chart(
             f'<line x1="{left}" y1="{secondary_y:.1f}" x2="{left + plot_width}" y2="{secondary_y:.1f}" '
             f'stroke="#94a3b8" stroke-dasharray="3 7" stroke-width="1.0" />'
         )
-        chart_label_specs.append((secondary_y - 10, "#94a3b8", f"{entry.secondary_entry_label or 'Secondary entry'} {secondary_price:.2f}"))
+        if entry.secondary_entry_low is not None and entry.secondary_entry_high is not None:
+            secondary_zone_top_price = max(entry.secondary_entry_low, entry.secondary_entry_high)
+            secondary_zone_bottom_price = min(entry.secondary_entry_low, entry.secondary_entry_high)
+            secondary_zone_top_y = _price_y(secondary_zone_top_price, y_min, y_max, price_top, price_height)
+            secondary_zone_bottom_y = _price_y(secondary_zone_bottom_price, y_min, y_max, price_top, price_height)
+            secondary_zone_y = min(secondary_zone_top_y, secondary_zone_bottom_y)
+            secondary_zone_height = max(abs(secondary_zone_bottom_y - secondary_zone_top_y), 8.0)
+            svg.append(
+                f'<rect x="{left}" y="{secondary_zone_y:.1f}" width="{plot_width}" height="{secondary_zone_height:.1f}" fill="#94a3b8" opacity="0.07" rx="4" />'
+            )
+            chart_label_specs.append(
+                (
+                    secondary_zone_y - 10,
+                    "#94a3b8",
+                    f"{entry.secondary_entry_label or 'Secondary entry'} {secondary_zone_bottom_price:.2f}-{secondary_zone_top_price:.2f}",
+                )
+            )
+        else:
+            chart_label_specs.append((secondary_y - 10, "#94a3b8", f"{entry.secondary_entry_label or 'Secondary entry'} {secondary_price:.2f}"))
 
     stop_y = _price_y(stop_price, y_min, y_max, price_top, price_height)
     invalid_zone_y = stop_y
@@ -1052,7 +1081,12 @@ def render_watchlist_chart(
         f"Gap zones: {len(gap_zones)} total | open: {len(open_gap_zones)} | visible: {len(visible_gap_zones)}",
     ]
     if entry.secondary_entry_price is not None:
-        info_lines.append(f"Secondary entry: {entry.secondary_entry_price:.2f}")
+        if entry.secondary_entry_low is not None and entry.secondary_entry_high is not None:
+            info_lines.append(
+                f"Secondary entry: {min(entry.secondary_entry_low, entry.secondary_entry_high):.2f}-{max(entry.secondary_entry_low, entry.secondary_entry_high):.2f}"
+            )
+        else:
+            info_lines.append(f"Secondary entry: {entry.secondary_entry_price:.2f}")
     if entry.entry_timeframe:
         info_lines.append(f"Entry timeframe: {entry.entry_timeframe}")
     if entry.stop_timeframe:
@@ -1323,7 +1357,7 @@ def load_watchlist_entries(args: argparse.Namespace) -> list[WatchlistEntry]:
         entries: list[WatchlistEntry] = []
         for raw_entry in raw_entries:
             entry = dict(raw_entry)
-            for key in ("trigger_price", "entry_price", "secondary_entry_price", "stop_price"):
+            for key in ("trigger_price", "entry_price", "secondary_entry_price", "secondary_entry_low", "secondary_entry_high", "stop_price"):
                 entry[key] = _coerce_optional_float(entry.get(key))
             entries.append(WatchlistEntry(**entry))
         return entries

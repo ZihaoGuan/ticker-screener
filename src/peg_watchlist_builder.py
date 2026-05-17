@@ -56,5 +56,9 @@ def build_peg_watchlist(hits: list[PegHit]) -> list[dict[str, object]]:
             watchlist_entry["secondary_entry_price"] = round(hit.secondary_entry_high, 4)
             watchlist_entry["secondary_entry_label"] = hit.secondary_entry_label or "EMA zone"
             watchlist_entry["secondary_entry_timeframe"] = "daily"
+        if hit.secondary_entry_low is not None:
+            watchlist_entry["secondary_entry_low"] = round(hit.secondary_entry_low, 4)
+        if hit.secondary_entry_high is not None:
+            watchlist_entry["secondary_entry_high"] = round(hit.secondary_entry_high, 4)
         watchlist.append(watchlist_entry)
     return watchlist
