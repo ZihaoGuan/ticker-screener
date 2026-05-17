@@ -18,6 +18,7 @@ from src.cookstock_bridge import load_configured_cookstock
 from src.earnings_growth_screen import run_earnings_growth_screen
 from src.earnings_growth_watchlist_builder import build_earnings_growth_watchlist
 from src.pre_earnings_screen import PreEarningsEvent
+from src.ticker_filters import filter_pre_earnings_events, filter_symbols, load_excluded_tickers
 from src.universe import load_universe
 
 
@@ -47,13 +48,8 @@ def _sector_by_symbol(config_path: str) -> dict[str, tuple[str | None, str | Non
 
 def _manual_events(symbols: list[str], sector_map: dict[str, tuple[str | None, str | None]] | None = None) -> list[PreEarningsEvent]:
     events: list[PreEarningsEvent] = []
-    seen: set[str] = set()
     lookup = sector_map or {}
-    for symbol in symbols:
-        ticker = str(symbol).upper().strip()
-        if not ticker or ticker in seen:
-            continue
-        seen.add(ticker)
+    for ticker in symbols:
         sector, exchange = lookup.get(ticker, (None, None))
         events.append(
             PreEarningsEvent(
@@ -67,6 +63,7 @@ def _manual_events(symbols: list[str], sector_map: dict[str, tuple[str | None, s
 
 def _next_week_events(config_path: str, reference_date: dt.date | None, limit: int | None) -> list[PreEarningsEvent]:
     config = load_app_config(config_path)
+    excluded = load_excluded_tickers(config)
     universe = load_universe(config)
     sector_map = {item.symbol: (item.sector, item.exchange) for item in universe}
     cookstock = load_configured_cookstock(config)
@@ -89,6 +86,7 @@ def _next_week_events(config_path: str, reference_date: dt.date | None, limit: i
                 exchange=exchange,
             )
         )
+    events = filter_pre_earnings_events(events, excluded)
     if limit is not None:
         return events[:limit]
     return events
@@ -100,11 +98,12 @@ def main() -> int:
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
 
     config = load_app_config(args.config)
+    excluded = load_excluded_tickers(config)
     date_label = args.date_label or today_label()
     reference_date = dt.date.fromisoformat(args.reference_date) if args.reference_date else None
 
     if args.tickers:
-        events = _manual_events(args.tickers)
+        events = _manual_events(filter_symbols(args.tickers, excluded))
         source_label = "manual-tickers"
     else:
         events = _next_week_events(args.config, reference_date, args.limit)

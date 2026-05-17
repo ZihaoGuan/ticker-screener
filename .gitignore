@@ -1,9 +1,7 @@
 __pycache__/
 *.pyc
 .DS_Store
-artifacts/raw/*.json
-artifacts/watchlists/*.json
-artifacts/output/
+artifacts/
 .python_deps/
 .venv-openbb/
 .venv-openbb312/

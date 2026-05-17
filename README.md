@@ -2,6 +2,9 @@
 
 Focused chart-screen workflows for `RS new high before price`, `VCP`, and `power earnings gap`.
 
+The repo also keeps a project-level small-cap exclusion list at [smallcap_exclude_tickers.txt](/Users/Zihao.Guan/Personal/ticker-screener/config/smallcap_exclude_tickers.txt). All screener workflows exclude those tickers by default.
+That file is refreshed by the weekly workflow in [refresh-smallcap-exclusion.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/refresh-smallcap-exclusion.yml), which pulls the latest list from `https://earnings.beavern.com/ics/smallcap.ics` and commits changes back to the repo.
+
 This project keeps the responsibilities narrow:
 
 - screen the US equity universe for `RS new high before price`

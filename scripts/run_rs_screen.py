@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.config import load_app_config, today_label, override_config
 from src.rs_screen import run_rs_screen
+from src.ticker_filters import filter_symbols, load_excluded_tickers
 from src.universe import UniverseTicker, load_universe
 from src.watchlist_builder import build_watchlist
 
@@ -32,14 +33,9 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _manual_tickers(symbols: list[str]) -> list[UniverseTicker]:
+def _manual_tickers(symbols: list[str], excluded: set[str]) -> list[UniverseTicker]:
     deduped = []
-    seen: set[str] = set()
-    for symbol in symbols:
-        normalized = symbol.upper()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
+    for normalized in filter_symbols(symbols, excluded):
         deduped.append(UniverseTicker(symbol=normalized))
     return deduped
 
@@ -52,11 +48,12 @@ def main() -> int:
     config = load_app_config(args.config)
     if args.limit:
         config = override_config(config, max_tickers=args.limit)
+    excluded = load_excluded_tickers(config)
 
     date_label = args.date_label or today_label()
 
     if args.tickers:
-        universe = _manual_tickers(args.tickers)
+        universe = _manual_tickers(args.tickers, excluded)
     else:
         universe = load_universe(config, limit=args.limit)
 

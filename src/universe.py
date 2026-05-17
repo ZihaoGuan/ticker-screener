@@ -6,6 +6,7 @@ from typing import Iterable
 import requests
 
 from .config import AppConfig
+from .ticker_filters import filter_universe_tickers, load_excluded_tickers
 
 
 NASDAQ_HEADERS = {
@@ -79,6 +80,7 @@ def load_universe(config: AppConfig, limit: int | None = None) -> list[UniverseT
     for exchange in config.exchanges:
         collected.extend(fetch_exchange_universe(exchange=exchange, timeout_seconds=config.request_timeout_seconds))
     deduped = dedupe_tickers(collected)
+    deduped = filter_universe_tickers(deduped, load_excluded_tickers(config))
     final_limit = limit if limit is not None else config.max_tickers
     if final_limit is not None:
         return deduped[:final_limit]

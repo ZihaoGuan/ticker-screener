@@ -26,6 +26,7 @@
   "default_split_pages": 4,
   "default_montage_columns": 2,
   "default_card_width": 700,
+  "excluded_tickers_file": "config/smallcap_exclude_tickers.txt",
   "peg_min_close_position_ratio": 0.25,
   "peg_require_green_candle": false,
   "peg_primary_entry_mode": "peg_low_or_ema_zone",

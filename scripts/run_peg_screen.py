@@ -17,6 +17,7 @@ from src.config import load_app_config, today_label
 from src.cookstock_bridge import load_configured_cookstock
 from src.peg_screen import EarningsEvent, run_peg_screen
 from src.peg_watchlist_builder import build_peg_watchlist
+from src.ticker_filters import filter_earnings_events, filter_symbols, load_excluded_tickers
 from src.universe import load_universe
 
 
@@ -44,14 +45,9 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _manual_events(symbols: list[str]) -> list[EarningsEvent]:
+def _manual_events(symbols: list[str], excluded: set[str]) -> list[EarningsEvent]:
     deduped: list[EarningsEvent] = []
-    seen: set[str] = set()
-    for symbol in symbols:
-        normalized = symbol.upper()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
+    for normalized in filter_symbols(symbols, excluded):
         deduped.append(EarningsEvent(ticker=normalized))
     return deduped
 
@@ -71,6 +67,7 @@ def _universe_events(config_path: str, limit: int | None) -> list[EarningsEvent]
 
 def _next_week_events(config_path: str, reference_date: dt.date | None, limit: int | None) -> list[EarningsEvent]:
     config = load_app_config(config_path)
+    excluded = load_excluded_tickers(config)
     cookstock = load_configured_cookstock(config)
     raw_events = cookstock.fetch_next_week_earnings_watchlist(reference_date=reference_date)
     events = [
@@ -83,6 +80,7 @@ def _next_week_events(config_path: str, reference_date: dt.date | None, limit: i
         )
         for item in raw_events
     ]
+    events = filter_earnings_events(events, excluded)
     if limit is not None:
         return events[:limit]
     return events
@@ -94,11 +92,12 @@ def main() -> int:
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
 
     config = load_app_config(args.config)
+    excluded = load_excluded_tickers(config)
     date_label = args.date_label or today_label()
     reference_date = dt.date.fromisoformat(args.reference_date) if args.reference_date else None
 
     if args.tickers:
-        earnings_events = _manual_events(args.tickers)
+        earnings_events = _manual_events(args.tickers, excluded)
     elif args.source == "earnings-watchlist":
         earnings_events = _next_week_events(args.config, reference_date, args.limit)
     else:

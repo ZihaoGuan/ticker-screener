@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_app_config, today_label
+from src.ticker_filters import filter_symbols, load_excluded_tickers
 from src.universe import UniverseTicker, load_universe
 from src.vcp_screen import run_vcp_screen
 from src.vcp_watchlist_builder import build_vcp_watchlist
@@ -32,14 +33,9 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _manual_tickers(symbols: list[str]) -> list[UniverseTicker]:
+def _manual_tickers(symbols: list[str], excluded: set[str]) -> list[UniverseTicker]:
     tickers: list[UniverseTicker] = []
-    seen: set[str] = set()
-    for symbol in symbols:
-        normalized = symbol.upper()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
+    for normalized in filter_symbols(symbols, excluded):
         tickers.append(UniverseTicker(symbol=normalized))
     return tickers
 
@@ -50,8 +46,9 @@ def main() -> int:
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
 
     config = load_app_config(args.config)
+    excluded = load_excluded_tickers(config)
     date_label = args.date_label or today_label()
-    tickers = _manual_tickers(args.tickers) if args.tickers else load_universe(config, limit=args.limit)
+    tickers = _manual_tickers(args.tickers, excluded) if args.tickers else load_universe(config, limit=args.limit)
 
     result = run_vcp_screen(config, tickers)
     watchlist = build_vcp_watchlist(result.hits)

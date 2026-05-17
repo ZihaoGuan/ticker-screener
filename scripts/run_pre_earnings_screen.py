@@ -17,6 +17,7 @@ from src.config import load_app_config, today_label
 from src.cookstock_bridge import load_configured_cookstock
 from src.pre_earnings_screen import PreEarningsEvent, run_pre_earnings_screen
 from src.pre_earnings_watchlist_builder import build_pre_earnings_watchlist
+from src.ticker_filters import filter_pre_earnings_events, filter_symbols, load_excluded_tickers
 from src.universe import load_universe
 
 
@@ -38,14 +39,13 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _manual_events(symbols: list[str], sector_by_symbol: dict[str, tuple[str | None, str | None]]) -> list[PreEarningsEvent]:
+def _manual_events(
+    symbols: list[str],
+    sector_by_symbol: dict[str, tuple[str | None, str | None]],
+    excluded: set[str],
+) -> list[PreEarningsEvent]:
     deduped: list[PreEarningsEvent] = []
-    seen: set[str] = set()
-    for symbol in symbols:
-        normalized = symbol.upper()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
+    for normalized in filter_symbols(symbols, excluded):
         sector, exchange = sector_by_symbol.get(normalized, (None, None))
         deduped.append(
             PreEarningsEvent(
@@ -59,6 +59,7 @@ def _manual_events(symbols: list[str], sector_by_symbol: dict[str, tuple[str | N
 
 def _sector_by_symbol(config_path: str) -> dict[str, tuple[str | None, str | None]]:
     config = load_app_config(config_path)
+    excluded = load_excluded_tickers(config)
     universe = load_universe(config)
     return {
         item.symbol: (item.sector, item.exchange)
@@ -97,6 +98,7 @@ def _next_week_events(
                 exchange=exchange,
             )
         )
+    events = filter_pre_earnings_events(events, excluded)
     if limit is not None:
         return events[:limit]
     return events
@@ -108,12 +110,13 @@ def main() -> int:
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
 
     config = load_app_config(args.config)
+    excluded = load_excluded_tickers(config)
     date_label = args.date_label or today_label()
     reference_date = dt.date.fromisoformat(args.reference_date) if args.reference_date else None
 
     if args.tickers:
         sector_by_symbol = _sector_by_symbol(args.config)
-        events = _manual_events(args.tickers, sector_by_symbol)
+        events = _manual_events(args.tickers, sector_by_symbol, excluded)
         source_label = "manual-tickers"
     else:
         events = _next_week_events(args.config, reference_date, args.limit)
