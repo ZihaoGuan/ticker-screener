@@ -136,7 +136,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: daily-overlap-summary-${{ needs.summarize.outputs.date_label }}
-          path: .
+          path: downloaded-overlap
 
       - name: Upload artifacts to R2
         id: publish
@@ -153,14 +153,17 @@ jobs:
           set -euo pipefail
           R2_PREFIX="daily-overlap-summary/${DATE_LABEL}"
           ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          SUMMARY_FILE="artifacts/raw/daily_overlap_summary_${DATE_LABEL}.json"
-          SUMMARY_TEXT_FILE="artifacts/raw/daily_overlap_summary_${DATE_LABEL}.txt"
-          RENDER_DIR="artifacts/output/daily_overlap_summary_${DATE_LABEL}"
+          SUMMARY_FILE="$(find downloaded-overlap -type f -name "daily_overlap_summary_${DATE_LABEL}.json" | head -n 1)"
+          SUMMARY_TEXT_FILE="$(find downloaded-overlap -type f -name "daily_overlap_summary_${DATE_LABEL}.txt" | head -n 1)"
+          RENDER_DIR="$(find downloaded-overlap -type d -path "*/artifacts/output/daily_overlap_summary_${DATE_LABEL}" | head -n 1)"
           RAW_RESULTS_URL="/${R2_PREFIX}/raw/daily_overlap_summary_${DATE_LABEL}.json"
           TEXT_URL="/${R2_PREFIX}/raw/daily_overlap_summary_${DATE_LABEL}.txt"
           INDEX_URL="/${R2_PREFIX}/rendered/index.html"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
+          test -n "${SUMMARY_FILE}"
+          test -n "${SUMMARY_TEXT_FILE}"
+          test -n "${RENDER_DIR}"
           test -f "${SUMMARY_FILE}"
           test -f "${SUMMARY_TEXT_FILE}"
           test -d "${RENDER_DIR}"
@@ -195,9 +198,10 @@ jobs:
             echo '{"updated_at": null, "entries": []}' > artifacts/r2/watchlist_index_manifest.json
           fi
 
-          TOTAL_TICKERS=$(python -c 'import json, os; from pathlib import Path; p = Path(f"artifacts/raw/daily_overlap_summary_{os.environ[\"DATE_LABEL\"]}.json"); d = json.loads(p.read_text()); print(int(d.get("unique_ticker_count", 0)))')
-          PASSED_TICKERS=$(python -c 'import json, os; from pathlib import Path; p = Path(f"artifacts/raw/daily_overlap_summary_{os.environ[\"DATE_LABEL\"]}.json"); d = json.loads(p.read_text()); print(len(d.get("overlap_two_plus", [])))')
-          FAILURE_COUNT=$(python -c 'import json, os; from pathlib import Path; p = Path(f"artifacts/raw/daily_overlap_summary_{os.environ[\"DATE_LABEL\"]}.json"); d = json.loads(p.read_text()); print(len(d.get("missing_pipelines", [])))')
+          export SUMMARY_FILE
+          TOTAL_TICKERS=$(python -c 'import json, os; from pathlib import Path; p = Path(os.environ["SUMMARY_FILE"]); d = json.loads(p.read_text()); print(int(d.get("unique_ticker_count", 0)))')
+          PASSED_TICKERS=$(python -c 'import json, os; from pathlib import Path; p = Path(os.environ["SUMMARY_FILE"]); d = json.loads(p.read_text()); print(len(d.get("overlap_two_plus", [])))')
+          FAILURE_COUNT=$(python -c 'import json, os; from pathlib import Path; p = Path(os.environ["SUMMARY_FILE"]); d = json.loads(p.read_text()); print(len(d.get("missing_pipelines", [])))')
 
           python scripts/build_r2_root_index.py \
             --manifest-in artifacts/r2/watchlist_index_manifest.json \
@@ -249,7 +253,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: daily-overlap-summary-${{ needs.summarize.outputs.date_label }}
-          path: .
+          path: downloaded-overlap
 
       - name: Send Discord notification
         if: ${{ env.DISCORD_WEBHOOK_URL != '' && needs.summarize.result == 'success' }}
@@ -264,7 +268,10 @@ jobs:
           import urllib.request
 
           date_label = "${{ needs.summarize.outputs.date_label }}"
-          path = pathlib.Path(f"artifacts/raw/daily_overlap_summary_{date_label}.json")
+          matches = list(pathlib.Path("downloaded-overlap").rglob(f"daily_overlap_summary_{date_label}.json"))
+          if not matches:
+              raise SystemExit(f"Could not find overlap summary json for {date_label}")
+          path = matches[0]
           payload = json.loads(path.read_text(encoding="utf-8"))
 
           top_lines = []
