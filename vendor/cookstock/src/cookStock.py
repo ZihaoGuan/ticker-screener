@@ -2433,7 +2433,7 @@ class cookFinancials(YahooFinancials):
             new_high_before_price.reindex(rs_line.index, fill_value=False),
         )
 
-    def get_rs_new_high_before_price_summary(self, sectorName=None, benchmarkTicker=None):
+    def get_rs_new_high_before_price_summary(self, sectorName=None, benchmarkTicker=None, signalProfile='daily'):
         stockData = self._get_clean_price_data()
         benchmarkData = self._get_benchmark_price_data(benchmarkTicker)
         if len(stockData) < 60 or len(benchmarkData) < 60:
@@ -2476,7 +2476,11 @@ class cookFinancials(YahooFinancials):
         latest_weekly_new_high = bool(weekly_new_high.iloc[-1]) if not weekly_new_high.empty else False
         latest_weekly_new_high_before_price = bool(weekly_new_high_before_price.iloc[-1]) if not weekly_new_high_before_price.empty else False
         require_before_price = bool(getattr(algoParas, 'RS_NEW_HIGH_REQUIRE_BEFORE_PRICE', True))
-        triggered = latest_daily_new_high_before_price if require_before_price else latest_daily_new_high
+        normalized_signal_profile = str(signalProfile or 'daily').strip().lower()
+        if normalized_signal_profile == 'weekly':
+            triggered = latest_weekly_new_high_before_price if require_before_price else latest_weekly_new_high
+        else:
+            triggered = latest_daily_new_high_before_price if require_before_price else latest_daily_new_high
         if not triggered:
             return None
 
@@ -2498,6 +2502,7 @@ class cookFinancials(YahooFinancials):
             reasons.append(f'sector ETF {sectorEtf} strong')
 
         return {
+            'signal_profile': normalized_signal_profile,
             'signal_date': latest_date.strftime('%Y-%m-%d'),
             'benchmark_ticker': self._resolve_benchmark_ticker(benchmarkTicker),
             'current_price': float(aligned['close'].iloc[-1]),

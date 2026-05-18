@@ -102,7 +102,7 @@ def _to_hit(ticker: UniverseTicker, summary: dict[str, object]) -> ScreenHit:
     )
 
 
-def run_rs_screen(config: AppConfig, tickers: list[UniverseTicker]) -> ScreenResult:
+def run_rs_screen(config: AppConfig, tickers: list[UniverseTicker], *, signal_profile: str = "daily") -> ScreenResult:
     cookstock = load_configured_cookstock(config)
     hits: list[ScreenHit] = []
     failures: list[dict[str, str]] = []
@@ -118,6 +118,7 @@ def run_rs_screen(config: AppConfig, tickers: list[UniverseTicker]) -> ScreenRes
             summary = financials.get_rs_new_high_before_price_summary(
                 sectorName=ticker.sector,
                 benchmarkTicker=config.benchmark_ticker,
+                signalProfile=signal_profile,
             )
             if summary:
                 hits.append(_to_hit(ticker, summary))

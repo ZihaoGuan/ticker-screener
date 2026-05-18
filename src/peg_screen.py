@@ -5,6 +5,7 @@ import datetime as dt
 
 from .config import AppConfig
 from .cookstock_bridge import load_configured_cookstock
+from .peg_strategy import SeanPegAssessment, assess_sean_post_earnings_gap_setup
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,24 @@ class PegHit:
     latest_distribution_date: str | None
     latest_distribution_volume_ratio: float | None
     distribution_volume_ratio_threshold: float | None
+    strategy_profile: str | None
+    strategy_qualifies: bool
+    strategy_setup_score: int | None
+    strategy_setup_label: str | None
+    strategy_peg_age_days: int | None
+    strategy_avg_volume_20: float | None
+    strategy_adr_pct_20: float | None
+    strategy_ema_50: float | None
+    strategy_dema_8: float | None
+    strategy_price_above_ema50: bool
+    strategy_demand_dry: bool
+    strategy_low_volume_pullback: bool
+    strategy_recent_range_pct: float | None
+    strategy_pullback_from_peg_high_pct: float | None
+    strategy_breakout_trigger: float | None
+    strategy_breakout_ready: bool
+    strategy_dema_support_ready: bool
+    strategy_notes: list[str]
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -125,6 +144,7 @@ def _to_hit(
     benchmark_ticker: str,
     peg_setup: dict[str, object],
     trade_plan: dict[str, object] | None,
+    strategy_assessment: SeanPegAssessment | None,
     *,
     has_peg_event: bool,
     actionable_now: bool,
@@ -175,6 +195,24 @@ def _to_hit(
         latest_distribution_date=str(trade_plan["latest_distribution_date"]) if trade_plan and trade_plan.get("latest_distribution_date") else None,
         latest_distribution_volume_ratio=_optional_float(trade_plan.get("latest_distribution_volume_ratio")) if trade_plan else None,
         distribution_volume_ratio_threshold=_optional_float(trade_plan.get("distribution_volume_ratio_threshold")) if trade_plan else None,
+        strategy_profile=strategy_assessment.strategy_profile if strategy_assessment else None,
+        strategy_qualifies=bool(strategy_assessment.qualifies) if strategy_assessment else False,
+        strategy_setup_score=int(strategy_assessment.setup_score) if strategy_assessment else None,
+        strategy_setup_label=str(strategy_assessment.setup_label) if strategy_assessment else None,
+        strategy_peg_age_days=_optional_int(strategy_assessment.peg_age_days) if strategy_assessment else None,
+        strategy_avg_volume_20=_optional_float(strategy_assessment.avg_volume_20) if strategy_assessment else None,
+        strategy_adr_pct_20=_optional_float(strategy_assessment.adr_pct_20) if strategy_assessment else None,
+        strategy_ema_50=_optional_float(strategy_assessment.ema_50) if strategy_assessment else None,
+        strategy_dema_8=_optional_float(strategy_assessment.dema_8) if strategy_assessment else None,
+        strategy_price_above_ema50=bool(strategy_assessment.price_above_ema50) if strategy_assessment else False,
+        strategy_demand_dry=bool(strategy_assessment.demand_dry) if strategy_assessment else False,
+        strategy_low_volume_pullback=bool(strategy_assessment.low_volume_pullback) if strategy_assessment else False,
+        strategy_recent_range_pct=_optional_float(strategy_assessment.recent_range_pct) if strategy_assessment else None,
+        strategy_pullback_from_peg_high_pct=_optional_float(strategy_assessment.pullback_from_peg_high_pct) if strategy_assessment else None,
+        strategy_breakout_trigger=_optional_float(strategy_assessment.breakout_trigger) if strategy_assessment else None,
+        strategy_breakout_ready=bool(strategy_assessment.breakout_ready) if strategy_assessment else False,
+        strategy_dema_support_ready=bool(strategy_assessment.dema_support_ready) if strategy_assessment else False,
+        strategy_notes=list(strategy_assessment.notes) if strategy_assessment else [],
     )
 
 
@@ -195,11 +233,18 @@ def run_peg_screen(config: AppConfig, earnings_events: list[EarningsEvent]) -> P
             peg_setup = financials.find_recent_power_earnings_gap()
             if recent_peg_event:
                 event_trade_plan = financials.get_peg_trade_plan(recent_peg_event)
+                event_strategy_assessment = assess_sean_post_earnings_gap_setup(
+                    financials,
+                    str(recent_peg_event.get("peg_date")) if recent_peg_event.get("peg_date") else None,
+                    bool(event_trade_plan.get("distribution_warning")) if event_trade_plan else False,
+                    config,
+                )
                 recent_event_hit = _to_hit(
                     event,
                     config.benchmark_ticker,
                     recent_peg_event,
                     event_trade_plan,
+                    event_strategy_assessment,
                     has_peg_event=True,
                     actionable_now=peg_setup is not None and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")),
                 )
@@ -210,12 +255,19 @@ def run_peg_screen(config: AppConfig, earnings_events: list[EarningsEvent]) -> P
             if recent_peg_event and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")):
                 continue
             trade_plan = financials.get_peg_trade_plan(peg_setup)
+            strategy_assessment = assess_sean_post_earnings_gap_setup(
+                financials,
+                str(peg_setup.get("peg_date")) if peg_setup.get("peg_date") else None,
+                bool(trade_plan.get("distribution_warning")) if trade_plan else False,
+                config,
+            )
             hits.append(
                 _to_hit(
                     event,
                     config.benchmark_ticker,
                     peg_setup,
                     trade_plan,
+                    strategy_assessment,
                     has_peg_event=True,
                     actionable_now=True,
                 )

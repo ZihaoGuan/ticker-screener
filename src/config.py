@@ -53,6 +53,13 @@ class AppConfig:
     peg_secondary_entry_slow_ema: int = 21
     peg_distribution_lookback_days: int = 10
     peg_distribution_volume_ratio: float = 1.5
+    peg_sean_min_setup_age_days: int = 2
+    peg_sean_min_adr_pct: float = 2.0
+    peg_sean_min_avg_volume: int = 500_000
+    peg_sean_recent_window_days: int = 10
+    peg_sean_tight_range_max_pct: float = 0.15
+    peg_sean_breakout_proximity_pct: float = 0.03
+    peg_sean_dema_tolerance_pct: float = 0.02
     pre_earnings_retry_timeout_seconds: int = 24
     earnings_growth_move_lookback_quarters: int = 4
     earnings_growth_min_move_pct: float = 7.0

@@ -37,6 +37,12 @@ def parse_args() -> argparse.Namespace:
         "--reference-date",
         help="Reference date for next-week earnings watchlist (YYYY-MM-DD). Defaults to today.",
     )
+    parser.add_argument(
+        "--strategy-profile",
+        choices=("legacy", "sean-peg"),
+        default="legacy",
+        help="Watchlist construction profile. `sean-peg` filters the universe PEG events for post-gap setups.",
+    )
     return parser.parse_args()
 
 
@@ -104,7 +110,8 @@ def main() -> int:
         earnings_events = _universe_events(args.config, args.limit)
 
     result = run_peg_screen(config, earnings_events)
-    watchlist = build_peg_watchlist(result.hits)
+    watchlist_source = result.recent_events if args.strategy_profile == "sean-peg" else result.hits
+    watchlist = build_peg_watchlist(watchlist_source, strategy_profile=args.strategy_profile)
 
     raw_path = PROJECT_ROOT / "artifacts" / "raw" / f"peg_earnings_gap_{date_label}.json"
     watchlist_path = PROJECT_ROOT / "artifacts" / "watchlists" / f"peg_earnings_gap_{date_label}.json"
@@ -118,9 +125,11 @@ def main() -> int:
             "date_label": date_label,
             "source": args.source if not args.tickers else "manual-tickers",
             "reference_date": str(reference_date) if reference_date else None,
+            "strategy_profile": args.strategy_profile,
             "total_tickers": result.total_tickers,
             "passed_tickers": result.passed_tickers,
             "recent_event_tickers": result.recent_event_tickers,
+            "watchlist_tickers": len(watchlist),
             "failed_tickers": result.failed_tickers,
             "raw_results_file": str(raw_path),
             "watchlist_file": str(watchlist_path),

@@ -21,6 +21,7 @@ The RS engine is vendored from `cookstock` so GitHub Actions can run without dep
 
 - `src/`: config, universe loading, RS screening, and watchlist building
 - `scripts/run_rs_screen.py`: produces raw results and watchlist JSON
+- `scripts/run_weekly_rs_screen.py`: produces weekly RS raw results and watchlist JSON
 - `scripts/run_vcp_screen.py`: produces VCP raw results and watchlist JSON
 - `scripts/run_peg_screen.py`: produces PEG raw results and watchlist JSON
 - `scripts/run_cup_handle_screen.py`: produces Cup & Handle raw results and watchlist JSON
@@ -50,16 +51,34 @@ Run the full RS screen:
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_rs_screen.py
 ```
 
+Run the weekly RS new-high screen:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_weekly_rs_screen.py
+```
+
 Run a smaller smoke test:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_rs_screen.py --limit 25
 ```
 
-Run the PEG screener across the configured exchange universe:
+Run a weekly RS smoke test:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_weekly_rs_screen.py --limit 25
+```
+
+Run the legacy PEG screener across the configured exchange universe:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_peg_screen.py
+```
+
+Run the Sean-style post-earnings-gap workflow across the configured exchange universe:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_peg_screen.py --strategy-profile sean-peg
 ```
 
 Run the VCP screener across the configured exchange universe:
@@ -86,10 +105,10 @@ Run a Cup & Handle smoke test:
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_cup_handle_screen.py --limit 25
 ```
 
-Run a PEG smoke test:
+Run a Sean PEG smoke test:
 
 ```bash
-python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_peg_screen.py --limit 10
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_peg_screen.py --strategy-profile sean-peg --limit 10
 ```
 
 Run the PEG screener against only the next-week earnings watchlist:
@@ -157,6 +176,9 @@ The screen step writes:
 - `artifacts/raw/rs_new_high_before_price_<date>.json`
 - `artifacts/raw/run_summary_<date>.json`
 - `artifacts/watchlists/rs_new_high_before_price_<date>.json`
+- `artifacts/raw/weekly_rs_new_high_<date>.json`
+- `artifacts/raw/weekly_rs_run_summary_<date>.json`
+- `artifacts/watchlists/weekly_rs_new_high_<date>.json`
 - `artifacts/raw/vcp_<date>.json`
 - `artifacts/raw/vcp_run_summary_<date>.json`
 - `artifacts/watchlists/vcp_<date>.json`
@@ -182,6 +204,8 @@ The workflow in [.github/workflows/rs-screen-render.yml](/Users/Zihao.Guan/Perso
 2. `render`
 
 The `render` job downloads the watchlist artifact produced by `screen` and then renders charts from that exact file.
+
+The weekly workflow in [.github/workflows/weekly-rs-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/weekly-rs-screen-render.yml) scans for weekly RS new highs and runs once every Saturday on the GitHub cron schedule.
 
 The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
 
