@@ -215,7 +215,7 @@ The VCP workflow in [.github/workflows/vcp-screen-render.yml](/Users/Zihao.Guan/
 
 The Cup & Handle workflow in [.github/workflows/cup-handle-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/cup-handle-screen-render.yml) follows the same screen and render pattern for daily breakout candidates.
 
-The overlap workflow in [.github/workflows/daily-overlap-summary.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/daily-overlap-summary.yml) runs after the daily `RS`, `PEG`, and `VCP` pipelines and summarizes which tickers appeared in at least two of those watchlists on the same day.
+The overlap workflow in [.github/workflows/daily-overlap-summary.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/daily-overlap-summary.yml) now summarizes overlap across daily `RS`, `Sean PEG`, `Legacy PEG`, and `VCP`. It is triggered by upstream workflow completion instead of relying only on a fixed cron slot, distinguishes missing upstream watchlist files from valid `0`-hit runs, writes JSON, text, and HTML summary artifacts, and follows the same R2 publish plus Discord notify pattern as the other first-class workflows.
 
 The pre-earnings workflow in [.github/workflows/pre-earnings-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-screen-render.yml) screens the next-week earnings watchlist, renders charts, and follows the same R2/Discord pattern as the RS and PEG workflows. It currently runs manually with optional `limit` and `reference_date` inputs.
 
