@@ -272,6 +272,7 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
           import pathlib
           import urllib.request
 
@@ -302,8 +303,9 @@ jobs:
           ]
           if top_lines:
               summary_lines.append("Top overlaps: " + ", ".join(top_lines))
-          if R2_INDEX_URL:
-              summary_lines.append(f"Report: {R2_INDEX_URL}")
+          r2_index_url = os.environ.get("R2_INDEX_URL", "").strip()
+          if r2_index_url:
+              summary_lines.append(f"Report: {r2_index_url}")
 
           body = {"content": "\n".join(summary_lines)}
           req = urllib.request.Request(
