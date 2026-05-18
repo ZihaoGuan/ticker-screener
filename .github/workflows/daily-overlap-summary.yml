@@ -155,17 +155,25 @@ jobs:
           ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           SUMMARY_FILE="$(find downloaded-overlap -type f -name "daily_overlap_summary_${DATE_LABEL}.json" | head -n 1)"
           SUMMARY_TEXT_FILE="$(find downloaded-overlap -type f -name "daily_overlap_summary_${DATE_LABEL}.txt" | head -n 1)"
-          RENDER_DIR="$(find downloaded-overlap -type d -path "*/artifacts/output/daily_overlap_summary_${DATE_LABEL}" | head -n 1)"
+          INDEX_FILE="$(find downloaded-overlap -type f -name "index.html" | grep "daily_overlap_summary_${DATE_LABEL}" | head -n 1 || true)"
+          RENDER_DIR="$(dirname "${INDEX_FILE}")"
           RAW_RESULTS_URL="/${R2_PREFIX}/raw/daily_overlap_summary_${DATE_LABEL}.json"
           TEXT_URL="/${R2_PREFIX}/raw/daily_overlap_summary_${DATE_LABEL}.txt"
           INDEX_URL="/${R2_PREFIX}/rendered/index.html"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
+          echo "Resolved summary json: ${SUMMARY_FILE}"
+          echo "Resolved summary txt: ${SUMMARY_TEXT_FILE}"
+          echo "Resolved index html: ${INDEX_FILE}"
+          echo "Resolved render dir: ${RENDER_DIR}"
+
           test -n "${SUMMARY_FILE}"
           test -n "${SUMMARY_TEXT_FILE}"
+          test -n "${INDEX_FILE}"
           test -n "${RENDER_DIR}"
           test -f "${SUMMARY_FILE}"
           test -f "${SUMMARY_TEXT_FILE}"
+          test -f "${INDEX_FILE}"
           test -d "${RENDER_DIR}"
 
           aws --endpoint-url "$ENDPOINT_URL" s3 cp \
