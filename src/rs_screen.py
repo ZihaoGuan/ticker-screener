@@ -26,6 +26,9 @@ class ScreenHit:
     daily_rs_new_high_before_price: bool
     weekly_rs_new_high: bool
     weekly_rs_new_high_before_price: bool
+    weekly_rs_new_high_recent: bool
+    weekly_signal_weeks_ago: int | None
+    weekly_recent_signal_weeks: int
     require_before_price: bool
     is_near_year_high: bool
     year_high: float
@@ -84,6 +87,9 @@ def _to_hit(ticker: UniverseTicker, summary: dict[str, object]) -> ScreenHit:
         daily_rs_new_high_before_price=bool(summary["daily_rs_new_high_before_price"]),
         weekly_rs_new_high=bool(summary["weekly_rs_new_high"]),
         weekly_rs_new_high_before_price=bool(summary["weekly_rs_new_high_before_price"]),
+        weekly_rs_new_high_recent=bool(summary["weekly_rs_new_high_recent"]),
+        weekly_signal_weeks_ago=int(summary["weekly_signal_weeks_ago"]) if summary.get("weekly_signal_weeks_ago") is not None else None,
+        weekly_recent_signal_weeks=int(summary["weekly_recent_signal_weeks"]),
         require_before_price=bool(summary["require_before_price"]),
         is_near_year_high=bool(summary["is_near_year_high"]),
         year_high=float(summary["year_high"]),

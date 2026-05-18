@@ -379,6 +379,7 @@ class algoParas:
     RS_NEW_HIGH_WEEKLY_LOOKBACK_WEEKS = 52
     RS_NEW_HIGH_HISTORY_DAYS = 400
     RS_NEW_HIGH_REQUIRE_BEFORE_PRICE = True
+    RS_WEEKLY_RECENT_SIGNAL_WEEKS = 4
     YEAR_HIGH_PROXIMITY = 0.15
     PARALLEL_ENABLED = False
     MAX_WORKERS = 4
@@ -2477,8 +2478,17 @@ class cookFinancials(YahooFinancials):
         latest_weekly_new_high_before_price = bool(weekly_new_high_before_price.iloc[-1]) if not weekly_new_high_before_price.empty else False
         require_before_price = bool(getattr(algoParas, 'RS_NEW_HIGH_REQUIRE_BEFORE_PRICE', True))
         normalized_signal_profile = str(signalProfile or 'daily').strip().lower()
+        weekly_recent_signal_weeks = max(1, int(getattr(algoParas, 'RS_WEEKLY_RECENT_SIGNAL_WEEKS', 4)))
+        recent_weekly_flags = weekly_new_high.tail(weekly_recent_signal_weeks) if not weekly_new_high.empty else pd.Series(dtype=bool)
+        weekly_rs_new_high_recent = bool(recent_weekly_flags.any()) if not recent_weekly_flags.empty else False
+        weekly_signal_weeks_ago = None
+        if weekly_rs_new_high_recent and not recent_weekly_flags.empty:
+            recent_flags_list = [bool(value) for value in recent_weekly_flags.tolist()]
+            true_positions = [idx for idx, value in enumerate(recent_flags_list) if value]
+            if true_positions:
+                weekly_signal_weeks_ago = len(recent_flags_list) - 1 - true_positions[-1]
         if normalized_signal_profile == 'weekly':
-            triggered = latest_weekly_new_high_before_price if require_before_price else latest_weekly_new_high
+            triggered = weekly_rs_new_high_recent
         else:
             triggered = latest_daily_new_high_before_price if require_before_price else latest_daily_new_high
         if not triggered:
@@ -2490,7 +2500,12 @@ class cookFinancials(YahooFinancials):
 
         reasons = []
         reasons.append('daily RS new high before price' if latest_daily_new_high_before_price else 'daily RS new high')
-        if latest_weekly_new_high_before_price:
+        if normalized_signal_profile == 'weekly' and weekly_rs_new_high_recent:
+            if weekly_signal_weeks_ago is None or weekly_signal_weeks_ago == 0:
+                reasons.append('weekly RS new high this week')
+            else:
+                reasons.append(f'weekly RS new high {weekly_signal_weeks_ago} week(s) ago')
+        elif latest_weekly_new_high_before_price:
             reasons.append('weekly RS new high before price')
         elif latest_weekly_new_high:
             reasons.append('weekly RS new high')
@@ -2516,6 +2531,9 @@ class cookFinancials(YahooFinancials):
             'daily_rs_new_high_before_price': latest_daily_new_high_before_price,
             'weekly_rs_new_high': latest_weekly_new_high,
             'weekly_rs_new_high_before_price': latest_weekly_new_high_before_price,
+            'weekly_rs_new_high_recent': weekly_rs_new_high_recent,
+            'weekly_signal_weeks_ago': weekly_signal_weeks_ago,
+            'weekly_recent_signal_weeks': weekly_recent_signal_weeks,
             'require_before_price': require_before_price,
             'is_near_year_high': bool(isNearYearHigh),
             'year_high': float(yearHigh),

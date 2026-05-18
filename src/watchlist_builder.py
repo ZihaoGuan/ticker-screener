@@ -17,10 +17,17 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
     for hit in hits:
         weekly_status = "True" if hit.weekly_rs_new_high_before_price else "False"
         if signal_profile == "weekly":
+            recency_text = (
+                f"{hit.weekly_signal_weeks_ago} week(s) ago"
+                if hit.weekly_signal_weeks_ago is not None
+                else f"within {hit.weekly_recent_signal_weeks} weeks"
+            )
             setup_label = "Weekly RS new high"
             summary = (
                 f"Signal on {hit.signal_date}. "
                 f"Weekly RS NH: {hit.weekly_rs_new_high}. "
+                f"Recent weekly RS NH: {hit.weekly_rs_new_high_recent}. "
+                f"Last weekly signal: {recency_text}. "
                 f"Weekly RS NH before price: {weekly_status}. "
                 f"Distance from year high: {hit.distance_from_year_high_pct:.1f}%."
             )

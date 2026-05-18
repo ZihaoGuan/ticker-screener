@@ -89,7 +89,8 @@ jobs:
         run: |
           python scripts/render_rs_watchlist.py \
             --watchlist-file "$WATCHLIST_FILE" \
-            --output-dir "artifacts/output/weekly_rs_new_high_${{ needs.screen.outputs.date_label }}"
+            --output-dir "artifacts/output/weekly_rs_new_high_${{ needs.screen.outputs.date_label }}" \
+            --timeframe weekly
 
       - name: Upload rendered charts
         uses: actions/upload-artifact@v4

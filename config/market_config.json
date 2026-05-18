@@ -7,6 +7,7 @@
   "rs_new_high_weekly_lookback_weeks": 52,
   "rs_new_high_history_days": 400,
   "rs_new_high_require_before_price": true,
+  "rs_weekly_recent_signal_weeks": 4,
   "year_high_proximity": 0.15,
   "breakout_volume_ratio": 1.4,
   "final_contraction_max": 0.1,

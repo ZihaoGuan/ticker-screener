@@ -19,6 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--benchmark", default="SPY")
     parser.add_argument("--period", default="18mo")
     parser.add_argument("--lookback", type=int, default=120)
+    parser.add_argument("--timeframe", choices=("daily", "weekly"), default="daily")
     parser.add_argument("--split-pages", type=int, default=4)
     parser.add_argument("--montage-columns", type=int, default=2)
     parser.add_argument("--card-width", type=int, default=700)
@@ -51,6 +52,8 @@ def main() -> int:
         args.period,
         "--lookback",
         str(args.lookback),
+        "--timeframe",
+        args.timeframe,
         "--split-pages",
         str(args.split_pages),
         "--montage-columns",

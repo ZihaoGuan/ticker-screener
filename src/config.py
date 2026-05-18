@@ -16,6 +16,7 @@ class AppConfig:
     rs_new_high_weekly_lookback_weeks: int = 52
     rs_new_high_history_days: int = 400
     rs_new_high_require_before_price: bool = True
+    rs_weekly_recent_signal_weeks: int = 4
     year_high_proximity: float = 0.15
     breakout_volume_ratio: float = 1.4
     final_contraction_max: float = 0.1

@@ -35,6 +35,7 @@ def apply_config_to_cookstock(module: ModuleType, config: AppConfig) -> None:
     algo.RS_NEW_HIGH_WEEKLY_LOOKBACK_WEEKS = int(config.rs_new_high_weekly_lookback_weeks)
     algo.RS_NEW_HIGH_HISTORY_DAYS = int(config.rs_new_high_history_days)
     algo.RS_NEW_HIGH_REQUIRE_BEFORE_PRICE = bool(config.rs_new_high_require_before_price)
+    algo.RS_WEEKLY_RECENT_SIGNAL_WEEKS = int(config.rs_weekly_recent_signal_weeks)
     algo.YEAR_HIGH_PROXIMITY = float(config.year_high_proximity)
     algo.BREAKOUT_VOLUME_RATIO = float(config.breakout_volume_ratio)
     algo.FINAL_CONTRACTION_MAX = float(config.final_contraction_max)

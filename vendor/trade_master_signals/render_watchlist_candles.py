@@ -126,7 +126,7 @@ class RSAnalysis:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Render daily candle charts for a trade-master watchlist.")
+    parser = argparse.ArgumentParser(description="Render candle charts for a trade-master watchlist.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--watchlist-file", help="JSON watchlist file with structured setup notes.")
     group.add_argument("--ticker-file", help="Plain text file with one ticker per line.")
@@ -134,7 +134,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True, help="Directory for charts and summary artifacts.")
     parser.add_argument("--benchmark", default="SPY", help="Benchmark ticker for RS display.")
     parser.add_argument("--period", default="18mo", help="Yahoo chart range such as 1y, 18mo, 2y.")
-    parser.add_argument("--lookback", type=int, default=120, help="Number of daily bars to render.")
+    parser.add_argument("--lookback", type=int, default=120, help="Number of bars to render for the selected timeframe.")
+    parser.add_argument("--timeframe", choices=("daily", "weekly"), default="daily", help="Display timeframe for rendered candles.")
     parser.add_argument("--split-pages", type=int, default=0, help="If > 0, emit montage pages with this many charts per page.")
     parser.add_argument("--montage-columns", type=int, default=2, help="Number of columns for split montage pages.")
     parser.add_argument("--card-width", type=int, default=700, help="Scaled width of each chart in montage pages.")
@@ -226,6 +227,19 @@ def add_price_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     weekly_ema8 = weekly_close.ewm(span=8, adjust=False).mean()
     data["weekly_ema8"] = weekly_ema8.reindex(data.index, method="ffill")
     return data
+
+
+def resample_ohlcv_weekly(frame: pd.DataFrame) -> pd.DataFrame:
+    weekly = frame.resample("W-FRI").agg(
+        {
+            "Open": "first",
+            "High": "max",
+            "Low": "min",
+            "Close": "last",
+            "Volume": "sum",
+        }
+    )
+    return weekly.dropna(subset=["Open", "High", "Low", "Close"])
 
 
 def compute_ipo_vwap(frame: pd.DataFrame) -> pd.Series:
@@ -704,23 +718,34 @@ def render_watchlist_chart(
     benchmark_history: pd.DataFrame,
     output_path: str | Path,
     lookback: int = 120,
+    timeframe: str = "daily",
     benchmark_ticker: str = "SPY",
     profile: dict[str, str] | None = None,
     sector_snapshot: dict[str, str] | None = None,
     ipo_history: pd.DataFrame | None = None,
 ) -> Path:
-    history_with_indicators = add_price_indicators(history)
-    ipo_source = add_price_indicators(ipo_history) if ipo_history is not None else history_with_indicators
+    display_history = resample_ohlcv_weekly(history) if timeframe == "weekly" else history
+    display_benchmark_history = resample_ohlcv_weekly(benchmark_history) if timeframe == "weekly" else benchmark_history
+    history_with_indicators = add_price_indicators(display_history)
+    ipo_display_history = resample_ohlcv_weekly(ipo_history) if timeframe == "weekly" and ipo_history is not None else ipo_history
+    ipo_source = add_price_indicators(ipo_display_history) if ipo_display_history is not None else history_with_indicators
     ipo_vwap_full = compute_ipo_vwap(ipo_source)
-    rs_analysis = compute_rs_analysis(history_with_indicators, benchmark_history)
+    rs_analysis = compute_rs_analysis(history, benchmark_history)
     chart = history_with_indicators.tail(lookback).copy()
-    chart = chart.loc[chart.index.intersection(rs_analysis.daily_line.index)]
-    benchmark = benchmark_history.reindex(chart.index).dropna()
+    benchmark = display_benchmark_history.reindex(chart.index).dropna()
     chart = chart.loc[benchmark.index]
     chart["ipo_vwap"] = ipo_vwap_full.reindex(chart.index).ffill()
-    rs_line = rs_analysis.daily_line.reindex(chart.index)
-    daily_new_high = rs_analysis.daily_new_high.reindex(chart.index).fillna(False)
-    daily_new_high_before_price = rs_analysis.daily_new_high_before_price.reindex(chart.index).fillna(False)
+    if timeframe == "weekly":
+        rs_line = compute_rs_line(chart["Close"], benchmark["Close"])
+        signal_new_high = rs_analysis.weekly_new_high.reindex(chart.index).fillna(False)
+        signal_new_high_before_price = rs_analysis.weekly_new_high_before_price.reindex(chart.index).fillna(False)
+    else:
+        chart = chart.loc[chart.index.intersection(rs_analysis.daily_line.index)]
+        benchmark = benchmark.loc[chart.index]
+        chart = chart.loc[benchmark.index]
+        rs_line = rs_analysis.daily_line.reindex(chart.index)
+        signal_new_high = rs_analysis.daily_new_high.reindex(chart.index).fillna(False)
+        signal_new_high_before_price = rs_analysis.daily_new_high_before_price.reindex(chart.index).fillna(False)
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -757,8 +782,10 @@ def render_watchlist_chart(
     latest_rs_value = float(rs_line.iloc[-1]) if pd.notna(rs_line.iloc[-1]) else float("nan")
     latest_rs_score = rs_analysis.daily_score.reindex(chart.index).iloc[-1]
     latest_rs_rating = rs_analysis.daily_rating.reindex(chart.index).iloc[-1]
-    latest_daily_rs_new_high = bool(daily_new_high.iloc[-1])
-    latest_daily_rs_new_high_before_price = bool(daily_new_high_before_price.iloc[-1])
+    latest_daily_rs_new_high = bool(rs_analysis.daily_new_high.reindex(history.index).fillna(False).iloc[-1]) if not history.empty else False
+    latest_daily_rs_new_high_before_price = (
+        bool(rs_analysis.daily_new_high_before_price.reindex(history.index).fillna(False).iloc[-1]) if not history.empty else False
+    )
     latest_weekly_rs_new_high = bool(rs_analysis.weekly_new_high.iloc[-1]) if not rs_analysis.weekly_new_high.empty else False
     latest_weekly_rs_new_high_before_price = (
         bool(rs_analysis.weekly_new_high_before_price.iloc[-1]) if not rs_analysis.weekly_new_high_before_price.empty else False
@@ -781,6 +808,11 @@ def render_watchlist_chart(
     recent_support = float(chart["Low"].tail(10).min()) if len(chart) >= 10 else float(chart["Low"].min())
     recent_ema21_flush = bool(((chart["Low"].tail(15) < chart["ema21"].tail(15)).fillna(False)).any() and latest_close > ema21_value)
     weekly_pullback_reclaim = _is_weekly_pullback_reclaim_setup(entry, note_lower)
+    timeframe_label = timeframe.title()
+    lookback_label = "weeks" if timeframe == "weekly" else "sessions"
+    pivot_20_label = "20w pivot" if timeframe == "weekly" else "20d pivot"
+    pivot_50_label = "50w pivot" if timeframe == "weekly" else "50d pivot"
+    rs_line_label = "weekly line" if timeframe == "weekly" else "daily line"
     entry_lines, entry_price, entry_color = build_entry_plan(
         entry=entry,
         latest_close=latest_close,
@@ -817,8 +849,8 @@ def render_watchlist_chart(
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<rect width="100%" height="100%" fill="#07101e" />',
-        f'<text x="{left}" y="34" fill="#f8fafc" font-size="26" font-family="Menlo, Consolas, monospace">{entry.ticker} Daily Setup Chart</text>',
-        f'<text x="{left}" y="58" fill="#94a3b8" font-size="15" font-family="Menlo, Consolas, monospace">Setup: {escape(entry.setup_label)} | Lookback: {lookback} sessions</text>',
+        f'<text x="{left}" y="34" fill="#f8fafc" font-size="26" font-family="Menlo, Consolas, monospace">{entry.ticker} {timeframe_label} Setup Chart</text>',
+        f'<text x="{left}" y="58" fill="#94a3b8" font-size="15" font-family="Menlo, Consolas, monospace">Setup: {escape(entry.setup_label)} | Lookback: {lookback} {lookback_label}</text>',
     ]
 
     for step in range(6):
@@ -891,10 +923,10 @@ def render_watchlist_chart(
             f'width="{body_width:.1f}" height="{volume_height_px:.1f}" fill="{color}" opacity="0.48" />'
         )
         rs_marker_y = min(price_top + price_height - 10.0, wick_bottom + 16.0)
-        if bool(daily_new_high.iloc[index]):
+        if bool(signal_new_high.iloc[index]):
             marker_radius = max(min(x_step * 0.24, 11.0), 4.5)
             svg.append(f'<circle cx="{x:.1f}" cy="{rs_marker_y:.1f}" r="{marker_radius:.1f}" fill="#3b82f6" opacity="0.58" />')
-        if bool(daily_new_high_before_price.iloc[index]):
+        if bool(signal_new_high_before_price.iloc[index]):
             ring_radius = max(min(x_step * 0.24, 11.0), 4.5) + 2.0
             svg.append(
                 f'<circle cx="{x:.1f}" cy="{rs_marker_y:.1f}" r="{ring_radius:.1f}" fill="none" stroke="#93c5fd" stroke-width="1.2" opacity="0.95" />'
@@ -1025,7 +1057,7 @@ def render_watchlist_chart(
         f'<line x1="{left}" y1="{prior_50_y:.1f}" x2="{left + plot_width}" y2="{prior_50_y:.1f}" '
         f'stroke="#14b8a6" stroke-dasharray="3 5" stroke-width="1.0" />'
     )
-    chart_label_specs.append((prior_50_y + 4, "#14b8a6", f"50d pivot {prior_50_high:.2f}"))
+    chart_label_specs.append((prior_50_y + 4, "#14b8a6", f"{pivot_50_label} {prior_50_high:.2f}"))
 
     latest_y = _price_y(latest_close, y_min, y_max, price_top, price_height)
     svg.append(f'<circle cx="{x_values[-1]:.1f}" cy="{latest_y:.1f}" r="4" fill="#f8fafc" />')
@@ -1049,8 +1081,8 @@ def render_watchlist_chart(
     for x, value, is_new_high, is_new_high_before_price in zip(
         x_values,
         rs_line,
-        daily_new_high,
-        daily_new_high_before_price,
+        signal_new_high,
+        signal_new_high_before_price,
     ):
         if pd.isna(value):
             continue
@@ -1070,7 +1102,7 @@ def render_watchlist_chart(
 
     svg.append(f'<text x="{left}" y="{volume_top - 12}" fill="#94a3b8" font-size="13" font-family="Menlo, Consolas, monospace">Volume</text>')
     svg.append(
-        f'<text x="{left}" y="{rs_top - 12}" fill="#94a3b8" font-size="13" font-family="Menlo, Consolas, monospace">Relative Strength vs {escape(benchmark_ticker)} (daily line) | price-panel blue dots = historical RS new highs | ring = before price</text>'
+        f'<text x="{left}" y="{rs_top - 12}" fill="#94a3b8" font-size="13" font-family="Menlo, Consolas, monospace">Relative Strength vs {escape(benchmark_ticker)} ({rs_line_label}) | price-panel blue dots = historical RS new highs | ring = before price</text>'
     )
 
     rs_rating_text = f"{int(round(latest_rs_rating))}" if pd.notna(latest_rs_rating) else "n/a"
@@ -1097,8 +1129,8 @@ def render_watchlist_chart(
         f"Recent EMA21 flush + reclaim: {'yes' if recent_ema21_flush else 'no'}",
         f"Entry ref: {entry_price:.2f}",
         f"Stop ref: {stop_price:.2f}",
-        f"20d pivot: {prior_20_high:.2f}",
-        f"50d pivot: {prior_50_high:.2f}",
+        f"{pivot_20_label}: {prior_20_high:.2f}",
+        f"{pivot_50_label}: {prior_50_high:.2f}",
         f"Rel volume 20d: {relative_volume20:.2f}",
         f"Avg volume 20d: {avg_volume20:,.0f}",
         f"ADR 20d: {adr_percent:.2f}%",
@@ -1186,6 +1218,7 @@ def render_watchlist_index(
     output_path: str | Path,
     chart_dir_name: str = "charts",
     benchmark_ticker: str = "SPY",
+    timeframe: str = "daily",
 ) -> Path:
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1302,7 +1335,7 @@ def render_watchlist_index(
   <main>
     <header>
       <h1>Trade Master Watchlist</h1>
-      <p>Daily setup charts generated from live market data. Each chart shows candles, EMA 8, EMA 21, a real weekly 8 EMA, IPO VWAP, SMA 50, SMA 200, reclaim and pivot context, volume, a daily RS line versus {escape(benchmark_ticker)}, an approximate RS Rating, RS new-high markers on both the RS panel and price pane, and explicit entry or stop guides when the watchlist provides them.</p>
+      <p>{escape(timeframe.title())} setup charts generated from live market data. Each chart shows candles, EMA 8, EMA 21, a real weekly 8 EMA, IPO VWAP, SMA 50, SMA 200, reclaim and pivot context, volume, a {escape(timeframe)} RS line versus {escape(benchmark_ticker)}, RS new-high markers on both the RS panel and price pane, and explicit entry or stop guides when the watchlist provides them.</p>
     </header>
     <section class="grid">
       {"".join(cards)}
@@ -1454,6 +1487,7 @@ def main() -> int:
                 benchmark_history=benchmark_history,
                 output_path=charts_dir / f"{entry.ticker}.svg",
                 lookback=args.lookback,
+                timeframe=args.timeframe,
                 benchmark_ticker=args.benchmark,
                 profile=profile,
                 sector_snapshot=sector_snapshot,
@@ -1477,7 +1511,7 @@ def main() -> int:
             failed[entry.ticker] = str(exc)
             print(f"[warn] {entry.ticker}: {exc}", file=sys.stderr)
 
-    render_watchlist_index(generated, output_dir / "index.html", benchmark_ticker=args.benchmark)
+    render_watchlist_index(generated, output_dir / "index.html", benchmark_ticker=args.benchmark, timeframe=args.timeframe)
     montage_pages: list[str] = []
     if args.split_pages > 0:
         chart_paths = [charts_dir / f"{entry.ticker}.svg" for entry in generated]
