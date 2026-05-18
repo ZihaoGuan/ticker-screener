@@ -266,7 +266,7 @@ jobs:
       - name: Send Discord notification
         if: ${{ env.DISCORD_WEBHOOK_URL != '' && needs.summarize.result == 'success' }}
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DATE_LABEL: ${{ needs.summarize.outputs.date_label }}
           R2_INDEX_URL: ${{ needs.publish-r2.outputs.r2_index_url }}
         continue-on-error: true
         run: |
@@ -274,7 +274,6 @@ jobs:
           import json
           import os
           import pathlib
-          import urllib.request
 
           date_label = "${{ needs.summarize.outputs.date_label }}"
           matches = list(pathlib.Path("downloaded-overlap").rglob(f"daily_overlap_summary_{date_label}.json"))
@@ -304,17 +303,20 @@ jobs:
           if top_lines:
               summary_lines.append("Top overlaps: " + ", ".join(top_lines))
           r2_index_url = os.environ.get("R2_INDEX_URL", "").strip()
-          discord_webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
           if r2_index_url:
               summary_lines.append(f"Report: {r2_index_url}")
 
           body = {"content": "\n".join(summary_lines)}
-          req = urllib.request.Request(
-              discord_webhook_url,
-              data=json.dumps(body).encode("utf-8"),
-              headers={"Content-Type": "application/json"},
-              method="POST",
-          )
-          with urllib.request.urlopen(req, timeout=20) as response:
-              response.read()
+          pathlib.Path("discord_payload.json").write_text(json.dumps(body), encoding="utf-8")
           PY
+
+      - name: Post Discord notification
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' && needs.summarize.result == 'success' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        continue-on-error: true
+        run: |
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            --data @discord_payload.json \
+            "$DISCORD_WEBHOOK_URL"
