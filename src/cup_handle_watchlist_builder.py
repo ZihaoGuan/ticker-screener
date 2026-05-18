@@ -8,7 +8,8 @@ def _format_note(hit: CupHandleHit) -> str:
         f"{hit.pattern_direction.title()} cup width {hit.cup_width_bars} bars. "
         f"Handle {hit.handle_width_bars} bars. "
         f"Containment {hit.containment_ratio * 100:.1f}%. "
-        f"Volume {hit.breakout_volume_ratio:.2f}x 50-day average."
+        f"Volume {hit.breakout_volume_ratio:.2f}x 50-day average. "
+        f"Target {hit.target_price:.2f}."
     )
 
 
@@ -22,7 +23,8 @@ def build_cup_handle_watchlist(hits: list[CupHandleHit]) -> list[dict[str, objec
             f"{setup_label} confirmed on {hit.breakout_date}. "
             f"Cup width {hit.cup_width_bars} bars, handle width {hit.handle_width_bars} bars. "
             f"Depth {hit.depth_pct * 100:.1f}%, handle retrace {hit.handle_retrace_pct * 100:.1f}%. "
-            f"Containment {hit.containment_ratio * 100:.1f}%, breakout volume {hit.breakout_volume_ratio:.2f}x."
+            f"Containment {hit.containment_ratio * 100:.1f}%, breakout volume {hit.breakout_volume_ratio:.2f}x. "
+            f"Depth projection target {hit.target_price:.2f}."
         )
         watchlist.append(
             {
@@ -39,8 +41,6 @@ def build_cup_handle_watchlist(hits: list[CupHandleHit]) -> list[dict[str, objec
                 "stop_price": round(hit.stop_price, 4),
                 "stop_label": "Handle pivot",
                 "stop_timeframe": "daily",
-                "target_price": round(hit.target_price, 4),
-                "target_label": "Cup depth projection",
             }
         )
     return watchlist
