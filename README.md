@@ -209,6 +209,8 @@ The weekly workflow in [.github/workflows/weekly-rs-screen-render.yml](/Users/Zi
 
 The PEG workflow in [.github/workflows/peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/peg-screen-render.yml) follows the same pattern for the earnings-gap screener.
 
+The legacy PEG workflow in [.github/workflows/legacy-peg-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/legacy-peg-screen-render.yml) runs daily in parallel with the Sean PEG workflow and always uses `--strategy-profile legacy`.
+
 The VCP workflow in [.github/workflows/vcp-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/vcp-screen-render.yml) follows the same screen, render, publish, and notify pattern. It supports manual runs with an optional `limit` input and is scheduled once per trading day at `UTC 00:00`, which corresponds to New Zealand noon during standard time and 1pm during daylight saving.
 
 The Cup & Handle workflow in [.github/workflows/cup-handle-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/cup-handle-screen-render.yml) follows the same screen and render pattern for daily breakout candidates.
