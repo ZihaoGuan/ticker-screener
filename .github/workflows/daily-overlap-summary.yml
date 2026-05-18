@@ -90,7 +90,7 @@ jobs:
           path: |
             artifacts/raw/daily_overlap_summary_${{ steps.meta.outputs.date_label }}.json
             artifacts/raw/daily_overlap_summary_${{ steps.meta.outputs.date_label }}.txt
-            artifacts/output/daily_overlap_summary_${{ steps.meta.outputs.date_label }}/index.html
+            artifacts/output/daily_overlap_summary_${{ steps.meta.outputs.date_label }}
 
   publish-r2:
     runs-on: ubuntu-latest
@@ -154,18 +154,27 @@ jobs:
           R2_PREFIX="daily-overlap-summary/${DATE_LABEL}"
           ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           SUMMARY_FILE="artifacts/raw/daily_overlap_summary_${DATE_LABEL}.json"
+          SUMMARY_TEXT_FILE="artifacts/raw/daily_overlap_summary_${DATE_LABEL}.txt"
+          RENDER_DIR="artifacts/output/daily_overlap_summary_${DATE_LABEL}"
           RAW_RESULTS_URL="/${R2_PREFIX}/raw/daily_overlap_summary_${DATE_LABEL}.json"
           TEXT_URL="/${R2_PREFIX}/raw/daily_overlap_summary_${DATE_LABEL}.txt"
           INDEX_URL="/${R2_PREFIX}/rendered/index.html"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
-            "artifacts/raw/" \
-            "s3://${R2_BUCKET}/${R2_PREFIX}/raw/" \
-            --recursive
+          test -f "${SUMMARY_FILE}"
+          test -f "${SUMMARY_TEXT_FILE}"
+          test -d "${RENDER_DIR}"
 
           aws --endpoint-url "$ENDPOINT_URL" s3 cp \
-            "artifacts/output/daily_overlap_summary_${DATE_LABEL}/" \
+            "${SUMMARY_FILE}" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/raw/daily_overlap_summary_${DATE_LABEL}.json"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "${SUMMARY_TEXT_FILE}" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/raw/daily_overlap_summary_${DATE_LABEL}.txt"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "${RENDER_DIR}/" \
             "s3://${R2_BUCKET}/${R2_PREFIX}/rendered/" \
             --recursive
 
