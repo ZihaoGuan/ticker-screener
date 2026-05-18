@@ -45,12 +45,7 @@ jobs:
           if [ -n "${{ github.event.inputs.date_label }}" ]; then
             echo "date_label=${{ github.event.inputs.date_label }}" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event_name }}" = "workflow_run" ] && [ -n "${{ github.event.workflow_run.created_at }}" ]; then
-            python - <<'PY' >> "$GITHUB_OUTPUT"
-from datetime import datetime
-raw = "${{ github.event.workflow_run.created_at }}"
-value = datetime.fromisoformat(raw.replace("Z", "+00:00")).strftime("%Y-%m-%d")
-print(f"date_label={value}")
-PY
+            python -c 'from datetime import datetime; raw = "${{ github.event.workflow_run.created_at }}"; value = datetime.fromisoformat(raw.replace("Z", "+00:00")).strftime("%Y-%m-%d"); print(f"date_label={value}")' >> "$GITHUB_OUTPUT"
           else
             echo "date_label=$(date +%F)" >> "$GITHUB_OUTPUT"
           fi
