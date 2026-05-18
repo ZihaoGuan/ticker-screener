@@ -116,9 +116,5 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
             watchlist_entry["secondary_entry_low"] = round(hit.secondary_entry_low, 4)
         if hit.secondary_entry_high is not None:
             watchlist_entry["secondary_entry_high"] = round(hit.secondary_entry_high, 4)
-        if strategy_profile == "sean-peg":
-            watchlist_entry["strategy_profile"] = "sean-peg"
-            watchlist_entry["strategy_score"] = hit.strategy_setup_score
-            watchlist_entry["strategy_notes"] = hit.strategy_notes
         watchlist.append(watchlist_entry)
     return watchlist
