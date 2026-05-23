@@ -22,6 +22,7 @@ The RS engine is vendored from `cookstock` so GitHub Actions can run without dep
 - `src/`: config, universe loading, RS screening, and watchlist building
 - `scripts/run_rs_screen.py`: produces raw results and watchlist JSON
 - `scripts/run_weekly_rs_screen.py`: produces weekly RS raw results and watchlist JSON
+- `scripts/run_weekly_htf_pullback_screen.py`: produces weekly RS + HTF 8-week pullback raw results and watchlist JSON
 - `scripts/run_vcp_screen.py`: produces VCP raw results and watchlist JSON
 - `scripts/run_peg_screen.py`: produces PEG raw results and watchlist JSON
 - `scripts/run_cup_handle_screen.py`: produces Cup & Handle raw results and watchlist JSON
@@ -55,6 +56,8 @@ Run the weekly RS new-high screen:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_weekly_rs_screen.py
+
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_weekly_htf_pullback_screen.py
 ```
 
 Run a smaller smoke test:
@@ -67,6 +70,8 @@ Run a weekly RS smoke test:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_weekly_rs_screen.py --limit 25
+
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_weekly_htf_pullback_screen.py --limit 25
 ```
 
 Run the legacy PEG screener across the configured exchange universe:
@@ -179,6 +184,9 @@ The screen step writes:
 - `artifacts/raw/weekly_rs_new_high_<date>.json`
 - `artifacts/raw/weekly_rs_run_summary_<date>.json`
 - `artifacts/watchlists/weekly_rs_new_high_<date>.json`
+- `artifacts/raw/weekly_htf_pullback_<date>.json`
+- `artifacts/raw/weekly_htf_pullback_run_summary_<date>.json`
+- `artifacts/watchlists/weekly_htf_pullback_<date>.json`
 - `artifacts/raw/vcp_<date>.json`
 - `artifacts/raw/vcp_run_summary_<date>.json`
 - `artifacts/watchlists/vcp_<date>.json`

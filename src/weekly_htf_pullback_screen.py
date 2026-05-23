@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+import datetime as dt
+
+import pandas as pd
+
+from .config import AppConfig
+from .cookstock_bridge import load_configured_cookstock
+from .universe import UniverseTicker
+
+
+@dataclass(frozen=True)
+class WeeklyHtfPullbackHit:
+    ticker: str
+    sector: str | None
+    exchange: str | None
+    benchmark_ticker: str
+    current_price: float
+    weekly_ema8: float
+    weekly_ema8_distance_pct: float
+    weekly_ema8_distance_abs_pct: float
+    is_above_weekly_ema8: bool
+    weekly_rs_new_high: bool
+    weekly_rs_new_high_recent: bool
+    weekly_signal_weeks_ago: int | None
+    weekly_recent_signal_weeks: int
+    current_rs_line: float
+    rs_line_high: float
+    htf_score: float
+    htf_grade: str
+    htf_trade_plan: str
+    htf_runup_pct: float
+    htf_pullback_from_high_pct: float
+    htf_runup_low: float
+    htf_runup_high: float
+    htf_runup_low_date: str
+    htf_runup_high_date: str
+    year_high: float
+    distance_from_year_high_pct: float
+    is_near_year_high: bool
+    is_strong_rs: bool
+    is_sector_etf_strong: bool
+    sector_etf: str
+    reasons: list[str]
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class WeeklyHtfPullbackScreenResult:
+    run_date: str
+    benchmark_ticker: str
+    total_tickers: int
+    passed_tickers: int
+    failed_tickers: list[dict[str, str]]
+    hits: list[WeeklyHtfPullbackHit]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "run_date": self.run_date,
+            "benchmark_ticker": self.benchmark_ticker,
+            "total_tickers": self.total_tickers,
+            "passed_tickers": self.passed_tickers,
+            "failed_tickers": self.failed_tickers,
+            "hits": [item.to_dict() for item in self.hits],
+        }
+
+
+def _build_price_frame(financials) -> pd.DataFrame:
+    rows = financials._get_clean_price_data()
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(
+        {
+            "Date": pd.to_datetime([row.get("formatted_date") for row in rows]),
+            "Open": [row.get("open") for row in rows],
+            "High": [row.get("high") for row in rows],
+            "Low": [row.get("low") for row in rows],
+            "Close": [row.get("close") for row in rows],
+            "Volume": [row.get("volume") for row in rows],
+        }
+    )
+    frame = frame.dropna(subset=["Date", "Close"]).set_index("Date").sort_index()
+    return frame
+
+
+def _latest_weekly_snapshot(financials) -> dict[str, float] | None:
+    frame = _build_price_frame(financials)
+    if frame.empty:
+        return None
+    weekly = frame.resample("W-FRI").agg(
+        {
+            "Open": "first",
+            "High": "max",
+            "Low": "min",
+            "Close": "last",
+            "Volume": "sum",
+        }
+    ).dropna(subset=["Open", "High", "Low", "Close"])
+    if len(weekly) < 8:
+        return None
+    weekly["ema8"] = weekly["Close"].ewm(span=8, adjust=False).mean()
+    latest = weekly.iloc[-1]
+    ema8 = float(latest["ema8"])
+    if ema8 <= 0:
+        return None
+    current_price = float(frame["Close"].iloc[-1])
+    distance_ratio = (current_price - ema8) / ema8
+    return {
+        "weekly_ema8": ema8,
+        "current_price": current_price,
+        "weekly_ema8_distance_pct": distance_ratio * 100.0,
+        "weekly_ema8_distance_abs_pct": abs(distance_ratio) * 100.0,
+        "is_above_weekly_ema8": current_price >= ema8,
+    }
+
+
+def _build_hit(
+    ticker: UniverseTicker,
+    rs_summary: dict[str, object],
+    htf_summary: dict[str, object],
+    weekly_snapshot: dict[str, float],
+) -> WeeklyHtfPullbackHit:
+    recency_weeks = rs_summary.get("weekly_signal_weeks_ago")
+    reasons = list(htf_summary.get("reasons", []))
+    if rs_summary.get("weekly_rs_new_high_recent"):
+        if recency_weeks is None:
+            reasons.append("recent weekly RS new high")
+        elif int(recency_weeks) == 0:
+            reasons.append("weekly RS new high this week")
+        else:
+            reasons.append(f"weekly RS new high {int(recency_weeks)} week(s) ago")
+    if weekly_snapshot["is_above_weekly_ema8"]:
+        reasons.append("holding above 8-week EMA")
+    else:
+        reasons.append("slightly under 8-week EMA")
+
+    return WeeklyHtfPullbackHit(
+        ticker=ticker.symbol,
+        sector=ticker.sector,
+        exchange=ticker.exchange,
+        benchmark_ticker=str(rs_summary["benchmark_ticker"]),
+        current_price=float(weekly_snapshot["current_price"]),
+        weekly_ema8=float(weekly_snapshot["weekly_ema8"]),
+        weekly_ema8_distance_pct=float(weekly_snapshot["weekly_ema8_distance_pct"]),
+        weekly_ema8_distance_abs_pct=float(weekly_snapshot["weekly_ema8_distance_abs_pct"]),
+        is_above_weekly_ema8=bool(weekly_snapshot["is_above_weekly_ema8"]),
+        weekly_rs_new_high=bool(rs_summary["weekly_rs_new_high"]),
+        weekly_rs_new_high_recent=bool(rs_summary["weekly_rs_new_high_recent"]),
+        weekly_signal_weeks_ago=int(recency_weeks) if recency_weeks is not None else None,
+        weekly_recent_signal_weeks=int(rs_summary["weekly_recent_signal_weeks"]),
+        current_rs_line=float(rs_summary["current_rs_line"]),
+        rs_line_high=float(rs_summary["rs_line_high"]),
+        htf_score=float(htf_summary["htf_score"]),
+        htf_grade=str(htf_summary["htf_grade"]),
+        htf_trade_plan=str(htf_summary["trade_plan"]),
+        htf_runup_pct=float(htf_summary["htf_runup_pct"]),
+        htf_pullback_from_high_pct=float(htf_summary["htf_pullback_from_high_pct"]),
+        htf_runup_low=float(htf_summary["htf_runup_low"]),
+        htf_runup_high=float(htf_summary["htf_runup_high"]),
+        htf_runup_low_date=str(htf_summary["htf_runup_low_date"]),
+        htf_runup_high_date=str(htf_summary["htf_runup_high_date"]),
+        year_high=float(htf_summary["year_high"]),
+        distance_from_year_high_pct=float(htf_summary["distance_from_year_high_pct"]),
+        is_near_year_high=bool(htf_summary["is_near_year_high"]),
+        is_strong_rs=bool(htf_summary["is_strong_rs"]),
+        is_sector_etf_strong=bool(htf_summary["is_sector_etf_strong"]),
+        sector_etf=str(htf_summary["sector_etf"]),
+        reasons=reasons,
+    )
+
+
+def run_weekly_htf_pullback_screen(
+    config: AppConfig,
+    tickers: list[UniverseTicker],
+) -> WeeklyHtfPullbackScreenResult:
+    cookstock = load_configured_cookstock(config)
+    hits: list[WeeklyHtfPullbackHit] = []
+    failures: list[dict[str, str]] = []
+    history_days = max(config.rs_new_high_history_days, config.htf_history_days, 365)
+
+    for position, ticker in enumerate(tickers, start=1):
+        print(f"[{position}/{len(tickers)}] screening {ticker.symbol}")
+        try:
+            financials = cookstock.cookFinancials(
+                ticker.symbol,
+                benchmarkTicker=config.benchmark_ticker,
+                historyLookbackDays=history_days,
+            )
+            rs_summary = financials.get_rs_new_high_before_price_summary(
+                sectorName=ticker.sector,
+                benchmarkTicker=config.benchmark_ticker,
+                signalProfile="weekly",
+            )
+            if not rs_summary or not bool(rs_summary.get("weekly_rs_new_high_recent")):
+                continue
+
+            htf_summary = financials.get_htf_leader_summary(
+                sectorName=ticker.sector,
+                benchmarkTicker=config.benchmark_ticker,
+            )
+            if not htf_summary:
+                continue
+            if str(htf_summary.get("htf_grade", "")).upper() not in {"A", "B"}:
+                continue
+
+            weekly_snapshot = _latest_weekly_snapshot(financials)
+            if not weekly_snapshot:
+                continue
+
+            distance_ratio = float(weekly_snapshot["weekly_ema8_distance_pct"]) / 100.0
+            if distance_ratio < -float(config.weekly_htf_ema8_breach_tolerance_pct):
+                continue
+
+            hits.append(_build_hit(ticker, rs_summary, htf_summary, weekly_snapshot))
+        except Exception as exc:
+            failures.append({"ticker": ticker.symbol, "error": str(exc)})
+            print(f"screening failed for {ticker.symbol}: {exc}")
+
+    hits.sort(
+        key=lambda hit: (
+            0 if hit.is_above_weekly_ema8 else 1,
+            hit.weekly_ema8_distance_abs_pct,
+            hit.weekly_signal_weeks_ago if hit.weekly_signal_weeks_ago is not None else 99,
+            -hit.htf_score,
+            hit.ticker,
+        )
+    )
+
+    return WeeklyHtfPullbackScreenResult(
+        run_date=dt.date.today().isoformat(),
+        benchmark_ticker=config.benchmark_ticker,
+        total_tickers=len(tickers),
+        passed_tickers=len(hits),
+        failed_tickers=failures,
+        hits=hits,
+    )

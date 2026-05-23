@@ -17,6 +17,11 @@ class AppConfig:
     rs_new_high_history_days: int = 400
     rs_new_high_require_before_price: bool = True
     rs_weekly_recent_signal_weeks: int = 4
+    htf_history_days: int = 365
+    htf_runup_window_days: int = 40
+    htf_min_runup_pct: float = 100.0
+    htf_max_correction_pct: float = 25.0
+    weekly_htf_ema8_breach_tolerance_pct: float = 0.02
     year_high_proximity: float = 0.15
     breakout_volume_ratio: float = 1.4
     final_contraction_max: float = 0.1
