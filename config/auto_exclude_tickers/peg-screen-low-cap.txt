@@ -1,0 +1,3 @@
+# Auto-generated low market-cap exclusions for Sean PEG Screen
+AIOS
+RDZN
