@@ -23,7 +23,7 @@ The RS engine is vendored from `cookstock` so GitHub Actions can run without dep
 - `scripts/run_rs_screen.py`: produces raw results and watchlist JSON
 - `scripts/run_weekly_rs_screen.py`: produces weekly RS raw results and watchlist JSON
 - `scripts/run_weekly_htf_pullback_screen.py`: produces weekly RS + HTF 8-week pullback raw results and watchlist JSON
-- `scripts/filter_low_market_cap_hits.py`: checks passed tickers with `yfinance`, removes names under `$1B` market cap from current artifacts, and writes pipeline-specific auto excludes under `config/auto_exclude_tickers/`
+- `scripts/filter_low_market_cap_hits.py`: checks passed tickers with `yfinance`, removes names under `$1B` market cap from current artifacts, and writes shared auto excludes to `config/auto_exclude_tickers/shared-low-cap.txt`
 - `scripts/run_vcp_screen.py`: produces VCP raw results and watchlist JSON
 - `scripts/run_peg_screen.py`: produces PEG raw results and watchlist JSON
 - `scripts/run_cup_handle_screen.py`: produces Cup & Handle raw results and watchlist JSON
@@ -224,7 +224,7 @@ The VCP workflow in [.github/workflows/vcp-screen-render.yml](/Users/Zihao.Guan/
 
 The Cup & Handle workflow in [.github/workflows/cup-handle-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/cup-handle-screen-render.yml) follows the same screen and render pattern for daily breakout candidates.
 
-The overlap workflow in [.github/workflows/daily-overlap-summary.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/daily-overlap-summary.yml) summarizes overlap across daily `RS`, `Sean PEG`, `Legacy PEG`, and `VCP`. It runs on its own schedule at `UTC 02:00`, which corresponds to New Zealand `2pm` during standard time and `3pm` during daylight saving because GitHub Actions schedules are UTC-based. It distinguishes missing upstream watchlist files from valid `0`-hit runs, writes JSON, text, and HTML summary artifacts, and follows the same R2 publish plus Discord notify pattern as the other first-class workflows.
+The overlap workflow in [.github/workflows/daily-overlap-summary.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/daily-overlap-summary.yml) summarizes overlap across daily `RS`, `Sean PEG`, `Legacy PEG`, `VCP`, `Cup and Handle`, and `Weekly HTF 8W Pullback`. It runs on its own schedule at `UTC 02:00`, which corresponds to New Zealand `2pm` during standard time and `3pm` during daylight saving because GitHub Actions schedules are UTC-based. It distinguishes missing upstream watchlist files from valid `0`-hit runs, writes JSON, text, and HTML summary artifacts, and follows the same R2 publish plus Discord notify pattern as the other first-class workflows.
 
 The pre-earnings workflow in [.github/workflows/pre-earnings-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-screen-render.yml) screens the next-week earnings watchlist, renders charts, and follows the same R2/Discord pattern as the RS and PEG workflows. It currently runs manually with optional `limit` and `reference_date` inputs.
 

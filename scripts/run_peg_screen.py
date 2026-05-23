@@ -110,7 +110,7 @@ def main() -> int:
         earnings_events = _universe_events(args.config, args.limit)
 
     result = run_peg_screen(config, earnings_events)
-    watchlist_source = result.recent_events if args.strategy_profile == "sean-peg" else result.hits
+    watchlist_source = result.hits
     watchlist = build_peg_watchlist(watchlist_source, strategy_profile=args.strategy_profile)
 
     raw_path = PROJECT_ROOT / "artifacts" / "raw" / f"peg_earnings_gap_{date_label}.json"
@@ -129,6 +129,7 @@ def main() -> int:
             "total_tickers": result.total_tickers,
             "passed_tickers": result.passed_tickers,
             "recent_event_tickers": result.recent_event_tickers,
+            "watchlist_source": "all_strategy_qualified_hits" if args.strategy_profile == "sean-peg" else "all_hits",
             "watchlist_tickers": len(watchlist),
             "failed_tickers": result.failed_tickers,
             "raw_results_file": str(raw_path),

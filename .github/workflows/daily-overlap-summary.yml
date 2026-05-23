@@ -65,6 +65,8 @@ jobs:
           fetch_or_warn "peg-screen/${DATE_LABEL}/watchlists/peg_earnings_gap_${DATE_LABEL}.json" "artifacts/watchlists/sean_peg_earnings_gap_${DATE_LABEL}.json"
           fetch_or_warn "legacy-peg-screen/${DATE_LABEL}/watchlists/peg_earnings_gap_${DATE_LABEL}.json" "artifacts/watchlists/legacy_peg_earnings_gap_${DATE_LABEL}.json"
           fetch_or_warn "vcp-screen/${DATE_LABEL}/watchlists/vcp_${DATE_LABEL}.json" "artifacts/watchlists/vcp_${DATE_LABEL}.json"
+          fetch_or_warn "cup-handle-screen/${DATE_LABEL}/watchlists/cup_handle_${DATE_LABEL}.json" "artifacts/watchlists/cup_handle_${DATE_LABEL}.json"
+          fetch_or_warn "weekly-htf-pullback-screen/${DATE_LABEL}/watchlists/weekly_htf_pullback_${DATE_LABEL}.json" "artifacts/watchlists/weekly_htf_pullback_${DATE_LABEL}.json"
 
       - name: Build overlap summary
         run: |
@@ -214,7 +216,7 @@ jobs:
             --watchlist-url "${TEXT_URL}" \
             --raw-results-url "${RAW_RESULTS_URL}" \
             --run-url "${RUN_URL}" \
-            --source-label "RS + Sean PEG + Legacy PEG + VCP"
+            --source-label "RS + Sean PEG + Legacy PEG + VCP + Cup and Handle + Weekly HTF 8W Pullback"
 
           aws --endpoint-url "$ENDPOINT_URL" s3 cp \
             "artifacts/r2/watchlist_index_manifest.json" \

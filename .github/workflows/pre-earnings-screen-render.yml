@@ -58,15 +58,15 @@ jobs:
             --raw-file "artifacts/raw/pre_earnings_focus_${{ steps.meta.outputs.date_label }}.json" \
             --watchlist-file "artifacts/watchlists/pre_earnings_focus_${{ steps.meta.outputs.date_label }}.json" \
             --summary-file "artifacts/raw/pre_earnings_run_summary_${{ steps.meta.outputs.date_label }}.json" \
-            --exclude-file "config/auto_exclude_tickers/pre-earnings-screen-low-cap.txt" \
-            --pipeline-name "Pre-Earnings Screen"
+            --exclude-file "config/auto_exclude_tickers/shared-low-cap.txt" \
+            --pipeline-name "Shared screener workflows"
 
       - name: Commit updated low-cap exclude file
         env:
           TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          EXCLUDE_FILE="config/auto_exclude_tickers/pre-earnings-screen-low-cap.txt"
+          EXCLUDE_FILE="config/auto_exclude_tickers/shared-low-cap.txt"
           if [ -z "$(git status --porcelain -- "$EXCLUDE_FILE")" ]; then
             echo "No low-cap exclusion changes detected"
             exit 0
@@ -74,7 +74,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$EXCLUDE_FILE"
-          git commit -m "Update low-cap exclusions for pre-earnings screen"
+          git commit -m "Update shared low-cap exclusions"
           git pull --rebase origin "${TARGET_BRANCH}"
           git push origin "HEAD:${TARGET_BRANCH}"
 

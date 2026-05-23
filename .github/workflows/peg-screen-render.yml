@@ -60,15 +60,15 @@ jobs:
             --raw-file "artifacts/raw/peg_earnings_gap_${{ steps.meta.outputs.date_label }}.json" \
             --watchlist-file "artifacts/watchlists/peg_earnings_gap_${{ steps.meta.outputs.date_label }}.json" \
             --summary-file "artifacts/raw/peg_run_summary_${{ steps.meta.outputs.date_label }}.json" \
-            --exclude-file "config/auto_exclude_tickers/peg-screen-low-cap.txt" \
-            --pipeline-name "Sean PEG Screen"
+            --exclude-file "config/auto_exclude_tickers/shared-low-cap.txt" \
+            --pipeline-name "Shared screener workflows"
 
       - name: Commit updated low-cap exclude file
         env:
           TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          EXCLUDE_FILE="config/auto_exclude_tickers/peg-screen-low-cap.txt"
+          EXCLUDE_FILE="config/auto_exclude_tickers/shared-low-cap.txt"
           if [ -z "$(git status --porcelain -- "$EXCLUDE_FILE")" ]; then
             echo "No low-cap exclusion changes detected"
             exit 0
@@ -76,7 +76,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$EXCLUDE_FILE"
-          git commit -m "Update low-cap exclusions for Sean PEG screen"
+          git commit -m "Update shared low-cap exclusions"
           git pull --rebase origin "${TARGET_BRANCH}"
           git push origin "HEAD:${TARGET_BRANCH}"
 
@@ -332,9 +332,13 @@ jobs:
 
           summary_path = Path("artifacts/raw") / f"peg_run_summary_{date_label}.json"
           raw_results_path = Path("artifacts/raw") / f"peg_earnings_gap_{date_label}.json"
+          watchlist_path = Path("artifacts/watchlists") / f"peg_earnings_gap_{date_label}.json"
           total_tickers = "n/a"
           passed_tickers = "n/a"
           failed_tickers = "n/a"
+          raw_hit_count = "n/a"
+          recent_event_count = "n/a"
+          rendered_watchlist_count = "n/a"
           current_hits = []
           hit_summaries = []
 
@@ -350,6 +354,15 @@ jobs:
               hits = raw_results.get("hits", [])
               if isinstance(hits, list):
                   current_hits = [hit for hit in hits if isinstance(hit, dict)]
+                  raw_hit_count = len(current_hits)
+              recent_events = raw_results.get("recent_events", [])
+              if isinstance(recent_events, list):
+                  recent_event_count = len([item for item in recent_events if isinstance(item, dict)])
+
+          if watchlist_path.exists():
+              watchlist = json.loads(watchlist_path.read_text(encoding="utf-8"))
+              if isinstance(watchlist, list):
+                  rendered_watchlist_count = len([item for item in watchlist if isinstance(item, dict)])
 
           def score_of(hit):
               try:
@@ -378,8 +391,11 @@ jobs:
               f"Render job: `{render_result}`",
               f"R2 publish job: `{publish_result}`",
               f"Tickers screened: `{total_tickers}`",
-              f"Hits: `{passed_tickers}`",
+              f"Rendered watchlist: `{rendered_watchlist_count}`",
+              f"Raw hits: `{raw_hit_count}`",
+              f"Recent PEG events: `{recent_event_count}`",
               f"Failures: `{failed_tickers}`",
+              "Raw hit = any PEG hit found by the screen. Recent PEG event = PEG event found in the recent event window, even if it is not the final rendered setup list.",
           ]
           if r2_index_url:
               lines.append(f"Rendered charts: {r2_index_url}")

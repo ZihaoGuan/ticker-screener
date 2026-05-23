@@ -39,12 +39,22 @@ PIPELINES = (
         "label": "VCP",
         "filename": "vcp_{date}.json",
     },
+    {
+        "id": "cup_handle",
+        "label": "Cup and Handle",
+        "filename": "cup_handle_{date}.json",
+    },
+    {
+        "id": "weekly_htf_pullback",
+        "label": "Weekly HTF 8W Pullback",
+        "filename": "weekly_htf_pullback_{date}.json",
+    },
 )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a daily overlap summary across RS, Sean PEG, Legacy PEG, and VCP watchlists."
+        description="Build a daily overlap summary across RS, Sean PEG, Legacy PEG, VCP, Cup and Handle, and Weekly HTF 8W Pullback watchlists."
     )
     parser.add_argument("--date-label", default=today_label(), help="Date label in YYYY-MM-DD format.")
     parser.add_argument(
