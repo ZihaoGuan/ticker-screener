@@ -7,18 +7,8 @@ on:
         description: Optional date label override (YYYY-MM-DD)
         required: false
         type: string
-  workflow_run:
-    workflows:
-      - RS Screen And Render
-      - PEG Screen And Render
-      - Legacy PEG Screen And Render
-      - VCP Screen And Render
-    types:
-      - completed
-
-concurrency:
-  group: daily-overlap-summary-${{ github.event.workflow_run.head_branch || github.ref_name || 'default' }}
-  cancel-in-progress: true
+  schedule:
+    - cron: "0 2 * * 2-6"
 
 jobs:
   summarize:
@@ -44,8 +34,6 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.date_label }}" ]; then
             echo "date_label=${{ github.event.inputs.date_label }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "workflow_run" ] && [ -n "${{ github.event.workflow_run.created_at }}" ]; then
-            python -c 'from datetime import datetime; raw = "${{ github.event.workflow_run.created_at }}"; value = datetime.fromisoformat(raw.replace("Z", "+00:00")).strftime("%Y-%m-%d"); print(f"date_label={value}")' >> "$GITHUB_OUTPUT"
           else
             echo "date_label=$(date +%F)" >> "$GITHUB_OUTPUT"
           fi
