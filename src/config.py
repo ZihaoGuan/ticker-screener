@@ -67,6 +67,7 @@ class AppConfig:
     peg_sean_tight_range_max_pct: float = 0.15
     peg_sean_breakout_proximity_pct: float = 0.03
     peg_sean_dema_tolerance_pct: float = 0.02
+    peg_sean_ema21_tolerance_pct: float = 0.02
     pre_earnings_retry_timeout_seconds: int = 24
     earnings_growth_move_lookback_quarters: int = 4
     earnings_growth_min_move_pct: float = 7.0

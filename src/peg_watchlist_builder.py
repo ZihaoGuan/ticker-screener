@@ -12,7 +12,9 @@ def _format_note(hit: PegHit) -> str:
         f"Gap-day high {hit.gdh:.2f}",
     ]
     if hit.strategy_profile == "sean-peg":
-        if hit.strategy_breakout_ready:
+        if hit.strategy_inside_day_at_ema21:
+            note_parts.insert(1, "Sean inside day at 21 EMA")
+        elif hit.strategy_breakout_ready:
             note_parts.insert(1, "Sean breakout-ready")
         elif hit.strategy_dema_support_ready:
             note_parts.insert(1, "Sean 8 DEMA support-ready")
@@ -20,6 +22,12 @@ def _format_note(hit: PegHit) -> str:
             note_parts.insert(1, "Sean qualified setup")
     else:
         note_parts.insert(1, "Actionable now" if hit.actionable_now else "Event only (not actionable now)")
+    if hit.strategy_profile == "sean-peg" and hit.strategy_inside_day and not hit.strategy_inside_day_at_ema21:
+        note_parts.append("Inside day")
+    if hit.strategy_profile == "sean-peg" and hit.strategy_ema_21 is not None:
+        note_parts.append(f"21 EMA {hit.strategy_ema_21:.2f}")
+    if hit.strategy_profile == "sean-peg" and hit.strategy_ema21_distance_pct is not None:
+        note_parts.append(f"21 EMA distance {hit.strategy_ema21_distance_pct:+.2f}%")
     if hit.secondary_entry_low is not None and hit.secondary_entry_high is not None:
         note_parts.append(
             f"EMA zone {hit.secondary_entry_low:.2f}-{hit.secondary_entry_high:.2f}"
@@ -47,12 +55,23 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
         ]
         filtered_hits.sort(
             key=lambda hit: (
-                hit.strategy_setup_score or 0,
-                hit.strategy_breakout_ready,
-                hit.strategy_dema_support_ready,
+                not (hit.strategy_inside_day and hit.strategy_price_above_ema21),
+                (
+                    hit.strategy_ema21_distance_pct
+                    if (
+                        hit.strategy_inside_day
+                        and hit.strategy_price_above_ema21
+                        and hit.strategy_ema21_distance_pct is not None
+                        and hit.strategy_ema21_distance_pct >= 0
+                    )
+                    else float("inf")
+                ),
+                not hit.strategy_inside_day_at_ema21,
+                -(hit.strategy_setup_score or 0),
+                not hit.strategy_breakout_ready,
+                not hit.strategy_dema_support_ready,
                 -(hit.strategy_peg_age_days or 0),
             ),
-            reverse=True,
         )
     else:
         filtered_hits = hits
@@ -67,8 +86,11 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
                 f"Age {hit.strategy_peg_age_days or 0} bars since gap. "
                 f"ADR20 {hit.strategy_adr_pct_20:.2f}%. "
                 f"Avg vol20 {hit.strategy_avg_volume_20:,.0f}. "
-                f"Low-volume pullback {'yes' if hit.strategy_low_volume_pullback else 'no'}."
+                f"Low-volume pullback {'yes' if hit.strategy_low_volume_pullback else 'no'}. "
+                f"Inside day at 21 EMA {'yes' if hit.strategy_inside_day_at_ema21 else 'no'}."
             )
+            if hit.strategy_ema21_distance_pct is not None:
+                summary += f" 21 EMA distance {hit.strategy_ema21_distance_pct:+.2f}%."
         else:
             summary = (
                 f"PEG event {hit.peg_date}. {status_text}. "
@@ -90,7 +112,12 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
             trigger_price = round(hit.strategy_breakout_trigger or hit.gdh, 4)
             trigger_label = "Post-gap breakout trigger"
             entry_style = "post_earnings_gap_breakout" if hit.strategy_breakout_ready else "post_earnings_gap_dema_support"
-            if hit.strategy_dema_8 is not None:
+            if hit.strategy_inside_day and hit.strategy_price_above_ema21 and hit.strategy_ema_21 is not None:
+                entry_price = hit.strategy_ema_21
+                entry_label = "Inside day at 21 EMA" if hit.strategy_inside_day_at_ema21 else "Inside day above 21 EMA"
+                secondary_entry_price = round(hit.strategy_ema_21, 4)
+                secondary_entry_label = "21 EMA"
+            elif hit.strategy_dema_8 is not None:
                 entry_price = hit.strategy_dema_8 if hit.strategy_dema_support_ready else entry_price
                 entry_label = "8 DEMA support" if hit.strategy_dema_support_ready else entry_label
                 secondary_entry_price = round(hit.strategy_dema_8, 4)

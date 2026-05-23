@@ -71,9 +71,14 @@ class PegHit:
     strategy_peg_age_days: int | None
     strategy_avg_volume_20: float | None
     strategy_adr_pct_20: float | None
+    strategy_ema_21: float | None
     strategy_ema_50: float | None
     strategy_dema_8: float | None
+    strategy_price_above_ema21: bool
     strategy_price_above_ema50: bool
+    strategy_ema21_distance_pct: float | None
+    strategy_inside_day: bool
+    strategy_inside_day_at_ema21: bool
     strategy_demand_dry: bool
     strategy_low_volume_pullback: bool
     strategy_recent_range_pct: float | None
@@ -202,9 +207,14 @@ def _to_hit(
         strategy_peg_age_days=_optional_int(strategy_assessment.peg_age_days) if strategy_assessment else None,
         strategy_avg_volume_20=_optional_float(strategy_assessment.avg_volume_20) if strategy_assessment else None,
         strategy_adr_pct_20=_optional_float(strategy_assessment.adr_pct_20) if strategy_assessment else None,
+        strategy_ema_21=_optional_float(strategy_assessment.ema_21) if strategy_assessment else None,
         strategy_ema_50=_optional_float(strategy_assessment.ema_50) if strategy_assessment else None,
         strategy_dema_8=_optional_float(strategy_assessment.dema_8) if strategy_assessment else None,
+        strategy_price_above_ema21=bool(strategy_assessment.price_above_ema21) if strategy_assessment else False,
         strategy_price_above_ema50=bool(strategy_assessment.price_above_ema50) if strategy_assessment else False,
+        strategy_ema21_distance_pct=_optional_float(strategy_assessment.ema21_distance_pct) if strategy_assessment else None,
+        strategy_inside_day=bool(strategy_assessment.inside_day) if strategy_assessment else False,
+        strategy_inside_day_at_ema21=bool(strategy_assessment.inside_day_at_ema21) if strategy_assessment else False,
         strategy_demand_dry=bool(strategy_assessment.demand_dry) if strategy_assessment else False,
         strategy_low_volume_pullback=bool(strategy_assessment.low_volume_pullback) if strategy_assessment else False,
         strategy_recent_range_pct=_optional_float(strategy_assessment.recent_range_pct) if strategy_assessment else None,
