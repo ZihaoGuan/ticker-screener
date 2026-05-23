@@ -1,0 +1,2 @@
+# Auto-generated low market-cap exclusions for RS Screen
+BSAA
