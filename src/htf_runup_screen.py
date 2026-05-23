@@ -15,6 +15,8 @@ class HtfRunupHit:
     exchange: str | None
     benchmark_ticker: str
     current_price: float
+    ema_21: float
+    price_above_ema21: bool
     runup_window_days: int
     runup_pct: float
     pullback_from_high_pct: float
@@ -51,9 +53,12 @@ class HtfRunupScreenResult:
 def _to_hit(ticker: UniverseTicker, benchmark_ticker: str, summary: dict[str, object]) -> HtfRunupHit:
     runup_pct = float(summary["runup_pct"])
     pullback_pct = float(summary["pullback_from_high_pct"])
+    current_price = float(summary["current_price"])
+    ema_21 = float(summary["ema_21"])
     reasons = [
         f"{runup_pct:.1f}% runup in {int(summary['window_days'])} sessions",
         f"{pullback_pct:.1f}% off the runup high",
+        f"holding above 21 EMA ({ema_21:.2f})",
         "monitor for HTF setup",
     ]
     return HtfRunupHit(
@@ -61,7 +66,9 @@ def _to_hit(ticker: UniverseTicker, benchmark_ticker: str, summary: dict[str, ob
         sector=ticker.sector,
         exchange=ticker.exchange,
         benchmark_ticker=benchmark_ticker,
-        current_price=float(summary["current_price"]),
+        current_price=current_price,
+        ema_21=ema_21,
+        price_above_ema21=bool(summary["price_above_ema21"]),
         runup_window_days=int(summary["window_days"]),
         runup_pct=runup_pct,
         pullback_from_high_pct=pullback_pct,
@@ -82,10 +89,11 @@ def run_htf_runup_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Ht
     total_tickers = len(tickers)
 
     print(
-        "starting HTF 8W runup screen: "
+        "starting 8W 100% runup screen: "
         f"total={total_tickers}, "
         f"window={config.htf_runup_window_days}, "
-        f"min_runup={min_runup_pct:.1f}%"
+        f"min_runup={min_runup_pct:.1f}%, "
+        "require_price_above_ema21=true"
     )
 
     for position, ticker in enumerate(tickers, start=1):
@@ -100,6 +108,17 @@ def run_htf_runup_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Ht
             if not runup_summary:
                 print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no 8W runup summary | passed={len(hits)}")
                 continue
+            ema_21 = financials._get_latest_ema_value(21)
+            current_price = float(runup_summary["current_price"])
+            if ema_21 is None:
+                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing 21 EMA | passed={len(hits)}")
+                continue
+            if current_price <= float(ema_21):
+                print(
+                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                    f"current {current_price:.2f} <= 21 EMA {float(ema_21):.2f} | passed={len(hits)}"
+                )
+                continue
             runup_pct = float(runup_summary["runup_pct"])
             if runup_pct < min_runup_pct:
                 print(
@@ -107,11 +126,14 @@ def run_htf_runup_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Ht
                     f"runup {runup_pct:.1f}% < {min_runup_pct:.1f}% | passed={len(hits)}"
                 )
                 continue
+            runup_summary["ema_21"] = float(ema_21)
+            runup_summary["price_above_ema21"] = True
             hits.append(_to_hit(ticker, config.benchmark_ticker, runup_summary))
             latest_hit = hits[-1]
             print(
                 f"[{position}/{total_tickers}] {ticker.symbol} passed: "
-                f"runup {latest_hit.runup_pct:.1f}% pullback {latest_hit.pullback_from_high_pct:.1f}% | passed={len(hits)}"
+                f"runup {latest_hit.runup_pct:.1f}% pullback {latest_hit.pullback_from_high_pct:.1f}% "
+                f"above 21 EMA {latest_hit.ema_21:.2f} | passed={len(hits)}"
             )
         except Exception as exc:
             failures.append({"ticker": ticker.symbol, "error": str(exc)})
@@ -126,7 +148,7 @@ def run_htf_runup_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Ht
     )
 
     print(
-        "finished HTF 8W runup screen: "
+        "finished 8W 100% runup screen: "
         f"passed={len(hits)}, failed={len(failures)}, total={total_tickers}"
     )
 
