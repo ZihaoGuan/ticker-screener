@@ -60,6 +60,11 @@ def _is_429_error(exc: Exception) -> bool:
     return "429" in text or "too many requests" in text
 
 
+def _is_timeout_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "timed out" in text or "timeout" in text
+
+
 def _fetch_market_caps(tickers: list[str], delay_seconds: float) -> tuple[dict[str, float], bool]:
     import yfinance as yf
 
@@ -82,6 +87,9 @@ def _fetch_market_caps(tickers: list[str], delay_seconds: float) -> tuple[dict[s
         except Exception as exc:
             if _is_429_error(exc):
                 print(f"Encountered yfinance 429 while checking {ticker}; skipping low market-cap filter step.")
+                return {}, True
+            if _is_timeout_error(exc):
+                print(f"Encountered yfinance timeout while checking {ticker}; skipping low market-cap filter step.")
                 return {}, True
             print(f"Market-cap lookup failed for {ticker}: {exc}")
         if index < len(tickers) - 1 and delay_seconds > 0:

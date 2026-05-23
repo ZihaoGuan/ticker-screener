@@ -1780,9 +1780,7 @@ class cookFinancials(YahooFinancials):
         recent_range_pct = self._get_recent_range_pct(compression_lookback)
         _trace("recent_range_pct", step_started)
 
-        step_started = time()
-        market_cap_b = self.get_marketCap_B_safe(timeout_seconds=3)
-        _trace("market_cap", step_started)
+        market_cap_b = None
 
         liquidity_score = 0
         if avg_dollar_volume >= 100_000_000:
@@ -1860,9 +1858,6 @@ class cookFinancials(YahooFinancials):
         penalty = 0
         if distribution['distribution_warning']:
             penalty += min(15, 6 + int(distribution['distribution_days_count']) * 3)
-        if market_cap_b is not None and market_cap_b < 2.0:
-            penalty += 8
-
         focus_score = max(
             0,
             min(
@@ -1981,7 +1976,7 @@ class cookFinancials(YahooFinancials):
         isStrongRs, stockReturn, benchmarkReturn, currentRsLine, rsLineHigh = self.is_relative_strength_strong(benchmarkTicker)
         isSectorStrong, sectorEtf, sectorEtfNearHigh, _, _, sectorEtfDistance, sectorEtfReturn, sectorBenchmarkReturn = self.is_sector_etf_strong(sectorName, benchmarkTicker)
         avg_dollar_volume = self._get_average_dollar_volume(liquidity_lookback)
-        market_cap_b = self.get_marketCap_B_safe(timeout_seconds=3)
+        market_cap_b = None
 
         runup_pct = float(runup_summary['runup_pct'])
         pullback_pct = float(runup_summary['pullback_from_high_pct'])
@@ -2054,8 +2049,6 @@ class cookFinancials(YahooFinancials):
         penalty = 0
         if distribution['distribution_warning']:
             penalty += min(12, 4 + int(distribution['distribution_days_count']) * 2)
-        if market_cap_b is not None and market_cap_b < 2.0:
-            penalty += 6
         if current_price < ema_slow:
             penalty += 6
 
