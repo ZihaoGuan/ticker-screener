@@ -12,6 +12,9 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   screen:
     runs-on: ubuntu-latest
@@ -48,6 +51,32 @@ jobs:
             ARGS+=(--reference-date "${REFERENCE_DATE}")
           fi
           python scripts/run_pre_earnings_screen.py "${ARGS[@]}"
+
+      - name: Filter low market-cap hits
+        run: |
+          python scripts/filter_low_market_cap_hits.py \
+            --raw-file "artifacts/raw/pre_earnings_focus_${{ steps.meta.outputs.date_label }}.json" \
+            --watchlist-file "artifacts/watchlists/pre_earnings_focus_${{ steps.meta.outputs.date_label }}.json" \
+            --summary-file "artifacts/raw/pre_earnings_run_summary_${{ steps.meta.outputs.date_label }}.json" \
+            --exclude-file "config/auto_exclude_tickers/pre-earnings-screen-low-cap.txt" \
+            --pipeline-name "Pre-Earnings Screen"
+
+      - name: Commit updated low-cap exclude file
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          EXCLUDE_FILE="config/auto_exclude_tickers/pre-earnings-screen-low-cap.txt"
+          if [ -z "$(git status --porcelain -- "$EXCLUDE_FILE")" ]; then
+            echo "No low-cap exclusion changes detected"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$EXCLUDE_FILE"
+          git commit -m "Update low-cap exclusions for pre-earnings screen"
+          git pull --rebase origin "${TARGET_BRANCH}"
+          git push origin "HEAD:${TARGET_BRANCH}"
 
       - name: Upload raw results
         uses: actions/upload-artifact@v4

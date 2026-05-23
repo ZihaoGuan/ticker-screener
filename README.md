@@ -23,6 +23,7 @@ The RS engine is vendored from `cookstock` so GitHub Actions can run without dep
 - `scripts/run_rs_screen.py`: produces raw results and watchlist JSON
 - `scripts/run_weekly_rs_screen.py`: produces weekly RS raw results and watchlist JSON
 - `scripts/run_weekly_htf_pullback_screen.py`: produces weekly RS + HTF 8-week pullback raw results and watchlist JSON
+- `scripts/filter_low_market_cap_hits.py`: checks passed tickers with `yfinance`, removes names under `$1B` market cap from current artifacts, and writes pipeline-specific auto excludes under `config/auto_exclude_tickers/`
 - `scripts/run_vcp_screen.py`: produces VCP raw results and watchlist JSON
 - `scripts/run_peg_screen.py`: produces PEG raw results and watchlist JSON
 - `scripts/run_cup_handle_screen.py`: produces Cup & Handle raw results and watchlist JSON

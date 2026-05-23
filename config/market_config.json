@@ -34,6 +34,7 @@
   "default_card_width": 700,
   "excluded_tickers_file": "config/smallcap_exclude_tickers.txt",
   "manual_excluded_tickers_file": "config/manual_exclude_tickers.txt",
+  "auto_excluded_tickers_dir": "config/auto_exclude_tickers",
   "peg_min_close_position_ratio": 0.25,
   "peg_require_green_candle": false,
   "peg_primary_entry_mode": "peg_low_or_ema_zone",

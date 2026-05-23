@@ -32,6 +32,16 @@ def manual_excluded_tickers_path(config: AppConfig) -> Path:
     return project_root() / candidate
 
 
+def auto_excluded_tickers_dir(config: AppConfig) -> Path:
+    raw_value = str(getattr(config, "auto_excluded_tickers_dir", "") or "").strip()
+    if not raw_value:
+        return project_root() / "config" / "auto_exclude_tickers"
+    candidate = Path(raw_value)
+    if candidate.is_absolute():
+        return candidate
+    return project_root() / candidate
+
+
 def _load_ticker_file(path: Path) -> set[str]:
     if not path.exists():
         return set()
@@ -51,6 +61,10 @@ def load_excluded_tickers(config: AppConfig) -> set[str]:
     excluded: set[str] = set()
     for path in (excluded_tickers_path(config), manual_excluded_tickers_path(config)):
         excluded.update(_load_ticker_file(path))
+    auto_dir = auto_excluded_tickers_dir(config)
+    if auto_dir.exists():
+        for path in sorted(auto_dir.glob("*.txt")):
+            excluded.update(_load_ticker_file(path))
     return excluded
 
 
