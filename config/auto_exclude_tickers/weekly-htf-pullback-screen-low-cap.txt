@@ -1,0 +1,8 @@
+# Auto-generated low market-cap exclusions for Weekly HTF 8W Pullback Screen
+AIXI
+EGG
+MI
+MX
+NCEW
+PODC
+ROMA
