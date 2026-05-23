@@ -6,12 +6,20 @@ from .peg_screen import PegHit
 def _format_note(hit: PegHit) -> str:
     note_parts = [
         f"{hit.setup_type.upper()} on {hit.peg_date}",
-        "Actionable now" if hit.actionable_now else "Event only (not actionable now)",
         f"Gap {hit.gap_pct * 100:.1f}%",
         f"Volume {hit.volume_ratio:.2f}x",
         f"PEG low {hit.peg_low:.2f}",
         f"Gap-day high {hit.gdh:.2f}",
     ]
+    if hit.strategy_profile == "sean-peg":
+        if hit.strategy_breakout_ready:
+            note_parts.insert(1, "Sean breakout-ready")
+        elif hit.strategy_dema_support_ready:
+            note_parts.insert(1, "Sean 8 DEMA support-ready")
+        else:
+            note_parts.insert(1, "Sean qualified setup")
+    else:
+        note_parts.insert(1, "Actionable now" if hit.actionable_now else "Event only (not actionable now)")
     if hit.secondary_entry_low is not None and hit.secondary_entry_high is not None:
         note_parts.append(
             f"EMA zone {hit.secondary_entry_low:.2f}-{hit.secondary_entry_high:.2f}"
@@ -27,10 +35,6 @@ def _format_note(hit: PegHit) -> str:
             note_parts.append(f"ADR20 {hit.strategy_adr_pct_20:.2f}%")
         if hit.strategy_avg_volume_20 is not None:
             note_parts.append(f"Avg vol20 {hit.strategy_avg_volume_20:,.0f}")
-        if hit.strategy_breakout_ready:
-            note_parts.append("Sean breakout-ready")
-        elif hit.strategy_dema_support_ready:
-            note_parts.append("Sean 8 DEMA support-ready")
     return ". ".join(note_parts) + "."
 
 

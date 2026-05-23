@@ -301,6 +301,14 @@ jobs:
           name: peg-screen-raw-${{ needs.screen.outputs.date_label }}
           path: artifacts/raw
 
+      - name: Download watchlist artifact
+        if: ${{ needs.screen.result == 'success' && needs.screen.outputs.date_label != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: peg-screen-watchlist-${{ needs.screen.outputs.date_label }}
+          path: artifacts/watchlists
+
       - name: Build Discord payload
         env:
           DATE_LABEL: ${{ needs.screen.outputs.date_label }}
