@@ -25,6 +25,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-earnings-growth.txt
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt awscli
@@ -118,6 +122,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-earnings-growth.txt
 
       - name: Install AWS CLI
         if: ${{ steps.r2-config.outputs.enabled == 'true' }}
@@ -246,6 +254,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-earnings-growth.txt
 
       - name: Download overlap artifact
         if: ${{ needs.summarize.result == 'success' && needs.summarize.outputs.date_label != '' }}
