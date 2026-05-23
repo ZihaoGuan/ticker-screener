@@ -22,6 +22,16 @@ class AppConfig:
     htf_min_runup_pct: float = 100.0
     htf_max_correction_pct: float = 25.0
     weekly_htf_ema8_breach_tolerance_pct: float = 0.02
+    gap_fill_history_days: int = 365
+    gap_fill_lookback_days: int = 180
+    gap_fill_min_gap_pct: float = 0.03
+    gap_fill_min_avg_volume: int = 1_000_000
+    gap_fill_min_avg_dollar_volume: float = 20_000_000.0
+    gap_fill_min_distance_to_gap_bottom_pct: float = -0.05
+    gap_fill_max_distance_to_gap_bottom_pct: float = 0.12
+    gap_fill_min_distance_to_gap_top_pct: float = 0.01
+    gap_fill_max_distance_to_gap_top_pct: float = 0.20
+    gap_fill_tight_range_lookback_days: int = 10
     year_high_proximity: float = 0.15
     breakout_volume_ratio: float = 1.4
     final_contraction_max: float = 0.1
