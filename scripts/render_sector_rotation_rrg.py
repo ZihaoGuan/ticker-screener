@@ -184,6 +184,7 @@ def render_top_level_index(
     trail_weeks: int,
     universe_sections: list[dict[str, str]],
     theme_batches: list[dict[str, object]],
+    theme_path_prefix: str = "",
 ) -> None:
     section_cards = "\n".join(
         f"""
@@ -200,8 +201,8 @@ def render_top_level_index(
         f"""
         <article class="theme-card">
           <h3>{batch['title']} <span>{batch['count']} ETFs</span></h3>
-          <a class="button" href="{batch['index']}">Open batch</a>
-          <img src="{batch['svg']}" alt="{batch['title']}" loading="lazy" />
+          <a class="button" href="{theme_path_prefix}{batch['index']}">Open batch</a>
+          <img src="{theme_path_prefix}{batch['svg']}" alt="{batch['title']}" loading="lazy" />
         </article>
         """
         for batch in theme_batches
@@ -426,6 +427,7 @@ def main() -> int:
             },
         ],
         theme_batches=theme_batches,
+        theme_path_prefix="theme/",
     )
     print(f"Rendered RRG output to {output_dir}")
     return 0
