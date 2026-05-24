@@ -80,6 +80,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--momentum-window", type=int, default=4, help="Weeks used to normalize the relative momentum axis.")
     parser.add_argument("--universe", choices=["sector", "industry"], default="sector", help="Use the official 11 sector ETFs or a more tactical industry ETF basket.")
     parser.add_argument("--tickers", nargs="*", help="Optional ETF tickers to use instead of the default ETF universe.")
+    parser.add_argument(
+        "--tickers-file",
+        help="Optional JSON file containing a list of {ticker, label} items to use instead of the default ETF universe.",
+    )
     return parser.parse_args()
 
 
@@ -404,8 +408,8 @@ def render_index(
       <img src="{escape(svg_name)}" alt="Sector rotation map" />
     </section>
     <section>
-      <h1>Single Industry Views</h1>
-      <p>Each industry also gets a standalone chart using the same benchmark and trail settings so you can inspect its path without the full-universe clutter.</p>
+      <h1>Single ETF Views</h1>
+      <p>Each ETF also gets a standalone chart using the same benchmark and trail settings so you can inspect its path without the full-universe clutter.</p>
       <div class="grid">
         {cards}
       </div>
@@ -422,7 +426,22 @@ def main() -> int:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.tickers:
+    if args.tickers_file:
+        payload = json.loads(Path(args.tickers_file).read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise ValueError("tickers-file payload must be a JSON list")
+        universe = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker", "")).strip().upper()
+            label = str(item.get("label", ticker)).strip()
+            if ticker:
+                universe.append((label or ticker, ticker))
+        if not universe:
+            raise ValueError("tickers-file did not provide any usable ticker entries")
+        universe_label = "Custom ETF"
+    elif args.tickers:
         universe = [(ticker, ticker) for ticker in args.tickers]
         universe_label = "Custom ETF"
     elif args.universe == "industry":
@@ -442,16 +461,22 @@ def main() -> int:
         except Exception as exc:
             failures[ticker] = str(exc)
 
-    close_frame = pd.concat(weekly_closes.values(), axis=1, join="inner").dropna()
     series_list: list[RotationSeries] = []
     for index, (label, ticker) in enumerate(universe):
-        if ticker not in close_frame.columns:
+        if ticker not in weekly_closes:
+            continue
+        pair_frame = pd.concat(
+            [weekly_closes[args.benchmark], weekly_closes[ticker]],
+            axis=1,
+            join="inner",
+        ).dropna()
+        if ticker not in pair_frame.columns or args.benchmark not in pair_frame.columns:
             continue
         series = compute_rotation_series(
             label=label,
             ticker=ticker,
             color=SERIES_COLORS[index % len(SERIES_COLORS)],
-            closes=close_frame,
+            closes=pair_frame,
             benchmark=args.benchmark,
             ratio_window=args.ratio_window,
             momentum_window=args.momentum_window,

@@ -1,4 +1,4 @@
-name: Sector RRG Render
+name: Market RRG Render
 
 on:
   workflow_dispatch:
@@ -11,13 +11,15 @@ on:
       universe:
         description: ETF universe
         required: false
-        default: "industry"
+        default: "all"
         type: choice
         options:
+          - all
           - industry
           - sector
+          - theme
   schedule:
-    - cron: "0 0 * * 0"
+    - cron: "10 1 * * 2-6"
 
 jobs:
   render:
@@ -176,10 +178,10 @@ jobs:
 
           success = render_result == "success"
           if success and r2_index_url:
-              payload = {"content": f"Sector RRG: {r2_index_url}"}
+              payload = {"content": f"Market RRG: {r2_index_url}"}
           else:
               lines = [
-                  f"{':white_check_mark:' if success else ':warning:'} Sector RRG render finished for `{date_label}`",
+                  f"{':white_check_mark:' if success else ':warning:'} Market RRG render finished for `{date_label}`",
                   f"Render job: `{render_result}`",
                   f"R2 publish job: `{publish_result}`",
               ]

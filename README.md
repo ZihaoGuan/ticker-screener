@@ -209,13 +209,13 @@ The enricher supports either:
 
 Supported providers are `fmp`, `ainvest`, `yfinance`, and `auto`. The default provider is `yfinance`. `auto` prefers `AInvest` when `AINVEST_API_KEY` is present, then `FMP` when `FMP_API_KEY` is present, then `yfinance`.
 
-Render a weekly RRG-style rotation map:
+Render the daily-refreshed market RRG report:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/render_sector_rotation_rrg.py \
   --output-dir /Users/Zihao.Guan/Personal/ticker-screener/artifacts/output/sector_rotation_rrg_YYYY-MM-DD \
   --benchmark SPY \
-  --universe industry
+  --universe all
 ```
 
 ## Artifacts
@@ -276,7 +276,7 @@ It is now scheduled once each Saturday on the GitHub cron schedule and its rende
 
 The earnings growth workflow in [.github/workflows/earnings-growth-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/earnings-growth-screen-render.yml) screens next-week earnings names for explosive growth plus post-earnings reaction behavior. It currently runs manually with optional `limit` and `reference_date` inputs. It now prefers `OpenBB` for the earnings calendar layer, falls back to `AInvest` when `AINVEST_API_KEY` is available, then falls back to `yfinance`, with `AKShare` as an extra fallback for quarterly revenue history.
 
-The sector rotation workflow in [.github/workflows/sector-rrg-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/sector-rrg-render.yml) renders an RRG-style rotation map for the configured ETF universe. Its cron is `0 0 * * 0`, which corresponds to Sunday noon in New Zealand winter and Sunday 1pm during New Zealand daylight saving because GitHub Actions schedules are UTC-based.
+The market rotation workflow in [.github/workflows/sector-rrg-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/sector-rrg-render.yml) now refreshes once per trading day and renders separate weekly RRG reports for `sector`, `industry`, and `theme` instead of forcing every ETF into one chart. It defaults to `--universe all`, splits the theme ETF set into multiple smaller batch charts, and publishes a top-level `index.html` that links to each sub-report. Its cron is `10 1 * * 2-6`, which corresponds to New Zealand `1:10pm` during standard time and `2:10pm` during daylight saving because GitHub Actions schedules are UTC-based.
 
 ### Optional Discord notifications
 
