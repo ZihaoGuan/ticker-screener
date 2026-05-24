@@ -20,6 +20,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--period", default="18mo")
     parser.add_argument("--lookback", type=int, default=120)
     parser.add_argument("--timeframe", choices=("daily", "weekly"), default="daily")
+    parser.add_argument("--macro-context-ticker", help="Optional macro ticker to summarize in the chart sidebar, such as DX-Y.NYB.")
+    parser.add_argument("--macro-context-label", help="Display label for the macro context ticker.")
+    parser.add_argument("--macro-context-ma", type=int, default=50, help="Moving average length for the macro context summary.")
+    parser.add_argument("--macro-context-lookback", type=int, default=10, help="Recent-bar window for detecting macro reclaim/cross events.")
     parser.add_argument("--split-pages", type=int, default=4)
     parser.add_argument("--montage-columns", type=int, default=2)
     parser.add_argument("--card-width", type=int, default=700)
@@ -54,6 +58,10 @@ def main() -> int:
         str(args.lookback),
         "--timeframe",
         args.timeframe,
+        "--macro-context-ma",
+        str(args.macro_context_ma),
+        "--macro-context-lookback",
+        str(args.macro_context_lookback),
         "--split-pages",
         str(args.split_pages),
         "--montage-columns",
@@ -61,6 +69,10 @@ def main() -> int:
         "--card-width",
         str(args.card_width),
     ]
+    if args.macro_context_ticker:
+        command.extend(["--macro-context-ticker", args.macro_context_ticker])
+    if args.macro_context_label:
+        command.extend(["--macro-context-label", args.macro_context_label])
     subprocess.run(command, check=True)
     print(f"Rendered charts to {output_dir}")
     return 0

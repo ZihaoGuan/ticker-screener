@@ -365,6 +365,63 @@ def compute_etf_strength(
     }
 
 
+def compute_macro_context_snapshot(
+    ticker: str,
+    *,
+    label: str,
+    period: str,
+    ma_length: int,
+    lookback_days: int,
+    history_cache: dict[str, pd.DataFrame],
+) -> dict[str, object] | None:
+    if ticker not in history_cache:
+        history_cache[ticker] = add_price_indicators(fetch_history(ticker, period))
+    history = history_cache[ticker].copy()
+    if history.empty:
+        return None
+
+    ma_column = f"sma{ma_length}"
+    if ma_column in history.columns and not history[ma_column].isna().all():
+        history["_macro_ma"] = history[ma_column]
+    else:
+        history["_macro_ma"] = history["Close"].rolling(ma_length).mean()
+
+    valid = history.dropna(subset=["Close", "_macro_ma"]).copy()
+    if valid.empty:
+        return None
+
+    latest = valid.iloc[-1]
+    close = float(latest["Close"])
+    ma_value = float(latest["_macro_ma"])
+    above_ma = close > ma_value
+    prior5 = float(valid["Close"].iloc[-6]) if len(valid) > 5 else float(valid["Close"].iloc[0])
+    prior20 = float(valid["Close"].iloc[-21]) if len(valid) > 20 else float(valid["Close"].iloc[0])
+    ret5 = (close / prior5 - 1.0) * 100.0 if prior5 else 0.0
+    ret20 = (close / prior20 - 1.0) * 100.0 if prior20 else 0.0
+
+    cross_above = (valid["Close"] > valid["_macro_ma"]) & (valid["Close"].shift(1) <= valid["_macro_ma"].shift(1))
+    recent_crosses = cross_above.tail(max(1, lookback_days))
+    recent_reclaim = bool(recent_crosses.any())
+    reclaim_days_ago: int | None = None
+    if recent_reclaim:
+        last_cross_date = recent_crosses[recent_crosses].index[-1]
+        last_cross_position = int(valid.index.get_loc(last_cross_date))
+        reclaim_days_ago = len(valid) - 1 - last_cross_position
+
+    return {
+        "ticker": ticker,
+        "label": label,
+        "ma_length": ma_length,
+        "close": close,
+        "ma_value": ma_value,
+        "above_ma": above_ma,
+        "recent_reclaim": recent_reclaim,
+        "reclaim_days_ago": reclaim_days_ago,
+        "ret5": f"{ret5:+.2f}%",
+        "ret20": f"{ret20:+.2f}%",
+    }
+
+
 def build_market_context(
     entry: WatchlistEntry,
     profile: dict[str, str] | None,
@@ -459,6 +516,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--period", default="18mo", help="Yahoo chart range such as 1y, 18mo, 2y.")
     parser.add_argument("--lookback", type=int, default=120, help="Number of bars to render for the selected timeframe.")
     parser.add_argument("--timeframe", choices=("daily", "weekly"), default="daily", help="Display timeframe for rendered candles.")
+    parser.add_argument("--macro-context-ticker", help="Optional macro ticker to summarize in the chart sidebar.")
+    parser.add_argument("--macro-context-label", help="Display label for the macro context ticker.")
+    parser.add_argument("--macro-context-ma", type=int, default=50, help="Moving average length for the macro context summary.")
+    parser.add_argument("--macro-context-lookback", type=int, default=10, help="Recent-bar window for detecting macro reclaim events.")
     parser.add_argument("--split-pages", type=int, default=0, help="If > 0, emit montage pages with this many charts per page.")
     parser.add_argument("--montage-columns", type=int, default=2, help="Number of columns for split montage pages.")
     parser.add_argument("--card-width", type=int, default=700, help="Scaled width of each chart in montage pages.")
@@ -1075,6 +1136,7 @@ def render_watchlist_chart(
     benchmark_ticker: str = "SPY",
     profile: dict[str, str] | None = None,
     sector_snapshot: dict[str, str] | None = None,
+    macro_snapshot: dict[str, object] | None = None,
     ipo_history: pd.DataFrame | None = None,
 ) -> Path:
     display_history = resample_ohlcv_weekly(history) if timeframe == "weekly" else history
@@ -1545,6 +1607,27 @@ def render_watchlist_chart(
             )
         cursor_y += max(0, len(list(sector_snapshot.get("theme_strengths", []))[:4])) * 18 + 16
 
+    if macro_snapshot:
+        macro_header_color = "#fde68a" if bool(macro_snapshot.get("recent_reclaim")) else "#f8fafc"
+        svg.append(
+            f'<text x="{right_panel_x}" y="{cursor_y}" fill="{macro_header_color}" font-size="14" font-family="Menlo, Consolas, monospace">Macro Context</text>'
+        )
+        reclaim_text = "no"
+        if bool(macro_snapshot.get("recent_reclaim")):
+            reclaim_days_ago = macro_snapshot.get("reclaim_days_ago")
+            reclaim_text = f"yes ({int(reclaim_days_ago)}d ago)" if reclaim_days_ago is not None else "yes"
+        macro_lines = [
+            f"{macro_snapshot['label']}: {float(macro_snapshot['close']):.2f} vs {int(macro_snapshot['ma_length'])}D MA {float(macro_snapshot['ma_value']):.2f}",
+            f"Above {int(macro_snapshot['ma_length'])}D MA: {'yes' if bool(macro_snapshot.get('above_ma')) else 'no'}",
+            f"Recent reclaim above {int(macro_snapshot['ma_length'])}D MA: {reclaim_text}",
+            f"5d {macro_snapshot['ret5']} | 20d {macro_snapshot['ret20']}",
+        ]
+        for macro_index, macro_line in enumerate(macro_lines):
+            svg.append(
+                f'<text x="{right_panel_x}" y="{cursor_y + 22 + macro_index * 18}" fill="#cbd5e1" font-size="12" font-family="Menlo, Consolas, monospace">{escape(macro_line)}</text>'
+            )
+        cursor_y += 22 + len(macro_lines) * 18 + 16
+
     entry_header_y = cursor_y
     svg.append(
         f'<text x="{right_panel_x}" y="{entry_header_y}" fill="{entry_color}" font-size="14" font-family="Menlo, Consolas, monospace">Entry Guide</text>'
@@ -1829,6 +1912,19 @@ def main() -> int:
     sector_history_cache: dict[str, pd.DataFrame] = {}
     etf_catalog = load_etf_catalog()
     theme_overrides = load_ticker_theme_overrides()
+    macro_snapshot = None
+    if args.macro_context_ticker:
+        try:
+            macro_snapshot = compute_macro_context_snapshot(
+                args.macro_context_ticker,
+                label=args.macro_context_label or args.macro_context_ticker,
+                period=args.period,
+                ma_length=max(2, int(args.macro_context_ma)),
+                lookback_days=max(1, int(args.macro_context_lookback)),
+                history_cache=sector_history_cache,
+            )
+        except Exception:
+            macro_snapshot = None
     generated: list[WatchlistEntry] = []
     summaries: list[dict[str, object]] = []
     failed: dict[str, str] = {}
@@ -1870,6 +1966,7 @@ def main() -> int:
                 benchmark_ticker=args.benchmark,
                 profile=profile,
                 sector_snapshot=sector_snapshot,
+                macro_snapshot=macro_snapshot,
                 ipo_history=ipo_history,
             )
             chart_text = chart_path.read_text()
