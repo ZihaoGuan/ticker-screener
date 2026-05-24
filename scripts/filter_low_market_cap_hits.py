@@ -65,6 +65,15 @@ def _is_timeout_error(exc: Exception) -> bool:
     return "timed out" in text or "timeout" in text
 
 
+def _is_yfinance_response_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        "expecting value: line 1 column 1" in text
+        or "jsondecodeerror" in text
+        or "no value found" in text
+    )
+
+
 def _fetch_market_caps(tickers: list[str], delay_seconds: float) -> tuple[dict[str, float], bool]:
     import yfinance as yf
 
@@ -90,6 +99,12 @@ def _fetch_market_caps(tickers: list[str], delay_seconds: float) -> tuple[dict[s
                 return {}, True
             if _is_timeout_error(exc):
                 print(f"Encountered yfinance timeout while checking {ticker}; skipping low market-cap filter step.")
+                return {}, True
+            if _is_yfinance_response_error(exc):
+                print(
+                    f"Encountered ambiguous yfinance response while checking {ticker}; "
+                    "skipping low market-cap filter step."
+                )
                 return {}, True
             print(f"Market-cap lookup failed for {ticker}: {exc}")
         if index < len(tickers) - 1 and delay_seconds > 0:

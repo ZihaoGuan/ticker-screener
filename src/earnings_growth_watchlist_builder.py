@@ -33,6 +33,7 @@ def build_earnings_growth_watchlist(hits: list[EarningsGrowthHit]) -> list[dict[
         watchlist.append(
             {
                 "ticker": hit.ticker,
+                "sector": getattr(hit, "sector", None),
                 "setup_label": "Next-week earnings growth",
                 "summary": summary,
                 "master_note": _format_note(hit),

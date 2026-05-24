@@ -124,6 +124,7 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
                 secondary_entry_label = "8 DEMA"
         watchlist_entry: dict[str, object] = {
             "ticker": hit.ticker,
+            "sector": getattr(hit, "sector", None),
             "setup_label": "Post earnings gap tight flag" if strategy_profile == "sean-peg" else "Power earnings gap",
             "summary": summary,
             "master_note": _format_note(hit),

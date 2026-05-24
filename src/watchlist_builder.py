@@ -42,6 +42,7 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
         watchlist.append(
             {
                 "ticker": hit.ticker,
+                "sector": getattr(hit, "sector", None),
                 "setup_label": setup_label,
                 "summary": summary,
                 "master_note": _format_note(hit),

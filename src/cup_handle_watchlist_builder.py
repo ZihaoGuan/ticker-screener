@@ -29,6 +29,7 @@ def build_cup_handle_watchlist(hits: list[CupHandleHit]) -> list[dict[str, objec
         watchlist.append(
             {
                 "ticker": hit.ticker,
+                "sector": getattr(hit, "sector", None),
                 "setup_label": setup_label,
                 "summary": summary,
                 "master_note": _format_note(hit),

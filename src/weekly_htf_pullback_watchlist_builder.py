@@ -35,6 +35,7 @@ def build_weekly_htf_pullback_watchlist(
         watchlist.append(
             {
                 "ticker": hit.ticker,
+                "sector": getattr(hit, "sector", None),
                 "setup_label": "Weekly RS + HTF 8W Pullback",
                 "summary": summary,
                 "master_note": _format_note(hit),

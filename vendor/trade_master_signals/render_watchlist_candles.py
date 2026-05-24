@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import re
+import sqlite3
 import sys
 from textwrap import wrap
 from typing import Iterable
@@ -20,6 +21,10 @@ YAHOO_HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Accept": "application/json",
 }
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ETF_CATALOG_PATH = PROJECT_ROOT / "config" / "etf_match_catalog.json"
+ETF_THEME_OVERRIDES_PATH = PROJECT_ROOT / "config" / "ticker_etf_theme_overrides.json"
+ETF_MATCH_DB_PATH = PROJECT_ROOT / "data" / "universe_etf_matches.sqlite"
 SVG_SIZE_RE = re.compile(r'<svg[^>]*\bwidth="(?P<width>[0-9.]+)"[^>]*\bheight="(?P<height>[0-9.]+)"', re.IGNORECASE)
 SECTOR_ETF_MAP = {
     "Communication Services": "XLC",
@@ -66,6 +71,61 @@ INDUSTRY_ETF_KEYWORDS = (
     ("semiconductors", "SOXX"),
     ("chip", "SOXX"),
 )
+ETF_DISPLAY_PRIORITY = {
+    "semiconductors": ["SMH", "SMHX", "XSD", "SOXX", "DRAM", "SOXL"],
+    "memory": ["DRAM", "SMH", "SMHX", "XSD"],
+    "space": ["NASA", "WARP", "XAR", "MARS", "DFEN"],
+    "satellites": ["NASA", "WARP", "MARS", "XTL"],
+    "aerospace": ["XAR", "NASA", "WARP", "DFEN"],
+    "medical devices": ["XHE", "XLV", "CURE", "HRTS"],
+    "health care equipment": ["XHE", "XLV"],
+    "biotech": ["XBI", "BBH", "XLV"],
+    "pharmaceuticals": ["PPH", "XPH", "XLV"],
+    "banks": ["KRE", "KBE", "XLF", "DPST", "FAS"],
+    "regional banks": ["KRE", "DPST", "KBE"],
+    "insurance": ["KIE", "XLF"],
+    "retail": ["XRT", "RTH", "XLY", "RETL"],
+    "software": ["XSW", "XLK", "XNTK", "XITK", "WEBL", "TECL"],
+    "cloud software": ["XSW", "XLK", "XNTK", "XITK"],
+    "internet": ["WEBL", "XLC", "XLK", "BUZZ"],
+    "communication services": ["XLC", "XTL"],
+    "telecom": ["XTL", "XLC"],
+    "uranium": ["NLR", "URA", "UX"],
+    "silver": ["SIL"],
+    "lithium": ["LIT"],
+    "copper": ["COPX", "EMET"],
+    "gold": ["GDX", "GDXJ", "GOEX"],
+    "oil services": ["OIH", "XES", "XLE"],
+    "refiners": ["CRAK", "XLE"],
+    "utilities": ["XLU", "UTSL", "VOLT", "SMOG"],
+    "power": ["VOLT", "XLU", "UTSL"],
+    "defense": ["XAR", "DFEN", "ARMY"],
+    "ai": ["CHAT", "XLK", "TECL"],
+    "generative ai": ["CHAT"],
+    "robotics": ["IBOT", "HUMN"],
+    "bitcoin": ["HODL", "BITS"],
+    "blockchain": ["BITS", "DAPP"],
+    "digital assets": ["HODL", "BITS", "DAPP"],
+}
+BROAD_SECTOR_ETFS = set(SECTOR_ETF_MAP.values())
+GENERIC_THEME_TAGS = {
+    "technology",
+    "information technology",
+    "finance",
+    "financials",
+    "financial services",
+    "health care",
+    "healthcare",
+    "industrials",
+    "utilities",
+    "energy",
+    "consumer discretionary",
+    "consumer staples",
+    "basic materials",
+    "materials",
+    "real estate",
+    "communication services",
+}
 RS_RATING_REPLAY_THRESHOLDS = (
     195.93,
     117.11,
@@ -83,6 +143,9 @@ class WatchlistEntry:
     setup_label: str
     summary: str
     master_note: str
+    sector: str | None = None
+    industry: str | None = None
+    theme_tags: list[str] | None = None
     event_date: str | None = None
     event_label: str | None = None
     trigger_price: float | None = None
@@ -123,6 +186,266 @@ class RSAnalysis:
     daily_new_high_before_price: pd.Series
     weekly_new_high: pd.Series
     weekly_new_high_before_price: pd.Series
+
+
+def normalize_match_text(text: str | None) -> str:
+    return " ".join((text or "").strip().lower().replace("&", " and ").replace("/", " ").split())
+
+
+def load_json(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_etf_catalog() -> list[dict[str, object]]:
+    if not ETF_CATALOG_PATH.exists():
+        return []
+    payload = load_json(ETF_CATALOG_PATH)
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def load_ticker_theme_overrides() -> dict[str, list[str]]:
+    if not ETF_THEME_OVERRIDES_PATH.exists():
+        return {}
+    payload = load_json(ETF_THEME_OVERRIDES_PATH)
+    if not isinstance(payload, dict):
+        return {}
+    overrides: dict[str, list[str]] = {}
+    for ticker, raw_themes in payload.items():
+        if not isinstance(ticker, str) or not isinstance(raw_themes, list):
+            continue
+        normalized = [
+            normalize_match_text(str(theme))
+            for theme in raw_themes
+            if str(theme).strip()
+        ]
+        if normalized:
+            overrides[ticker.upper()] = normalized
+    return overrides
+
+
+def _contains_theme(haystack_text: str, theme: str) -> bool:
+    if not theme:
+        return False
+    if len(theme) <= 3 and " " not in theme:
+        return theme in haystack_text.split()
+    return theme in haystack_text
+
+
+def infer_theme_tags(
+    ticker: str,
+    profile: dict[str, str] | None,
+    catalog: list[dict[str, object]],
+    overrides: dict[str, list[str]],
+    preset_tags: list[str] | None = None,
+) -> list[str]:
+    tags: list[str] = [normalize_match_text(item) for item in (preset_tags or []) if normalize_match_text(item)]
+    tags.extend(theme for theme in overrides.get(ticker.upper(), []) if theme not in tags)
+    seen = set(tags)
+    profile = profile or {"sector": "Unknown", "industry": "Unknown"}
+    haystack = normalize_match_text(f"{profile.get('sector', '')} {profile.get('industry', '')}")
+    catalog_themes: set[str] = set()
+    for item in catalog:
+        for theme in item.get("match_themes", []):
+            normalized = normalize_match_text(str(theme))
+            if normalized:
+                catalog_themes.add(normalized)
+    for theme in sorted(catalog_themes, key=lambda value: (-len(value), value)):
+        if theme in seen:
+            continue
+        if _contains_theme(haystack, theme):
+            tags.append(theme)
+            seen.add(theme)
+    return tags[:8]
+
+
+def match_etfs_for_context(
+    *,
+    sector: str | None,
+    theme_tags: list[str],
+    catalog: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    sector_key = normalize_match_text(sector)
+    matches: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for etf in catalog:
+        etf_ticker = str(etf.get("ticker", "")).strip().upper()
+        if not etf_ticker or etf_ticker in seen:
+            continue
+        sector_matches = {
+            normalize_match_text(str(value))
+            for value in etf.get("match_sectors", [])
+            if str(value).strip()
+        }
+        theme_matches = {
+            normalize_match_text(str(value))
+            for value in etf.get("match_themes", [])
+            if str(value).strip()
+        }
+        reasons: list[str] = []
+        if sector_key and sector_key in sector_matches:
+            reasons.append(f"sector:{sector}")
+        overlaps = [theme for theme in theme_tags if theme in theme_matches]
+        if overlaps:
+            reasons.extend(f"theme:{theme}" for theme in overlaps)
+        if not reasons:
+            continue
+        seen.add(etf_ticker)
+        matches.append(
+            {
+                "ticker": etf_ticker,
+                "name": str(etf.get("name", "")).strip(),
+                "reason": ", ".join(reasons),
+            }
+        )
+    return matches
+
+
+def is_leveraged_etf(etf_name: str) -> bool:
+    name = etf_name.lower()
+    return "3x" in name or "bull" in name or "premium income" in name
+
+
+def extract_theme_reasons(reason: str) -> list[str]:
+    themes: list[str] = []
+    for part in reason.split(","):
+        normalized = part.strip()
+        if normalized.startswith("theme:"):
+            themes.append(normalize_match_text(normalized.split(":", 1)[1]))
+    return themes
+
+
+def clean_optional_label(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    if normalized.lower() in {"", "unknown", "n/a", "na"}:
+        return None
+    return normalized
+
+
+def compute_etf_strength(
+    etf: str,
+    period: str,
+    history_cache: dict[str, pd.DataFrame],
+) -> dict[str, str]:
+    if etf not in history_cache:
+        history_cache[etf] = add_price_indicators(fetch_history(etf, period))
+    history = history_cache[etf]
+    latest = history.iloc[-1]
+    close = float(latest["Close"])
+    ema21 = float(latest["ema21"])
+    sma50 = float(latest["sma50"]) if not pd.isna(latest["sma50"]) else close
+    prior5 = float(history["Close"].iloc[-6]) if len(history) > 5 else float(history["Close"].iloc[0])
+    prior20 = float(history["Close"].iloc[-21]) if len(history) > 20 else float(history["Close"].iloc[0])
+    ret5 = (close / prior5 - 1) * 100 if prior5 else 0.0
+    ret20 = (close / prior20 - 1) * 100 if prior20 else 0.0
+    rolling_high20 = float(history["High"].tail(20).max()) if len(history) >= 1 else close
+    score = 0
+    if close > ema21:
+        score += 1
+    if close > sma50:
+        score += 1
+    if ret5 > 0:
+        score += 1
+    if ret20 > 0:
+        score += 1
+    if close >= rolling_high20 * 0.97:
+        score += 1
+    if score >= 4:
+        trend = "strong"
+    elif score >= 2:
+        trend = "neutral"
+    else:
+        trend = "weak"
+    return {
+        "etf": etf,
+        "ret5": f"{ret5:+.2f}%",
+        "ret20": f"{ret20:+.2f}%",
+        "trend": trend,
+    }
+
+
+def build_market_context(
+    entry: WatchlistEntry,
+    profile: dict[str, str] | None,
+    period: str,
+    etf_catalog: list[dict[str, object]],
+    theme_overrides: dict[str, list[str]],
+    sector_history_cache: dict[str, pd.DataFrame],
+    matched_etfs: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    profile = profile or {"sector": "Unknown", "industry": "Unknown"}
+    raw_sector = clean_optional_label(profile.get("sector")) or clean_optional_label(entry.sector) or "Unknown"
+    sector = SECTOR_ALIASES.get(raw_sector.strip().lower(), raw_sector)
+    industry = clean_optional_label(profile.get("industry")) or clean_optional_label(entry.industry) or "Unknown"
+    if entry.theme_tags:
+        theme_tags = [normalize_match_text(item) for item in entry.theme_tags if normalize_match_text(item)]
+    else:
+        theme_tags = infer_theme_tags(
+            entry.ticker,
+            {"sector": sector, "industry": industry},
+            etf_catalog,
+            theme_overrides,
+            preset_tags=entry.theme_tags,
+        )
+    matches = matched_etfs if matched_etfs is not None else match_etfs_for_context(sector=sector, theme_tags=theme_tags, catalog=etf_catalog)
+    sector_etf = SECTOR_ETF_MAP.get(sector)
+    sector_strength = compute_etf_strength(sector_etf, period, sector_history_cache) if sector_etf else None
+
+    display_candidates = [item for item in matches if item["ticker"] != sector_etf]
+    specific_candidates = [
+        item
+        for item in display_candidates
+        if any(theme not in GENERIC_THEME_TAGS for theme in extract_theme_reasons(item["reason"]))
+    ]
+    display_candidates = specific_candidates
+    non_leveraged = [item for item in display_candidates if not is_leveraged_etf(item["name"])]
+    if non_leveraged:
+        display_candidates = non_leveraged
+
+    preferred: list[str] = []
+    for theme in theme_tags:
+        preferred.extend(ETF_DISPLAY_PRIORITY.get(theme, []))
+    ordered_theme_etfs: list[dict[str, str]] = []
+    used_etfs: set[str] = set()
+    by_ticker = {item["ticker"]: item for item in display_candidates}
+    for etf in preferred:
+        if etf in by_ticker and etf not in used_etfs:
+            ordered_theme_etfs.append(by_ticker[etf])
+            used_etfs.add(etf)
+    for item in sorted(display_candidates, key=lambda entry: entry["ticker"]):
+        if item["ticker"] not in used_etfs:
+            ordered_theme_etfs.append(item)
+            used_etfs.add(item["ticker"])
+
+    theme_strengths: list[dict[str, str]] = []
+    for item in ordered_theme_etfs[:4]:
+        strength = compute_etf_strength(item["ticker"], period, sector_history_cache)
+        theme_strengths.append(
+            {
+                "ticker": item["ticker"],
+                "name": item["name"],
+                "reason": item["reason"],
+                "ret5": strength["ret5"],
+                "ret20": strength["ret20"],
+                "trend": strength["trend"],
+            }
+        )
+
+    industry_etf = theme_strengths[0]["ticker"] if theme_strengths else (sector_etf or "n/a")
+    industry_trend = theme_strengths[0]["trend"] if theme_strengths else (sector_strength or {}).get("trend", "n/a")
+    return {
+        "sector": sector,
+        "industry": industry,
+        "theme_tags": theme_tags,
+        "sector_etf": sector_etf or "n/a",
+        "sector_ret5": (sector_strength or {}).get("ret5", "n/a"),
+        "sector_ret20": (sector_strength or {}).get("ret20", "n/a"),
+        "sector_trend": (sector_strength or {}).get("trend", "n/a"),
+        "industry_etf": industry_etf,
+        "industry_trend": industry_trend,
+        "theme_strengths": theme_strengths,
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -211,6 +534,65 @@ def fetch_company_profile(ticker: str) -> dict[str, str]:
     sector = asset_profile.get("sector") or summary_profile.get("sector") or "Unknown"
     industry = asset_profile.get("industry") or summary_profile.get("industry") or "Unknown"
     return {"sector": sector, "industry": industry}
+
+
+def load_ticker_context_map(db_path: Path = ETF_MATCH_DB_PATH) -> dict[str, dict[str, object]]:
+    if not db_path.exists():
+        return {}
+    connection = sqlite3.connect(db_path)
+    try:
+        metadata_rows = connection.execute(
+            """
+            SELECT ticker, sector, industry, exchange
+            FROM ticker_metadata
+            """
+        ).fetchall()
+        theme_rows = connection.execute(
+            """
+            SELECT ticker, theme
+            FROM ticker_themes
+            ORDER BY ticker, theme
+            """
+        ).fetchall()
+        match_rows = connection.execute(
+            """
+            SELECT ticker, etf_ticker, etf_name, match_reason
+            FROM ticker_etf_matches
+            ORDER BY ticker, etf_ticker
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+
+    context: dict[str, dict[str, object]] = {}
+    for ticker, sector, industry, exchange in metadata_rows:
+        symbol = str(ticker).strip().upper()
+        if not symbol:
+            continue
+        context[symbol] = {
+            "sector": sector,
+            "industry": industry,
+            "exchange": exchange,
+            "theme_tags": [],
+            "matched_etfs": [],
+        }
+    for ticker, theme in theme_rows:
+        symbol = str(ticker).strip().upper()
+        if symbol not in context:
+            context[symbol] = {"sector": None, "industry": None, "exchange": None, "theme_tags": [], "matched_etfs": []}
+        context[symbol]["theme_tags"].append(str(theme))
+    for ticker, etf_ticker, etf_name, match_reason in match_rows:
+        symbol = str(ticker).strip().upper()
+        if symbol not in context:
+            context[symbol] = {"sector": None, "industry": None, "exchange": None, "theme_tags": [], "matched_etfs": []}
+        context[symbol]["matched_etfs"].append(
+            {
+                "ticker": str(etf_ticker),
+                "name": str(etf_name),
+                "reason": str(match_reason),
+            }
+        )
+    return context
 
 
 def add_price_indicators(frame: pd.DataFrame) -> pd.DataFrame:
@@ -664,52 +1046,23 @@ def build_rr_comment(latest_close: float, entry_price: float, stop_price: float,
 
 
 def build_sector_snapshot(
+    entry: WatchlistEntry,
     profile: dict[str, str] | None,
     period: str,
+    etf_catalog: list[dict[str, object]],
+    theme_overrides: dict[str, list[str]],
     sector_history_cache: dict[str, pd.DataFrame],
-) -> dict[str, str]:
-    profile = profile or {"sector": "Unknown", "industry": "Unknown"}
-    raw_sector = profile.get("sector", "Unknown")
-    sector = SECTOR_ALIASES.get(raw_sector.strip().lower(), raw_sector)
-    industry = profile.get("industry", "Unknown")
-    industry_lower = industry.lower()
-    etf = next((candidate for keyword, candidate in INDUSTRY_ETF_KEYWORDS if keyword in industry_lower), None)
-    if not etf:
-        etf = SECTOR_ETF_MAP.get(sector)
-    if not etf:
-        return {
-            "sector": sector,
-            "industry": industry,
-            "etf": "n/a",
-            "ret5": "n/a",
-            "ret20": "n/a",
-            "trend": "n/a",
-        }
-
-    if etf not in sector_history_cache:
-        sector_history_cache[etf] = add_price_indicators(fetch_history(etf, period))
-
-    history = sector_history_cache[etf]
-    latest = history.iloc[-1]
-    close = float(latest["Close"])
-    prior5 = float(history["Close"].iloc[-6]) if len(history) > 5 else float(history["Close"].iloc[0])
-    prior20 = float(history["Close"].iloc[-21]) if len(history) > 20 else float(history["Close"].iloc[0])
-    ret5 = (close / prior5 - 1) * 100 if prior5 else 0.0
-    ret20 = (close / prior20 - 1) * 100 if prior20 else 0.0
-    if close > float(latest["ema21"]) and close > float(latest["sma50"]) and ret20 > 0:
-        trend = "strong"
-    elif close > float(latest["sma50"]) or ret5 > 0:
-        trend = "neutral"
-    else:
-        trend = "weak"
-    return {
-        "sector": sector,
-        "industry": industry,
-        "etf": etf,
-        "ret5": f"{ret5:+.2f}%",
-        "ret20": f"{ret20:+.2f}%",
-        "trend": trend,
-    }
+    matched_etfs: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    return build_market_context(
+        entry=entry,
+        profile=profile,
+        period=period,
+        etf_catalog=etf_catalog,
+        theme_overrides=theme_overrides,
+        sector_history_cache=sector_history_cache,
+        matched_etfs=matched_etfs,
+    )
 
 
 def render_watchlist_chart(
@@ -1162,24 +1515,35 @@ def render_watchlist_chart(
             f'<text x="{right_panel_x}" y="{250 + index * 23}" fill="#e2e8f0" font-size="14" font-family="Menlo, Consolas, monospace">{escape(line)}</text>'
         )
 
-    sector_value = (sector_snapshot.get("sector") or "").strip().lower()
+    sector_value = str(sector_snapshot.get("sector") or "").strip().lower()
     show_sector_snapshot = sector_value not in {"", "unknown", "n/a"}
     cursor_y = 250 + len(info_lines) * 23 + 22
     if show_sector_snapshot:
         svg.append(
-            f'<text x="{right_panel_x}" y="{cursor_y}" fill="#38bdf8" font-size="14" font-family="Menlo, Consolas, monospace">Sector Snapshot</text>'
+            f'<text x="{right_panel_x}" y="{cursor_y}" fill="#38bdf8" font-size="14" font-family="Menlo, Consolas, monospace">Market Context</text>'
         )
+        theme_tags = list(sector_snapshot.get("theme_tags", []))
+        theme_text = ", ".join(theme_tags[:4]) if theme_tags else "n/a"
         sector_lines = [
-            f"Sector: {sector_snapshot['sector']} | ETF: {sector_snapshot['etf']}",
+            f"Sector: {sector_snapshot['sector']} | ETF: {sector_snapshot['sector_etf']}",
             f"Industry: {sector_snapshot['industry']}",
-            f"Sector 5d: {sector_snapshot['ret5']} | 20d: {sector_snapshot['ret20']}",
-            f"Sector trend: {sector_snapshot['trend']}",
+            f"Themes: {theme_text}",
+            f"Sector 5d: {sector_snapshot['sector_ret5']} | 20d: {sector_snapshot['sector_ret20']}",
+            f"Sector trend: {sector_snapshot['sector_trend']} | Industry ETF: {sector_snapshot['industry_etf']} ({sector_snapshot['industry_trend']})",
         ]
         for index, line in enumerate(sector_lines):
             svg.append(
                 f'<text x="{right_panel_x}" y="{cursor_y + 22 + index * 18}" fill="#f8fafc" font-size="13" font-family="Menlo, Consolas, monospace">{escape(line)}</text>'
             )
-        cursor_y += 22 + len(sector_lines) * 18 + 28
+        cursor_y += 22 + len(sector_lines) * 18 + 12
+        for theme_index, strength in enumerate(list(sector_snapshot.get("theme_strengths", []))[:4]):
+            strength_line = (
+                f"{strength['ticker']} {strength['trend']} | 5d {strength['ret5']} | 20d {strength['ret20']}"
+            )
+            svg.append(
+                f'<text x="{right_panel_x}" y="{cursor_y + theme_index * 18}" fill="#cbd5e1" font-size="12" font-family="Menlo, Consolas, monospace">{escape(strength_line)}</text>'
+            )
+        cursor_y += max(0, len(list(sector_snapshot.get("theme_strengths", []))[:4])) * 18 + 16
 
     entry_header_y = cursor_y
     svg.append(
@@ -1460,8 +1824,10 @@ def main() -> int:
     charts_dir.mkdir(parents=True, exist_ok=True)
 
     benchmark_history = fetch_history(args.benchmark, period=args.period)
-    profile_cache: dict[str, dict[str, str]] = {}
+    ticker_context_map = load_ticker_context_map()
     sector_history_cache: dict[str, pd.DataFrame] = {}
+    etf_catalog = load_etf_catalog()
+    theme_overrides = load_ticker_theme_overrides()
     generated: list[WatchlistEntry] = []
     summaries: list[dict[str, object]] = []
     failed: dict[str, str] = {}
@@ -1473,13 +1839,25 @@ def main() -> int:
                 ipo_history = fetch_history(entry.ticker, period="max")
             except Exception:
                 ipo_history = history
-            if entry.ticker not in profile_cache:
-                profile_cache[entry.ticker] = fetch_company_profile(entry.ticker)
-            profile = profile_cache[entry.ticker]
+            context = ticker_context_map.get(entry.ticker, {})
+            if entry.sector is None and context.get("sector"):
+                entry.sector = str(context.get("sector"))
+            if entry.industry is None and context.get("industry"):
+                entry.industry = str(context.get("industry"))
+            if not entry.theme_tags and context.get("theme_tags"):
+                entry.theme_tags = [str(item) for item in context.get("theme_tags", []) if str(item).strip()]
+            profile = {
+                "sector": entry.sector or "Unknown",
+                "industry": entry.industry or "Unknown",
+            }
             sector_snapshot = build_sector_snapshot(
+                entry=entry,
                 profile=profile,
                 period=args.period,
+                etf_catalog=etf_catalog,
+                theme_overrides=theme_overrides,
                 sector_history_cache=sector_history_cache,
+                matched_etfs=list(context.get("matched_etfs", [])) if context else None,
             )
             chart_path = render_watchlist_chart(
                 entry=entry,

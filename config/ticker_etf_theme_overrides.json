@@ -1,0 +1,17 @@
+{
+  "MASI": ["medtech", "health care equipment", "medical devices"],
+  "MOD": ["consumer discretionary"],
+  "FER": ["infrastructure", "transportation"],
+  "BNS": ["banks"],
+  "HAFN": ["shipping", "transportation"],
+  "KEN": ["utilities", "power"],
+  "DY": ["infrastructure", "communication infrastructure", "industrials"],
+  "BMO": ["banks"],
+  "MANU": ["sports", "consumer discretionary"],
+  "KC": ["china", "cloud software", "technology"],
+  "SVM": ["silver", "miners", "basic materials"],
+  "SQM": ["lithium", "battery", "basic materials"],
+  "VSAT": ["space", "satellites", "communication services"],
+  "MRVL": ["semiconductors", "technology"],
+  "SMTC": ["semiconductors", "technology"]
+}

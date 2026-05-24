@@ -34,6 +34,7 @@ def build_pre_earnings_watchlist(hits: list[PreEarningsHit]) -> list[dict[str, o
         watchlist.append(
             {
                 "ticker": hit.ticker,
+                "sector": getattr(hit, "sector", None),
                 "setup_label": "Pre-earnings focus",
                 "summary": summary,
                 "master_note": _format_note(hit),

@@ -32,6 +32,7 @@ def build_vcp_watchlist(hits: list[VcpHit]) -> list[dict[str, object]]:
         watchlist.append(
             {
                 "ticker": hit.ticker,
+                "sector": getattr(hit, "sector", None),
                 "setup_label": "VCP",
                 "summary": summary,
                 "master_note": _format_note(hit),

@@ -30,6 +30,7 @@ NASDAQ_HEADERS = {
 class UniverseTicker:
     symbol: str
     sector: str | None = None
+    industry: str | None = None
     exchange: str | None = None
 
 
@@ -58,10 +59,12 @@ def fetch_exchange_universe(exchange: str, timeout_seconds: int) -> list[Univers
         if not _is_supported_symbol(symbol):
             continue
         sector = row.get("sector")
+        industry = row.get("industry")
         tickers.append(
             UniverseTicker(
                 symbol=symbol,
                 sector=sector if isinstance(sector, str) and sector.strip() else None,
+                industry=industry if isinstance(industry, str) and industry.strip() else None,
                 exchange=exchange.upper(),
             )
         )

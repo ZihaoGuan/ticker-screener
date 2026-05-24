@@ -25,6 +25,10 @@ The RS engine is vendored from `cookstock` so GitHub Actions can run without dep
 - `scripts/run_weekly_htf_pullback_screen.py`: produces weekly RS + HTF 8-week pullback raw results and watchlist JSON
 - `scripts/run_htf_runup_screen.py`: produces raw results and watchlist JSON for tickers up 100% or more inside the last 8 weeks
 - `scripts/run_gap_fill_screen.py`: produces raw results and watchlist JSON for potential overhead gap-fill setups
+- `scripts/run_pre_earnings_ma_stack_screen.py`: produces raw results and watchlist JSON for next-week earnings names with `MA20 > MA50 > MA200`
+- `scripts/build_pre_earnings_calendar_index.py`: rewrites the pre-earnings MA stack report index with a next-week earnings calendar table linked to each chart
+- `scripts/build_candidate_etf_table.py`: builds a local table mapping candidate tickers to sector-matched or theme-matched ETFs from the maintained ETF catalog
+- `scripts/build_universe_etf_match_db.py`: builds a local SQLite database for full-universe ticker metadata plus ETF matches derived from the maintained ETF catalog and ticker theme overrides
 - `scripts/filter_low_market_cap_hits.py`: checks passed tickers with `yfinance`, removes names under `$1B` market cap from current artifacts, and writes shared auto excludes to `config/auto_exclude_tickers/shared-low-cap.txt`
 - `scripts/run_vcp_screen.py`: produces VCP raw results and watchlist JSON
 - `scripts/run_peg_screen.py`: produces PEG raw results and watchlist JSON
@@ -151,6 +155,39 @@ Provider priority for this workflow is currently:
 - `yfinance` as the default financials / institutional ownership source and final earnings fallback
 - `AKShare` as an additional fallback for quarterly revenue history when `yfinance` comes up empty
 
+Run the next-week earnings MA stack screener:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/run_pre_earnings_ma_stack_screen.py
+```
+
+This workflow filters next-week earnings candidates for:
+
+- next-week earnings
+- `MA20 > MA50 > MA200`
+- shared post-screen market-cap filter above `$1B`
+
+Build a SQLite ETF-match database for a small smoke subset:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/build_universe_etf_match_db.py \
+  --tickers MRVL VSAT MASI SVM
+```
+
+Build the full-universe SQLite ETF-match database:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/build_universe_etf_match_db.py
+```
+
+The generated database defaults to:
+
+- `data/universe_etf_matches.sqlite`
+
+The SQLite schema lives in:
+
+- `sql/universe_etf_match_schema.sql`
+
 Render charts from the generated watchlist:
 
 ```bash
@@ -233,6 +270,9 @@ The Cup & Handle workflow in [.github/workflows/cup-handle-screen-render.yml](/U
 The overlap workflow in [.github/workflows/daily-overlap-summary.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/daily-overlap-summary.yml) summarizes overlap across daily `RS`, `Sean PEG`, `Legacy PEG`, `VCP`, `Cup and Handle`, `Weekly HTF 8W Pullback`, `8W 100% Runup`, and `Gap Fill`. It runs on its own schedule at `UTC 02:00`, which corresponds to New Zealand `2pm` during standard time and `3pm` during daylight saving because GitHub Actions schedules are UTC-based. It distinguishes missing upstream watchlist files from valid `0`-hit runs, writes JSON, text, and HTML summary artifacts, and follows the same R2 publish plus Discord notify pattern as the other first-class workflows.
 
 The pre-earnings workflow in [.github/workflows/pre-earnings-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-screen-render.yml) screens the next-week earnings watchlist, renders charts, and follows the same R2/Discord pattern as the RS and PEG workflows. It currently runs manually with optional `limit` and `reference_date` inputs.
+
+The pre-earnings MA stack workflow in [.github/workflows/pre-earnings-ma-stack-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/pre-earnings-ma-stack-screen-render.yml) screens the next-week earnings watchlist for `MA20 > MA50 > MA200`, then applies the shared post-screen market-cap filter above `$1B`. It currently runs manually with optional `limit` and `reference_date` inputs.
+It is now scheduled once each Saturday on the GitHub cron schedule and its rendered `index.html` includes a next-week earnings calendar table whose ticker links jump to the corresponding chart cards further down the page.
 
 The earnings growth workflow in [.github/workflows/earnings-growth-screen-render.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/earnings-growth-screen-render.yml) screens next-week earnings names for explosive growth plus post-earnings reaction behavior. It currently runs manually with optional `limit` and `reference_date` inputs. It now prefers `OpenBB` for the earnings calendar layer, falls back to `AInvest` when `AINVEST_API_KEY` is available, then falls back to `yfinance`, with `AKShare` as an extra fallback for quarterly revenue history.
 

@@ -27,6 +27,7 @@ def build_gap_fill_watchlist(hits: list[GapFillHit]) -> list[dict[str, object]]:
         watchlist.append(
             {
                 "ticker": hit.ticker,
+                "sector": getattr(hit, "sector", None),
                 "setup_label": "Potential Overhead Gap Fill",
                 "summary": summary,
                 "master_note": _format_note(hit),
