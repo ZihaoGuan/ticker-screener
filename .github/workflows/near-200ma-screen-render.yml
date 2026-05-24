@@ -1,0 +1,369 @@
+name: Near 200D MA Screen And Render
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Optional universe limit for smoke runs
+        required: false
+        type: string
+  schedule:
+    - cron: "20 1 * * 2-6"
+
+permissions:
+  contents: write
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    outputs:
+      date_label: ${{ steps.meta.outputs.date_label }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-earnings-growth.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compute artifact metadata
+        id: meta
+        run: echo "date_label=$(date +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Run near 200D MA screen
+        env:
+          MPLBACKEND: Agg
+          MPLCONFIGDIR: /tmp/mpl
+        run: |
+          if [ -n "${{ github.event.inputs.limit }}" ]; then
+            python scripts/run_near_200ma_screen.py --limit "${{ github.event.inputs.limit }}"
+          else
+            python scripts/run_near_200ma_screen.py
+          fi
+
+      - name: Filter low market-cap hits
+        run: |
+          python scripts/filter_low_market_cap_hits.py \
+            --raw-file "artifacts/raw/near_200ma_${{ steps.meta.outputs.date_label }}.json" \
+            --watchlist-file "artifacts/watchlists/near_200ma_${{ steps.meta.outputs.date_label }}.json" \
+            --summary-file "artifacts/raw/near_200ma_run_summary_${{ steps.meta.outputs.date_label }}.json" \
+            --exclude-file "config/auto_exclude_tickers/shared-low-cap.txt" \
+            --pipeline-name "Shared screener workflows"
+
+      - name: Commit updated low-cap exclude file
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          EXCLUDE_FILE="config/auto_exclude_tickers/shared-low-cap.txt"
+          if [ -z "$(git status --porcelain -- "$EXCLUDE_FILE")" ]; then
+            echo "No low-cap exclusion changes detected"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$EXCLUDE_FILE"
+          git commit -m "Update shared low-cap exclusions"
+          git pull --rebase origin "${TARGET_BRANCH}"
+          git push origin "HEAD:${TARGET_BRANCH}"
+
+      - name: Upload raw results
+        uses: actions/upload-artifact@v4
+        with:
+          name: near-200ma-screen-raw-${{ steps.meta.outputs.date_label }}
+          path: |
+            artifacts/raw/near_200ma_${{ steps.meta.outputs.date_label }}.json
+            artifacts/raw/near_200ma_run_summary_${{ steps.meta.outputs.date_label }}.json
+
+      - name: Upload watchlist
+        uses: actions/upload-artifact@v4
+        with:
+          name: near-200ma-screen-watchlist-${{ steps.meta.outputs.date_label }}
+          path: artifacts/watchlists/near_200ma_${{ steps.meta.outputs.date_label }}.json
+
+  render:
+    runs-on: ubuntu-latest
+    needs: screen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-earnings-growth.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Download watchlist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: near-200ma-screen-watchlist-${{ needs.screen.outputs.date_label }}
+          path: artifacts/watchlists
+
+      - name: Resolve watchlist path
+        run: |
+          WATCHLIST_FILE="$(find artifacts/watchlists -name 'near_200ma_*.json' | head -n 1)"
+          echo "WATCHLIST_FILE=$WATCHLIST_FILE" >> "$GITHUB_ENV"
+
+      - name: Render charts
+        env:
+          MPLBACKEND: Agg
+          MPLCONFIGDIR: /tmp/mpl
+        run: |
+          python scripts/render_rs_watchlist.py \
+            --watchlist-file "$WATCHLIST_FILE" \
+            --output-dir "artifacts/output/near_200ma_${{ needs.screen.outputs.date_label }}"
+
+      - name: Build grouped index
+        run: |
+          python scripts/build_near_200ma_index.py \
+            --watchlist-file "$WATCHLIST_FILE" \
+            --output-dir "artifacts/output/near_200ma_${{ needs.screen.outputs.date_label }}" \
+            --title "Near 200D MA"
+
+      - name: Upload rendered charts
+        uses: actions/upload-artifact@v4
+        with:
+          name: near-200ma-screen-rendered-${{ needs.screen.outputs.date_label }}
+          path: artifacts/output/near_200ma_${{ needs.screen.outputs.date_label }}
+
+  publish-r2:
+    runs-on: ubuntu-latest
+    needs:
+      - screen
+      - render
+    if: ${{ needs.screen.result == 'success' && needs.render.result == 'success' }}
+    concurrency:
+      group: r2-root-index-update
+      cancel-in-progress: false
+    outputs:
+      r2_prefix: ${{ steps.publish.outputs.r2_prefix }}
+      r2_index_url: ${{ steps.publish.outputs.r2_index_url }}
+    steps:
+      - name: Check R2 configuration
+        id: r2-config
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [ -n "${R2_ACCOUNT_ID}" ] && [ -n "${R2_ACCESS_KEY_ID}" ] && [ -n "${R2_SECRET_ACCESS_KEY}" ] && [ -n "${R2_BUCKET}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-earnings-growth.txt
+
+      - name: Install AWS CLI
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        run: python -m pip install awscli
+
+      - name: Download raw results artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: near-200ma-screen-raw-${{ needs.screen.outputs.date_label }}
+          path: artifacts/raw
+
+      - name: Download watchlist artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: near-200ma-screen-watchlist-${{ needs.screen.outputs.date_label }}
+          path: artifacts/watchlists
+
+      - name: Download rendered charts artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: near-200ma-screen-rendered-${{ needs.screen.outputs.date_label }}
+          path: artifacts/output/near_200ma_${{ needs.screen.outputs.date_label }}
+
+      - name: Upload artifacts to R2
+        id: publish
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+          DATE_LABEL: ${{ needs.screen.outputs.date_label }}
+        run: |
+          set -euo pipefail
+          R2_PREFIX="near-200ma-screen/${DATE_LABEL}"
+          ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          SUMMARY_FILE="artifacts/raw/near_200ma_run_summary_${DATE_LABEL}.json"
+          RAW_RESULTS_URL="/${R2_PREFIX}/raw/near_200ma_${DATE_LABEL}.json"
+          WATCHLIST_URL="/${R2_PREFIX}/watchlists/near_200ma_${DATE_LABEL}.json"
+          INDEX_URL="/${R2_PREFIX}/rendered/index.html"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/raw/near_200ma_${DATE_LABEL}.json" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/raw/near_200ma_${DATE_LABEL}.json"
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/raw/near_200ma_run_summary_${DATE_LABEL}.json" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/raw/near_200ma_run_summary_${DATE_LABEL}.json"
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/watchlists/near_200ma_${DATE_LABEL}.json" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/watchlists/near_200ma_${DATE_LABEL}.json"
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/output/near_200ma_${DATE_LABEL}/" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/rendered/" \
+            --recursive
+
+          if [ -n "${R2_PUBLIC_BASE_URL}" ]; then
+            BASE_URL="${R2_PUBLIC_BASE_URL%/}"
+            RAW_RESULTS_URL="${BASE_URL}/${R2_PREFIX}/raw/near_200ma_${DATE_LABEL}.json"
+            WATCHLIST_URL="${BASE_URL}/${R2_PREFIX}/watchlists/near_200ma_${DATE_LABEL}.json"
+            INDEX_URL="${BASE_URL}/${R2_PREFIX}/rendered/index.html"
+          fi
+
+          mkdir -p artifacts/r2
+          if aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "s3://${R2_BUCKET}/watchlist_index_manifest.json" \
+            "artifacts/r2/watchlist_index_manifest.json" 2>/dev/null; then
+            echo "Loaded existing root watchlist manifest from R2"
+          else
+            echo "No existing root watchlist manifest found in R2; starting fresh"
+            echo '{"updated_at": null, "entries": []}' > artifacts/r2/watchlist_index_manifest.json
+          fi
+
+          TOTAL_TICKERS=$(python -c 'import json, os; from pathlib import Path; p = Path(f"artifacts/raw/near_200ma_run_summary_{os.environ[\"DATE_LABEL\"]}.json"); d = json.loads(p.read_text()); print(int(d.get("total_tickers", 0)))')
+          PASSED_TICKERS=$(python -c 'import json, os; from pathlib import Path; p = Path(f"artifacts/raw/near_200ma_run_summary_{os.environ[\"DATE_LABEL\"]}.json"); d = json.loads(p.read_text()); print(int(d.get("passed_tickers", 0)))')
+          FAILURE_COUNT=$(python -c 'import json, os; from pathlib import Path; p = Path(f"artifacts/raw/near_200ma_run_summary_{os.environ[\"DATE_LABEL\"]}.json"); d = json.loads(p.read_text()); print(len(d.get("failed_tickers", [])))')
+
+          python scripts/build_r2_root_index.py \
+            --manifest-in artifacts/r2/watchlist_index_manifest.json \
+            --manifest-out artifacts/r2/watchlist_index_manifest.json \
+            --html-out artifacts/r2/index.html \
+            --pipeline-id near-200ma-screen \
+            --pipeline-name "Near 200D MA" \
+            --date-label "${DATE_LABEL}" \
+            --summary-file "${SUMMARY_FILE}" \
+            --total-tickers "${TOTAL_TICKERS}" \
+            --passed-tickers "${PASSED_TICKERS}" \
+            --failure-count "${FAILURE_COUNT}" \
+            --rendered-index-url "${INDEX_URL}" \
+            --watchlist-url "${WATCHLIST_URL}" \
+            --raw-results-url "${RAW_RESULTS_URL}" \
+            --run-url "${RUN_URL}" \
+            --source-label "Near 200D MA"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/r2/watchlist_index_manifest.json" \
+            "s3://${R2_BUCKET}/watchlist_index_manifest.json"
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "artifacts/r2/index.html" \
+            "s3://${R2_BUCKET}/index.html"
+
+          {
+            echo "r2_prefix=${R2_PREFIX}"
+            echo "r2_index_url=${INDEX_URL}"
+          } >> "$GITHUB_OUTPUT"
+
+  notify:
+    runs-on: ubuntu-latest
+    needs:
+      - screen
+      - render
+      - publish-r2
+    if: ${{ always() }}
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download raw results artifact
+        if: ${{ needs.screen.outputs.date_label != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: near-200ma-screen-raw-${{ needs.screen.outputs.date_label }}
+          path: artifacts/raw
+
+      - name: Build Discord payload
+        env:
+          SCREEN_RESULT: ${{ needs.screen.result }}
+          RENDER_RESULT: ${{ needs.render.result }}
+          PUBLISH_RESULT: ${{ needs.publish-r2.result }}
+          R2_INDEX_URL: ${{ needs.publish-r2.outputs.r2_index_url }}
+          DATE_LABEL: ${{ needs.screen.outputs.date_label }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          date_label = os.getenv("DATE_LABEL", "unknown-date")
+          summary_path = Path("artifacts/raw") / f"near_200ma_run_summary_{date_label}.json"
+          summary = {}
+          if summary_path.exists():
+              summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+          payload_lines = [
+              f"{':white_check_mark:' if os.getenv('SCREEN_RESULT') == 'success' and os.getenv('RENDER_RESULT') == 'success' else ':warning:'} Near 200D MA pipeline finished for `{date_label}`",
+              f"Screen job: `{os.getenv('SCREEN_RESULT', 'unknown')}`",
+              f"Render job: `{os.getenv('RENDER_RESULT', 'unknown')}`",
+              f"R2 publish job: `{os.getenv('PUBLISH_RESULT', 'skipped')}`",
+          ]
+          if summary:
+              payload_lines.extend(
+                  [
+                      f"Tickers screened: `{summary.get('total_tickers', 'n/a')}`",
+                      f"Passed tickers: `{summary.get('passed_tickers', 'n/a')}`",
+                      f"Bull case: `{summary.get('bull_count', 'n/a')}`",
+                      f"Bear case: `{summary.get('bear_count', 'n/a')}`",
+                      f"Failures: `{len(summary.get('failed_tickers', []))}`",
+                  ]
+              )
+          r2_index_url = os.getenv("R2_INDEX_URL", "").strip()
+          if r2_index_url:
+              payload_lines.append(f"Rendered charts: {r2_index_url}")
+          run_url = os.getenv("GITHUB_RUN_URL", "").strip()
+          if run_url:
+              payload_lines.append(f"Run details: {run_url}")
+          Path("discord_payload.json").write_text(json.dumps({"content": "\\n".join(payload_lines)}), encoding="utf-8")
+          PY
+
+      - name: Send Discord notification
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            --data @discord_payload.json \
+            "$DISCORD_WEBHOOK_URL"
