@@ -21,6 +21,9 @@ on:
   schedule:
     - cron: "10 1 * * 2-6"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   render:
     runs-on: ubuntu-latest
