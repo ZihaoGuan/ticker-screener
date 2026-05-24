@@ -24,6 +24,10 @@ class HtfRunupHit:
     runup_high: float
     runup_low_date: str
     runup_high_date: str
+    has_htf_shape: bool
+    htf_grade: str | None
+    htf_score: float | None
+    htf_trade_plan: str | None
     reasons: list[str]
 
     def to_dict(self) -> dict[str, object]:
@@ -55,12 +59,18 @@ def _to_hit(ticker: UniverseTicker, benchmark_ticker: str, summary: dict[str, ob
     pullback_pct = float(summary["pullback_from_high_pct"])
     current_price = float(summary["current_price"])
     ema_21 = float(summary["ema_21"])
+    htf_grade = summary.get("htf_grade")
+    htf_score = summary.get("htf_score")
+    htf_trade_plan = summary.get("htf_trade_plan")
+    has_htf_shape = bool(summary.get("has_htf_shape"))
     reasons = [
         f"{runup_pct:.1f}% runup in {int(summary['window_days'])} sessions",
         f"{pullback_pct:.1f}% off the runup high",
         f"holding above 21 EMA ({ema_21:.2f})",
         "monitor for HTF setup",
     ]
+    if has_htf_shape and htf_grade:
+        reasons.append(f"current HTF shape {str(htf_grade).upper()}")
     return HtfRunupHit(
         ticker=ticker.symbol,
         sector=ticker.sector,
@@ -76,6 +86,10 @@ def _to_hit(ticker: UniverseTicker, benchmark_ticker: str, summary: dict[str, ob
         runup_high=float(summary["runup_high"]),
         runup_low_date=str(summary.get("runup_low_date") or "NA"),
         runup_high_date=str(summary.get("runup_high_date") or "NA"),
+        has_htf_shape=has_htf_shape,
+        htf_grade=str(htf_grade) if htf_grade else None,
+        htf_score=float(htf_score) if htf_score is not None else None,
+        htf_trade_plan=str(htf_trade_plan) if htf_trade_plan else None,
         reasons=reasons,
     )
 
@@ -126,14 +140,26 @@ def run_htf_runup_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Ht
                     f"runup {runup_pct:.1f}% < {min_runup_pct:.1f}% | passed={len(hits)}"
                 )
                 continue
+            htf_summary = financials.get_htf_leader_summary(
+                sectorName=ticker.sector,
+                benchmarkTicker=config.benchmark_ticker,
+            )
+            htf_grade = str(htf_summary.get("htf_grade", "")).upper() if htf_summary else ""
+            runup_summary["has_htf_shape"] = htf_grade in {"A", "B"}
+            runup_summary["htf_grade"] = htf_grade or None
+            runup_summary["htf_score"] = htf_summary.get("htf_score") if htf_summary else None
+            runup_summary["htf_trade_plan"] = htf_summary.get("trade_plan") if htf_summary else None
             runup_summary["ema_21"] = float(ema_21)
             runup_summary["price_above_ema21"] = True
             hits.append(_to_hit(ticker, config.benchmark_ticker, runup_summary))
             latest_hit = hits[-1]
+            htf_suffix = ""
+            if latest_hit.has_htf_shape and latest_hit.htf_score is not None:
+                htf_suffix = f" | HTF {latest_hit.htf_grade} {latest_hit.htf_score:.1f}"
             print(
                 f"[{position}/{total_tickers}] {ticker.symbol} passed: "
                 f"runup {latest_hit.runup_pct:.1f}% pullback {latest_hit.pullback_from_high_pct:.1f}% "
-                f"above 21 EMA {latest_hit.ema_21:.2f} | passed={len(hits)}"
+                f"above 21 EMA {latest_hit.ema_21:.2f}{htf_suffix} | passed={len(hits)}"
             )
         except Exception as exc:
             failures.append({"ticker": ticker.symbol, "error": str(exc)})
@@ -141,6 +167,9 @@ def run_htf_runup_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Ht
 
     hits.sort(
         key=lambda hit: (
+            0 if hit.has_htf_shape else 1,
+            0 if hit.htf_grade == "A" else 1 if hit.htf_grade == "B" else 2,
+            -(hit.htf_score if hit.htf_score is not None else -1.0),
             -hit.runup_pct,
             hit.pullback_from_high_pct,
             hit.ticker,

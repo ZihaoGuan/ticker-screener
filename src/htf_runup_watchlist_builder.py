@@ -15,11 +15,16 @@ def _format_note(hit: HtfRunupHit) -> str:
 def build_htf_runup_watchlist(hits: list[HtfRunupHit]) -> list[dict[str, object]]:
     watchlist: list[dict[str, object]] = []
     for hit in hits:
+        htf_clause = ""
+        if hit.has_htf_shape:
+            score_text = f" {hit.htf_score:.1f}" if hit.htf_score is not None else ""
+            htf_clause = f" Current HTF shape: {hit.htf_grade}{score_text}."
         summary = (
             f"{hit.runup_pct:.1f}% runup in the last {hit.runup_window_days} sessions. "
             f"Current close is above 21 EMA {hit.ema_21:.2f}. "
             f"Current close is {hit.pullback_from_high_pct:.1f}% below the runup high. "
             f"Monitor for a future HTF setup rather than treating this as a direct entry."
+            f"{htf_clause}"
         )
         watchlist.append(
             {
