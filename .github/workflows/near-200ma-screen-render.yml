@@ -259,9 +259,18 @@ jobs:
             echo '{"updated_at": null, "entries": []}' > artifacts/r2/watchlist_index_manifest.json
           fi
 
-          TOTAL_TICKERS=$(python -c 'import json, os; from pathlib import Path; p = Path(f"artifacts/raw/near_200ma_run_summary_{os.environ[\"DATE_LABEL\"]}.json"); d = json.loads(p.read_text()); print(int(d.get("total_tickers", 0)))')
-          PASSED_TICKERS=$(python -c 'import json, os; from pathlib import Path; p = Path(f"artifacts/raw/near_200ma_run_summary_{os.environ[\"DATE_LABEL\"]}.json"); d = json.loads(p.read_text()); print(int(d.get("passed_tickers", 0)))')
-          FAILURE_COUNT=$(python -c 'import json, os; from pathlib import Path; p = Path(f"artifacts/raw/near_200ma_run_summary_{os.environ[\"DATE_LABEL\"]}.json"); d = json.loads(p.read_text()); print(len(d.get("failed_tickers", [])))')
+          eval "$(python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("artifacts/raw") / f"near_200ma_run_summary_{os.environ['DATE_LABEL']}.json"
+          payload = json.loads(path.read_text())
+          print(f"TOTAL_TICKERS={int(payload.get('total_tickers', 0))}")
+          print(f"PASSED_TICKERS={int(payload.get('passed_tickers', 0))}")
+          print(f"FAILURE_COUNT={len(payload.get('failed_tickers', []))}")
+          PY
+          )"
 
           python scripts/build_r2_root_index.py \
             --manifest-in artifacts/r2/watchlist_index_manifest.json \
