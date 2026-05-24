@@ -1780,9 +1780,10 @@ def render_split_montage_pages(
 def load_watchlist_entries(args: argparse.Namespace) -> list[WatchlistEntry]:
     if args.watchlist_file:
         raw_entries = json.loads(Path(args.watchlist_file).read_text())
+        allowed_fields = set(WatchlistEntry.__dataclass_fields__.keys())
         entries: list[WatchlistEntry] = []
         for raw_entry in raw_entries:
-            entry = dict(raw_entry)
+            entry = {key: value for key, value in dict(raw_entry).items() if key in allowed_fields}
             for key in ("trigger_price", "entry_price", "secondary_entry_price", "secondary_entry_low", "secondary_entry_high", "stop_price"):
                 entry[key] = _coerce_optional_float(entry.get(key))
             entries.append(WatchlistEntry(**entry))
