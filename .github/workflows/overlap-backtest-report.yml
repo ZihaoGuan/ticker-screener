@@ -302,10 +302,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: |
-            requirements.txt
-            requirements-earnings-growth.txt
 
       - name: Install AWS CLI
         if: ${{ steps.r2-config.outputs.enabled == 'true' }}
@@ -401,7 +397,10 @@ jobs:
           from pathlib import Path
 
           report_slug = os.environ["REPORT_SLUG"]
-          path = Path("downloaded-backtest") / f"overlap_backtest_{report_slug}.json"
+          candidates = list(Path("downloaded-backtest").rglob(f"overlap_backtest_{report_slug}.json"))
+          if not candidates:
+              raise FileNotFoundError(f"overlap_backtest_{report_slug}.json not found under downloaded-backtest")
+          path = candidates[0]
           payload = json.loads(path.read_text(encoding="utf-8"))
 
           lines = [

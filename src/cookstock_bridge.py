@@ -5,7 +5,6 @@ import datetime as real_dt
 import importlib
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from types import ModuleType
 
 from .config import AppConfig, project_root
@@ -97,12 +96,13 @@ def freeze_cookstock_today(module: ModuleType, as_of_date: real_dt.date | None):
         def today(cls) -> "FrozenDate":
             return cls(as_of_date.year, as_of_date.month, as_of_date.day)
 
-    module.dt = SimpleNamespace(
-        date=FrozenDate,
-        datetime=real_dt.datetime,
-        timedelta=real_dt.timedelta,
-        timezone=real_dt.timezone,
-    )
+    class FrozenDateModule:
+        date = FrozenDate
+
+        def __getattr__(self, name: str):
+            return getattr(real_dt, name)
+
+    module.dt = FrozenDateModule()
     try:
         yield
     finally:
