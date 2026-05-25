@@ -82,16 +82,42 @@ def _load_yfinance():
     return yf
 
 
-def _fetch_history(ticker: str, period: str) -> pd.DataFrame:
+def _period_to_start_date(period: str, as_of_date: dt.date) -> dt.date:
+    value = str(period).strip().lower()
+    if value.endswith("mo"):
+        months = int(value[:-2])
+        return as_of_date - dt.timedelta(days=max(31, months * 31))
+    if value.endswith("y"):
+        years = int(value[:-1])
+        return as_of_date - dt.timedelta(days=max(366, years * 366))
+    if value.endswith("d"):
+        days = int(value[:-1])
+        return as_of_date - dt.timedelta(days=max(30, days))
+    return as_of_date - dt.timedelta(days=550)
+
+
+def _fetch_history(ticker: str, period: str, *, as_of_date: dt.date | None = None) -> pd.DataFrame:
     yf = _load_yfinance()
-    history = yf.download(
-        tickers=ticker,
-        period=period,
-        interval="1d",
-        auto_adjust=False,
-        progress=False,
-        threads=False,
-    )
+    if as_of_date is not None:
+        start_date = _period_to_start_date(period, as_of_date)
+        history = yf.download(
+            tickers=ticker,
+            start=start_date.isoformat(),
+            end=(as_of_date + dt.timedelta(days=1)).isoformat(),
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+        )
+    else:
+        history = yf.download(
+            tickers=ticker,
+            period=period,
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+        )
     if history is None or history.empty:
         raise RuntimeError("No history returned")
     if isinstance(history.columns, pd.MultiIndex):
@@ -418,7 +444,7 @@ def _to_hit(ticker: UniverseTicker, config: AppConfig, df: pd.DataFrame, candida
         ticker=ticker.symbol,
         sector=ticker.sector,
         exchange=ticker.exchange,
-        signal_date=dt.date.today().isoformat(),
+        signal_date=df.index[-1].date().isoformat(),
         benchmark_ticker=config.benchmark_ticker,
         pattern_direction="bullish" if direction == 1 else "bearish",
         breakout_date=_date_at(df, breakout_index),
@@ -448,14 +474,20 @@ def _to_hit(ticker: UniverseTicker, config: AppConfig, df: pd.DataFrame, candida
     )
 
 
-def run_cup_handle_screen(config: AppConfig, tickers: list[UniverseTicker]) -> CupHandleScreenResult:
+def run_cup_handle_screen(
+    config: AppConfig,
+    tickers: list[UniverseTicker],
+    *,
+    as_of_date: dt.date | None = None,
+) -> CupHandleScreenResult:
     hits: list[CupHandleHit] = []
     failures: list[dict[str, str]] = []
+    run_date = as_of_date or dt.date.today()
 
     for position, ticker in enumerate(tickers, start=1):
         print(f"[{position}/{len(tickers)}] screening {ticker.symbol}")
         try:
-            history = _fetch_history(ticker.symbol, config.cup_handle_history_period)
+            history = _fetch_history(ticker.symbol, config.cup_handle_history_period, as_of_date=as_of_date)
             candidate = _find_best_pattern(history, config)
             if candidate is None:
                 continue
@@ -465,7 +497,7 @@ def run_cup_handle_screen(config: AppConfig, tickers: list[UniverseTicker]) -> C
             print(f"screening failed for {ticker.symbol}: {exc}")
 
     return CupHandleScreenResult(
-        run_date=dt.date.today().isoformat(),
+        run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
         total_tickers=len(tickers),
         passed_tickers=len(hits),

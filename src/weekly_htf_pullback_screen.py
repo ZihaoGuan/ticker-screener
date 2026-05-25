@@ -6,7 +6,7 @@ import datetime as dt
 import pandas as pd
 
 from .config import AppConfig
-from .cookstock_bridge import load_configured_cookstock
+from .cookstock_bridge import freeze_cookstock_today, load_configured_cookstock
 from .universe import UniverseTicker
 
 
@@ -175,12 +175,15 @@ def _build_hit(
 def run_weekly_htf_pullback_screen(
     config: AppConfig,
     tickers: list[UniverseTicker],
+    *,
+    as_of_date: dt.date | None = None,
 ) -> WeeklyHtfPullbackScreenResult:
     cookstock = load_configured_cookstock(config)
     hits: list[WeeklyHtfPullbackHit] = []
     failures: list[dict[str, str]] = []
     history_days = max(config.rs_new_high_history_days, config.htf_history_days, 365)
     total_tickers = len(tickers)
+    run_date = as_of_date or dt.date.today()
 
     print(
         "starting weekly HTF 8W pullback screen: "
@@ -191,60 +194,61 @@ def run_weekly_htf_pullback_screen(
         f"ema8_breach_tolerance={config.weekly_htf_ema8_breach_tolerance_pct * 100:.1f}%"
     )
 
-    for position, ticker in enumerate(tickers, start=1):
-        print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
-        try:
-            financials = cookstock.cookFinancials(
-                ticker.symbol,
-                benchmarkTicker=config.benchmark_ticker,
-                historyLookbackDays=history_days,
-            )
-            rs_summary = financials.get_rs_new_high_before_price_summary(
-                sectorName=ticker.sector,
-                benchmarkTicker=config.benchmark_ticker,
-                signalProfile="weekly",
-            )
-            if not rs_summary or not bool(rs_summary.get("weekly_rs_new_high_recent")):
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no recent weekly RS new high | passed={len(hits)}")
-                continue
-
-            htf_summary = financials.get_htf_leader_summary(
-                sectorName=ticker.sector,
-                benchmarkTicker=config.benchmark_ticker,
-            )
-            if not htf_summary:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no HTF summary | passed={len(hits)}")
-                continue
-            if str(htf_summary.get("htf_grade", "")).upper() not in {"A", "B"}:
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"HTF grade {htf_summary.get('htf_grade')} | passed={len(hits)}"
+    with freeze_cookstock_today(cookstock, as_of_date):
+        for position, ticker in enumerate(tickers, start=1):
+            print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
+            try:
+                financials = cookstock.cookFinancials(
+                    ticker.symbol,
+                    benchmarkTicker=config.benchmark_ticker,
+                    historyLookbackDays=history_days,
                 )
-                continue
-
-            weekly_snapshot = _latest_weekly_snapshot(financials)
-            if not weekly_snapshot:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing weekly snapshot | passed={len(hits)}")
-                continue
-
-            distance_ratio = float(weekly_snapshot["weekly_ema8_distance_pct"]) / 100.0
-            if distance_ratio < -float(config.weekly_htf_ema8_breach_tolerance_pct):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"{weekly_snapshot['weekly_ema8_distance_pct']:.2f}% vs 8W EMA | passed={len(hits)}"
+                rs_summary = financials.get_rs_new_high_before_price_summary(
+                    sectorName=ticker.sector,
+                    benchmarkTicker=config.benchmark_ticker,
+                    signalProfile="weekly",
                 )
-                continue
+                if not rs_summary or not bool(rs_summary.get("weekly_rs_new_high_recent")):
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no recent weekly RS new high | passed={len(hits)}")
+                    continue
 
-            hits.append(_build_hit(ticker, rs_summary, htf_summary, weekly_snapshot))
-            latest_hit = hits[-1]
-            print(
-                f"[{position}/{total_tickers}] {ticker.symbol} passed: "
-                f"HTF {latest_hit.htf_grade} {latest_hit.htf_score:.1f}, "
-                f"8W EMA distance {latest_hit.weekly_ema8_distance_pct:+.2f}% | passed={len(hits)}"
-            )
-        except Exception as exc:
-            failures.append({"ticker": ticker.symbol, "error": str(exc)})
-            print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+                htf_summary = financials.get_htf_leader_summary(
+                    sectorName=ticker.sector,
+                    benchmarkTicker=config.benchmark_ticker,
+                )
+                if not htf_summary:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no HTF summary | passed={len(hits)}")
+                    continue
+                if str(htf_summary.get("htf_grade", "")).upper() not in {"A", "B"}:
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"HTF grade {htf_summary.get('htf_grade')} | passed={len(hits)}"
+                    )
+                    continue
+
+                weekly_snapshot = _latest_weekly_snapshot(financials)
+                if not weekly_snapshot:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing weekly snapshot | passed={len(hits)}")
+                    continue
+
+                distance_ratio = float(weekly_snapshot["weekly_ema8_distance_pct"]) / 100.0
+                if distance_ratio < -float(config.weekly_htf_ema8_breach_tolerance_pct):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"{weekly_snapshot['weekly_ema8_distance_pct']:.2f}% vs 8W EMA | passed={len(hits)}"
+                    )
+                    continue
+
+                hits.append(_build_hit(ticker, rs_summary, htf_summary, weekly_snapshot))
+                latest_hit = hits[-1]
+                print(
+                    f"[{position}/{total_tickers}] {ticker.symbol} passed: "
+                    f"HTF {latest_hit.htf_grade} {latest_hit.htf_score:.1f}, "
+                    f"8W EMA distance {latest_hit.weekly_ema8_distance_pct:+.2f}% | passed={len(hits)}"
+                )
+            except Exception as exc:
+                failures.append({"ticker": ticker.symbol, "error": str(exc)})
+                print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
 
     hits.sort(
         key=lambda hit: (
@@ -262,7 +266,7 @@ def run_weekly_htf_pullback_screen(
     )
 
     return WeeklyHtfPullbackScreenResult(
-        run_date=dt.date.today().isoformat(),
+        run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
         total_tickers=total_tickers,
         passed_tickers=len(hits),

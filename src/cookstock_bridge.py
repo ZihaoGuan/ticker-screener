@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+import datetime as real_dt
 import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from types import ModuleType
 
 from .config import AppConfig, project_root
@@ -76,3 +79,31 @@ def load_configured_cookstock(config: AppConfig) -> ModuleType:
     module = load_cookstock_module()
     apply_config_to_cookstock(module, config)
     return module
+
+
+@contextmanager
+def freeze_cookstock_today(module: ModuleType, as_of_date: real_dt.date | None):
+    if as_of_date is None:
+        yield
+        return
+
+    original_dt = getattr(module, "dt", None)
+    if original_dt is None:
+        yield
+        return
+
+    class FrozenDate(real_dt.date):
+        @classmethod
+        def today(cls) -> "FrozenDate":
+            return cls(as_of_date.year, as_of_date.month, as_of_date.day)
+
+    module.dt = SimpleNamespace(
+        date=FrozenDate,
+        datetime=real_dt.datetime,
+        timedelta=real_dt.timedelta,
+        timezone=real_dt.timezone,
+    )
+    try:
+        yield
+    finally:
+        module.dt = original_dt

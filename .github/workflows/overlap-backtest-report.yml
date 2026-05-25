@@ -1,0 +1,436 @@
+name: Overlap Backtest From Date
+
+on:
+  workflow_dispatch:
+    inputs:
+      as_of_date:
+        description: Historical signal date to replay (YYYY-MM-DD)
+        required: true
+        type: string
+      min_overlap_count:
+        description: Minimum overlap count to buy
+        required: false
+        default: "4"
+        type: string
+      limit:
+        description: Optional universe limit for smoke runs
+        required: false
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      as_of_date: ${{ steps.meta.outputs.as_of_date }}
+      min_overlap_count: ${{ steps.meta.outputs.min_overlap_count }}
+      limit: ${{ steps.meta.outputs.limit }}
+    steps:
+      - name: Validate inputs
+        id: meta
+        env:
+          INPUT_AS_OF_DATE: ${{ github.event.inputs.as_of_date }}
+          INPUT_MIN_OVERLAP_COUNT: ${{ github.event.inputs.min_overlap_count }}
+          INPUT_LIMIT: ${{ github.event.inputs.limit }}
+        run: |
+          python - <<'PY'
+          import datetime as dt
+          import os
+          from pathlib import Path
+
+          as_of_date = dt.date.fromisoformat(os.environ["INPUT_AS_OF_DATE"].strip())
+          min_overlap_count = int((os.environ.get("INPUT_MIN_OVERLAP_COUNT") or "4").strip())
+          limit_raw = (os.environ.get("INPUT_LIMIT") or "").strip()
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as handle:
+              handle.write(f"as_of_date={as_of_date.isoformat()}\n")
+              handle.write(f"min_overlap_count={min_overlap_count}\n")
+              handle.write(f"limit={limit_raw}\n")
+          PY
+
+  screen:
+    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        screener:
+          - id: rs
+            artifact_name: overlap-watchlist-rs
+            final_watchlist: rs_new_high_before_price
+          - id: sean_peg
+            artifact_name: overlap-watchlist-sean-peg
+            final_watchlist: sean_peg_earnings_gap
+          - id: legacy_peg
+            artifact_name: overlap-watchlist-legacy-peg
+            final_watchlist: legacy_peg_earnings_gap
+          - id: vcp
+            artifact_name: overlap-watchlist-vcp
+            final_watchlist: vcp
+          - id: cup_handle
+            artifact_name: overlap-watchlist-cup-handle
+            final_watchlist: cup_handle
+          - id: weekly_htf_pullback
+            artifact_name: overlap-watchlist-weekly-htf-pullback
+            final_watchlist: weekly_htf_pullback
+          - id: htf_8w_runup
+            artifact_name: overlap-watchlist-8w-100-runup
+            final_watchlist: htf_8w_runup
+          - id: gap_fill
+            artifact_name: overlap-watchlist-gap-fill
+            final_watchlist: gap_fill
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-earnings-growth.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run screener
+        env:
+          AS_OF_DATE: ${{ needs.prepare.outputs.as_of_date }}
+          LIMIT: ${{ needs.prepare.outputs.limit }}
+          SCREENER_ID: ${{ matrix.screener.id }}
+        run: |
+          set -euo pipefail
+          LIMIT_ARGS=()
+          if [ -n "${LIMIT}" ]; then
+            LIMIT_ARGS+=(--limit "${LIMIT}")
+          fi
+
+          case "${SCREENER_ID}" in
+            rs)
+              python scripts/run_rs_screen.py --date-label "${AS_OF_DATE}" --as-of-date "${AS_OF_DATE}" "${LIMIT_ARGS[@]}"
+              python scripts/filter_low_market_cap_hits.py \
+                --raw-file "artifacts/raw/rs_new_high_before_price_${AS_OF_DATE}.json" \
+                --watchlist-file "artifacts/watchlists/rs_new_high_before_price_${AS_OF_DATE}.json" \
+                --summary-file "artifacts/raw/run_summary_${AS_OF_DATE}.json" \
+                --exclude-file "/tmp/rs-low-cap.txt" \
+                --pipeline-name "Overlap backtest RS"
+              ;;
+            sean_peg)
+              python scripts/run_peg_screen.py --date-label "${AS_OF_DATE}" --as-of-date "${AS_OF_DATE}" --strategy-profile "sean-peg" "${LIMIT_ARGS[@]}"
+              python scripts/filter_low_market_cap_hits.py \
+                --raw-file "artifacts/raw/peg_earnings_gap_${AS_OF_DATE}.json" \
+                --watchlist-file "artifacts/watchlists/peg_earnings_gap_${AS_OF_DATE}.json" \
+                --summary-file "artifacts/raw/peg_run_summary_${AS_OF_DATE}.json" \
+                --exclude-file "/tmp/sean-peg-low-cap.txt" \
+                --pipeline-name "Overlap backtest Sean PEG"
+              cp "artifacts/watchlists/peg_earnings_gap_${AS_OF_DATE}.json" "artifacts/watchlists/sean_peg_earnings_gap_${AS_OF_DATE}.json"
+              ;;
+            legacy_peg)
+              python scripts/run_peg_screen.py --date-label "${AS_OF_DATE}" --as-of-date "${AS_OF_DATE}" --strategy-profile "legacy" "${LIMIT_ARGS[@]}"
+              python scripts/filter_low_market_cap_hits.py \
+                --raw-file "artifacts/raw/peg_earnings_gap_${AS_OF_DATE}.json" \
+                --watchlist-file "artifacts/watchlists/peg_earnings_gap_${AS_OF_DATE}.json" \
+                --summary-file "artifacts/raw/peg_run_summary_${AS_OF_DATE}.json" \
+                --exclude-file "/tmp/legacy-peg-low-cap.txt" \
+                --pipeline-name "Overlap backtest Legacy PEG"
+              cp "artifacts/watchlists/peg_earnings_gap_${AS_OF_DATE}.json" "artifacts/watchlists/legacy_peg_earnings_gap_${AS_OF_DATE}.json"
+              ;;
+            vcp)
+              python scripts/run_vcp_screen.py --date-label "${AS_OF_DATE}" --as-of-date "${AS_OF_DATE}" "${LIMIT_ARGS[@]}"
+              python scripts/filter_low_market_cap_hits.py \
+                --raw-file "artifacts/raw/vcp_${AS_OF_DATE}.json" \
+                --watchlist-file "artifacts/watchlists/vcp_${AS_OF_DATE}.json" \
+                --summary-file "artifacts/raw/vcp_run_summary_${AS_OF_DATE}.json" \
+                --exclude-file "/tmp/vcp-low-cap.txt" \
+                --pipeline-name "Overlap backtest VCP"
+              ;;
+            cup_handle)
+              python scripts/run_cup_handle_screen.py --date-label "${AS_OF_DATE}" --as-of-date "${AS_OF_DATE}" "${LIMIT_ARGS[@]}"
+              python scripts/filter_low_market_cap_hits.py \
+                --raw-file "artifacts/raw/cup_handle_${AS_OF_DATE}.json" \
+                --watchlist-file "artifacts/watchlists/cup_handle_${AS_OF_DATE}.json" \
+                --summary-file "artifacts/raw/cup_handle_run_summary_${AS_OF_DATE}.json" \
+                --exclude-file "/tmp/cup-handle-low-cap.txt" \
+                --pipeline-name "Overlap backtest Cup and Handle"
+              ;;
+            weekly_htf_pullback)
+              python scripts/run_weekly_htf_pullback_screen.py --date-label "${AS_OF_DATE}" --as-of-date "${AS_OF_DATE}" "${LIMIT_ARGS[@]}"
+              python scripts/filter_low_market_cap_hits.py \
+                --raw-file "artifacts/raw/weekly_htf_pullback_${AS_OF_DATE}.json" \
+                --watchlist-file "artifacts/watchlists/weekly_htf_pullback_${AS_OF_DATE}.json" \
+                --summary-file "artifacts/raw/weekly_htf_pullback_run_summary_${AS_OF_DATE}.json" \
+                --exclude-file "/tmp/weekly-htf-pullback-low-cap.txt" \
+                --pipeline-name "Overlap backtest Weekly HTF Pullback"
+              ;;
+            htf_8w_runup)
+              python scripts/run_htf_runup_screen.py --date-label "${AS_OF_DATE}" --as-of-date "${AS_OF_DATE}" "${LIMIT_ARGS[@]}"
+              python scripts/filter_low_market_cap_hits.py \
+                --raw-file "artifacts/raw/htf_8w_runup_${AS_OF_DATE}.json" \
+                --watchlist-file "artifacts/watchlists/htf_8w_runup_${AS_OF_DATE}.json" \
+                --summary-file "artifacts/raw/htf_8w_runup_run_summary_${AS_OF_DATE}.json" \
+                --exclude-file "/tmp/8w-runup-low-cap.txt" \
+                --pipeline-name "Overlap backtest 8W 100 Runup"
+              ;;
+            gap_fill)
+              python scripts/run_gap_fill_screen.py --date-label "${AS_OF_DATE}" --as-of-date "${AS_OF_DATE}" "${LIMIT_ARGS[@]}"
+              python scripts/filter_low_market_cap_hits.py \
+                --raw-file "artifacts/raw/gap_fill_${AS_OF_DATE}.json" \
+                --watchlist-file "artifacts/watchlists/gap_fill_${AS_OF_DATE}.json" \
+                --summary-file "artifacts/raw/gap_fill_run_summary_${AS_OF_DATE}.json" \
+                --exclude-file "/tmp/gap-fill-low-cap.txt" \
+                --pipeline-name "Overlap backtest Gap Fill"
+              ;;
+            *)
+              echo "Unknown screener: ${SCREENER_ID}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Upload watchlist artifact
+        uses: actions/upload-artifact@v4
+        env:
+          AS_OF_DATE: ${{ needs.prepare.outputs.as_of_date }}
+        with:
+          name: ${{ matrix.screener.artifact_name }}-${{ needs.prepare.outputs.as_of_date }}
+          path: artifacts/watchlists/${{ matrix.screener.final_watchlist }}_${{ needs.prepare.outputs.as_of_date }}.json
+
+  summarize:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - screen
+    outputs:
+      as_of_date: ${{ needs.prepare.outputs.as_of_date }}
+      report_slug: ${{ steps.meta.outputs.report_slug }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-earnings-growth.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compute report slug
+        id: meta
+        env:
+          AS_OF_DATE: ${{ needs.prepare.outputs.as_of_date }}
+        run: echo "report_slug=${AS_OF_DATE}_to_${AS_OF_DATE}" >> "$GITHUB_OUTPUT"
+
+      - name: Download watchlist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: overlap-watchlist-*-${{ needs.prepare.outputs.as_of_date }}
+          path: downloaded-watchlists
+          merge-multiple: true
+
+      - name: Stage watchlists
+        run: |
+          mkdir -p artifacts/watchlists
+          find downloaded-watchlists -type f -name '*.json' -exec cp {} artifacts/watchlists/ \;
+          ls -1 artifacts/watchlists
+
+      - name: Build overlap summary
+        env:
+          AS_OF_DATE: ${{ needs.prepare.outputs.as_of_date }}
+        run: |
+          python scripts/build_daily_overlap_summary.py \
+            --date-label "${AS_OF_DATE}" \
+            --watchlist-dir artifacts/watchlists \
+            --output-json "artifacts/raw/daily_overlap_summary_${AS_OF_DATE}.json" \
+            --output-text "artifacts/raw/daily_overlap_summary_${AS_OF_DATE}.txt" \
+            --output-html "artifacts/output/daily_overlap_summary_${AS_OF_DATE}/index.html"
+
+      - name: Build overlap backtest report
+        env:
+          AS_OF_DATE: ${{ needs.prepare.outputs.as_of_date }}
+          MIN_OVERLAP_COUNT: ${{ needs.prepare.outputs.min_overlap_count }}
+        run: |
+          python scripts/build_overlap_backtest_report.py \
+            --overlap-dir artifacts/raw \
+            --start-date "${AS_OF_DATE}" \
+            --end-date "${AS_OF_DATE}" \
+            --min-overlap-count "${MIN_OVERLAP_COUNT}" \
+            --output-json "artifacts/raw/overlap_backtest_${AS_OF_DATE}_to_${AS_OF_DATE}.json" \
+            --output-html "artifacts/output/overlap_backtest_${AS_OF_DATE}_to_${AS_OF_DATE}/index.html"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlap-backtest-report-${{ steps.meta.outputs.report_slug }}
+          path: |
+            artifacts/raw/daily_overlap_summary_${{ needs.prepare.outputs.as_of_date }}.json
+            artifacts/raw/overlap_backtest_${{ steps.meta.outputs.report_slug }}.json
+            artifacts/output/overlap_backtest_${{ steps.meta.outputs.report_slug }}
+
+  publish-r2:
+    runs-on: ubuntu-latest
+    needs:
+      - summarize
+    if: ${{ needs.summarize.result == 'success' }}
+    outputs:
+      r2_prefix: ${{ steps.publish.outputs.r2_prefix }}
+      r2_index_url: ${{ steps.publish.outputs.r2_index_url }}
+    steps:
+      - name: Check R2 configuration
+        id: r2-config
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [ -n "${R2_ACCOUNT_ID}" ] && [ -n "${R2_ACCESS_KEY_ID}" ] && [ -n "${R2_SECRET_ACCESS_KEY}" ] && [ -n "${R2_BUCKET}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Python
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-earnings-growth.txt
+
+      - name: Install AWS CLI
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        run: python -m pip install awscli
+
+      - name: Download report artifact
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: overlap-backtest-report-${{ needs.summarize.outputs.report_slug }}
+          path: downloaded-backtest
+
+      - name: Upload report to R2
+        id: publish
+        if: ${{ steps.r2-config.outputs.enabled == 'true' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+          REPORT_SLUG: ${{ needs.summarize.outputs.report_slug }}
+        run: |
+          set -euo pipefail
+          ENDPOINT_URL="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          R2_PREFIX="overlap-backtest/${REPORT_SLUG}"
+          JSON_FILE="$(find downloaded-backtest -type f -name "overlap_backtest_${REPORT_SLUG}.json" | head -n 1)"
+          INDEX_FILE="$(find downloaded-backtest -type f -name "index.html" | grep "overlap_backtest_${REPORT_SLUG}" | head -n 1)"
+          RENDER_DIR="$(dirname "${INDEX_FILE}")"
+          INDEX_URL="/${R2_PREFIX}/rendered/index.html"
+
+          test -n "${JSON_FILE}"
+          test -n "${INDEX_FILE}"
+          test -f "${JSON_FILE}"
+          test -f "${INDEX_FILE}"
+          test -d "${RENDER_DIR}"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "${JSON_FILE}" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/raw/overlap_backtest_${REPORT_SLUG}.json"
+
+          aws --endpoint-url "$ENDPOINT_URL" s3 cp \
+            "${RENDER_DIR}/" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/rendered/" \
+            --recursive
+
+          if [ -n "${R2_PUBLIC_BASE_URL}" ]; then
+            BASE_URL="${R2_PUBLIC_BASE_URL%/}"
+            INDEX_URL="${BASE_URL}/${R2_PREFIX}/rendered/index.html"
+          fi
+
+          {
+            echo "r2_prefix=${R2_PREFIX}"
+            echo "r2_index_url=${INDEX_URL}"
+          } >> "$GITHUB_OUTPUT"
+
+  notify:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - summarize
+      - publish-r2
+    if: ${{ always() }}
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download report artifact
+        if: ${{ needs.summarize.result == 'success' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: overlap-backtest-report-${{ needs.summarize.outputs.report_slug }}
+          path: downloaded-backtest
+
+      - name: Build Discord payload
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' && needs.summarize.result == 'success' }}
+        env:
+          AS_OF_DATE: ${{ needs.prepare.outputs.as_of_date }}
+          REPORT_SLUG: ${{ needs.summarize.outputs.report_slug }}
+          MIN_OVERLAP_COUNT: ${{ needs.prepare.outputs.min_overlap_count }}
+          R2_INDEX_URL: ${{ needs.publish-r2.outputs.r2_index_url }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_slug = os.environ["REPORT_SLUG"]
+          path = Path("downloaded-backtest") / f"overlap_backtest_{report_slug}.json"
+          payload = json.loads(path.read_text(encoding="utf-8"))
+
+          lines = [
+              f":white_check_mark: Overlap backtest replay finished for `{os.environ['AS_OF_DATE']}`",
+              f"Buy rule: `pipeline_count >= {os.environ['MIN_OVERLAP_COUNT']}`",
+              f"Signal days: `{payload.get('signal_day_count', 0)}`",
+              f"Trades: `{payload.get('trade_count', 0)}`",
+          ]
+          for horizon in ("1w", "2w", "3w", "4w"):
+              summary = payload.get("overall_summary", {}).get(horizon, {})
+              avg_return = summary.get("avg_return_pct")
+              samples = summary.get("sample_count", 0)
+              if avg_return is not None:
+                  lines.append(f"{horizon.upper()} avg: `{avg_return:+.2f}%` on `{samples}` samples")
+          r2_index_url = os.getenv("R2_INDEX_URL", "").strip()
+          if r2_index_url:
+              lines.append(f"Report: {r2_index_url}")
+          run_url = os.getenv("GITHUB_RUN_URL", "").strip()
+          if run_url:
+              lines.append(f"Run details: {run_url}")
+          Path("discord_payload.json").write_text(json.dumps({"content": "\n".join(lines)}), encoding="utf-8")
+          PY
+
+      - name: Send Discord notification
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' && needs.summarize.result == 'success' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            --data @discord_payload.json \
+            "$DISCORD_WEBHOOK_URL"

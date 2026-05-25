@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import datetime as dt
 
 from .config import AppConfig
-from .cookstock_bridge import load_configured_cookstock
+from .cookstock_bridge import freeze_cookstock_today, load_configured_cookstock
 from .peg_strategy import SeanPegAssessment, assess_sean_post_earnings_gap_setup
 
 
@@ -134,14 +134,14 @@ def _optional_int(value: object) -> int | None:
         return None
 
 
-def _event_age_days(peg_date: object) -> int | None:
+def _event_age_days(peg_date: object, as_of_date: dt.date) -> int | None:
     if peg_date in (None, "", "NA", "n/a"):
         return None
     try:
         event_date = dt.date.fromisoformat(str(peg_date))
     except ValueError:
         return None
-    return (dt.date.today() - event_date).days
+    return (as_of_date - event_date).days
 
 
 def _to_hit(
@@ -150,6 +150,7 @@ def _to_hit(
     peg_setup: dict[str, object],
     trade_plan: dict[str, object] | None,
     strategy_assessment: SeanPegAssessment | None,
+    as_of_date: dt.date,
     *,
     has_peg_event: bool,
     actionable_now: bool,
@@ -162,7 +163,7 @@ def _to_hit(
         exchange=event.exchange,
         has_peg_event=has_peg_event,
         actionable_now=actionable_now,
-        peg_event_age_days=_event_age_days(peg_setup.get("peg_date")),
+        peg_event_age_days=_event_age_days(peg_setup.get("peg_date"), as_of_date),
         benchmark_ticker=benchmark_ticker,
         setup_type=str(peg_setup["setup_type"]),
         peg_date=str(peg_setup["peg_date"]),
@@ -226,68 +227,77 @@ def _to_hit(
     )
 
 
-def run_peg_screen(config: AppConfig, earnings_events: list[EarningsEvent]) -> PegScreenResult:
+def run_peg_screen(
+    config: AppConfig,
+    earnings_events: list[EarningsEvent],
+    *,
+    as_of_date: dt.date | None = None,
+) -> PegScreenResult:
     cookstock = load_configured_cookstock(config)
     hits: list[PegHit] = []
     recent_events: list[PegHit] = []
     failures: list[dict[str, str]] = []
+    run_date = as_of_date or dt.date.today()
 
-    for position, event in enumerate(earnings_events, start=1):
-        print(f"[{position}/{len(earnings_events)}] screening {event.ticker}")
-        try:
-            financials = cookstock.cookFinancials(
-                event.ticker,
-                benchmarkTicker=config.benchmark_ticker,
-            )
-            recent_peg_event = financials.find_recent_power_earnings_gap_event(recency_days=30)
-            peg_setup = financials.find_recent_power_earnings_gap()
-            if recent_peg_event:
-                event_trade_plan = financials.get_peg_trade_plan(recent_peg_event)
-                event_strategy_assessment = assess_sean_post_earnings_gap_setup(
+    with freeze_cookstock_today(cookstock, as_of_date):
+        for position, event in enumerate(earnings_events, start=1):
+            print(f"[{position}/{len(earnings_events)}] screening {event.ticker}")
+            try:
+                financials = cookstock.cookFinancials(
+                    event.ticker,
+                    benchmarkTicker=config.benchmark_ticker,
+                )
+                recent_peg_event = financials.find_recent_power_earnings_gap_event(recency_days=30)
+                peg_setup = financials.find_recent_power_earnings_gap()
+                if recent_peg_event:
+                    event_trade_plan = financials.get_peg_trade_plan(recent_peg_event)
+                    event_strategy_assessment = assess_sean_post_earnings_gap_setup(
+                        financials,
+                        str(recent_peg_event.get("peg_date")) if recent_peg_event.get("peg_date") else None,
+                        bool(event_trade_plan.get("distribution_warning")) if event_trade_plan else False,
+                        config,
+                    )
+                    recent_event_hit = _to_hit(
+                        event,
+                        config.benchmark_ticker,
+                        recent_peg_event,
+                        event_trade_plan,
+                        event_strategy_assessment,
+                        run_date,
+                        has_peg_event=True,
+                        actionable_now=peg_setup is not None and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")),
+                    )
+                    recent_events.append(recent_event_hit)
+                    hits.append(recent_event_hit)
+                if not peg_setup:
+                    continue
+                if recent_peg_event and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")):
+                    continue
+                trade_plan = financials.get_peg_trade_plan(peg_setup)
+                strategy_assessment = assess_sean_post_earnings_gap_setup(
                     financials,
-                    str(recent_peg_event.get("peg_date")) if recent_peg_event.get("peg_date") else None,
-                    bool(event_trade_plan.get("distribution_warning")) if event_trade_plan else False,
+                    str(peg_setup.get("peg_date")) if peg_setup.get("peg_date") else None,
+                    bool(trade_plan.get("distribution_warning")) if trade_plan else False,
                     config,
                 )
-                recent_event_hit = _to_hit(
-                    event,
-                    config.benchmark_ticker,
-                    recent_peg_event,
-                    event_trade_plan,
-                    event_strategy_assessment,
-                    has_peg_event=True,
-                    actionable_now=peg_setup is not None and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")),
+                hits.append(
+                    _to_hit(
+                        event,
+                        config.benchmark_ticker,
+                        peg_setup,
+                        trade_plan,
+                        strategy_assessment,
+                        run_date,
+                        has_peg_event=True,
+                        actionable_now=True,
+                    )
                 )
-                recent_events.append(recent_event_hit)
-                hits.append(recent_event_hit)
-            if not peg_setup:
-                continue
-            if recent_peg_event and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")):
-                continue
-            trade_plan = financials.get_peg_trade_plan(peg_setup)
-            strategy_assessment = assess_sean_post_earnings_gap_setup(
-                financials,
-                str(peg_setup.get("peg_date")) if peg_setup.get("peg_date") else None,
-                bool(trade_plan.get("distribution_warning")) if trade_plan else False,
-                config,
-            )
-            hits.append(
-                _to_hit(
-                    event,
-                    config.benchmark_ticker,
-                    peg_setup,
-                    trade_plan,
-                    strategy_assessment,
-                    has_peg_event=True,
-                    actionable_now=True,
-                )
-            )
-        except Exception as exc:
-            failures.append({"ticker": event.ticker, "error": str(exc)})
-            print(f"screening failed for {event.ticker}: {exc}")
+            except Exception as exc:
+                failures.append({"ticker": event.ticker, "error": str(exc)})
+                print(f"screening failed for {event.ticker}: {exc}")
 
     return PegScreenResult(
-        run_date=dt.date.today().isoformat(),
+        run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
         total_tickers=len(earnings_events),
         passed_tickers=len(hits),

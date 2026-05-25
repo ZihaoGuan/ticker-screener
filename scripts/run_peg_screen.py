@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="Limit the candidate set for smoke runs.")
     parser.add_argument("--tickers", nargs="+", help="Optional explicit ticker list instead of the configured source.")
     parser.add_argument("--date-label", help="Override artifact date label (YYYY-MM-DD).")
+    parser.add_argument("--as-of-date", help="Historical as-of date for replay mode (YYYY-MM-DD).")
     parser.add_argument(
         "--source",
         choices=("universe", "earnings-watchlist"),
@@ -99,8 +100,9 @@ def main() -> int:
 
     config = load_app_config(args.config)
     excluded = load_excluded_tickers(config)
-    date_label = args.date_label or today_label()
-    reference_date = dt.date.fromisoformat(args.reference_date) if args.reference_date else None
+    as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else None
+    date_label = args.date_label or today_label(as_of_date)
+    reference_date = dt.date.fromisoformat(args.reference_date) if args.reference_date else as_of_date
 
     if args.tickers:
         earnings_events = _manual_events(args.tickers, excluded)
@@ -109,7 +111,7 @@ def main() -> int:
     else:
         earnings_events = _universe_events(args.config, args.limit)
 
-    result = run_peg_screen(config, earnings_events)
+    result = run_peg_screen(config, earnings_events, as_of_date=as_of_date)
     watchlist_source = result.hits
     watchlist = build_peg_watchlist(watchlist_source, strategy_profile=args.strategy_profile)
 
@@ -123,6 +125,7 @@ def main() -> int:
         summary_path,
         {
             "date_label": date_label,
+            "as_of_date": as_of_date.isoformat() if as_of_date else None,
             "source": args.source if not args.tickers else "manual-tickers",
             "reference_date": str(reference_date) if reference_date else None,
             "strategy_profile": args.strategy_profile,

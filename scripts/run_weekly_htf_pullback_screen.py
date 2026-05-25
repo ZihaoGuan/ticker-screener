@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="Limit the universe for smoke runs.")
     parser.add_argument("--tickers", nargs="+", help="Optional explicit ticker list instead of full exchange universe.")
     parser.add_argument("--date-label", help="Override artifact date label (YYYY-MM-DD).")
+    parser.add_argument("--as-of-date", help="Historical as-of date for replay mode (YYYY-MM-DD).")
     return parser.parse_args()
 
 
@@ -49,14 +51,15 @@ def main() -> int:
     if args.limit:
         config = override_config(config, max_tickers=args.limit)
     excluded = load_excluded_tickers(config)
-    date_label = args.date_label or today_label()
+    as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else None
+    date_label = args.date_label or today_label(as_of_date)
 
     if args.tickers:
         universe = _manual_tickers(args.tickers, excluded)
     else:
         universe = load_universe(config, limit=args.limit)
 
-    result = run_weekly_htf_pullback_screen(config, universe)
+    result = run_weekly_htf_pullback_screen(config, universe, as_of_date=as_of_date)
     watchlist = build_weekly_htf_pullback_watchlist(
         result.hits,
         ema8_breach_tolerance_pct=config.weekly_htf_ema8_breach_tolerance_pct,
@@ -72,6 +75,7 @@ def main() -> int:
         summary_path,
         {
             "date_label": date_label,
+            "as_of_date": as_of_date.isoformat() if as_of_date else None,
             "signal_profile": "weekly_htf_pullback",
             "total_tickers": result.total_tickers,
             "passed_tickers": result.passed_tickers,

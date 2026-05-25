@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import datetime as dt
 
 from .config import AppConfig
-from .cookstock_bridge import load_configured_cookstock
+from .cookstock_bridge import freeze_cookstock_today, load_configured_cookstock
 from .universe import UniverseTicker
 
 
@@ -108,32 +108,40 @@ def _to_hit(ticker: UniverseTicker, summary: dict[str, object]) -> ScreenHit:
     )
 
 
-def run_rs_screen(config: AppConfig, tickers: list[UniverseTicker], *, signal_profile: str = "daily") -> ScreenResult:
+def run_rs_screen(
+    config: AppConfig,
+    tickers: list[UniverseTicker],
+    *,
+    signal_profile: str = "daily",
+    as_of_date: dt.date | None = None,
+) -> ScreenResult:
     cookstock = load_configured_cookstock(config)
     hits: list[ScreenHit] = []
     failures: list[dict[str, str]] = []
+    run_date = as_of_date or dt.date.today()
 
-    for position, ticker in enumerate(tickers, start=1):
-        print(f"[{position}/{len(tickers)}] screening {ticker.symbol}")
-        try:
-            financials = cookstock.cookFinancials(
-                ticker.symbol,
-                benchmarkTicker=config.benchmark_ticker,
-                historyLookbackDays=config.rs_new_high_history_days,
-            )
-            summary = financials.get_rs_new_high_before_price_summary(
-                sectorName=ticker.sector,
-                benchmarkTicker=config.benchmark_ticker,
-                signalProfile=signal_profile,
-            )
-            if summary:
-                hits.append(_to_hit(ticker, summary))
-        except Exception as exc:
-            failures.append({"ticker": ticker.symbol, "error": str(exc)})
-            print(f"screening failed for {ticker.symbol}: {exc}")
+    with freeze_cookstock_today(cookstock, as_of_date):
+        for position, ticker in enumerate(tickers, start=1):
+            print(f"[{position}/{len(tickers)}] screening {ticker.symbol}")
+            try:
+                financials = cookstock.cookFinancials(
+                    ticker.symbol,
+                    benchmarkTicker=config.benchmark_ticker,
+                    historyLookbackDays=config.rs_new_high_history_days,
+                )
+                summary = financials.get_rs_new_high_before_price_summary(
+                    sectorName=ticker.sector,
+                    benchmarkTicker=config.benchmark_ticker,
+                    signalProfile=signal_profile,
+                )
+                if summary:
+                    hits.append(_to_hit(ticker, summary))
+            except Exception as exc:
+                failures.append({"ticker": ticker.symbol, "error": str(exc)})
+                print(f"screening failed for {ticker.symbol}: {exc}")
 
     return ScreenResult(
-        run_date=dt.date.today().isoformat(),
+        run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
         total_tickers=len(tickers),
         passed_tickers=len(hits),

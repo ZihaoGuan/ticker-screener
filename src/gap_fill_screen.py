@@ -6,7 +6,7 @@ import datetime as dt
 import numpy as np
 
 from .config import AppConfig
-from .cookstock_bridge import load_configured_cookstock
+from .cookstock_bridge import freeze_cookstock_today, load_configured_cookstock
 from .universe import UniverseTicker
 
 
@@ -191,12 +191,18 @@ def _to_hit(
     )
 
 
-def run_gap_fill_screen(config: AppConfig, tickers: list[UniverseTicker]) -> GapFillScreenResult:
+def run_gap_fill_screen(
+    config: AppConfig,
+    tickers: list[UniverseTicker],
+    *,
+    as_of_date: dt.date | None = None,
+) -> GapFillScreenResult:
     cookstock = load_configured_cookstock(config)
     hits: list[GapFillHit] = []
     failures: list[dict[str, str]] = []
     history_days = max(int(config.gap_fill_history_days), int(config.gap_fill_lookback_days) + 30, 120)
     total_tickers = len(tickers)
+    run_date = as_of_date or dt.date.today()
 
     print(
         "starting gap fill screen: "
@@ -206,122 +212,123 @@ def run_gap_fill_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Gap
         f"max_gap_entry_distance={float(config.gap_fill_max_distance_to_gap_bottom_pct) * 100.0:.1f}%"
     )
 
-    for position, ticker in enumerate(tickers, start=1):
-        print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
-        try:
-            financials = cookstock.cookFinancials(
-                ticker.symbol,
-                benchmarkTicker=config.benchmark_ticker,
-                historyLookbackDays=history_days,
-            )
-            price_data = financials._get_clean_price_data()
-            if len(price_data) < 40:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: insufficient price history | passed={len(hits)}")
-                continue
+    with freeze_cookstock_today(cookstock, as_of_date):
+        for position, ticker in enumerate(tickers, start=1):
+            print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
+            try:
+                financials = cookstock.cookFinancials(
+                    ticker.symbol,
+                    benchmarkTicker=config.benchmark_ticker,
+                    historyLookbackDays=history_days,
+                )
+                price_data = financials._get_clean_price_data()
+                if len(price_data) < 40:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: insufficient price history | passed={len(hits)}")
+                    continue
 
-            current_price = float(price_data[-1]["close"])
-            avg_volume_20 = float(financials._get_average_volume(20))
-            if avg_volume_20 < int(config.gap_fill_min_avg_volume):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"avg vol20 {avg_volume_20:,.0f} < {int(config.gap_fill_min_avg_volume):,} | passed={len(hits)}"
-                )
-                continue
-            avg_dollar_volume_20 = float(financials._get_average_dollar_volume(20))
-            if avg_dollar_volume_20 < float(config.gap_fill_min_avg_dollar_volume):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"avg $ vol20 {avg_dollar_volume_20:,.0f} < {float(config.gap_fill_min_avg_dollar_volume):,.0f} | passed={len(hits)}"
-                )
-                continue
+                current_price = float(price_data[-1]["close"])
+                avg_volume_20 = float(financials._get_average_volume(20))
+                if avg_volume_20 < int(config.gap_fill_min_avg_volume):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"avg vol20 {avg_volume_20:,.0f} < {int(config.gap_fill_min_avg_volume):,} | passed={len(hits)}"
+                    )
+                    continue
+                avg_dollar_volume_20 = float(financials._get_average_dollar_volume(20))
+                if avg_dollar_volume_20 < float(config.gap_fill_min_avg_dollar_volume):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"avg $ vol20 {avg_dollar_volume_20:,.0f} < {float(config.gap_fill_min_avg_dollar_volume):,.0f} | passed={len(hits)}"
+                    )
+                    continue
 
-            ema_21 = financials._get_latest_ema_value(21)
-            ema_50 = financials._get_latest_ema_value(50)
-            if ema_21 is None or ema_50 is None:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing EMA values | passed={len(hits)}")
-                continue
-            if current_price <= float(ema_21):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"current {current_price:.2f} <= 21 EMA {float(ema_21):.2f} | passed={len(hits)}"
-                )
-                continue
-            if current_price <= float(ema_50):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"current {current_price:.2f} <= 50 EMA {float(ema_50):.2f} | passed={len(hits)}"
-                )
-                continue
+                ema_21 = financials._get_latest_ema_value(21)
+                ema_50 = financials._get_latest_ema_value(50)
+                if ema_21 is None or ema_50 is None:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing EMA values | passed={len(hits)}")
+                    continue
+                if current_price <= float(ema_21):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"current {current_price:.2f} <= 21 EMA {float(ema_21):.2f} | passed={len(hits)}"
+                    )
+                    continue
+                if current_price <= float(ema_50):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"current {current_price:.2f} <= 50 EMA {float(ema_50):.2f} | passed={len(hits)}"
+                    )
+                    continue
 
-            gap_summary = _scan_open_overhead_gap(
-                price_data,
-                lookback_days=int(config.gap_fill_lookback_days),
-                min_gap_pct=float(config.gap_fill_min_gap_pct),
-                current_price=current_price,
-            )
-            if not gap_summary:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no open overhead gap | passed={len(hits)}")
-                continue
+                gap_summary = _scan_open_overhead_gap(
+                    price_data,
+                    lookback_days=int(config.gap_fill_lookback_days),
+                    min_gap_pct=float(config.gap_fill_min_gap_pct),
+                    current_price=current_price,
+                )
+                if not gap_summary:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no open overhead gap | passed={len(hits)}")
+                    continue
 
-            distance_to_gap_bottom_pct = float(gap_summary["distance_to_gap_bottom_pct"]) / 100.0
-            distance_to_gap_top_pct = float(gap_summary["distance_to_gap_top_pct"]) / 100.0
-            if distance_to_gap_bottom_pct < float(config.gap_fill_min_distance_to_gap_bottom_pct):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"too deep inside gap {distance_to_gap_bottom_pct * 100.0:+.1f}% | passed={len(hits)}"
-                )
-                continue
-            if distance_to_gap_bottom_pct > float(config.gap_fill_max_distance_to_gap_bottom_pct):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"too far below gap entry {distance_to_gap_bottom_pct * 100.0:+.1f}% | passed={len(hits)}"
-                )
-                continue
-            if distance_to_gap_top_pct < float(config.gap_fill_min_distance_to_gap_top_pct):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"not enough fill room {distance_to_gap_top_pct * 100.0:+.1f}% | passed={len(hits)}"
-                )
-                continue
-            if distance_to_gap_top_pct > float(config.gap_fill_max_distance_to_gap_top_pct):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"gap target too far {distance_to_gap_top_pct * 100.0:+.1f}% | passed={len(hits)}"
-                )
-                continue
+                distance_to_gap_bottom_pct = float(gap_summary["distance_to_gap_bottom_pct"]) / 100.0
+                distance_to_gap_top_pct = float(gap_summary["distance_to_gap_top_pct"]) / 100.0
+                if distance_to_gap_bottom_pct < float(config.gap_fill_min_distance_to_gap_bottom_pct):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"too deep inside gap {distance_to_gap_bottom_pct * 100.0:+.1f}% | passed={len(hits)}"
+                    )
+                    continue
+                if distance_to_gap_bottom_pct > float(config.gap_fill_max_distance_to_gap_bottom_pct):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"too far below gap entry {distance_to_gap_bottom_pct * 100.0:+.1f}% | passed={len(hits)}"
+                    )
+                    continue
+                if distance_to_gap_top_pct < float(config.gap_fill_min_distance_to_gap_top_pct):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"not enough fill room {distance_to_gap_top_pct * 100.0:+.1f}% | passed={len(hits)}"
+                    )
+                    continue
+                if distance_to_gap_top_pct > float(config.gap_fill_max_distance_to_gap_top_pct):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"gap target too far {distance_to_gap_top_pct * 100.0:+.1f}% | passed={len(hits)}"
+                    )
+                    continue
 
-            inside_day = _is_inside_day(price_data)
-            recent_range_pct = financials._get_recent_range_pct(int(config.gap_fill_tight_range_lookback_days))
-            recent_window = price_data[-max(5, int(config.gap_fill_tight_range_lookback_days)) :]
-            recent_lows = [float(item["low"]) for item in recent_window if item.get("low") is not None]
-            if not recent_lows:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing recent lows | passed={len(hits)}")
-                continue
-            recent_low = min(recent_lows)
-            hit = _to_hit(
-                ticker,
-                config.benchmark_ticker,
-                current_price=current_price,
-                avg_volume_20=avg_volume_20,
-                avg_dollar_volume_20=avg_dollar_volume_20,
-                ema_21=float(ema_21),
-                ema_50=float(ema_50),
-                price_above_ema21=True,
-                price_above_ema50=True,
-                inside_day=inside_day,
-                recent_range_pct=recent_range_pct,
-                gap_summary=gap_summary,
-                recent_low=recent_low,
-            )
-            hits.append(hit)
-            print(
-                f"[{position}/{total_tickers}] {ticker.symbol} passed: "
-                f"gap entry {hit.distance_to_gap_bottom_pct:+.1f}% fill target {hit.distance_to_gap_top_pct:+.1f}% "
-                f"inside_day={hit.inside_day} | passed={len(hits)}"
-            )
-        except Exception as exc:
-            failures.append({"ticker": ticker.symbol, "error": str(exc)})
-            print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+                inside_day = _is_inside_day(price_data)
+                recent_range_pct = financials._get_recent_range_pct(int(config.gap_fill_tight_range_lookback_days))
+                recent_window = price_data[-max(5, int(config.gap_fill_tight_range_lookback_days)) :]
+                recent_lows = [float(item["low"]) for item in recent_window if item.get("low") is not None]
+                if not recent_lows:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing recent lows | passed={len(hits)}")
+                    continue
+                recent_low = min(recent_lows)
+                hit = _to_hit(
+                    ticker,
+                    config.benchmark_ticker,
+                    current_price=current_price,
+                    avg_volume_20=avg_volume_20,
+                    avg_dollar_volume_20=avg_dollar_volume_20,
+                    ema_21=float(ema_21),
+                    ema_50=float(ema_50),
+                    price_above_ema21=True,
+                    price_above_ema50=True,
+                    inside_day=inside_day,
+                    recent_range_pct=recent_range_pct,
+                    gap_summary=gap_summary,
+                    recent_low=recent_low,
+                )
+                hits.append(hit)
+                print(
+                    f"[{position}/{total_tickers}] {ticker.symbol} passed: "
+                    f"gap entry {hit.distance_to_gap_bottom_pct:+.1f}% fill target {hit.distance_to_gap_top_pct:+.1f}% "
+                    f"inside_day={hit.inside_day} | passed={len(hits)}"
+                )
+            except Exception as exc:
+                failures.append({"ticker": ticker.symbol, "error": str(exc)})
+                print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
 
     hits.sort(
         key=lambda hit: (
@@ -341,7 +348,7 @@ def run_gap_fill_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Gap
     )
 
     return GapFillScreenResult(
-        run_date=dt.date.today().isoformat(),
+        run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
         total_tickers=total_tickers,
         passed_tickers=len(hits),
