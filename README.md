@@ -47,6 +47,12 @@ Install dependencies:
 python3 -m pip install -r /Users/Zihao.Guan/Personal/ticker-screener/requirements.txt
 ```
 
+For Oracle NoSQL export or direct sync support, install the optional SDK dependencies:
+
+```bash
+python3 -m pip install -r /Users/Zihao.Guan/Personal/ticker-screener/requirements-oracle-nosql.txt
+```
+
 For the next-week earnings growth screener, install the extra provider dependencies:
 
 ```bash
@@ -217,6 +223,58 @@ python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/render_sector_rotatio
   --benchmark SPY \
   --universe all
 ```
+
+Export Oracle NoSQL-ready market data files for the configured universe:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/sync_oracle_nosql_market_data.py \
+  --start-date 2020-01-01 \
+  --end-date 2026-05-01
+```
+
+Run an incremental Oracle NoSQL export for the last 10 days:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/sync_oracle_nosql_market_data.py \
+  --incremental-days 10 \
+  --end-date 2026-05-01
+```
+
+Run a small Oracle NoSQL export smoke test:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/sync_oracle_nosql_market_data.py \
+  --tickers AAPL MSFT NVDA \
+  --start-date 2024-01-01 \
+  --end-date 2024-03-31
+```
+
+Apply exported rows directly to existing Oracle NoSQL tables:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/sync_oracle_nosql_market_data.py \
+  --start-date 2020-01-01 \
+  --end-date 2026-05-01 \
+  --apply \
+  --endpoint https://<your-endpoint> \
+  --compartment <your-compartment-ocid>
+```
+
+Create the Oracle NoSQL tables on a first seed run and then write rows:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/sync_oracle_nosql_market_data.py \
+  --start-date 2020-01-01 \
+  --end-date 2026-05-01 \
+  --apply \
+  --create-tables \
+  --endpoint https://<your-endpoint> \
+  --compartment <your-compartment-ocid>
+```
+
+The Oracle NoSQL schema notes and table design rationale live in:
+
+- [docs/oracle-nosql.md](/Users/Zihao.Guan/Personal/ticker-screener/docs/oracle-nosql.md)
 
 ## Artifacts
 

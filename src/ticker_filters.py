@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import csv
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
@@ -42,6 +43,20 @@ def auto_excluded_tickers_dir(config: AppConfig) -> Path:
     return project_root() / candidate
 
 
+def special_security_tickers_path(config: AppConfig) -> Path:
+    raw_value = str(getattr(config, "special_security_tickers_file", "") or "").strip()
+    if not raw_value:
+        return project_root() / "artifacts" / "special_security_tickers_to_filter.csv"
+    candidate = Path(raw_value)
+    if candidate.is_absolute():
+        return candidate
+    return project_root() / candidate
+
+
+def normalize_ticker_symbol(symbol: str) -> str:
+    return str(symbol).upper().strip().replace("/", ".")
+
+
 def _load_ticker_file(path: Path) -> set[str]:
     if not path.exists():
         return set()
@@ -53,8 +68,33 @@ def _load_ticker_file(path: Path) -> set[str]:
         parts = [part.strip().upper() for part in line.replace(",", " ").split()]
         for ticker in parts:
             if ticker:
-                excluded.add(ticker)
+                excluded.add(normalize_ticker_symbol(ticker))
     return excluded
+
+
+def _load_special_security_tickers(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    excluded: set[str] = set()
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            ticker = normalize_ticker_symbol(str(row.get("ticker", "")))
+            filter_reason = str(row.get("filter_reason", "")).strip()
+            if not ticker or ticker == "DXYZ":
+                continue
+            # Keep common share classes like BRK.A in the universe after slash-to-dot normalization.
+            if filter_reason == "share_class_or_structured_suffix" and _is_share_class_ticker(ticker):
+                continue
+            excluded.add(ticker)
+    return excluded
+
+
+def _is_share_class_ticker(ticker: str) -> bool:
+    root, dot, suffix = ticker.partition(".")
+    if not root or dot != ".":
+        return False
+    return len(suffix) == 1 and suffix.isalpha()
 
 
 def load_excluded_tickers(config: AppConfig) -> set[str]:
@@ -65,6 +105,7 @@ def load_excluded_tickers(config: AppConfig) -> set[str]:
     if auto_dir.exists():
         for path in sorted(auto_dir.glob("*.txt")):
             excluded.update(_load_ticker_file(path))
+    excluded.update(_load_special_security_tickers(special_security_tickers_path(config)))
     return excluded
 
 
@@ -72,7 +113,7 @@ def filter_symbols(symbols: Iterable[str], excluded: set[str]) -> list[str]:
     filtered: list[str] = []
     seen: set[str] = set()
     for symbol in symbols:
-        ticker = str(symbol).upper().strip()
+        ticker = normalize_ticker_symbol(symbol)
         if not ticker or ticker in seen or ticker in excluded:
             continue
         seen.add(ticker)
@@ -84,7 +125,7 @@ def filter_universe_tickers(tickers: Iterable["UniverseTicker"], excluded: set[s
     filtered: list["UniverseTicker"] = []
     seen: set[str] = set()
     for item in tickers:
-        ticker = item.symbol.upper().strip()
+        ticker = normalize_ticker_symbol(item.symbol)
         if not ticker or ticker in seen or ticker in excluded:
             continue
         seen.add(ticker)
@@ -96,7 +137,7 @@ def filter_earnings_events(events: Iterable["EarningsEvent"], excluded: set[str]
     filtered: list["EarningsEvent"] = []
     seen: set[str] = set()
     for item in events:
-        ticker = item.ticker.upper().strip()
+        ticker = normalize_ticker_symbol(item.ticker)
         if not ticker or ticker in seen or ticker in excluded:
             continue
         seen.add(ticker)
@@ -108,7 +149,7 @@ def filter_pre_earnings_events(events: Iterable["PreEarningsEvent"], excluded: s
     filtered: list["PreEarningsEvent"] = []
     seen: set[str] = set()
     for item in events:
-        ticker = item.ticker.upper().strip()
+        ticker = normalize_ticker_symbol(item.ticker)
         if not ticker or ticker in seen or ticker in excluded:
             continue
         seen.add(ticker)

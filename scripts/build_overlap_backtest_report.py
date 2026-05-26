@@ -109,6 +109,8 @@ def _load_signals(paths: list[Path], min_overlap_count: int) -> tuple[list[dict[
                     "ticker": ticker,
                     "pipeline_count": pipeline_count,
                     "pipeline_labels": list(item.get("pipeline_labels", [])),
+                    "theme_tags": list(item.get("theme_tags", [])),
+                    "is_drug_ticker": bool(item.get("is_drug_ticker", False)),
                 }
             )
             tickers.add(ticker)
@@ -190,7 +192,14 @@ def _resolve_entry(series: pd.Series, signal_date: dt.date) -> tuple[pd.Timestam
     return entry_date, float(later.iloc[0]), int(entry_position)
 
 
-def _compute_trade(signal_date: dt.date, ticker: str, pipeline_count: int, series: pd.Series) -> dict[str, Any] | None:
+def _compute_trade(
+    signal_date: dt.date,
+    ticker: str,
+    pipeline_count: int,
+    series: pd.Series,
+    theme_tags: list[str],
+    is_drug_ticker: bool,
+) -> dict[str, Any] | None:
     entry_date, entry_price, entry_position = _resolve_entry(series, signal_date)
     if entry_date is None or entry_price is None or entry_position is None:
         return None
@@ -212,6 +221,8 @@ def _compute_trade(signal_date: dt.date, ticker: str, pipeline_count: int, serie
         "signal_date": signal_date.isoformat(),
         "ticker": ticker,
         "pipeline_count": pipeline_count,
+        "theme_tags": theme_tags,
+        "is_drug_ticker": is_drug_ticker,
         "entry_date": entry_date.date().isoformat(),
         "entry_price": entry_price,
         "returns_pct": returns,
@@ -240,6 +251,10 @@ def _build_payload(signal_days: list[dict[str, Any]], prices_by_ticker: dict[str
     date_rows: list[dict[str, Any]] = []
     trades: list[dict[str, Any]] = []
     overall_buckets: dict[str, list[float]] = {label: [] for label, _ in HORIZONS}
+    grouped_buckets: dict[str, dict[str, list[float]]] = {
+        "drug_buys": {label: [] for label, _ in HORIZONS},
+        "non_drug_buys": {label: [] for label, _ in HORIZONS},
+    }
 
     for signal_day in signal_days:
         signal_date = _parse_date(signal_day["date_label"])
@@ -249,15 +264,24 @@ def _build_payload(signal_days: list[dict[str, Any]], prices_by_ticker: dict[str
             series = prices_by_ticker.get(ticker)
             if series is None:
                 continue
-            trade = _compute_trade(signal_date, ticker, int(item["pipeline_count"]), series)
+            trade = _compute_trade(
+                signal_date,
+                ticker,
+                int(item["pipeline_count"]),
+                series,
+                list(item.get("theme_tags", [])),
+                bool(item.get("is_drug_ticker", False)),
+            )
             if trade is None:
                 continue
             day_trades.append(trade)
             trades.append(trade)
+            group_key = "drug_buys" if trade["is_drug_ticker"] else "non_drug_buys"
             for label, _bars in HORIZONS:
                 value = trade["returns_pct"][label]
                 if value is not None:
                     overall_buckets[label].append(float(value))
+                    grouped_buckets[group_key][label].append(float(value))
 
         row_summary: dict[str, Any] = {
             "signal_date": signal_day["date_label"],
@@ -274,6 +298,10 @@ def _build_payload(signal_days: list[dict[str, Any]], prices_by_ticker: dict[str
         date_rows.append(row_summary)
 
     overall_summary = {label: _summarize_returns(values) for label, values in overall_buckets.items()}
+    grouped_summary = {
+        group_key: {label: _summarize_returns(values) for label, values in horizon_map.items()}
+        for group_key, horizon_map in grouped_buckets.items()
+    }
 
     return {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -281,6 +309,7 @@ def _build_payload(signal_days: list[dict[str, Any]], prices_by_ticker: dict[str
         "signal_days": date_rows,
         "trades": trades,
         "overall_summary": overall_summary,
+        "grouped_summary": grouped_summary,
         "signal_day_count": len(date_rows),
         "trade_count": len(trades),
         "unique_ticker_count": len({trade["ticker"] for trade in trades}),
@@ -317,6 +346,47 @@ def _build_html(payload: dict[str, Any], start_date: str, end_date: str) -> str:
             """
         )
 
+    grouped_sections = []
+    for group_key, title in (
+        ("drug_buys", "Drug Buy Returns"),
+        ("non_drug_buys", "Non-Drug Buy Returns"),
+    ):
+        rows = []
+        for label, _bars in HORIZONS:
+            summary = payload.get("grouped_summary", {}).get(group_key, {}).get(label, {})
+            rows.append(
+                f"""
+                <tr>
+                  <td>{escape(label.upper())}</td>
+                  <td>{_fmt_pct(summary.get('avg_return_pct'))}</td>
+                  <td>{_fmt_pct(summary.get('median_return_pct'))}</td>
+                  <td>{_fmt_num(summary.get('win_rate_pct'))}%</td>
+                  <td>{int(summary.get('sample_count', 0) or 0)}</td>
+                </tr>
+                """
+            )
+        grouped_sections.append(
+            f"""
+            <section>
+              <h2>{escape(title)}</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Horizon</th>
+                    <th>Average</th>
+                    <th>Median</th>
+                    <th>Win rate</th>
+                    <th>Samples</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {''.join(rows) or '<tr><td colspan="5">No data.</td></tr>'}
+                </tbody>
+              </table>
+            </section>
+            """
+        )
+
     date_rows = []
     for row in payload["signal_days"]:
         links = ", ".join(escape(ticker) for ticker in row["tickers"][:12])
@@ -339,11 +409,15 @@ def _build_html(payload: dict[str, Any], start_date: str, end_date: str) -> str:
 
     trade_rows = []
     for trade in payload["trades"][:250]:
+        tags = escape(", ".join(trade.get("theme_tags", [])) or "-")
+        drug_flag = "Yes" if trade.get("is_drug_ticker") else "No"
         trade_rows.append(
             f"""
             <tr>
               <td>{escape(trade['signal_date'])}</td>
               <td>{escape(trade['ticker'])}</td>
+              <td>{tags}</td>
+              <td>{drug_flag}</td>
               <td>{int(trade['pipeline_count'])}</td>
               <td>{escape(trade['entry_date'])}</td>
               <td>{trade['entry_price']:.2f}</td>
@@ -457,6 +531,7 @@ def _build_html(payload: dict[str, Any], start_date: str, end_date: str) -> str:
         </tbody>
       </table>
     </section>
+    {''.join(grouped_sections)}
     <section>
       <h2>Signal Dates</h2>
       <table>
@@ -484,6 +559,8 @@ def _build_html(payload: dict[str, Any], start_date: str, end_date: str) -> str:
           <tr>
             <th>Signal date</th>
             <th>Ticker</th>
+            <th>Tags</th>
+            <th>Drug</th>
             <th>Count</th>
             <th>Entry date</th>
             <th>Entry price</th>
@@ -494,7 +571,7 @@ def _build_html(payload: dict[str, Any], start_date: str, end_date: str) -> str:
           </tr>
         </thead>
         <tbody>
-          {''.join(trade_rows) or '<tr><td colspan="9">No trades found.</td></tr>'}
+          {''.join(trade_rows) or '<tr><td colspan="11">No trades found.</td></tr>'}
         </tbody>
       </table>
     </section>

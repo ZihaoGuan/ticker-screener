@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import today_label
+from src.etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 
 
 PIPELINES = (
@@ -60,6 +61,15 @@ PIPELINES = (
         "filename": "gap_fill_{date}.json",
     },
 )
+
+DRUG_THEME_TAGS = {
+    "health care",
+    "biotech",
+    "pharmaceuticals",
+    "medical devices",
+    "health care equipment",
+    "health care services",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,6 +121,43 @@ def _extract_tickers(entries: list[dict[str, object]]) -> list[str]:
     return tickers
 
 
+def _build_ticker_metadata(
+    entries: list[dict[str, object]],
+    catalog: list[dict[str, object]],
+    overrides: dict[str, list[str]],
+) -> dict[str, dict[str, object]]:
+    metadata: dict[str, dict[str, object]] = {}
+    for item in entries:
+        ticker = str(item.get("ticker", "")).strip().upper()
+        if not ticker:
+            continue
+        sector = str(item.get("sector", "") or "").strip() or None
+        industry = str(item.get("industry", "") or "").strip() or None
+        entry = metadata.setdefault(
+            ticker,
+            {
+                "sector": None,
+                "industry": None,
+                "theme_tags": [],
+                "is_drug_ticker": False,
+            },
+        )
+        if entry["sector"] is None and sector:
+            entry["sector"] = sector
+        if entry["industry"] is None and industry:
+            entry["industry"] = industry
+        theme_tags = infer_theme_tags_for_ticker(
+            ticker=ticker,
+            sector=entry["sector"],
+            industry=entry["industry"],
+            catalog=catalog,
+            overrides=overrides,
+        )
+        entry["theme_tags"] = theme_tags
+        entry["is_drug_ticker"] = any(theme in DRUG_THEME_TAGS for theme in theme_tags)
+    return metadata
+
+
 def _resolve_pipeline_path(watchlist_dir: Path, date_label: str, pipeline: dict[str, str]) -> tuple[Path | None, str]:
     primary = watchlist_dir / pipeline["filename"].format(date=date_label)
     if primary.exists():
@@ -147,7 +194,9 @@ def _build_text_summary(payload: dict[str, object]) -> str:
     for item in overlap_two_plus[:25]:
         ticker = item["ticker"]
         pipelines = ", ".join(item["pipeline_labels"])
-        lines.append(f"- {ticker}: {pipelines}")
+        tags = ", ".join(item.get("theme_tags", [])) or "-"
+        drug_flag = " [drug]" if item.get("is_drug_ticker") else ""
+        lines.append(f"- {ticker}{drug_flag}: {pipelines} | tags={tags}")
     if len(overlap_two_plus) > 25:
         lines.append(f"- ... and {len(overlap_two_plus) - 25} more")
     return "\n".join(lines) + "\n"
@@ -181,16 +230,20 @@ def _build_html_summary(payload: dict[str, object]) -> str:
 
     rows = []
     for item in overlap_two_plus[:100]:
+        tags = escape(", ".join(item.get("theme_tags", [])) or "-")
+        drug_flag = "Yes" if item.get("is_drug_ticker") else "No"
         rows.append(
             f"""
             <tr>
               <td>{escape(str(item['ticker']))}</td>
               <td>{int(item['pipeline_count'])}</td>
               <td>{escape(', '.join(item['pipeline_labels']))}</td>
+              <td>{tags}</td>
+              <td>{drug_flag}</td>
             </tr>
             """
         )
-    table_rows = "".join(rows) or '<tr><td colspan="3">No overlaps found.</td></tr>'
+    table_rows = "".join(rows) or '<tr><td colspan="5">No overlaps found.</td></tr>'
 
     return f"""<!doctype html>
 <html lang="en">
@@ -330,6 +383,8 @@ def _build_html_summary(payload: dict[str, object]) -> str:
             <th>Ticker</th>
             <th>Count</th>
             <th>Pipelines</th>
+            <th>Tags</th>
+            <th>Drug</th>
           </tr>
         </thead>
         <tbody>
@@ -366,6 +421,9 @@ def main() -> int:
     pipeline_counts: dict[str, int] = {}
     pipeline_status: list[dict[str, object]] = []
     ticker_to_pipelines: dict[str, set[str]] = defaultdict(set)
+    ticker_metadata: dict[str, dict[str, object]] = {}
+    catalog = load_etf_catalog()
+    overrides = load_ticker_theme_overrides()
 
     labels_by_id = {pipeline["id"]: pipeline["label"] for pipeline in PIPELINES}
 
@@ -374,6 +432,7 @@ def main() -> int:
         path, resolution = _resolve_pipeline_path(watchlist_dir, args.date_label, pipeline)
         entries = _load_watchlist(path) if path is not None else []
         tickers = _extract_tickers(entries)
+        metadata = _build_ticker_metadata(entries, catalog, overrides)
         pipeline_tickers[pipeline_id] = tickers
         pipeline_counts[pipeline_id] = len(tickers)
         pipeline_status.append(
@@ -388,6 +447,23 @@ def main() -> int:
         )
         for ticker in tickers:
             ticker_to_pipelines[ticker].add(pipeline_id)
+            if ticker not in ticker_metadata:
+                ticker_metadata[ticker] = metadata.get(
+                    ticker,
+                    {"sector": None, "industry": None, "theme_tags": [], "is_drug_ticker": False},
+                )
+                continue
+            existing = ticker_metadata[ticker]
+            incoming = metadata.get(ticker)
+            if not incoming:
+                continue
+            if existing.get("sector") is None and incoming.get("sector") is not None:
+                existing["sector"] = incoming["sector"]
+            if existing.get("industry") is None and incoming.get("industry") is not None:
+                existing["industry"] = incoming["industry"]
+            merged_tags = sorted(set(existing.get("theme_tags", [])) | set(incoming.get("theme_tags", [])))
+            existing["theme_tags"] = merged_tags
+            existing["is_drug_ticker"] = bool(existing.get("is_drug_ticker")) or bool(incoming.get("is_drug_ticker"))
 
     overlap_two_plus = [
         {
@@ -395,6 +471,10 @@ def main() -> int:
             "pipelines": sorted(pipelines),
             "pipeline_labels": [labels_by_id[pipeline_id] for pipeline_id in sorted(pipelines)],
             "pipeline_count": len(pipelines),
+            "sector": ticker_metadata.get(ticker, {}).get("sector"),
+            "industry": ticker_metadata.get(ticker, {}).get("industry"),
+            "theme_tags": ticker_metadata.get(ticker, {}).get("theme_tags", []),
+            "is_drug_ticker": bool(ticker_metadata.get(ticker, {}).get("is_drug_ticker", False)),
         }
         for ticker, pipelines in ticker_to_pipelines.items()
         if len(pipelines) >= 2
