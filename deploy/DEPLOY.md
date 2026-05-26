@@ -162,7 +162,10 @@ This repo now includes:
 - [.github/workflows/ci.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/ci.yml)
 - [.github/workflows/deploy.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/deploy.yml)
 
-The deploy workflow is intentionally manual through `workflow_dispatch`.
+The deploy workflow supports both:
+
+- automatic deploy after `CI` succeeds on `main` or `master`
+- manual deploy through `workflow_dispatch`
 
 Required GitHub repository secrets:
 
