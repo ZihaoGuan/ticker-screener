@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title }} | Ticker Screener</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="/">Ticker Screener</a>
+      <nav class="nav">
+        <a href="/">Dashboard</a>
+        <a href="/runs">Runs</a>
+        <a href="/watchlists">Watchlists</a>
+        <a href="/backtests">Backtests</a>
+        <a href="/admin/exclusions">Exclusions</a>
+      </nav>
+    </div>
+  </header>
+  <main class="shell page">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

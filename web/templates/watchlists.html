@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="band">
+  <h1>Watchlists</h1>
+  <div class="list">
+    {% if watchlists %}
+      {% for item in watchlists %}
+      <a class="list-row" href="/watchlists/{{ item.stem }}">
+        <span>{{ item.name }}</span>
+        <span class="muted">{{ item.path }}</span>
+      </a>
+      {% endfor %}
+    {% else %}
+      <div class="empty">No watchlists available.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

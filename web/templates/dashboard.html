@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Research Control Room</h1>
+    <p>One place for sync status, strategy runs, watchlists, and backtests.</p>
+  </div>
+  <div class="hero-meta">
+    <div class="metric">
+      <span class="label">DB configured</span>
+      <strong>{{ "Yes" if overview.database_configured else "No" }}</strong>
+    </div>
+    <div class="metric">
+      <span class="label">Artifacts</span>
+      <strong>{{ overview.artifacts_dir }}</strong>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <h2>Strategies</h2>
+  <div class="grid cards-4">
+    {% for item in strategy_cards %}
+    <article class="card">
+      <h3>{{ item.label }}</h3>
+      <p>{{ item.description }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="band">
+  <div class="section-head">
+    <h2>Recent Watchlists</h2>
+    <a href="/watchlists">Browse all</a>
+  </div>
+  <div class="list">
+    {% if recent_watchlists %}
+      {% for item in recent_watchlists %}
+      <a class="list-row" href="/watchlists/{{ item.stem }}">
+        <span>{{ item.name }}</span>
+        <span class="muted">{{ item.path }}</span>
+      </a>
+      {% endfor %}
+    {% else %}
+      <div class="empty">No watchlists found yet.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

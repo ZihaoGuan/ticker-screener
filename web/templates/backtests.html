@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="band">
+  <h1>Backtests</h1>
+  <div class="grid cards-2">
+    {% for item in backtest_templates %}
+    <article class="card">
+      <h3>{{ item.label }}</h3>
+      <p>{{ item.description }}</p>
+      <pre>{{ item.command }}</pre>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

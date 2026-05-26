@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="band">
+  <h1>Run Controls</h1>
+  <p class="lede">First-pass UI shell for manual job entrypoints.</p>
+  <div class="grid cards-2">
+    {% for item in run_actions %}
+    <article class="card">
+      <h3>{{ item.label }}</h3>
+      <pre>{{ item.command }}</pre>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

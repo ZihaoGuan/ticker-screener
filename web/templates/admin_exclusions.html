@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="band">
+  <div class="section-head">
+    <h1>Excluded Tickers</h1>
+    <span class="muted">{{ excluded_count }} total</span>
+  </div>
+  <div class="chips">
+    {% for ticker in excluded_tickers %}
+    <span class="chip">{{ ticker }}</span>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

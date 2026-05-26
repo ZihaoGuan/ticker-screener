@@ -1,0 +1,45 @@
+name: Deploy Oracle Instance
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Git ref to deploy
+        required: false
+        default: main
+        type: string
+      compose_command:
+        description: Compose command after git pull
+        required: false
+        default: up -d --remove-orphans
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GIT_REF: ${{ github.event.inputs.git_ref }}
+          COMPOSE_COMMAND: ${{ github.event.inputs.compose_command }}
+          APP_DIR: ${{ secrets.ORACLE_APP_DIR }}
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_PORT }}
+          envs: GIT_REF,COMPOSE_COMMAND,APP_DIR
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "${APP_DIR}"
+            git fetch --all --prune
+            git checkout "${GIT_REF}"
+            git pull --ff-only origin "${GIT_REF}"
+            cd deploy
+            docker-compose ${COMPOSE_COMMAND}
+            docker-compose ps

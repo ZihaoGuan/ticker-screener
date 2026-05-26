@@ -53,6 +53,12 @@ For Oracle NoSQL export or direct sync support, install the optional SDK depende
 python3 -m pip install -r /Users/Zihao.Guan/Personal/ticker-screener/requirements-oracle-nosql.txt
 ```
 
+For the web app shell and Postgres-backed app layer, install the optional web dependencies:
+
+```bash
+python3 -m pip install -r /Users/Zihao.Guan/Personal/ticker-screener/requirements-web.txt
+```
+
 For the next-week earnings growth screener, install the extra provider dependencies:
 
 ```bash
@@ -275,6 +281,31 @@ python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/sync_oracle_nosql_mar
 The Oracle NoSQL schema notes and table design rationale live in:
 
 - [docs/oracle-nosql.md](/Users/Zihao.Guan/Personal/ticker-screener/docs/oracle-nosql.md)
+
+Run the web app shell locally:
+
+```bash
+uvicorn web.app:app --reload --host 0.0.0.0 --port 8000
+```
+
+The initial Postgres schema for the web app lives in:
+
+- [sql/postgres_app_schema.sql](/Users/Zihao.Guan/Personal/ticker-screener/sql/postgres_app_schema.sql)
+
+The web app MVP notes live in:
+
+- [docs/web-app.md](/Users/Zihao.Guan/Personal/ticker-screener/docs/web-app.md)
+
+The Docker Compose deployment files for a single Oracle instance live in:
+
+- [deploy/docker-compose.yml](/Users/Zihao.Guan/Personal/ticker-screener/deploy/docker-compose.yml)
+- [deploy/Caddyfile](/Users/Zihao.Guan/Personal/ticker-screener/deploy/Caddyfile)
+- [deploy/DEPLOY.md](/Users/Zihao.Guan/Personal/ticker-screener/deploy/DEPLOY.md)
+
+GitHub Actions now includes:
+
+- [.github/workflows/ci.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/ci.yml)
+- [.github/workflows/deploy.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/deploy.yml)
 
 ## Artifacts
 
