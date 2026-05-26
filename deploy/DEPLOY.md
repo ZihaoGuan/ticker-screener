@@ -95,10 +95,12 @@ Build it before bringing up the full stack:
 ```bash
 docker run --rm \
   --user "$(id -u):$(id -g)" \
+  -e HOME=/tmp/npm-home \
+  -e npm_config_cache=/tmp/npm-cache \
   -v "/opt/ticker-screener/app:/app" \
   -w /app/frontend \
   node:20 \
-  sh -c "npm install && npm run build"
+  sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm install && npm run build"
 ```
 
 ## 8. Start the web stack
@@ -198,7 +200,7 @@ Suggested values:
 The deploy workflow logs into the Oracle instance, checks out the requested git ref, then runs:
 
 ```bash
-docker run --rm --user "$(id -u):$(id -g)" -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "npm install && npm run build"
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm install && npm run build"
 cd deploy
 docker-compose down || true
 docker rm -f deploy_db_1 deploy_web_1 deploy_caddy_1 2>/dev/null || true

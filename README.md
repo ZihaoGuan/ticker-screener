@@ -59,6 +59,25 @@ For the web app shell and Postgres-backed app layer, install the optional web de
 python3 -m pip install -r /Users/Zihao.Guan/Personal/ticker-screener/requirements-web.txt
 ```
 
+Seed or incrementally sync Postgres market data for screener use:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/sync_postgres_market_data.py \
+  --ensure-schema \
+  --start-date 2020-01-01 \
+  --end-date 2026-05-26
+```
+
+Run a smaller smoke sync:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/sync_postgres_market_data.py \
+  --ensure-schema \
+  --tickers AAPL MSFT NVDA \
+  --start-date 2024-01-01 \
+  --end-date 2024-03-31
+```
+
 For the next-week earnings growth screener, install the extra provider dependencies:
 
 ```bash
