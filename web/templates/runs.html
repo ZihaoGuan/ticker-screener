@@ -3,12 +3,48 @@
 {% block content %}
 <section class="band">
   <h1>Run Controls</h1>
-  <p class="lede">First-pass UI shell for manual job entrypoints.</p>
+  <p class="lede">Launch the core screeners directly from the web app.</p>
+  {% if launched %}
+  <div class="callout success">Started {{ launched }} run.</div>
+  {% endif %}
   <div class="grid cards-2">
     {% for item in run_actions %}
     <article class="card">
       <h3>{{ item.label }}</h3>
       <pre>{{ item.command }}</pre>
+      <form method="post" action="/runs/{{ item.id }}" class="run-form">
+        {% if item.supports_limit %}
+        <label class="field">
+          <span>Limit</span>
+          <input type="number" name="limit" min="1" step="1" placeholder="optional">
+        </label>
+        {% endif %}
+        <button type="submit" class="primary-button">Run</button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="band">
+  <div class="section-head compact">
+    <h2>Recent Jobs</h2>
+    <span class="muted">Refresh the page to update status.</span>
+  </div>
+  <div class="grid cards-2">
+    {% for job in jobs %}
+    <article class="card">
+      <div class="section-head compact">
+        <h3>{{ job.label }}</h3>
+        <span class="status-pill status-{{ job.status }}">{{ job.status }}</span>
+      </div>
+      <p class="muted">{{ job.started_at }}</p>
+      <pre>{{ job.command }}</pre>
+      <pre class="job-log">{{ job.log_tail }}</pre>
+    </article>
+    {% else %}
+    <article class="card">
+      <p class="muted">No jobs launched yet.</p>
     </article>
     {% endfor %}
   </div>
