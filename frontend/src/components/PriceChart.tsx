@@ -1,4 +1,4 @@
-import { ColorType, createChart, HistogramSeries, LineSeries, CandlestickSeries } from "lightweight-charts";
+import { ColorType, createChart } from "lightweight-charts";
 import { useEffect, useMemo, useRef } from "react";
 import type { CandlePoint, WatchlistChartResponse } from "../lib/types";
 
@@ -38,7 +38,7 @@ export function PriceChart({ ticker, candles, overlays }: PriceChartProps) {
       },
     });
 
-    const candleSeries = chart.addSeries(CandlestickSeries, {
+    const candleSeries = chart.addCandlestickSeries({
       upColor: "#10b981",
       downColor: "#f43f5e",
       wickUpColor: "#10b981",
@@ -46,7 +46,7 @@ export function PriceChart({ ticker, candles, overlays }: PriceChartProps) {
       borderVisible: false,
     });
 
-    const volumeSeries = chart.addSeries(HistogramSeries, {
+    const volumeSeries = chart.addHistogramSeries({
       priceFormat: { type: "volume" },
       priceScaleId: "",
     });
@@ -58,9 +58,9 @@ export function PriceChart({ ticker, candles, overlays }: PriceChartProps) {
       },
     });
 
-    const ma20Series = chart.addSeries(LineSeries, { color: "#38bdf8", lineWidth: 2 });
-    const ma50Series = chart.addSeries(LineSeries, { color: "#fb923c", lineWidth: 2 });
-    const ma200Series = chart.addSeries(LineSeries, { color: "#a78bfa", lineWidth: 2 });
+    const ma20Series = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2 });
+    const ma50Series = chart.addLineSeries({ color: "#fb923c", lineWidth: 2 });
+    const ma200Series = chart.addLineSeries({ color: "#a78bfa", lineWidth: 2 });
 
     candleSeries.setData(
       candles.map((item) => ({
