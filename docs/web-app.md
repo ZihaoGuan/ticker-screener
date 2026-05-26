@@ -33,6 +33,10 @@ The first app shell lives in:
 
 - [web/app.py](/Users/Zihao.Guan/Personal/ticker-screener/web/app.py)
 
+The fuller product spec lives in:
+
+- [docs/web-app-spec.md](/Users/Zihao.Guan/Personal/ticker-screener/docs/web-app-spec.md)
+
 Routes included:
 
 - `/`
