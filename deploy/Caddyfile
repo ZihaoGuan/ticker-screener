@@ -1,15 +1,20 @@
 {$APP_FQDN} {
-    handle /api/* {
+    @api path /api/*
+    @health path /healthz
+
+    handle @api {
         reverse_proxy web:8000
     }
 
-    handle /healthz {
+    handle @health {
         reverse_proxy web:8000
     }
 
-    root * /srv/frontend
-    try_files {path} /index.html
-    file_server
+    handle {
+        root * /srv/frontend
+        try_files {path} /index.html
+        file_server
+    }
 }
 
 {$REPORTS_FQDN} {
