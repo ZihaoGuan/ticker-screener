@@ -1,10 +1,47 @@
 {% extends "base.html" %}
 
 {% block content %}
+<section class="band chart-band">
+  <div class="section-head">
+    <div>
+      <h1>{{ stem }}</h1>
+      <span class="muted">{{ entry_count }} entries</span>
+    </div>
+    <div class="chart-meta">
+      <strong id="chartTicker">{{ entries[0].get("ticker", "No ticker") if entries else "No ticker" }}</strong>
+      <span class="muted" id="chartSetup">{{ entries[0].get("setup_label", "") if entries else "" }}</span>
+    </div>
+  </div>
+  <div class="chart-layout">
+    <div class="chart-surface">
+      <div id="priceChart" class="chart-canvas"></div>
+      <div id="chartSummary" class="chart-summary">{{ entries[0].get("summary", "") if entries else "No watchlist entries available." }}</div>
+    </div>
+    <aside class="chart-sidebar">
+      <div class="chart-note">
+        <span class="label">Entry</span>
+        <strong id="chartEntry">{{ entries[0].get("entry_label", entries[0].get("trigger_label", "-")) if entries else "-" }}</strong>
+      </div>
+      <div class="chart-note">
+        <span class="label">Trigger</span>
+        <strong id="chartTrigger">{{ entries[0].get("trigger_price", "-") if entries else "-" }}</strong>
+      </div>
+      <div class="chart-note">
+        <span class="label">Stop</span>
+        <strong id="chartStop">{{ entries[0].get("stop_price", "-") if entries else "-" }}</strong>
+      </div>
+      <div class="chart-note">
+        <span class="label">Source</span>
+        <strong>Lightweight Charts</strong>
+      </div>
+    </aside>
+  </div>
+</section>
+
 <section class="band">
   <div class="section-head">
-    <h1>{{ stem }}</h1>
-    <span class="muted">{{ entry_count }} entries</span>
+    <h2>Entries</h2>
+    <span class="muted">Click a ticker to update the chart</span>
   </div>
   <div class="table-wrap">
     <table>
@@ -17,8 +54,14 @@
       </thead>
       <tbody>
         {% for item in entries %}
-        <tr>
-          <td>{{ item.get("ticker", "") }}</td>
+        <tr class="watchlist-row{% if loop.first %} is-selected{% endif %}"
+            data-ticker="{{ item.get('ticker', '') }}"
+            data-setup="{{ item.get('setup_label', '') }}"
+            data-summary="{{ item.get('summary', '') }}"
+            data-entry="{{ item.get('entry_label', item.get('trigger_label', '-')) }}"
+            data-trigger="{{ item.get('trigger_price', '-') }}"
+            data-stop="{{ item.get('stop_price', '-') }}">
+          <td><button type="button" class="ticker-link">{{ item.get("ticker", "") }}</button></td>
           <td>{{ item.get("setup_label", "") }}</td>
           <td>{{ item.get("summary", "") }}</td>
         </tr>
@@ -27,4 +70,97 @@
     </table>
   </div>
 </section>
+
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+  const chartRoot = document.getElementById('priceChart');
+  const rows = Array.from(document.querySelectorAll('.watchlist-row'));
+  const chartTicker = document.getElementById('chartTicker');
+  const chartSetup = document.getElementById('chartSetup');
+  const chartSummary = document.getElementById('chartSummary');
+  const chartEntry = document.getElementById('chartEntry');
+  const chartTrigger = document.getElementById('chartTrigger');
+  const chartStop = document.getElementById('chartStop');
+
+  const chart = LightweightCharts.createChart(chartRoot, {
+    layout: {
+      background: { color: '#ffffff' },
+      textColor: '#122033',
+    },
+    rightPriceScale: {
+      borderColor: '#d4deea',
+    },
+    timeScale: {
+      borderColor: '#d4deea',
+      timeVisible: true,
+    },
+    grid: {
+      vertLines: { color: '#eef3f9' },
+      horzLines: { color: '#eef3f9' },
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+    },
+  });
+
+  const candleSeries = chart.addCandlestickSeries({
+    upColor: '#22c55e',
+    downColor: '#ef4444',
+    borderVisible: false,
+    wickUpColor: '#22c55e',
+    wickDownColor: '#ef4444',
+  });
+
+  const volumeSeries = chart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: '',
+    scaleMargins: {
+      top: 0.75,
+      bottom: 0,
+    },
+  });
+
+  const ma20Series = chart.addLineSeries({ color: '#2563eb', lineWidth: 2 });
+  const ma50Series = chart.addLineSeries({ color: '#f59e0b', lineWidth: 2 });
+  const ma200Series = chart.addLineSeries({ color: '#7c3aed', lineWidth: 2 });
+
+  function resizeChart() {
+    chart.applyOptions({ width: chartRoot.clientWidth, height: 520 });
+    chart.timeScale().fitContent();
+  }
+
+  async function loadTicker(row) {
+    const ticker = row.dataset.ticker;
+    if (!ticker) {
+      return;
+    }
+    rows.forEach((item) => item.classList.remove('is-selected'));
+    row.classList.add('is-selected');
+    chartTicker.textContent = ticker;
+    chartSetup.textContent = row.dataset.setup || '';
+    chartSummary.textContent = row.dataset.summary || '';
+    chartEntry.textContent = row.dataset.entry || '-';
+    chartTrigger.textContent = row.dataset.trigger || '-';
+    chartStop.textContent = row.dataset.stop || '-';
+
+    const response = await fetch(`/watchlists/api/chart/${ticker}`);
+    const payload = await response.json();
+    candleSeries.setData(payload.candles || []);
+    volumeSeries.setData(payload.volume || []);
+    ma20Series.setData(payload.ma20 || []);
+    ma50Series.setData(payload.ma50 || []);
+    ma200Series.setData(payload.ma200 || []);
+    chart.timeScale().fitContent();
+  }
+
+  rows.forEach((row) => {
+    row.addEventListener('click', () => loadTicker(row));
+  });
+
+  window.addEventListener('resize', resizeChart);
+  resizeChart();
+  if (rows.length > 0) {
+    loadTicker(rows[0]);
+  }
+</script>
 {% endblock %}

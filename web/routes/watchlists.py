@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from src.webapp.services.watchlist_service import WatchlistService
 from web.dependencies import get_watchlist_service, templates
@@ -40,3 +40,12 @@ def watchlist_detail(
             **detail,
         },
     )
+
+
+@router.get("/api/chart/{ticker}", response_class=JSONResponse)
+def watchlist_chart_data(
+    ticker: str,
+    period: str = Query(default="18mo"),
+    service: WatchlistService = Depends(get_watchlist_service),
+) -> JSONResponse:
+    return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period))

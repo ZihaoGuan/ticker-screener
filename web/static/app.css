@@ -122,6 +122,51 @@ body {
 .table-wrap {
   overflow-x: auto;
 }
+.chart-band {
+  padding-bottom: 12px;
+}
+.chart-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 16px;
+}
+.chart-surface {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 12px;
+}
+.chart-canvas {
+  width: 100%;
+  min-height: 520px;
+}
+.chart-sidebar {
+  display: grid;
+  gap: 12px;
+}
+.chart-meta {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+.chart-summary {
+  margin-top: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.chart-note {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 14px 16px;
+}
+.label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -151,8 +196,25 @@ pre {
   padding: 6px 10px;
   font-size: 13px;
 }
+.watchlist-row {
+  cursor: pointer;
+}
+.watchlist-row.is-selected {
+  background: rgba(15, 108, 189, 0.08);
+}
+.ticker-link {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
 @media (max-width: 900px) {
   .hero {
+    grid-template-columns: 1fr;
+  }
+  .chart-layout {
     grid-template-columns: 1fr;
   }
   .list-row,
