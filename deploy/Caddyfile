@@ -1,8 +1,8 @@
-:80 {
+{$APP_FQDN} {
     reverse_proxy web:8000
 }
 
-:8080 {
+{$REPORTS_FQDN} {
     root * /artifacts/output
     file_server
 }

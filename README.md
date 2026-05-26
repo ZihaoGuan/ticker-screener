@@ -302,6 +302,11 @@ The Docker Compose deployment files for a single Oracle instance live in:
 - [deploy/Caddyfile](/Users/Zihao.Guan/Personal/ticker-screener/deploy/Caddyfile)
 - [deploy/DEPLOY.md](/Users/Zihao.Guan/Personal/ticker-screener/deploy/DEPLOY.md)
 
+The checked-in deploy config is generic for public-repo use. Set your real hostnames in `deploy/.env` with:
+
+- `APP_FQDN`
+- `REPORTS_FQDN`
+
 GitHub Actions now includes:
 
 - [.github/workflows/ci.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/ci.yml)

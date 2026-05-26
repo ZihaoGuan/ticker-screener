@@ -58,6 +58,8 @@ cp .env.example .env
 Edit `.env` and set:
 
 - `APP_DOMAIN`
+- `APP_FQDN`
+- `REPORTS_FQDN`
 - `POSTGRES_PASSWORD`
 - `TICKER_SCREENER_DATABASE_URL`
 
@@ -183,3 +185,12 @@ docker-compose up -d --remove-orphans
 ```
 
 You can override that compose command from the workflow UI when needed.
+
+## Domain mapping
+
+The checked-in [Caddyfile](/Users/Zihao.Guan/Personal/ticker-screener/deploy/Caddyfile) now reads its public hostnames from environment variables so the repository can stay generic.
+
+Typical production values:
+
+- `APP_FQDN=app.your-domain.com`
+- `REPORTS_FQDN=reports.your-domain.com`
