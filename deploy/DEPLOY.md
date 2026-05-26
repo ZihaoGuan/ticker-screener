@@ -181,7 +181,9 @@ The deploy workflow logs into the Oracle instance, checks out the requested git 
 
 ```bash
 cd deploy
-docker-compose up -d --remove-orphans
+docker-compose down || true
+docker rm -f deploy_db_1 deploy_web_1 deploy_caddy_1 2>/dev/null || true
+docker-compose up -d
 ```
 
 You can override that compose command from the workflow UI when needed.

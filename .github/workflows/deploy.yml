@@ -11,7 +11,7 @@ on:
       compose_command:
         description: Compose command after git pull
         required: false
-        default: up -d --remove-orphans
+        default: up -d
         type: string
 
 env:
@@ -41,5 +41,7 @@ jobs:
             git checkout "${GIT_REF}"
             git pull --ff-only origin "${GIT_REF}"
             cd deploy
+            docker-compose down || true
+            docker rm -f deploy_db_1 deploy_web_1 deploy_caddy_1 2>/dev/null || true
             docker-compose ${COMPOSE_COMMAND}
             docker-compose ps
