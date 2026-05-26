@@ -1,8 +1,32 @@
-import { Panel } from "../components/Panel";
+import { useEffect, useMemo, useState } from "react";
 import { StatusPill } from "../components/StatusPill";
-import { consoleTail, screenerJobs } from "../lib/mock-data";
+import { Panel } from "../components/Panel";
+import { fetchJson } from "../lib/api";
+import type { JobsResponse } from "../lib/types";
 
 export function RunsPage() {
+  const [payload, setPayload] = useState<JobsResponse | null>(null);
+  const [limitValue, setLimitValue] = useState("2500");
+
+  const refresh = () => {
+    void fetchJson<JobsResponse>("/api/jobs").then(setPayload).catch(() => setPayload({ actions: [], jobs: [] }));
+  };
+
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 4000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const latestLog = useMemo(() => payload?.jobs[0]?.log_tail ?? "No job log yet.", [payload]);
+
+  const runAction = async (actionId: string) => {
+    const limit = Number(limitValue);
+    const query = Number.isFinite(limit) && limit > 0 ? `?limit=${limit}` : "";
+    await fetchJson<{ ok: boolean; job_id: string }>(`/api/runs/${actionId}${query}`, { method: "POST" });
+    refresh();
+  };
+
   return (
     <div className="page-grid">
       <Panel title="Trigger Screener">
@@ -12,12 +36,19 @@ export function RunsPage() {
           </div>
           <label className="field">
             <span>Universe Limit</span>
-            <input defaultValue="2500" />
+            <input value={limitValue} onChange={(event) => setLimitValue(event.target.value)} />
           </label>
           <div className="button-row">
-            <button className="primary-button">Run RS</button>
-            <button className="secondary-button">Run VCP</button>
-            <button className="secondary-button">Run Cup Handle</button>
+            {(payload?.actions ?? []).map((action, index) => (
+              <button
+                key={action.id}
+                className={index === 0 ? "primary-button" : "secondary-button"}
+                onClick={() => void runAction(action.id)}
+                type="button"
+              >
+                {action.label}
+              </button>
+            ))}
           </div>
         </div>
       </Panel>
@@ -35,24 +66,24 @@ export function RunsPage() {
             </tr>
           </thead>
           <tbody>
-            {screenerJobs.map((job) => (
-              <tr key={job.jobId}>
-                <td className="mono">#{job.jobId}</td>
+            {(payload?.jobs ?? []).map((job) => (
+              <tr key={job.job_id}>
+                <td className="mono">#{job.job_id}</td>
                 <td>{job.label}</td>
                 <td>
                   <StatusPill status={job.status} />
                 </td>
-                <td>{job.startedAt}</td>
-                <td>{job.finishedAt}</td>
-                <td className="mono">{job.returnCode}</td>
+                <td>{job.started_at || "-"}</td>
+                <td>{job.finished_at || "-"}</td>
+                <td className="mono">{job.return_code ?? "-"}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </Panel>
 
-      <Panel title="Console Tail: #RUN-8821" aside={<span className="eyebrow">Auto-scroll: on</span>}>
-        <pre className="console-surface">{consoleTail}</pre>
+      <Panel title="Console Tail" aside={<span className="eyebrow">Auto-refresh: 4s</span>}>
+        <pre className="console-surface">{latestLog}</pre>
       </Panel>
     </div>
   );

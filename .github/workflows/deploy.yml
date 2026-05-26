@@ -52,6 +52,12 @@ jobs:
             git fetch --all --prune
             git checkout "${GIT_REF}"
             git pull --ff-only origin "${GIT_REF}"
+            docker run --rm \
+              --user "$(id -u):$(id -g)" \
+              -v "${APP_DIR}:/app" \
+              -w /app/frontend \
+              node:20 \
+              sh -c "npm install && npm run build"
             cd deploy
             docker-compose down || true
             docker rm -f deploy_db_1 deploy_web_1 deploy_caddy_1 2>/dev/null || true

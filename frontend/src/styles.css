@@ -316,6 +316,13 @@ a {
   padding: 16px;
 }
 
+.file-button {
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
 .file-row.is-selected {
   border-color: #3f3f46;
 }

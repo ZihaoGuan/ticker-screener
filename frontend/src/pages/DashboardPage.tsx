@@ -1,8 +1,21 @@
-import { Panel } from "../components/Panel";
-import { strategyCards, screenerJobs, watchlistFiles } from "../lib/mock-data";
+import { useEffect, useState } from "react";
 import { StatusPill } from "../components/StatusPill";
+import { Panel } from "../components/Panel";
+import { fetchJson } from "../lib/api";
+import type { DashboardResponse, JobsResponse } from "../lib/types";
 
 export function DashboardPage() {
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+  const [jobs, setJobs] = useState<JobsResponse["jobs"]>([]);
+
+  useEffect(() => {
+    void fetchJson<DashboardResponse>("/api/dashboard").then(setDashboard).catch(() => setDashboard(null));
+    void fetchJson<JobsResponse>("/api/jobs").then((payload) => setJobs(payload.jobs)).catch(() => setJobs([]));
+  }, []);
+
+  const strategyCards = dashboard?.strategy_cards ?? [];
+  const watchlistFiles = dashboard?.recent_watchlists ?? [];
+
   return (
     <div className="page-grid">
       <Panel title="Key Strategy Metrics" aside={<span className="eyebrow">Last 24 hours</span>}>
@@ -13,9 +26,9 @@ export function DashboardPage() {
                 <h3>{card.label}</h3>
                 <span className={`accent-mark accent-${card.accent ?? "neutral"}`} />
               </div>
-              <p className="card-meta">Last Run: {card.lastRun}</p>
+              <p className="card-meta">{card.description}</p>
               <div className="metric-value">
-                {String(card.hits).padStart(2, "0")} <span>tickers found</span>
+                {String(card.hits ?? 0).padStart(2, "0")} <span>tickers found</span>
               </div>
             </article>
           ))}
@@ -33,10 +46,10 @@ export function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {screenerJobs.map((job) => (
-                <tr key={job.jobId}>
+              {jobs.map((job) => (
+                <tr key={job.job_id}>
                   <td>{job.label}</td>
-                  <td>{job.startedAt}</td>
+                  <td>{job.started_at || "-"}</td>
                   <td>
                     <StatusPill status={job.status} />
                   </td>
@@ -51,10 +64,8 @@ export function DashboardPage() {
             {watchlistFiles.map((file) => (
               <div key={file.stem} className="file-row">
                 <div>
-                  <div className="file-name">{file.label}</div>
-                  <div className="file-meta">
-                    {file.dateLabel} • {file.sizeLabel}
-                  </div>
+                  <div className="file-name">{file.name}</div>
+                  <div className="file-meta">{file.stem}</div>
                 </div>
               </div>
             ))}

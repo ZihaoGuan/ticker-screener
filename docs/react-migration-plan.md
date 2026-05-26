@@ -45,7 +45,7 @@ Initial React pages were created for:
 - Backtests
 - Admin
 
-The watchlists page already includes a React-side `lightweight-charts` component scaffold.
+The watchlists page includes a React-side `lightweight-charts` component and now reads chart data from FastAPI JSON endpoints.
 
 ## Migration strategy
 
@@ -55,9 +55,9 @@ Keep the current FastAPI/Jinja app as the stable operator surface.
 
 Add React as a parallel frontend for iterative development:
 
-- FastAPI still serves current HTML pages
+- FastAPI still owns API and can keep legacy HTML pages during transition
 - React runs separately during development
-- React uses mock data first, then shifts to real API calls
+- React uses real API calls for dashboard, runs, watchlists, overlap, backtests, and admin
 
 This is the current recommended mode.
 
@@ -81,7 +81,7 @@ Promote the backend toward JSON endpoints for React consumption.
 
 - `GET /api/watchlists`
 - `GET /api/watchlists/{stem}`
-- `GET /api/watchlists/api/chart/{ticker}` or rename to a cleaner API namespace
+- `GET /api/watchlists/{stem}/chart/{ticker}`
 
 #### Overlap
 
@@ -102,8 +102,9 @@ Promote the backend toward JSON endpoints for React consumption.
 Once the React routes are feature-complete:
 
 1. build the React app into static assets
-2. serve the React build from FastAPI or Caddy
-3. turn old Jinja pages into:
+2. serve the React build from Caddy
+3. keep FastAPI focused on `/api/*` and `/healthz`
+4. turn old Jinja pages into:
    - redirects
    - fallback admin/operator pages
    - or remove them after confidence is high
@@ -210,31 +211,31 @@ React target:
 
 ## Current limitations
 
-The React scaffold is intentionally not wired to the backend yet.
+The migration is now partially wired:
 
-That means:
+1. React pages consume FastAPI JSON APIs
+2. production deploy builds `frontend/` and serves `frontend/dist` through Caddy
+3. FastAPI remains the backend for `/api/*` and `/healthz`
 
-1. it uses mock data
-2. it has not replaced FastAPI templates
-3. it has not yet been wired into Docker deploy flow
-4. it has not been installed or built in this environment
+There are still open pieces:
 
-This is expected for the preparation step.
+1. local build validation has not been run in this environment
+2. some legacy Jinja routes still exist as fallback surfaces
+3. runs use in-memory job state rather than Postgres persistence
 
 ## Next recommended implementation order
 
-1. add JSON API for dashboard and watchlists
-2. switch React watchlists page from mock data to real watchlist/chart APIs
-3. add job polling API and migrate runs page
-4. implement overlap API and page
-5. decide whether FastAPI or Caddy serves the React build in production
+1. validate the React build in CI
+2. add deploy-time health checks for `https://app.<domain>/healthz`
+3. persist run history into Postgres instead of process memory
+4. decide whether to keep or retire legacy Jinja routes
 
 ## Production cutover recommendation
 
 When ready, prefer:
 
 1. build React into static assets
-2. serve those assets from FastAPI or Caddy
+2. serve those assets from Caddy
 3. keep FastAPI as the only backend/API process
 
 Avoid introducing a second frontend server in production unless there is a strong reason.

@@ -1,18 +1,19 @@
 import { ColorType, createChart, HistogramSeries, LineSeries, CandlestickSeries } from "lightweight-charts";
 import { useEffect, useMemo, useRef } from "react";
-import type { CandlePoint } from "../lib/types";
+import type { CandlePoint, WatchlistChartResponse } from "../lib/types";
 
 type PriceChartProps = {
   ticker: string;
   candles: CandlePoint[];
+  overlays?: Pick<WatchlistChartResponse, "ma20" | "ma50" | "ma200">;
 };
 
-export function PriceChart({ ticker, candles }: PriceChartProps) {
+export function PriceChart({ ticker, candles, overlays }: PriceChartProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  const ma20 = useMemo(() => buildMovingAverage(candles, 20), [candles]);
-  const ma50 = useMemo(() => buildMovingAverage(candles, 50), [candles]);
-  const ma200 = useMemo(() => buildMovingAverage(candles, 200), [candles]);
+  const ma20 = useMemo(() => overlays?.ma20 ?? buildMovingAverage(candles, 20), [candles, overlays?.ma20]);
+  const ma50 = useMemo(() => overlays?.ma50 ?? buildMovingAverage(candles, 50), [candles, overlays?.ma50]);
+  const ma200 = useMemo(() => overlays?.ma200 ?? buildMovingAverage(candles, 200), [candles, overlays?.ma200]);
 
   useEffect(() => {
     if (!rootRef.current) {

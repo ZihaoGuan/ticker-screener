@@ -86,7 +86,22 @@ Load it with:
 docker-compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < ../sql/postgres_app_schema.sql
 ```
 
-## 7. Start the web stack
+## 7. Build the React frontend
+
+The app domain serves the React build from `frontend/dist`.
+
+Build it before bringing up the full stack:
+
+```bash
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -v "/opt/ticker-screener/app:/app" \
+  -w /app/frontend \
+  node:20 \
+  sh -c "npm install && npm run build"
+```
+
+## 8. Start the web stack
 
 ```bash
 docker-compose up -d
@@ -100,20 +115,20 @@ The web service installs Python dependencies at container start and then launche
 uvicorn web.app:app --host 0.0.0.0 --port 8000
 ```
 
-## 8. Smoke checks
+## 9. Smoke checks
 
 Check health:
 
 ```bash
-curl http://localhost/healthz
+curl -k https://app.your-domain.com/healthz
 ```
 
 Open in browser:
 
-- `http://<server-ip>/`
-- or your configured domain once DNS points at the instance
+- `https://app.your-domain.com/`
+- `https://reports.your-domain.com/`
 
-## 9. Run jobs manually
+## 10. Run jobs manually
 
 Until the `/runs` page launches real jobs, use `docker compose exec`:
 
@@ -132,7 +147,7 @@ Rendered and raw outputs stay under:
 
 The `reports.<domain>` site in the default Caddyfile serves `artifacts/output` directly.
 
-## 10. Optional cron on the host
+## 11. Optional cron on the host
 
 For a simple single-instance setup, host cron is enough. Example:
 
@@ -183,6 +198,7 @@ Suggested values:
 The deploy workflow logs into the Oracle instance, checks out the requested git ref, then runs:
 
 ```bash
+docker run --rm --user "$(id -u):$(id -g)" -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "npm install && npm run build"
 cd deploy
 docker-compose down || true
 docker rm -f deploy_db_1 deploy_web_1 deploy_caddy_1 2>/dev/null || true

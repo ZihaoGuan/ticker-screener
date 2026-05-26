@@ -1,16 +1,16 @@
 import type { CandlePoint, OverlapEntry, ScreenerJob, StrategyCard, WatchlistFile, WatchlistTicker } from "./types";
 
 export const strategyCards: StrategyCard[] = [
-  { id: "rs", label: "RS (Relative Strength)", lastRun: "2026-05-26 09:30", hits: 14, accent: "up" },
-  { id: "vcp", label: "VCP (Volatility Contraction)", lastRun: "2026-05-26 10:15", hits: 8, accent: "up" },
-  { id: "cup_handle", label: "Cup & Handle", lastRun: "2026-05-26 16:00", hits: 3, accent: "neutral" },
-  { id: "overlap", label: "Overlap", lastRun: "2026-05-26 11:00", hits: 22, accent: "up" },
+  { id: "rs", label: "RS (Relative Strength)", description: "Daily RS leaders.", lastRun: "2026-05-26 09:30", hits: 14, accent: "up" },
+  { id: "vcp", label: "VCP (Volatility Contraction)", description: "Volatility contraction setups.", lastRun: "2026-05-26 10:15", hits: 8, accent: "up" },
+  { id: "cup_handle", label: "Cup & Handle", description: "Breakout candidates.", lastRun: "2026-05-26 16:00", hits: 3, accent: "neutral" },
+  { id: "overlap", label: "Overlap", description: "Cross-strategy overlap.", lastRun: "2026-05-26 11:00", hits: 22, accent: "up" },
 ];
 
 export const screenerJobs: ScreenerJob[] = [
-  { jobId: "RUN-8821", label: "Relative Strength (RS)", status: "running", startedAt: "2026-05-26 14:30:05", finishedAt: "--", returnCode: "--" },
-  { jobId: "RUN-8819", label: "VCP Scanner", status: "success", startedAt: "2026-05-26 12:15:10", finishedAt: "2026-05-26 12:18:42", returnCode: "0" },
-  { jobId: "RUN-8815", label: "Cup & Handle", status: "failed", startedAt: "2026-05-26 10:00:00", finishedAt: "2026-05-26 10:00:15", returnCode: "127" },
+  { jobId: "RUN-8821", label: "Relative Strength (RS)", status: "running", startedAt: "2026-05-26 14:30:05", finishedAt: "--", returnCode: null },
+  { jobId: "RUN-8819", label: "VCP Scanner", status: "success", startedAt: "2026-05-26 12:15:10", finishedAt: "2026-05-26 12:18:42", returnCode: 0 },
+  { jobId: "RUN-8815", label: "Cup & Handle", status: "failed", startedAt: "2026-05-26 10:00:00", finishedAt: "2026-05-26 10:00:15", returnCode: 127 },
 ];
 
 export const consoleTail = [
@@ -22,9 +22,9 @@ export const consoleTail = [
 ].join("\n");
 
 export const watchlistFiles: WatchlistFile[] = [
-  { stem: "rs_20260526", label: "rs_20260526.json", dateLabel: "May 26", sizeLabel: "14KB" },
-  { stem: "vcp_20260525", label: "vcp_20260525.json", dateLabel: "May 25", sizeLabel: "8KB" },
-  { stem: "growth_leaders_20260524", label: "growth_leaders_20260524.json", dateLabel: "May 24", sizeLabel: "22KB" },
+  { stem: "rs_20260526", name: "rs_20260526.json", path: "/tmp/rs_20260526.json" },
+  { stem: "vcp_20260525", name: "vcp_20260525.json", path: "/tmp/vcp_20260525.json" },
+  { stem: "growth_leaders_20260524", name: "growth_leaders_20260524.json", path: "/tmp/growth_leaders_20260524.json" },
 ];
 
 export const watchlistTickers: WatchlistTicker[] = [
@@ -103,7 +103,7 @@ export const chartData: CandlePoint[] = priceSeed.map((item, index) => ({
 }));
 
 export const overlapEntries: OverlapEntry[] = [
-  { ticker: "NVDA", overlapCount: 4, pipelines: ["RS", "VCP", "HTF 8W Runup", "Overlap"], sector: "Semiconductors" },
-  { ticker: "CRWV", overlapCount: 3, pipelines: ["Sean PEG", "RS", "Gap Fill"], sector: "Software" },
-  { ticker: "META", overlapCount: 2, pipelines: ["RS", "Weekly HTF Pullback"], sector: "Internet" },
+  { ticker: "NVDA", pipeline_count: 4, pipeline_labels: ["RS", "VCP", "HTF 8W Runup", "Overlap"], sector: "Semiconductors" },
+  { ticker: "CRWV", pipeline_count: 3, pipeline_labels: ["Sean PEG", "RS", "Gap Fill"], sector: "Software" },
+  { ticker: "META", pipeline_count: 2, pipeline_labels: ["RS", "Weekly HTF Pullback"], sector: "Internet" },
 ];

@@ -51,6 +51,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - ../artifacts:/artifacts
+      - ../frontend/dist:/srv/frontend
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
