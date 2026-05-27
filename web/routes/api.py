@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from src.config import load_app_config
@@ -35,13 +35,14 @@ def jobs_data(service: RunService = Depends(get_run_service)) -> JSONResponse:
 @router.post("/runs/{action_id}", response_class=JSONResponse)
 def run_action(
     action_id: str,
-    limit: int | None = Query(default=None, ge=1, le=10000),
+    payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
 ) -> JSONResponse:
     try:
-        job_id = service.launch(action_id, limit=limit)
+        job_id = service.launch(action_id, options=payload or {})
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        status_code = 404 if str(exc).startswith("Unknown run action") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return JSONResponse({"ok": True, "job_id": job_id})
 
 

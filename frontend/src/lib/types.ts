@@ -68,7 +68,20 @@ export type DashboardResponse = {
 };
 
 export type JobsResponse = {
-  actions: { id: string; label: string; command: string; supports_limit: boolean }[];
+  actions: {
+    id: string;
+    label: string;
+    command: string;
+    supports_limit: boolean;
+    fields: Array<{
+      id: string;
+      label: string;
+      type: "text" | "number" | "date" | "select";
+      placeholder?: string | null;
+      help_text?: string | null;
+      options: Array<{ value: string; label: string }>;
+    }>;
+  }[];
   jobs: {
     job_id: string;
     label: string;

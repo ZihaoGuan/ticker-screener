@@ -468,10 +468,14 @@ a {
 }
 
 .run-toolbar {
-  align-items: end;
   display: grid;
   gap: 18px;
-  grid-template-columns: minmax(260px, 1fr) 160px auto;
+}
+
+.run-params-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .field {
@@ -485,7 +489,8 @@ a {
   font-weight: 600;
 }
 
-.field input {
+.field input,
+.field select {
   background: #09090b;
   border: 1px solid #3f3f46;
   border-radius: 4px;
@@ -494,10 +499,24 @@ a {
   padding: 0 12px;
 }
 
+.field-help {
+  color: #a1a1aa;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.run-action-footer {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  grid-column: 1 / -1;
 }
 
 .console-surface,

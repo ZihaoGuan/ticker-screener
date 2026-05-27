@@ -7,7 +7,15 @@ import type { JobsResponse } from "../lib/types";
 
 export function RunsPage() {
   const [payload, setPayload] = useState<JobsResponse | null>(null);
-  const [limitValue, setLimitValue] = useState("2500");
+  const [selectedActionId, setSelectedActionId] = useState("");
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({
+    limit: "",
+    tickers: "",
+    date_label: "",
+    as_of_date: "",
+    source: "universe",
+    reference_date: "",
+  });
 
   const refresh = () => {
     void fetchJson<JobsResponse>("/api/jobs").then(setPayload).catch(() => setPayload({ actions: [], jobs: [] }));
@@ -19,13 +27,32 @@ export function RunsPage() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!payload?.actions?.length) {
+      return;
+    }
+    setSelectedActionId((current) => current || payload.actions[0].id);
+  }, [payload]);
+
   const latestLog = useMemo(() => payload?.jobs[0]?.log_tail ?? "No job log yet.", [payload]);
   const activeJob = useMemo(() => payload?.jobs.find((job) => job.status === "running") ?? null, [payload]);
+  const selectedAction = useMemo(
+    () => payload?.actions.find((action) => action.id === selectedActionId) ?? payload?.actions[0] ?? null,
+    [payload, selectedActionId],
+  );
 
   const runAction = async (actionId: string) => {
-    const limit = Number(limitValue);
-    const query = Number.isFinite(limit) && limit > 0 ? `?limit=${limit}` : "";
-    await fetchJson<{ ok: boolean; job_id: string }>(`/api/runs/${actionId}${query}`, { method: "POST" });
+    const body: Record<string, string> = {};
+    for (const [key, value] of Object.entries(fieldValues)) {
+      if (value.trim()) {
+        body[key] = value.trim();
+      }
+    }
+    await fetchJson<{ ok: boolean; job_id: string }>(`/api/runs/${actionId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     refresh();
   };
 
@@ -36,22 +63,63 @@ export function RunsPage() {
           <div>
             <div className="panel-copy">Execute algorithmic screeners against the current research universe.</div>
           </div>
-          <label className="field">
-            <span>Universe Limit</span>
-            <input value={limitValue} onChange={(event) => setLimitValue(event.target.value)} />
-          </label>
           <div className="button-row">
-            {(payload?.actions ?? []).map((action, index) => (
+            {(payload?.actions ?? []).map((action) => (
               <button
                 key={action.id}
-                className={index === 0 ? "primary-button" : "secondary-button"}
-                onClick={() => void runAction(action.id)}
+                className={selectedAction?.id === action.id ? "primary-button" : "secondary-button"}
+                onClick={() => setSelectedActionId(action.id)}
                 type="button"
               >
                 {action.label}
               </button>
             ))}
           </div>
+          {selectedAction ? (
+            <div className="run-params-grid">
+              {selectedAction.fields.map((field) => (
+                <label className="field" key={field.id}>
+                  <span>{field.label}</span>
+                  {field.type === "select" ? (
+                    <select
+                      value={fieldValues[field.id] ?? ""}
+                      onChange={(event) =>
+                        setFieldValues((current) => ({
+                          ...current,
+                          [field.id]: event.target.value,
+                        }))
+                      }
+                    >
+                      {field.options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={field.type}
+                      placeholder={field.placeholder ?? undefined}
+                      value={fieldValues[field.id] ?? ""}
+                      onChange={(event) =>
+                        setFieldValues((current) => ({
+                          ...current,
+                          [field.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  )}
+                  {field.help_text ? <small className="field-help">{field.help_text}</small> : null}
+                </label>
+              ))}
+              <div className="run-action-footer">
+                <button className="primary-button" onClick={() => void runAction(selectedAction.id)} type="button">
+                  {selectedAction.label}
+                </button>
+                <span className="eyebrow">Command: {selectedAction.command}</span>
+              </div>
+            </div>
+          ) : null}
         </div>
       </Panel>
 

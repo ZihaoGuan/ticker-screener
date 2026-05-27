@@ -18,35 +18,128 @@ class RunAction:
     script_path: str
     supports_limit: bool = True
     extra_args: tuple[str, ...] = ()
+    fields: tuple["RunField", ...] = ()
+
+
+@dataclass(frozen=True)
+class RunField:
+    field_id: str
+    label: str
+    field_type: str
+    placeholder: str | None = None
+    help_text: str | None = None
+    options: tuple[tuple[str, str], ...] = ()
 
 
 class RunService:
     _progress_pattern = re.compile(r"\[(\d{1,6})/(\d{1,6})\]")
+    _limit_field = RunField(
+        "limit",
+        "Universe Limit",
+        "number",
+        placeholder="Optional",
+        help_text="Leave blank to scan the full configured universe.",
+    )
+    _tickers_field = RunField(
+        "tickers",
+        "Tickers",
+        "text",
+        placeholder="AAPL NVDA CRWD",
+        help_text="Optional space- or comma-separated ticker list.",
+    )
+    _date_label_field = RunField(
+        "date_label",
+        "Date Label",
+        "date",
+        help_text="Optional artifact label override.",
+    )
+    _as_of_date_field = RunField(
+        "as_of_date",
+        "As Of Date",
+        "date",
+        help_text="Optional historical replay date.",
+    )
+    _source_field = RunField(
+        "source",
+        "Source",
+        "select",
+        help_text="Choose whether PEG scans the full universe or the earnings watchlist.",
+        options=(("universe", "Exchange Universe"), ("earnings-watchlist", "Earnings Watchlist")),
+    )
+    _reference_date_field = RunField(
+        "reference_date",
+        "Reference Date",
+        "date",
+        help_text="Optional date anchor for the earnings watchlist source.",
+    )
     _actions = {
-        "rs": RunAction("rs", "Run RS", "scripts/run_rs_screen.py"),
-        "vcp": RunAction("vcp", "Run VCP", "scripts/run_vcp_screen.py"),
-        "cup_handle": RunAction("cup_handle", "Run Cup Handle", "scripts/run_cup_handle_screen.py"),
-        "gap_fill": RunAction("gap_fill", "Run Gap Fill", "scripts/run_gap_fill_screen.py"),
+        "rs": RunAction(
+            "rs",
+            "Run RS",
+            "scripts/run_rs_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+        ),
+        "vcp": RunAction(
+            "vcp",
+            "Run VCP",
+            "scripts/run_vcp_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+        ),
+        "cup_handle": RunAction(
+            "cup_handle",
+            "Run Cup Handle",
+            "scripts/run_cup_handle_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+        ),
+        "gap_fill": RunAction(
+            "gap_fill",
+            "Run Gap Fill",
+            "scripts/run_gap_fill_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+        ),
         "weekly_htf_pullback": RunAction(
             "weekly_htf_pullback",
             "Run Weekly HTF Pullback",
             "scripts/run_weekly_htf_pullback_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
         ),
-        "htf_8w_runup": RunAction("htf_8w_runup", "Run HTF 8W Runup", "scripts/run_htf_runup_screen.py"),
-        "weekly_rs": RunAction("weekly_rs", "Run Weekly RS", "scripts/run_weekly_rs_screen.py"),
-        "near_200ma": RunAction("near_200ma", "Run Near 200MA", "scripts/run_near_200ma_screen.py"),
-        "lost_21ema": RunAction("lost_21ema", "Run Lost 21EMA", "scripts/run_lost_21ema_screen.py"),
+        "htf_8w_runup": RunAction(
+            "htf_8w_runup",
+            "Run HTF 8W Runup",
+            "scripts/run_htf_runup_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+        ),
+        "weekly_rs": RunAction(
+            "weekly_rs",
+            "Run Weekly RS",
+            "scripts/run_weekly_rs_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field),
+        ),
+        "near_200ma": RunAction(
+            "near_200ma",
+            "Run Near 200MA",
+            "scripts/run_near_200ma_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field),
+        ),
+        "lost_21ema": RunAction(
+            "lost_21ema",
+            "Run Lost 21EMA",
+            "scripts/run_lost_21ema_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field),
+        ),
         "legacy_peg": RunAction(
             "legacy_peg",
             "Run Legacy PEG",
             "scripts/run_peg_screen.py",
             extra_args=("--strategy-profile", "legacy"),
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field, _source_field, _reference_date_field),
         ),
         "sean_peg": RunAction(
             "sean_peg",
             "Run Sean PEG",
             "scripts/run_peg_screen.py",
             extra_args=("--strategy-profile", "sean-peg"),
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field, _source_field, _reference_date_field),
         ),
     }
     _jobs_lock = threading.Lock()
@@ -63,6 +156,17 @@ class RunService:
                 "label": action.label,
                 "command": " ".join([sys.executable, action.script_path, *action.extra_args]).strip(),
                 "supports_limit": action.supports_limit,
+                "fields": [
+                    {
+                        "id": field.field_id,
+                        "label": field.label,
+                        "type": field.field_type,
+                        "placeholder": field.placeholder,
+                        "help_text": field.help_text,
+                        "options": [{"value": value, "label": label} for value, label in field.options],
+                    }
+                    for field in action.fields
+                ],
             }
             for action in self._actions.values()
         ]
@@ -71,17 +175,29 @@ class RunService:
         with self._jobs_lock:
             return [dict(item) for item in self._jobs[:limit]]
 
-    def launch(self, action_id: str, *, limit: int | None = None) -> str:
+    def launch(self, action_id: str, *, options: dict[str, Any] | None = None) -> str:
         action = self._actions.get(action_id)
         if action is None:
             raise ValueError(f"Unknown run action: {action_id}")
 
+        normalized = self._normalize_options(action, options or {})
         job_id = uuid.uuid4().hex[:12]
         started_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
         command = [sys.executable, action.script_path]
         command.extend(action.extra_args)
-        if action.supports_limit and limit is not None:
-            command.extend(["--limit", str(limit)])
+        if action.supports_limit and normalized.get("limit") is not None:
+            command.extend(["--limit", str(normalized["limit"])])
+        if normalized.get("tickers"):
+            command.append("--tickers")
+            command.extend(normalized["tickers"])
+        if normalized.get("date_label"):
+            command.extend(["--date-label", str(normalized["date_label"])])
+        if normalized.get("as_of_date"):
+            command.extend(["--as-of-date", str(normalized["as_of_date"])])
+        if normalized.get("source"):
+            command.extend(["--source", str(normalized["source"])])
+        if normalized.get("reference_date"):
+            command.extend(["--reference-date", str(normalized["reference_date"])])
 
         job = {
             "job_id": job_id,
@@ -107,6 +223,32 @@ class RunService:
         thread = threading.Thread(target=self._run_job, args=(job_id, command), daemon=True)
         thread.start()
         return job_id
+
+    def _normalize_options(self, action: RunAction, options: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        if action.supports_limit:
+            raw_limit = options.get("limit")
+            if raw_limit not in (None, ""):
+                try:
+                    limit = int(raw_limit)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Limit must be an integer.") from exc
+                if limit <= 0 or limit > 10000:
+                    raise ValueError("Limit must be between 1 and 10000.")
+                normalized["limit"] = limit
+
+        raw_tickers = options.get("tickers")
+        if isinstance(raw_tickers, str) and raw_tickers.strip():
+            tickers = [item.strip().upper() for item in re.split(r"[\s,]+", raw_tickers.strip()) if item.strip()]
+            if tickers:
+                normalized["tickers"] = tickers
+
+        for key in ("date_label", "as_of_date", "reference_date", "source"):
+            value = options.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized[key] = value.strip()
+
+        return normalized
 
     def _run_job(self, job_id: str, command: list[str]) -> None:
         process = subprocess.Popen(
