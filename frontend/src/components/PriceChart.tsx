@@ -309,11 +309,11 @@ function buildExponentialMovingAverage(candles: CandlePoint[], span: number) {
 }
 
 function buildPriceLine(
-  series: { createPriceLine: (options: { price: number; color: string; lineWidth: number; title: string }) => unknown },
+  series: { createPriceLine: (options: unknown) => unknown },
   price: number | null | undefined,
   color: string,
   title: string,
-  lineWidth: number,
+  lineWidth: 1 | 2 | 3 | 4,
 ) {
   if (price == null) {
     return null;
@@ -323,7 +323,7 @@ function buildPriceLine(
     color,
     lineWidth,
     title,
-  });
+  } as Parameters<typeof series.createPriceLine>[0]);
 }
 
 function detectGapZones(candles: CandlePoint[]): GapZone[] {
