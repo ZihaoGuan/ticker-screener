@@ -524,6 +524,25 @@ a {
   grid-template-columns: 360px minmax(0, 1fr);
 }
 
+.rrg-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.rrg-image-link {
+  display: block;
+  margin-top: 14px;
+}
+
+.rrg-image {
+  width: 100%;
+  display: block;
+  border-radius: 8px;
+  border: 1px solid #27272a;
+  background: #111114;
+}
+
 .files-pane {
   padding: 0;
   overflow: hidden;

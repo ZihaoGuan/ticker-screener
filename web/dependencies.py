@@ -5,6 +5,7 @@ from fastapi.templating import Jinja2Templates
 from src.webapp.config import PROJECT_ROOT, load_webapp_config
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.overlap_service import OverlapService
+from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.watchlist_service import WatchlistService
 
@@ -27,3 +28,7 @@ def get_run_service() -> RunService:
 
 def get_overlap_service() -> OverlapService:
     return OverlapService(artifacts_dir=config.artifacts_dir)
+
+
+def get_rrg_service() -> RrgService:
+    return RrgService(output_dir=config.output_dir, reports_fqdn=config.reports_fqdn)

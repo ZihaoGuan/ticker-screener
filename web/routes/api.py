@@ -7,11 +7,13 @@ from src.config import load_app_config
 from src.ticker_filters import load_excluded_tickers
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.overlap_service import OverlapService
+from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.watchlist_service import WatchlistService
 from web.dependencies import (
     get_dashboard_service,
     get_overlap_service,
+    get_rrg_service,
     get_run_service,
     get_watchlist_service,
 )
@@ -67,6 +69,11 @@ def watchlist_chart_data(
 @router.get("/overlap/latest", response_class=JSONResponse)
 def overlap_latest(service: OverlapService = Depends(get_overlap_service)) -> JSONResponse:
     return JSONResponse(service.get_latest_summary())
+
+
+@router.get("/rrg/latest", response_class=JSONResponse)
+def rrg_latest(service: RrgService = Depends(get_rrg_service)) -> JSONResponse:
+    return JSONResponse(service.get_latest_report())
 
 
 @router.get("/overlap/{date_label}", response_class=JSONResponse)

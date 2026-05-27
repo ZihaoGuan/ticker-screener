@@ -15,6 +15,7 @@ class WebAppConfig:
     database_url: str = os.getenv("TICKER_SCREENER_DATABASE_URL", "")
     artifacts_dir: Path = Path(os.getenv("TICKER_SCREENER_ARTIFACTS_DIR", str(PROJECT_ROOT / "artifacts")))
     output_dir: Path = Path(os.getenv("TICKER_SCREENER_OUTPUT_DIR", str(PROJECT_ROOT / "artifacts" / "output")))
+    reports_fqdn: str = os.getenv("REPORTS_FQDN", "")
 
 
 def load_webapp_config() -> WebAppConfig:
