@@ -10,6 +10,9 @@ import threading
 import uuid
 from typing import Any
 
+from src.config import load_app_config
+from src.universe_filters import build_filter_option_catalog
+
 
 @dataclass(frozen=True)
 class RunAction:
@@ -33,6 +36,7 @@ class RunField:
 
 class RunService:
     _progress_pattern = re.compile(r"\[(\d{1,6})/(\d{1,6})\]")
+    _filter_catalog_cache: dict[str, dict[str, list[str]]] = {}
     _limit_field = RunField(
         "limit",
         "Universe Limit",
@@ -72,74 +76,220 @@ class RunService:
         "date",
         help_text="Optional date anchor for the earnings watchlist source.",
     )
+    _filter_precedence_field = RunField(
+        "filter_precedence",
+        "Filter Precedence",
+        "select",
+        help_text="Choose which side wins when the same sector, industry, or theme appears in both include and exclude.",
+        options=(("exclude", "Exclude First"), ("include", "Include First")),
+    )
+    _include_sectors_field = RunField("include_sectors", "Only Sectors", "multiselect")
+    _exclude_sectors_field = RunField("exclude_sectors", "Exclude Sectors", "multiselect")
+    _include_industries_field = RunField("include_industries", "Only Industries", "multiselect")
+    _exclude_industries_field = RunField("exclude_industries", "Exclude Industries", "multiselect")
+    _include_themes_field = RunField("include_themes", "Only Themes", "multiselect")
+    _exclude_themes_field = RunField("exclude_themes", "Exclude Themes", "multiselect")
     _actions = {
         "rs": RunAction(
             "rs",
             "Run RS",
             "scripts/run_rs_screen.py",
-            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "vcp": RunAction(
             "vcp",
             "Run VCP",
             "scripts/run_vcp_screen.py",
-            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "cup_handle": RunAction(
             "cup_handle",
             "Run Cup Handle",
             "scripts/run_cup_handle_screen.py",
-            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "gap_fill": RunAction(
             "gap_fill",
             "Run Gap Fill",
             "scripts/run_gap_fill_screen.py",
-            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "weekly_htf_pullback": RunAction(
             "weekly_htf_pullback",
             "Run Weekly HTF Pullback",
             "scripts/run_weekly_htf_pullback_screen.py",
-            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "htf_8w_runup": RunAction(
             "htf_8w_runup",
             "Run HTF 8W Runup",
             "scripts/run_htf_runup_screen.py",
-            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "weekly_rs": RunAction(
             "weekly_rs",
             "Run Weekly RS",
             "scripts/run_weekly_rs_screen.py",
-            fields=(_limit_field, _tickers_field, _date_label_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "near_200ma": RunAction(
             "near_200ma",
             "Run Near 200MA",
             "scripts/run_near_200ma_screen.py",
-            fields=(_limit_field, _tickers_field, _date_label_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "lost_21ema": RunAction(
             "lost_21ema",
             "Run Lost 21EMA",
             "scripts/run_lost_21ema_screen.py",
-            fields=(_limit_field, _tickers_field, _date_label_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "legacy_peg": RunAction(
             "legacy_peg",
             "Run Legacy PEG",
             "scripts/run_peg_screen.py",
             extra_args=("--strategy-profile", "legacy"),
-            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field, _source_field, _reference_date_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _source_field,
+                _reference_date_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
         "sean_peg": RunAction(
             "sean_peg",
             "Run Sean PEG",
             "scripts/run_peg_screen.py",
             extra_args=("--strategy-profile", "sean-peg"),
-            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field, _source_field, _reference_date_field),
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _source_field,
+                _reference_date_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
         ),
     }
     _jobs_lock = threading.Lock()
@@ -150,6 +300,7 @@ class RunService:
         self.project_root = project_root
 
     def list_actions(self) -> list[dict[str, Any]]:
+        filter_catalog = self._get_filter_catalog()
         return [
             {
                 "id": action.action_id,
@@ -163,7 +314,7 @@ class RunService:
                         "type": field.field_type,
                         "placeholder": field.placeholder,
                         "help_text": field.help_text,
-                        "options": [{"value": value, "label": label} for value, label in field.options],
+                        "options": self._field_options(field, filter_catalog),
                     }
                     for field in action.fields
                 ],
@@ -198,6 +349,14 @@ class RunService:
             command.extend(["--source", str(normalized["source"])])
         if normalized.get("reference_date"):
             command.extend(["--reference-date", str(normalized["reference_date"])])
+        if normalized.get("filter_precedence"):
+            command.extend(["--filter-precedence", str(normalized["filter_precedence"])])
+        self._append_multi_args(command, "--include-sectors", normalized.get("include_sectors"))
+        self._append_multi_args(command, "--exclude-sectors", normalized.get("exclude_sectors"))
+        self._append_multi_args(command, "--include-industries", normalized.get("include_industries"))
+        self._append_multi_args(command, "--exclude-industries", normalized.get("exclude_industries"))
+        self._append_multi_args(command, "--include-themes", normalized.get("include_themes"))
+        self._append_multi_args(command, "--exclude-themes", normalized.get("exclude_themes"))
 
         job = {
             "job_id": job_id,
@@ -243,12 +402,52 @@ class RunService:
             if tickers:
                 normalized["tickers"] = tickers
 
-        for key in ("date_label", "as_of_date", "reference_date", "source"):
+        for key in ("date_label", "as_of_date", "reference_date", "source", "filter_precedence"):
             value = options.get(key)
             if isinstance(value, str) and value.strip():
                 normalized[key] = value.strip()
 
+        for key in (
+            "include_sectors",
+            "exclude_sectors",
+            "include_industries",
+            "exclude_industries",
+            "include_themes",
+            "exclude_themes",
+        ):
+            value = options.get(key)
+            if isinstance(value, list):
+                normalized_values = [str(item).strip() for item in value if str(item).strip()]
+                if normalized_values:
+                    normalized[key] = normalized_values
+
         return normalized
+
+    def _append_multi_args(self, command: list[str], flag: str, values: list[str] | None) -> None:
+        if values:
+            command.append(flag)
+            command.extend(values)
+
+    def _get_filter_catalog(self) -> dict[str, list[str]]:
+        cache_key = str(self.project_root)
+        cached = self._filter_catalog_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            catalog = build_filter_option_catalog(load_app_config())
+        except Exception:
+            catalog = {"sectors": [], "industries": [], "themes": []}
+        self._filter_catalog_cache[cache_key] = catalog
+        return catalog
+
+    def _field_options(self, field: RunField, filter_catalog: dict[str, list[str]]) -> list[dict[str, str]]:
+        if field.field_id.endswith("sectors"):
+            return [{"value": value, "label": value} for value in filter_catalog.get("sectors", [])]
+        if field.field_id.endswith("industries"):
+            return [{"value": value, "label": value} for value in filter_catalog.get("industries", [])]
+        if field.field_id.endswith("themes"):
+            return [{"value": value, "label": value} for value in filter_catalog.get("themes", [])]
+        return [{"value": value, "label": label} for value, label in field.options]
 
     def _run_job(self, job_id: str, command: list[str]) -> None:
         process = subprocess.Popen(

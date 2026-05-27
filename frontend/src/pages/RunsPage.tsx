@@ -8,13 +8,20 @@ import type { JobsResponse } from "../lib/types";
 export function RunsPage() {
   const [payload, setPayload] = useState<JobsResponse | null>(null);
   const [selectedActionId, setSelectedActionId] = useState("");
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>({
+  const [fieldValues, setFieldValues] = useState<Record<string, string | string[]>>({
     limit: "",
     tickers: "",
     date_label: "",
     as_of_date: "",
     source: "universe",
     reference_date: "",
+    filter_precedence: "exclude",
+    include_sectors: [],
+    exclude_sectors: [],
+    include_industries: [],
+    exclude_industries: [],
+    include_themes: [],
+    exclude_themes: [],
   });
 
   const refresh = () => {
@@ -42,9 +49,13 @@ export function RunsPage() {
   );
 
   const runAction = async (actionId: string) => {
-    const body: Record<string, string> = {};
+    const body: Record<string, string | string[]> = {};
     for (const [key, value] of Object.entries(fieldValues)) {
-      if (value.trim()) {
+      if (Array.isArray(value)) {
+        if (value.length > 0) {
+          body[key] = value;
+        }
+      } else if (value.trim()) {
         body[key] = value.trim();
       }
     }
@@ -82,7 +93,7 @@ export function RunsPage() {
                   <span>{field.label}</span>
                   {field.type === "select" ? (
                     <select
-                      value={fieldValues[field.id] ?? ""}
+                      value={typeof fieldValues[field.id] === "string" ? fieldValues[field.id] : ""}
                       onChange={(event) =>
                         setFieldValues((current) => ({
                           ...current,
@@ -96,11 +107,29 @@ export function RunsPage() {
                         </option>
                       ))}
                     </select>
+                  ) : field.type === "multiselect" ? (
+                    <select
+                      multiple
+                      value={Array.isArray(fieldValues[field.id]) ? fieldValues[field.id] : []}
+                      onChange={(event) =>
+                        setFieldValues((current) => ({
+                          ...current,
+                          [field.id]: Array.from(event.target.selectedOptions).map((option) => option.value),
+                        }))
+                      }
+                      className="multi-select"
+                    >
+                      {field.options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   ) : (
                     <input
                       type={field.type}
                       placeholder={field.placeholder ?? undefined}
-                      value={fieldValues[field.id] ?? ""}
+                      value={typeof fieldValues[field.id] === "string" ? fieldValues[field.id] : ""}
                       onChange={(event) =>
                         setFieldValues((current) => ({
                           ...current,

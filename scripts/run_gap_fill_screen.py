@@ -18,6 +18,7 @@ from src.gap_fill_screen import run_gap_fill_screen
 from src.gap_fill_watchlist_builder import build_gap_fill_watchlist
 from src.ticker_filters import filter_symbols, load_excluded_tickers
 from src.universe import UniverseTicker, load_universe
+from src.universe_filters import add_universe_filter_args, build_filter_criteria_from_args, filter_universe_by_criteria
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tickers", nargs="+", help="Optional explicit ticker list instead of the configured universe.")
     parser.add_argument("--date-label", help="Override artifact date label (YYYY-MM-DD).")
     parser.add_argument("--as-of-date", help="Historical as-of date for replay mode (YYYY-MM-DD).")
+    add_universe_filter_args(parser)
     return parser.parse_args()
 
 
@@ -53,7 +55,10 @@ def main() -> int:
     excluded = load_excluded_tickers(config)
     as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else None
     date_label = args.date_label or today_label(as_of_date)
+    filter_criteria = build_filter_criteria_from_args(args)
     tickers = _manual_tickers(args.tickers, excluded) if args.tickers else load_universe(config, limit=args.limit)
+    if not args.tickers:
+        tickers = filter_universe_by_criteria(tickers, filter_criteria)
 
     result = run_gap_fill_screen(config, tickers, as_of_date=as_of_date)
     watchlist = build_gap_fill_watchlist(result.hits)

@@ -76,7 +76,7 @@ export type JobsResponse = {
     fields: Array<{
       id: string;
       label: string;
-      type: "text" | "number" | "date" | "select";
+      type: "text" | "number" | "date" | "select" | "multiselect";
       placeholder?: string | null;
       help_text?: string | null;
       options: Array<{ value: string; label: string }>;

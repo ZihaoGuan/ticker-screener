@@ -17,6 +17,7 @@ from src.near_200ma_screen import run_near_200ma_screen
 from src.near_200ma_watchlist_builder import build_near_200ma_watchlist
 from src.ticker_filters import filter_symbols, load_excluded_tickers
 from src.universe import UniverseTicker, load_universe
+from src.universe_filters import add_universe_filter_args, build_filter_criteria_from_args, filter_universe_by_criteria
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="Limit the candidate set for smoke runs.")
     parser.add_argument("--tickers", nargs="+", help="Optional explicit ticker list instead of the configured universe.")
     parser.add_argument("--date-label", help="Override artifact date label (YYYY-MM-DD).")
+    add_universe_filter_args(parser)
     return parser.parse_args()
 
 
@@ -50,7 +52,10 @@ def main() -> int:
         config = override_config(config, max_tickers=args.limit)
     excluded = load_excluded_tickers(config)
     date_label = args.date_label or today_label()
+    filter_criteria = build_filter_criteria_from_args(args)
     tickers = _manual_tickers(args.tickers, excluded) if args.tickers else load_universe(config, limit=args.limit)
+    if not args.tickers:
+        tickers = filter_universe_by_criteria(tickers, filter_criteria)
 
     result = run_near_200ma_screen(config, tickers)
     watchlist = build_near_200ma_watchlist(result.hits)

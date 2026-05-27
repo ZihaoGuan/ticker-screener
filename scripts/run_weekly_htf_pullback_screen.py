@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.config import load_app_config, override_config, today_label
 from src.ticker_filters import filter_symbols, load_excluded_tickers
 from src.universe import UniverseTicker, load_universe
+from src.universe_filters import add_universe_filter_args, build_filter_criteria_from_args, filter_universe_by_criteria
 from src.weekly_htf_pullback_screen import run_weekly_htf_pullback_screen
 from src.weekly_htf_pullback_watchlist_builder import build_weekly_htf_pullback_watchlist
 
@@ -27,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tickers", nargs="+", help="Optional explicit ticker list instead of full exchange universe.")
     parser.add_argument("--date-label", help="Override artifact date label (YYYY-MM-DD).")
     parser.add_argument("--as-of-date", help="Historical as-of date for replay mode (YYYY-MM-DD).")
+    add_universe_filter_args(parser)
     return parser.parse_args()
 
 
@@ -53,11 +55,13 @@ def main() -> int:
     excluded = load_excluded_tickers(config)
     as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else None
     date_label = args.date_label or today_label(as_of_date)
+    filter_criteria = build_filter_criteria_from_args(args)
 
     if args.tickers:
         universe = _manual_tickers(args.tickers, excluded)
     else:
         universe = load_universe(config, limit=args.limit)
+        universe = filter_universe_by_criteria(universe, filter_criteria)
 
     result = run_weekly_htf_pullback_screen(config, universe, as_of_date=as_of_date)
     watchlist = build_weekly_htf_pullback_watchlist(

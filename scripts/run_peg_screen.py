@@ -19,6 +19,12 @@ from src.peg_screen import EarningsEvent, run_peg_screen
 from src.peg_watchlist_builder import build_peg_watchlist
 from src.ticker_filters import filter_earnings_events, filter_symbols, load_excluded_tickers
 from src.universe import load_universe
+from src.universe_filters import (
+    add_universe_filter_args,
+    build_filter_criteria_from_args,
+    build_universe_index,
+    filter_records_by_criteria,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,6 +50,7 @@ def parse_args() -> argparse.Namespace:
         default="legacy",
         help="Watchlist construction profile. `sean-peg` filters the universe PEG events for post-gap setups.",
     )
+    add_universe_filter_args(parser)
     return parser.parse_args()
 
 
@@ -103,6 +110,7 @@ def main() -> int:
     as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else None
     date_label = args.date_label or today_label(as_of_date)
     reference_date = dt.date.fromisoformat(args.reference_date) if args.reference_date else as_of_date
+    filter_criteria = build_filter_criteria_from_args(args)
 
     if args.tickers:
         earnings_events = _manual_events(args.tickers, excluded)
@@ -110,6 +118,13 @@ def main() -> int:
         earnings_events = _next_week_events(args.config, reference_date, args.limit)
     else:
         earnings_events = _universe_events(args.config, args.limit)
+
+    if filter_criteria.is_active and not args.tickers:
+        earnings_events = filter_records_by_criteria(
+            earnings_events,
+            filter_criteria,
+            metadata_by_symbol=build_universe_index(config),
+        )
 
     result = run_peg_screen(config, earnings_events, as_of_date=as_of_date)
     watchlist_source = result.hits
