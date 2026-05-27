@@ -30,9 +30,8 @@ services:
       TICKER_SCREENER_DATABASE_URL: ${TICKER_SCREENER_DATABASE_URL}
       TICKER_SCREENER_ARTIFACTS_DIR: /artifacts
       TICKER_SCREENER_OUTPUT_DIR: /artifacts/output
-    command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt -r requirements-web.txt &&
-             uvicorn web.app:app --host 0.0.0.0 --port 8000"
+    entrypoint: ["sh", "/app/deploy/web-entrypoint.sh"]
+    command: ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
       - ..:/app
       - ../artifacts:/artifacts

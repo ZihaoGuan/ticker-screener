@@ -170,6 +170,7 @@ Example entries:
 
 - This setup is intentionally not optimized for fast image builds yet.
 - The web container installs dependencies on startup for simplicity.
+- One-off jobs such as `docker-compose run --rm web python3 scripts/sync_postgres_market_data.py ...` now go through the same dependency-installing entrypoint as the normal web container.
 - Once the stack settles, the next improvement is a dedicated `Dockerfile` for the web and worker environments.
 
 ## GitHub Actions
