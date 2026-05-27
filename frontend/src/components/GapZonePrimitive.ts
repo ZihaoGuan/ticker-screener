@@ -27,6 +27,11 @@ class GapZonePaneRenderer {
     private readonly source: GapZonePrimitive,
   ) {}
 
+  draw() {
+    // The primitive only paints background gap boxes. The foreground hook still
+    // gets called by lightweight-charts, so keep this as an explicit no-op.
+  }
+
   drawBackground(target: any) {
     const attachment = this.source.attachment;
     if (!attachment || this.source.zones.length === 0) {
