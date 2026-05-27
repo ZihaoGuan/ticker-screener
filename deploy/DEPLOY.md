@@ -200,6 +200,8 @@ Suggested values:
 The deploy workflow logs into the Oracle instance, checks out the requested git ref, then runs:
 
 ```bash
+git clean -fd -- frontend/package-lock.json frontend/dist frontend/tsconfig.app.tsbuildinfo frontend/tsconfig.node.tsbuildinfo frontend/vite.config.js frontend/vite.config.d.ts
+git pull --ff-only origin "${GIT_REF}"
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm install && npm run build"
 cd deploy
 docker-compose down || true
@@ -208,6 +210,8 @@ docker-compose up -d
 ```
 
 You can override that compose command from the workflow UI when needed.
+
+The `git clean` step is intentionally narrow: it only removes frontend build artefacts and the generated `frontend/package-lock.json` if it was left behind on the server, so `git pull` cannot be blocked by untracked frontend files.
 
 ## Domain mapping
 

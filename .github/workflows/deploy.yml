@@ -51,6 +51,13 @@ jobs:
             cd "${APP_DIR}"
             git fetch --all --prune
             git checkout "${GIT_REF}"
+            git clean -fd -- \
+              frontend/package-lock.json \
+              frontend/dist \
+              frontend/tsconfig.app.tsbuildinfo \
+              frontend/tsconfig.node.tsbuildinfo \
+              frontend/vite.config.js \
+              frontend/vite.config.d.ts
             git pull --ff-only origin "${GIT_REF}"
             docker run --rm \
               --user "$(id -u):$(id -g)" \
