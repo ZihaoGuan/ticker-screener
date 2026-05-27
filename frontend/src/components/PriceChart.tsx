@@ -111,7 +111,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
       },
     });
 
-    priceChart.timeScale().applyOptions({ visible: false });
+    priceChart.timeScale().applyOptions({ visible: !options.rsLine });
 
     const candleSeries = priceChart.addCandlestickSeries({
       upColor: "#10b981",
@@ -223,6 +223,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
 
     priceChart.timeScale().fitContent();
     rsChart.timeScale().fitContent();
+    rsChart.timeScale().applyOptions({ visible: options.rsLine });
     rsChart.applyOptions({ handleScroll: options.rsLine, handleScale: options.rsLine });
     if (!options.rsLine && rsRootRef.current) {
       rsRootRef.current.style.display = "none";
