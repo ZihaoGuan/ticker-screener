@@ -142,6 +142,7 @@ export type AdminResponse = {
 };
 
 export type RrgUniverse = "sector" | "industry" | "theme";
+export type RrgCadence = "weekly" | "daily-2m";
 
 export type RrgPoint = {
   x: number;
@@ -169,6 +170,7 @@ export type RrgResponse = {
   benchmark: string;
   period: string;
   trail_weeks: number;
+  cadence?: RrgCadence;
   generated_at: string;
   series: RrgSeries[];
   groups?: RrgGroup[];

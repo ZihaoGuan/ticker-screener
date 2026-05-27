@@ -3,7 +3,7 @@ import { NavLink, useParams } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { RrgChart } from "../components/RrgChart";
 import { fetchJson } from "../lib/api";
-import type { RrgResponse, RrgSeries, RrgUniverse } from "../lib/types";
+import type { RrgCadence, RrgResponse, RrgSeries, RrgUniverse } from "../lib/types";
 
 const DEFAULT_RESPONSE: RrgResponse = {
   universe: "sector",
@@ -12,6 +12,7 @@ const DEFAULT_RESPONSE: RrgResponse = {
   trail_weeks: 12,
   generated_at: "",
   series: [],
+  cadence: "weekly",
   quadrants: {
     center_x: 100,
     center_y: 100,
@@ -29,9 +30,15 @@ const universeTabs: Array<{ value: RrgUniverse; label: string }> = [
   { value: "theme", label: "Theme" },
 ];
 
+const cadenceTabs: Array<{ value: RrgCadence; label: string }> = [
+  { value: "weekly", label: "Weekly" },
+  { value: "daily-2m", label: "Daily 2M" },
+];
+
 export function RrgPage() {
   const params = useParams();
   const universe = normalizeUniverse(params.universe);
+  const [cadence, setCadence] = useState<RrgCadence>("weekly");
   const [payload, setPayload] = useState<RrgResponse>(DEFAULT_RESPONSE);
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -40,19 +47,19 @@ export function RrgPage() {
   useEffect(() => {
     setLoading(true);
     setHasError(false);
-    void fetchJson<RrgResponse>(`/api/rrg/${universe}?benchmark=SPY&period=3y&trailWeeks=12`)
+    void fetchJson<RrgResponse>(`/api/rrg/${universe}?benchmark=SPY&period=3y&trailWeeks=12&cadence=${cadence}`)
       .then((response) => {
         setPayload(response);
         setActiveGroupId(response.groups?.[0]?.id ?? "");
         setLoading(false);
       })
       .catch(() => {
-        setPayload({ ...DEFAULT_RESPONSE, universe });
+        setPayload({ ...DEFAULT_RESPONSE, universe, cadence });
         setActiveGroupId("");
         setHasError(true);
         setLoading(false);
       });
-  }, [universe]);
+  }, [cadence, universe]);
 
   const activeGroup = useMemo(() => {
     if (!payload.groups?.length) {
@@ -83,6 +90,7 @@ export function RrgPage() {
 
   const title = `${labelForUniverse(universe)} RRG`;
   const subtitle = `${labelForUniverse(universe)} rotation map vs ${payload.benchmark}`;
+  const cadenceLabel = cadence === "daily-2m" ? "Daily 2M" : "Weekly";
 
   return (
     <div className="page-grid rrg-page">
@@ -104,6 +112,8 @@ export function RrgPage() {
             <div className="rrg-meta-row">
               <span className="eyebrow">Benchmark</span>
               <strong>{payload.benchmark}</strong>
+              <span className="eyebrow">Mode</span>
+              <strong>{cadenceLabel}</strong>
               <span className="eyebrow">Period</span>
               <strong>{payload.period}</strong>
               <span className="eyebrow">Trail</span>
@@ -117,6 +127,21 @@ export function RrgPage() {
               </NavLink>
             ))}
           </div>
+        </div>
+      </Panel>
+
+      <Panel title="RRG Mode">
+        <div className="rrg-group-row">
+          {cadenceTabs.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`rrg-group-chip${cadence === option.value ? " is-active" : ""}`}
+              onClick={() => setCadence(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
       </Panel>
 

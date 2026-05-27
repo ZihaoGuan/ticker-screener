@@ -18,9 +18,12 @@ from vendor.trade_master_signals.render_sector_rotation_rrg import (
 
 
 UniverseName = Literal["sector", "industry", "theme"]
+CadenceName = Literal["weekly", "daily-2m"]
 THEME_BATCH_SIZE = 12
 DEFAULT_PERIOD = "3y"
 DEFAULT_TRAIL_WEEKS = 12
+DAILY_PERIOD = "2mo"
+DAILY_TRAIL_POINTS = 40
 DEFAULT_RATIO_WINDOW = 10
 DEFAULT_MOMENTUM_WINDOW = 4
 
@@ -103,28 +106,35 @@ class RrgService:
         benchmark: str,
         period: str,
         trail_weeks: int,
+        cadence: CadenceName = "weekly",
     ) -> dict[str, Any]:
         benchmark_symbol = benchmark.upper()
         generated_at = datetime.now(UTC).isoformat()
         static_report_url = self._static_report_url(universe)
         notes: list[str] = []
+        effective_period = DAILY_PERIOD if cadence == "daily-2m" else period
+        effective_trail = DAILY_TRAIL_POINTS if cadence == "daily-2m" else trail_weeks
 
         if universe == "theme":
             groups, failures = self._build_theme_groups(
                 benchmark=benchmark_symbol,
-                period=period,
-                trail_weeks=trail_weeks,
+                period=effective_period,
+                trail_weeks=effective_trail,
+                cadence=cadence,
             )
             if failures:
                 notes.append(f"Skipped {len(failures)} tickers with missing or unusable history.")
             if groups:
                 notes.append(f"Theme universe grouped into batches of {THEME_BATCH_SIZE}.")
+            if cadence == "daily-2m":
+                notes.append("Daily mode uses raw daily closes from the most recent two months.")
             flat_series = [series for group in groups for series in group.series]
             return {
                 "universe": universe,
                 "benchmark": benchmark_symbol,
-                "period": period,
-                "trail_weeks": trail_weeks,
+                "period": effective_period,
+                "trail_weeks": effective_trail,
+                "cadence": cadence,
                 "generated_at": generated_at,
                 "series": [self._series_payload(series) for series in flat_series],
                 "groups": [self._group_payload(group) for group in groups],
@@ -140,18 +150,22 @@ class RrgService:
         series_list, failures = self._build_series_for_universe(
             self._universe_entries(universe),
             benchmark=benchmark_symbol,
-            period=period,
-            trail_weeks=trail_weeks,
+            period=effective_period,
+            trail_weeks=effective_trail,
+            cadence=cadence,
         )
         if failures:
             notes.append(f"Skipped {len(failures)} tickers with missing or unusable history.")
         if not series_list:
             notes.append("No RRG series could be computed for the requested universe.")
+        if cadence == "daily-2m":
+            notes.append("Daily mode uses raw daily closes from the most recent two months.")
         return {
             "universe": universe,
             "benchmark": benchmark_symbol,
-            "period": period,
-            "trail_weeks": trail_weeks,
+            "period": effective_period,
+            "trail_weeks": effective_trail,
+            "cadence": cadence,
             "generated_at": generated_at,
             "series": [self._series_payload(series) for series in series_list],
             "quadrants": self._quadrants_payload(),
@@ -169,6 +183,7 @@ class RrgService:
         benchmark: str,
         period: str,
         trail_weeks: int,
+        cadence: CadenceName,
     ) -> tuple[list[RrgGroup], list[str]]:
         theme_universe = build_theme_universe()
         all_series, failures = self._build_series_for_universe(
@@ -176,6 +191,7 @@ class RrgService:
             benchmark=benchmark,
             period=period,
             trail_weeks=trail_weeks,
+            cadence=cadence,
         )
         groups: list[RrgGroup] = []
         for index, batch in enumerate(chunked(all_series, THEME_BATCH_SIZE), start=1):
@@ -195,15 +211,16 @@ class RrgService:
         benchmark: str,
         period: str,
         trail_weeks: int,
+        cadence: CadenceName,
     ) -> tuple[list[RrgSeries], list[str]]:
-        benchmark_history = to_weekly_close(fetch_history(benchmark, period)).rename(benchmark)
+        benchmark_history = self._history_series(benchmark, period, cadence).rename(benchmark)
         failures: list[str] = []
 
         series_list: list[RrgSeries] = []
         for index, (label, ticker) in enumerate(entries):
             symbol = ticker.upper()
             try:
-                ticker_history = to_weekly_close(fetch_history(symbol, period)).rename(symbol)
+                ticker_history = self._history_series(symbol, period, cadence).rename(symbol)
             except Exception:
                 failures.append(symbol)
                 continue
@@ -251,6 +268,12 @@ class RrgService:
                 )
             )
         return series_list, sorted(set(failures))
+
+    def _history_series(self, ticker: str, period: str, cadence: CadenceName) -> pd.Series:
+        history = fetch_history(ticker, period)
+        if cadence == "daily-2m":
+            return history["Close"].dropna()
+        return to_weekly_close(history)
 
     def _universe_entries(self, universe: UniverseName) -> list[tuple[str, str]]:
         if universe == "sector":

@@ -82,16 +82,20 @@ def rrg_universe_data(
     benchmark: str = Query(default="SPY"),
     period: str = Query(default="3y"),
     trail_weeks: int = Query(default=12, alias="trailWeeks", ge=4, le=52),
+    cadence: str = Query(default="weekly"),
     service: RrgService = Depends(get_rrg_service),
 ) -> JSONResponse:
     if universe not in {"sector", "industry", "theme"}:
         raise HTTPException(status_code=404, detail=f"Unsupported RRG universe: {universe}")
+    if cadence not in {"weekly", "daily-2m"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported RRG cadence: {cadence}")
     return JSONResponse(
         service.get_universe_report(
             universe=universe,
             benchmark=benchmark,
             period=period,
             trail_weeks=trail_weeks,
+            cadence=cadence,
         )
     )
 
