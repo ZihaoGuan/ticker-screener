@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { AdvancedPriceChart } from "../components/AdvancedPriceChart";
 import { Panel } from "../components/Panel";
+import { PriceChart } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse, WatchlistDetailResponse, WatchlistFile } from "../lib/types";
 
@@ -171,7 +171,7 @@ export function WatchlistsPage() {
             </div>
           }
         >
-          <AdvancedPriceChart ticker={ticker} candles={smallChartData} overlays={chartPayload ?? undefined} annotations={annotations} />
+          <PriceChart ticker={ticker} candles={smallChartData} overlays={chartPayload ?? undefined} annotations={annotations} />
           <div className="chart-annotation-strip">
             {annotations.setupLabel ? <span className="chart-pill chart-pill-setup">{annotations.setupLabel}</span> : null}
             {annotations.eventDate ? <span className="chart-pill chart-pill-event">{annotations.eventLabel ?? "Event"} {annotations.eventDate}</span> : null}

@@ -64,36 +64,6 @@ def watchlist_chart_data(
     return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period))
 
 
-@router.get("/charting/config", response_class=JSONResponse)
-def charting_config(service: WatchlistService = Depends(get_watchlist_service)) -> JSONResponse:
-    return JSONResponse(service.get_charting_config())
-
-
-@router.get("/charting/search", response_class=JSONResponse)
-def charting_search(
-    query: str = Query(default=""),
-    limit: int = Query(default=20, ge=1, le=50),
-    service: WatchlistService = Depends(get_watchlist_service),
-) -> JSONResponse:
-    return JSONResponse(service.search_charting_symbols(query=query, limit=limit))
-
-
-@router.get("/charting/symbols", response_class=JSONResponse)
-def charting_symbols(symbol: str, service: WatchlistService = Depends(get_watchlist_service)) -> JSONResponse:
-    return JSONResponse(service.resolve_charting_symbol(symbol))
-
-
-@router.get("/charting/history", response_class=JSONResponse)
-def charting_history(
-    symbol: str,
-    resolution: str,
-    from_ts: int = Query(alias="from"),
-    to_ts: int = Query(alias="to"),
-    service: WatchlistService = Depends(get_watchlist_service),
-) -> JSONResponse:
-    return JSONResponse(service.get_charting_history(symbol=symbol.upper(), resolution=resolution, from_unix=from_ts, to_unix=to_ts))
-
-
 @router.get("/overlap/latest", response_class=JSONResponse)
 def overlap_latest(service: OverlapService = Depends(get_overlap_service)) -> JSONResponse:
     return JSONResponse(service.get_latest_summary())

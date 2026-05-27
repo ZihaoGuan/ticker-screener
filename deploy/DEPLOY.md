@@ -90,18 +90,6 @@ docker-compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < ../sql/po
 
 The app domain serves the React build from `frontend/dist`.
 
-If you want the watchlist detail page to use TradingView Advanced Charts instead
-of the lightweight fallback chart, place the official library files under:
-
-- `frontend/public/charting_library/`
-
-At minimum, the deployment expects:
-
-- `frontend/public/charting_library/charting_library.js`
-
-The app falls back to the built-in lightweight chart when those files are not
-present, so deploys remain safe even before the TradingView assets are added.
-
 Build it before bringing up the full stack:
 
 ```bash
