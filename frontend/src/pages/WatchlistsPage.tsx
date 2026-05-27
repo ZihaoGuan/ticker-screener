@@ -17,7 +17,6 @@ export function WatchlistsPage() {
     ipoVwap: true,
     maStack: true,
     gapZones: true,
-    setupLevels: true,
     rsLine: true,
     rsSignals: true,
   });
@@ -93,7 +92,6 @@ export function WatchlistsPage() {
     { key: "ipoVwap", label: "IPO VWAP" },
     { key: "maStack", label: "MA stack" },
     { key: "gapZones", label: "Gap zones" },
-    { key: "setupLevels", label: "Setup levels" },
     { key: "rsLine", label: "RS line" },
     { key: "rsSignals", label: "RS markers" },
   ];

@@ -1,4 +1,4 @@
-import { ColorType, LineStyle, createChart } from "lightweight-charts";
+import { ColorType, createChart } from "lightweight-charts";
 import { useEffect, useMemo, useRef } from "react";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
 
@@ -9,7 +9,6 @@ export type ChartVisibility = {
   ipoVwap: boolean;
   maStack: boolean;
   gapZones: boolean;
-  setupLevels: boolean;
   rsLine: boolean;
   rsSignals: boolean;
 };
@@ -44,7 +43,6 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     ipoVwap: true,
     maStack: true,
     gapZones: true,
-    setupLevels: true,
     rsLine: true,
     rsSignals: true,
   };
@@ -186,17 +184,6 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
       return [upperSeries, lowerSeries];
     });
 
-    const priceLines = options.setupLevels
-      ? [
-          buildPriceLine(candleSeries, annotations?.triggerPrice, "#facc15", annotations?.triggerLabel ?? "Trigger", 2),
-          buildPriceLine(candleSeries, annotations?.entryPrice, "#4ade80", annotations?.entryLabel ?? "Entry", 2),
-          buildPriceLine(candleSeries, annotations?.secondaryEntryPrice, "#94a3b8", annotations?.secondaryEntryLabel ?? "Secondary", 1),
-          buildPriceLine(candleSeries, annotations?.secondaryEntryLow, "rgba(148, 163, 184, 0.75)", "Secondary low", 1),
-          buildPriceLine(candleSeries, annotations?.secondaryEntryHigh, "rgba(148, 163, 184, 0.75)", "Secondary high", 1),
-          buildPriceLine(candleSeries, annotations?.stopPrice, "#fb7185", annotations?.stopLabel ?? "Stop", 2),
-        ].filter(Boolean)
-      : [];
-
     const priceMarkers = [];
     if (annotations?.eventDate) {
       priceMarkers.push({
@@ -283,7 +270,6 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     return () => {
       resizeObserver.disconnect();
       void gapSeries;
-      void priceLines;
       priceChart.remove();
       rsChart.remove();
     };
@@ -306,7 +292,6 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     options.ipoVwap,
     options.maStack,
     options.gapZones,
-    options.setupLevels,
     options.rsLine,
     options.rsSignals,
     visibleGapZones,
@@ -345,25 +330,6 @@ function buildExponentialMovingAverage(candles: CandlePoint[], span: number) {
     points.push({ time: candles[index].time, value: Number(ema.toFixed(2)) });
   }
   return points;
-}
-
-function buildPriceLine(
-  series: any,
-  price: number | null | undefined,
-  color: string,
-  title: string,
-  lineWidth: 1 | 2 | 3 | 4,
-) {
-  if (price == null) {
-    return null;
-  }
-  return series.createPriceLine({
-    price,
-    color,
-    lineWidth,
-    lineStyle: LineStyle.Solid,
-    title,
-  });
 }
 
 function detectGapZones(candles: CandlePoint[]): GapZone[] {
