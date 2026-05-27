@@ -52,11 +52,7 @@ export function WatchlistsPage() {
   const company = typeof selectedTicker?.company_name === "string" ? selectedTicker.company_name : "";
   const industry = typeof selectedTicker?.industry === "string" ? selectedTicker.industry : "Unknown";
   const score = Number(selectedTicker?.rs_rank ?? selectedTicker?.score ?? 0);
-  const lastPrice = Number(selectedTicker?.current_price ?? selectedTicker?.last_price ?? 0);
-  const dailyChangePct = Number(selectedTicker?.price_change_pct ?? selectedTicker?.daily_change_pct ?? 0);
   const summary = typeof selectedTicker?.summary === "string" ? selectedTicker.summary : "No summary available yet.";
-  const positive = dailyChangePct >= 0;
-  const indicatorTone = positive ? "positive" : "negative";
   const smallChartData = useMemo<CandlePoint[]>(
     () =>
       (chartPayload?.candles ?? []).map((item, index) => ({
@@ -65,6 +61,9 @@ export function WatchlistsPage() {
       })),
     [chartPayload],
   );
+  const selectedPrice = resolveDisplayPrice(selectedTicker, chartPayload);
+  const selectedChangePct = resolveDisplayChangePct(selectedTicker, chartPayload);
+  const indicatorTone = selectedChangePct == null ? "neutral" : selectedChangePct >= 0 ? "positive" : "negative";
   const annotations = useMemo<ChartAnnotations>(
     () => ({
       setupLabel: typeof selectedTicker?.setup_label === "string" ? selectedTicker.setup_label : undefined,
@@ -135,11 +134,8 @@ export function WatchlistsPage() {
                 </div>
               </div>
               <div className="ticker-side">
-                <div className="ticker-price">{Number(item.current_price ?? item.last_price ?? 0).toFixed(2)}</div>
-                <div className={`ticker-change ${Number(item.price_change_pct ?? item.daily_change_pct ?? 0) >= 0 ? "up" : "down"}`}>
-                  {Number(item.price_change_pct ?? item.daily_change_pct ?? 0) >= 0 ? "+" : ""}
-                  {Number(item.price_change_pct ?? item.daily_change_pct ?? 0).toFixed(2)}%
-                </div>
+                <div className="ticker-price">{formatPrice(resolveDisplayPrice(item, null))}</div>
+                {renderChange(resolveDisplayChangePct(item, null))}
               </div>
             </button>
           ))}
@@ -155,11 +151,15 @@ export function WatchlistsPage() {
               <span className="ticker-company-inline">{company}</span>
             </div>
             <div className="hero-price-row">
-              <span className="hero-price">{lastPrice.toFixed(2)}</span>
-              <span className={`hero-change ${indicatorTone}`}>
-                {dailyChangePct >= 0 ? "+" : ""}
-                {(lastPrice * dailyChangePct / 100).toFixed(2)} ({dailyChangePct.toFixed(2)}%)
-              </span>
+              <span className="hero-price">{formatPrice(selectedPrice)}</span>
+              {selectedPrice != null && selectedChangePct != null ? (
+                <span className={`hero-change ${indicatorTone}`}>
+                  {selectedChangePct >= 0 ? "+" : ""}
+                  {(selectedPrice * selectedChangePct / 100).toFixed(2)} ({selectedChangePct.toFixed(2)}%)
+                </span>
+              ) : (
+                <span className="hero-change neutral">Change unavailable</span>
+              )}
             </div>
           </div>
           <div className="hero-stats">
@@ -263,4 +263,76 @@ function toNullableNumber(value: unknown): number | null {
   }
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function resolveDisplayPrice(entry: Record<string, unknown> | null | undefined, chartPayload: WatchlistChartResponse | null): number | null {
+  const candidates = [
+    entry?.current_price,
+    entry?.last_price,
+    entry?.signal_close,
+    entry?.close,
+    entry?.entry_price,
+    entry?.trigger_price,
+    entry?.secondary_entry_price,
+    latestCloseFromChart(chartPayload),
+  ];
+  for (const candidate of candidates) {
+    const value = toNullableNumber(candidate);
+    if (value != null) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function resolveDisplayChangePct(entry: Record<string, unknown> | null | undefined, chartPayload: WatchlistChartResponse | null): number | null {
+  const candidates = [
+    entry?.price_change_pct,
+    entry?.daily_change_pct,
+    entry?.change_pct,
+    entry?.pct_change,
+    latestChangePctFromChart(chartPayload),
+  ];
+  for (const candidate of candidates) {
+    const value = toNullableNumber(candidate);
+    if (value != null) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function latestCloseFromChart(chartPayload: WatchlistChartResponse | null): number | null {
+  const candles = chartPayload?.candles ?? [];
+  const latest = candles[candles.length - 1];
+  return latest ? latest.close : null;
+}
+
+function latestChangePctFromChart(chartPayload: WatchlistChartResponse | null): number | null {
+  const candles = chartPayload?.candles ?? [];
+  if (candles.length < 2) {
+    return null;
+  }
+  const previous = candles[candles.length - 2]?.close;
+  const latest = candles[candles.length - 1]?.close;
+  if (previous == null || latest == null || previous === 0) {
+    return null;
+  }
+  return ((latest - previous) / previous) * 100;
+}
+
+function formatPrice(value: number | null): string {
+  return value == null ? "—" : value.toFixed(2);
+}
+
+function renderChange(changePct: number | null) {
+  if (changePct == null) {
+    return <div className="ticker-change flat">—</div>;
+  }
+  return (
+    <div className={`ticker-change ${changePct >= 0 ? "up" : "down"}`}>
+      {changePct >= 0 ? "+" : ""}
+      {changePct.toFixed(2)}%
+    </div>
+  );
 }
