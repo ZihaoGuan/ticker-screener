@@ -562,6 +562,50 @@ a {
   width: 100%;
 }
 
+.chart-annotation-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.chart-pill {
+  border: 1px solid #3f3f46;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+}
+
+.chart-pill-setup {
+  color: #d4d4d8;
+}
+
+.chart-pill-event {
+  color: #fde68a;
+  border-color: rgba(251, 191, 36, 0.45);
+}
+
+.chart-pill-trigger {
+  color: #fde047;
+  border-color: rgba(250, 204, 21, 0.42);
+}
+
+.chart-pill-entry {
+  color: #86efac;
+  border-color: rgba(74, 222, 128, 0.42);
+}
+
+.chart-pill-secondary {
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.42);
+}
+
+.chart-pill-stop {
+  color: #fda4af;
+  border-color: rgba(251, 113, 133, 0.42);
+}
+
 .tab-strip {
   border-bottom: 1px solid #27272a;
   display: flex;

@@ -100,6 +100,22 @@ export type WatchlistChartResponse = {
   ma200: Array<{ time: string; value: number }>;
 };
 
+export type ChartAnnotations = {
+  setupLabel?: string;
+  eventDate?: string | null;
+  eventLabel?: string | null;
+  triggerPrice?: number | null;
+  triggerLabel?: string | null;
+  entryPrice?: number | null;
+  entryLabel?: string | null;
+  secondaryEntryPrice?: number | null;
+  secondaryEntryLabel?: string | null;
+  secondaryEntryLow?: number | null;
+  secondaryEntryHigh?: number | null;
+  stopPrice?: number | null;
+  stopLabel?: string | null;
+};
+
 export type OverlapResponse = {
   date_label: string;
   unique_ticker_count: number;

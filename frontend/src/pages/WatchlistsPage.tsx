@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
 import { PriceChart } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
-import type { CandlePoint, WatchlistChartResponse, WatchlistDetailResponse, WatchlistFile } from "../lib/types";
+import type { CandlePoint, ChartAnnotations, WatchlistChartResponse, WatchlistDetailResponse, WatchlistFile } from "../lib/types";
 
 export function WatchlistsPage() {
   const [watchlists, setWatchlists] = useState<WatchlistFile[]>([]);
@@ -54,6 +54,25 @@ export function WatchlistsPage() {
         volume: chartPayload?.volume[index]?.value ?? 0,
       })),
     [chartPayload],
+  );
+  const annotations = useMemo<ChartAnnotations>(
+    () => ({
+      setupLabel: typeof selectedTicker?.setup_label === "string" ? selectedTicker.setup_label : undefined,
+      eventDate: typeof selectedTicker?.event_date === "string" ? selectedTicker.event_date : null,
+      eventLabel: typeof selectedTicker?.event_label === "string" ? selectedTicker.event_label : null,
+      triggerPrice: toNullableNumber(selectedTicker?.trigger_price),
+      triggerLabel: typeof selectedTicker?.trigger_label === "string" ? selectedTicker.trigger_label : null,
+      entryPrice: toNullableNumber(selectedTicker?.entry_price),
+      entryLabel: typeof selectedTicker?.entry_label === "string" ? selectedTicker.entry_label : null,
+      secondaryEntryPrice: toNullableNumber(selectedTicker?.secondary_entry_price),
+      secondaryEntryLabel:
+        typeof selectedTicker?.secondary_entry_label === "string" ? selectedTicker.secondary_entry_label : null,
+      secondaryEntryLow: toNullableNumber(selectedTicker?.secondary_entry_low),
+      secondaryEntryHigh: toNullableNumber(selectedTicker?.secondary_entry_high),
+      stopPrice: toNullableNumber(selectedTicker?.stop_price),
+      stopLabel: typeof selectedTicker?.stop_label === "string" ? selectedTicker.stop_label : null,
+    }),
+    [selectedTicker],
   );
 
   return (
@@ -138,8 +157,16 @@ export function WatchlistsPage() {
           </div>
         </section>
 
-        <Panel title="Candles" aside={<div className="legend-row"><span>MA (20)</span><span>MA (50)</span><span>MA (200)</span></div>}>
-          <PriceChart ticker={ticker} candles={smallChartData} overlays={chartPayload ?? undefined} />
+        <Panel title="Candles" aside={<div className="legend-row"><span>MA (20)</span><span>MA (50)</span><span>MA (200)</span><span>Gap Zones</span><span>Trigger / Entry / Stop</span></div>}>
+          <PriceChart ticker={ticker} candles={smallChartData} overlays={chartPayload ?? undefined} annotations={annotations} />
+          <div className="chart-annotation-strip">
+            {annotations.setupLabel ? <span className="chart-pill chart-pill-setup">{annotations.setupLabel}</span> : null}
+            {annotations.eventDate ? <span className="chart-pill chart-pill-event">{annotations.eventLabel ?? "Event"} {annotations.eventDate}</span> : null}
+            {annotations.triggerPrice != null ? <span className="chart-pill chart-pill-trigger">{annotations.triggerLabel ?? "Trigger"} {annotations.triggerPrice.toFixed(2)}</span> : null}
+            {annotations.entryPrice != null ? <span className="chart-pill chart-pill-entry">{annotations.entryLabel ?? "Entry"} {annotations.entryPrice.toFixed(2)}</span> : null}
+            {annotations.secondaryEntryPrice != null ? <span className="chart-pill chart-pill-secondary">{annotations.secondaryEntryLabel ?? "Secondary"} {annotations.secondaryEntryPrice.toFixed(2)}</span> : null}
+            {annotations.stopPrice != null ? <span className="chart-pill chart-pill-stop">{annotations.stopLabel ?? "Stop"} {annotations.stopPrice.toFixed(2)}</span> : null}
+          </div>
         </Panel>
 
         <section className="tab-strip">
@@ -164,4 +191,12 @@ export function WatchlistsPage() {
       </div>
     </div>
   );
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
