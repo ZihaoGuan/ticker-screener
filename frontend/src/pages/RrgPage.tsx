@@ -97,13 +97,18 @@ export function RrgPage() {
       <Panel
         title={title}
         aside={
-          payload.static_report_url ? (
-            <a className="ghost-button" href={payload.static_report_url} target="_blank" rel="noreferrer">
-              Open Static Report
-            </a>
-          ) : (
-            <span className="eyebrow">Interactive</span>
-          )
+          <div className="rrg-panel-aside">
+            <NavLink className="ghost-button" to="/guide">
+              Open Guide
+            </NavLink>
+            {payload.static_report_url ? (
+              <a className="ghost-button" href={payload.static_report_url} target="_blank" rel="noreferrer">
+                Open Static Report
+              </a>
+            ) : (
+              <span className="eyebrow">Interactive</span>
+            )}
+          </div>
         }
       >
         <div className="rrg-hero">

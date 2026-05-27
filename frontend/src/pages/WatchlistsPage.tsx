@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
@@ -181,15 +182,20 @@ export function WatchlistsPage() {
         <Panel
           title="Candles"
           aside={
-            <div className="legend-row legend-row-compact">
-              <span className="legend-marker legend-marker-event" aria-hidden="true" />
-              <span>Event</span>
-              <span className="legend-marker legend-marker-gap" aria-hidden="true" />
-              <span>Gap</span>
-              <span className="legend-marker legend-marker-rs" aria-hidden="true" />
-              <span>RS NH</span>
-              <span className="legend-marker legend-marker-rs-before" aria-hidden="true" />
-              <span>RS NH before price</span>
+            <div className="watchlist-panel-aside">
+              <div className="legend-row legend-row-compact">
+                <span className="legend-marker legend-marker-event" aria-hidden="true" />
+                <span>Event</span>
+                <span className="legend-marker legend-marker-gap" aria-hidden="true" />
+                <span>Gap</span>
+                <span className="legend-marker legend-marker-rs" aria-hidden="true" />
+                <span>RS NH</span>
+                <span className="legend-marker legend-marker-rs-before" aria-hidden="true" />
+                <span>RS NH before price</span>
+              </div>
+              <Link className="ghost-button" to="/guide">
+                Open Guide
+              </Link>
             </div>
           }
         >

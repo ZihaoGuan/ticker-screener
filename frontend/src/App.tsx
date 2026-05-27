@@ -3,6 +3,7 @@ import { AppLayout } from "./components/AppLayout";
 import { AdminPage } from "./pages/AdminPage";
 import { BacktestsPage } from "./pages/BacktestsPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { GuidePage } from "./pages/GuidePage";
 import { OverlapPage } from "./pages/OverlapPage";
 import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
@@ -13,6 +14,7 @@ export default function App() {
     <AppLayout>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/guide" element={<GuidePage />} />
         <Route path="/runs" element={<RunsPage />} />
         <Route path="/watchlists" element={<WatchlistsPage />} />
         <Route path="/rrg" element={<Navigate to="/rrg/sector" replace />} />

@@ -530,6 +530,26 @@ a {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
+.guide-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.guide-topic {
+  display: grid;
+  gap: 18px;
+}
+
+.watchlist-panel-aside,
+.rrg-panel-aside {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .rrg-page {
   gap: 18px;
 }
