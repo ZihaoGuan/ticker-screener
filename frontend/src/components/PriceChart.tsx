@@ -1,4 +1,4 @@
-import { ColorType, createChart } from "lightweight-charts";
+import { ColorType, LineStyle, createChart } from "lightweight-charts";
 import { useEffect, useMemo, useRef } from "react";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
 
@@ -361,6 +361,7 @@ function buildPriceLine(
     price,
     color,
     lineWidth,
+    lineStyle: LineStyle.Solid,
     title,
   });
 }
