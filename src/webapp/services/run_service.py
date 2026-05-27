@@ -16,6 +16,7 @@ class RunAction:
     label: str
     script_path: str
     supports_limit: bool = True
+    extra_args: tuple[str, ...] = ()
 
 
 class RunService:
@@ -23,6 +24,28 @@ class RunService:
         "rs": RunAction("rs", "Run RS", "scripts/run_rs_screen.py"),
         "vcp": RunAction("vcp", "Run VCP", "scripts/run_vcp_screen.py"),
         "cup_handle": RunAction("cup_handle", "Run Cup Handle", "scripts/run_cup_handle_screen.py"),
+        "gap_fill": RunAction("gap_fill", "Run Gap Fill", "scripts/run_gap_fill_screen.py"),
+        "weekly_htf_pullback": RunAction(
+            "weekly_htf_pullback",
+            "Run Weekly HTF Pullback",
+            "scripts/run_weekly_htf_pullback_screen.py",
+        ),
+        "htf_8w_runup": RunAction("htf_8w_runup", "Run HTF 8W Runup", "scripts/run_htf_runup_screen.py"),
+        "weekly_rs": RunAction("weekly_rs", "Run Weekly RS", "scripts/run_weekly_rs_screen.py"),
+        "near_200ma": RunAction("near_200ma", "Run Near 200MA", "scripts/run_near_200ma_screen.py"),
+        "lost_21ema": RunAction("lost_21ema", "Run Lost 21EMA", "scripts/run_lost_21ema_screen.py"),
+        "legacy_peg": RunAction(
+            "legacy_peg",
+            "Run Legacy PEG",
+            "scripts/run_peg_screen.py",
+            extra_args=("--strategy-profile", "legacy"),
+        ),
+        "sean_peg": RunAction(
+            "sean_peg",
+            "Run Sean PEG",
+            "scripts/run_peg_screen.py",
+            extra_args=("--strategy-profile", "sean-peg"),
+        ),
     }
     _jobs_lock = threading.Lock()
     _jobs: list[dict[str, Any]] = []
@@ -36,7 +59,7 @@ class RunService:
             {
                 "id": action.action_id,
                 "label": action.label,
-                "command": f"{sys.executable} {action.script_path}",
+                "command": " ".join([sys.executable, action.script_path, *action.extra_args]).strip(),
                 "supports_limit": action.supports_limit,
             }
             for action in self._actions.values()
@@ -54,6 +77,7 @@ class RunService:
         job_id = uuid.uuid4().hex[:12]
         started_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
         command = [sys.executable, action.script_path]
+        command.extend(action.extra_args)
         if action.supports_limit and limit is not None:
             command.extend(["--limit", str(limit)])
 

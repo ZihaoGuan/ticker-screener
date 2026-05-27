@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/Panel";
+import { ProgressBar } from "../components/ProgressBar";
 import { fetchJson } from "../lib/api";
 import type { JobsResponse } from "../lib/types";
 
@@ -19,6 +20,7 @@ export function RunsPage() {
   }, []);
 
   const latestLog = useMemo(() => payload?.jobs[0]?.log_tail ?? "No job log yet.", [payload]);
+  const activeJob = useMemo(() => payload?.jobs.find((job) => job.status === "running") ?? null, [payload]);
 
   const runAction = async (actionId: string) => {
     const limit = Number(limitValue);
@@ -53,6 +55,28 @@ export function RunsPage() {
         </div>
       </Panel>
 
+      <Panel
+        title="Current Progress"
+        aside={
+          activeJob ? (
+            <span className="eyebrow">{activeJob.label}</span>
+          ) : (
+            <span className="eyebrow">Idle</span>
+          )
+        }
+      >
+        <div className="run-progress-panel">
+          <ProgressBar
+            status={activeJob?.status ?? "success"}
+            label={
+              activeJob
+                ? `${activeJob.label} started ${activeJob.started_at || "just now"}`
+                : "No screener currently running"
+            }
+          />
+        </div>
+      </Panel>
+
       <Panel title="Recent Screener Jobs">
         <table className="data-table">
           <thead>
@@ -62,6 +86,7 @@ export function RunsPage() {
               <th>Status</th>
               <th>Start Time</th>
               <th>Finish Time</th>
+              <th>Progress</th>
               <th>RC</th>
             </tr>
           </thead>
@@ -75,6 +100,9 @@ export function RunsPage() {
                 </td>
                 <td>{job.started_at || "-"}</td>
                 <td>{job.finished_at || "-"}</td>
+                <td>
+                  <ProgressBar status={job.status} compact />
+                </td>
                 <td className="mono">{job.return_code ?? "-"}</td>
               </tr>
             ))}
