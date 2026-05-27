@@ -609,6 +609,65 @@ a {
   font-size: 13px;
 }
 
+.legend-row-compact {
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.legend-marker {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.legend-marker-event {
+  background: #fbbf24;
+}
+
+.legend-marker-gap {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: #86efac;
+}
+
+.legend-marker-rs {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: #60a5fa;
+}
+
+.legend-marker-rs-before {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #bfdbfe;
+  box-shadow: 0 0 0 1px rgba(191, 219, 254, 0.4);
+}
+
+.chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.chart-toggle {
+  align-items: center;
+  color: #d4d4d8;
+  display: inline-flex;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chart-toggle input {
+  accent-color: #34d399;
+}
+
 .chart-card {
   width: 100%;
 }

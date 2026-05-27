@@ -2,6 +2,18 @@ import { ColorType, createChart } from "lightweight-charts";
 import { useEffect, useMemo, useRef } from "react";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
 
+export type ChartVisibility = {
+  ema8: boolean;
+  ema21: boolean;
+  weeklyEma8: boolean;
+  ipoVwap: boolean;
+  maStack: boolean;
+  gapZones: boolean;
+  setupLevels: boolean;
+  rsLine: boolean;
+  rsSignals: boolean;
+};
+
 type PriceChartProps = {
   ticker: string;
   candles: CandlePoint[];
@@ -10,6 +22,7 @@ type PriceChartProps = {
     "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "rs_line" | "rs_markers" | "benchmark_ticker"
   >;
   annotations?: ChartAnnotations;
+  visibility?: ChartVisibility;
 };
 
 type GapZone = {
@@ -21,9 +34,20 @@ type GapZone = {
   filled: boolean;
 };
 
-export function PriceChart({ ticker, candles, overlays, annotations }: PriceChartProps) {
+export function PriceChart({ ticker, candles, overlays, annotations, visibility }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
+  const options = visibility ?? {
+    ema8: true,
+    ema21: true,
+    weeklyEma8: true,
+    ipoVwap: true,
+    maStack: true,
+    gapZones: true,
+    setupLevels: true,
+    rsLine: true,
+    rsSignals: true,
+  };
 
   const ma20 = useMemo(() => overlays?.ma20 ?? buildMovingAverage(candles, 20), [candles, overlays?.ma20]);
   const ma50 = useMemo(() => overlays?.ma50 ?? buildMovingAverage(candles, 50), [candles, overlays?.ma50]);
@@ -133,16 +157,16 @@ export function PriceChart({ ticker, candles, overlays, annotations }: PriceChar
         color: item.close >= item.open ? "rgba(16, 185, 129, 0.5)" : "rgba(244, 63, 94, 0.5)",
       })),
     );
-    ema8Series.setData(ema8);
-    ema21Series.setData(ema21);
-    weeklyEma8Series.setData(weeklyEma8);
-    ipoVwapSeries.setData(ipoVwap);
-    ma20Series.setData(ma20);
-    ma50Series.setData(ma50);
-    ma200Series.setData(ma200);
-    rsSeries.setData(rsLine);
+    ema8Series.setData(options.ema8 ? ema8 : []);
+    ema21Series.setData(options.ema21 ? ema21 : []);
+    weeklyEma8Series.setData(options.weeklyEma8 ? weeklyEma8 : []);
+    ipoVwapSeries.setData(options.ipoVwap ? ipoVwap : []);
+    ma20Series.setData(options.maStack ? ma20 : []);
+    ma50Series.setData(options.maStack ? ma50 : []);
+    ma200Series.setData(options.maStack ? ma200 : []);
+    rsSeries.setData(options.rsLine ? rsLine : []);
 
-    const gapSeries = visibleGapZones.flatMap((zone, index) => {
+    const gapSeries = (options.gapZones ? visibleGapZones : []).flatMap((zone, index) => {
       const startTime = candles[zone.startIndex]?.time;
       const endTime = candles[zone.endIndex]?.time ?? candles[candles.length - 1]?.time;
       if (!startTime || !endTime) {
@@ -162,14 +186,16 @@ export function PriceChart({ ticker, candles, overlays, annotations }: PriceChar
       return [upperSeries, lowerSeries];
     });
 
-    const priceLines = [
-      buildPriceLine(candleSeries, annotations?.triggerPrice, "#facc15", annotations?.triggerLabel ?? "Trigger", 2),
-      buildPriceLine(candleSeries, annotations?.entryPrice, "#4ade80", annotations?.entryLabel ?? "Entry", 2),
-      buildPriceLine(candleSeries, annotations?.secondaryEntryPrice, "#94a3b8", annotations?.secondaryEntryLabel ?? "Secondary", 1),
-      buildPriceLine(candleSeries, annotations?.secondaryEntryLow, "rgba(148, 163, 184, 0.75)", "Secondary low", 1),
-      buildPriceLine(candleSeries, annotations?.secondaryEntryHigh, "rgba(148, 163, 184, 0.75)", "Secondary high", 1),
-      buildPriceLine(candleSeries, annotations?.stopPrice, "#fb7185", annotations?.stopLabel ?? "Stop", 2),
-    ].filter(Boolean);
+    const priceLines = options.setupLevels
+      ? [
+          buildPriceLine(candleSeries, annotations?.triggerPrice, "#facc15", annotations?.triggerLabel ?? "Trigger", 2),
+          buildPriceLine(candleSeries, annotations?.entryPrice, "#4ade80", annotations?.entryLabel ?? "Entry", 2),
+          buildPriceLine(candleSeries, annotations?.secondaryEntryPrice, "#94a3b8", annotations?.secondaryEntryLabel ?? "Secondary", 1),
+          buildPriceLine(candleSeries, annotations?.secondaryEntryLow, "rgba(148, 163, 184, 0.75)", "Secondary low", 1),
+          buildPriceLine(candleSeries, annotations?.secondaryEntryHigh, "rgba(148, 163, 184, 0.75)", "Secondary high", 1),
+          buildPriceLine(candleSeries, annotations?.stopPrice, "#fb7185", annotations?.stopLabel ?? "Stop", 2),
+        ].filter(Boolean)
+      : [];
 
     const priceMarkers = [];
     if (annotations?.eventDate) {
@@ -178,10 +204,9 @@ export function PriceChart({ ticker, candles, overlays, annotations }: PriceChar
         position: "aboveBar" as const,
         color: "#fbbf24",
         shape: "circle" as const,
-        text: annotations.eventLabel ?? "Event",
       });
     }
-    if (visibleGapZones.length > 0) {
+    if (options.gapZones && visibleGapZones.length > 0) {
       const latestGap = visibleGapZones[visibleGapZones.length - 1];
       const latestTime = candles[latestGap.startIndex]?.time;
       if (latestTime) {
@@ -190,37 +215,42 @@ export function PriceChart({ ticker, candles, overlays, annotations }: PriceChar
           position: "belowBar" as const,
           color: latestGap.direction === "up" ? "#86efac" : "#fca5a5",
           shape: "square" as const,
-          text: latestGap.direction === "up" ? "Gap up" : "Gap down",
         });
       }
     }
-    for (const marker of rsMarkers) {
-      priceMarkers.push({
-        time: marker.time,
-        position: "belowBar" as const,
-        color: marker.kind === "daily_new_high_before_price" ? "#bfdbfe" : "#60a5fa",
-        shape: marker.kind === "daily_new_high_before_price" ? "circle" as const : "square" as const,
-        text: marker.kind === "daily_new_high_before_price" ? "RS NH before price" : "RS NH",
-      });
+    if (options.rsSignals) {
+      for (const marker of rsMarkers) {
+        priceMarkers.push({
+          time: marker.time,
+          position: "belowBar" as const,
+          color: marker.kind === "daily_new_high_before_price" ? "#bfdbfe" : "#60a5fa",
+          shape: marker.kind === "daily_new_high_before_price" ? "circle" as const : "square" as const,
+        });
+      }
     }
     if (priceMarkers.length > 0) {
       candleSeries.setMarkers(priceMarkers);
     }
 
-    if (rsMarkers.length > 0) {
+    if (options.rsSignals && rsMarkers.length > 0) {
       rsSeries.setMarkers(
         rsMarkers.map((marker) => ({
           time: marker.time,
           position: "aboveBar" as const,
           color: marker.kind === "daily_new_high_before_price" ? "#bfdbfe" : "#60a5fa",
           shape: marker.kind === "daily_new_high_before_price" ? "circle" as const : "square" as const,
-          text: marker.kind === "daily_new_high_before_price" ? "Before price" : "New high",
         })),
       );
     }
 
     priceChart.timeScale().fitContent();
     rsChart.timeScale().fitContent();
+    rsChart.applyOptions({ handleScroll: options.rsLine, handleScale: options.rsLine });
+    if (!options.rsLine && rsRootRef.current) {
+      rsRootRef.current.style.display = "none";
+    } else if (rsRootRef.current) {
+      rsRootRef.current.style.display = "";
+    }
 
     let syncingPriceToRs = false;
     let syncingRsToPrice = false;
@@ -270,6 +300,15 @@ export function PriceChart({ ticker, candles, overlays, annotations }: PriceChar
     rsLine,
     rsMarkers,
     ticker,
+    options.ema8,
+    options.ema21,
+    options.weeklyEma8,
+    options.ipoVwap,
+    options.maStack,
+    options.gapZones,
+    options.setupLevels,
+    options.rsLine,
+    options.rsSignals,
     visibleGapZones,
     weeklyEma8,
   ]);
@@ -277,7 +316,7 @@ export function PriceChart({ ticker, candles, overlays, annotations }: PriceChar
   return (
     <div className="chart-stack">
       <div ref={priceRootRef} className="chart-card chart-card-price" />
-      <div className="chart-rs-header">RS line vs {benchmarkTicker}</div>
+      {options.rsLine ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
       <div ref={rsRootRef} className="chart-card chart-card-rs" />
     </div>
   );

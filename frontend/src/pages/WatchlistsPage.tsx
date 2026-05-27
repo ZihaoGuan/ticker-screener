@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
-import { PriceChart } from "../components/PriceChart";
+import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse, WatchlistDetailResponse, WatchlistFile } from "../lib/types";
 
@@ -10,6 +10,17 @@ export function WatchlistsPage() {
   const [detail, setDetail] = useState<WatchlistDetailResponse | null>(null);
   const [selectedTicker, setSelectedTicker] = useState<Record<string, unknown> | null>(null);
   const [chartPayload, setChartPayload] = useState<WatchlistChartResponse | null>(null);
+  const [chartVisibility, setChartVisibility] = useState<ChartVisibility>({
+    ema8: true,
+    ema21: true,
+    weeklyEma8: true,
+    ipoVwap: true,
+    maStack: true,
+    gapZones: true,
+    setupLevels: true,
+    rsLine: true,
+    rsSignals: true,
+  });
 
   useEffect(() => {
     void fetchJson<{ watchlists: WatchlistFile[] }>("/api/watchlists").then((payload) => {
@@ -75,6 +86,17 @@ export function WatchlistsPage() {
     [selectedTicker],
   );
   const latestRsMarker = chartPayload?.rs_markers?.[chartPayload.rs_markers.length - 1] ?? null;
+  const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
+    { key: "ema8", label: "EMA 8" },
+    { key: "ema21", label: "EMA 21" },
+    { key: "weeklyEma8", label: "Weekly 8 EMA" },
+    { key: "ipoVwap", label: "IPO VWAP" },
+    { key: "maStack", label: "MA stack" },
+    { key: "gapZones", label: "Gap zones" },
+    { key: "setupLevels", label: "Setup levels" },
+    { key: "rsLine", label: "RS line" },
+    { key: "rsSignals", label: "RS markers" },
+  ];
 
   return (
     <div className="watchlists-layout">
@@ -161,17 +183,42 @@ export function WatchlistsPage() {
         <Panel
           title="Candles"
           aside={
-            <div className="legend-row">
-              <span>EMA 8</span>
-              <span>EMA 21</span>
-              <span>Weekly 8 EMA</span>
-              <span>IPO VWAP</span>
-              <span>MA stack</span>
-              <span>Gap / RS / Entry</span>
+            <div className="legend-row legend-row-compact">
+              <span className="legend-marker legend-marker-event" aria-hidden="true" />
+              <span>Event</span>
+              <span className="legend-marker legend-marker-gap" aria-hidden="true" />
+              <span>Gap</span>
+              <span className="legend-marker legend-marker-rs" aria-hidden="true" />
+              <span>RS NH</span>
+              <span className="legend-marker legend-marker-rs-before" aria-hidden="true" />
+              <span>RS NH before price</span>
             </div>
           }
         >
-          <PriceChart ticker={ticker} candles={smallChartData} overlays={chartPayload ?? undefined} annotations={annotations} />
+          <div className="chart-toolbar">
+            {chartToggles.map((toggle) => (
+              <label key={toggle.key} className="chart-toggle">
+                <input
+                  type="checkbox"
+                  checked={chartVisibility[toggle.key]}
+                  onChange={() =>
+                    setChartVisibility((current) => ({
+                      ...current,
+                      [toggle.key]: !current[toggle.key],
+                    }))
+                  }
+                />
+                <span>{toggle.label}</span>
+              </label>
+            ))}
+          </div>
+          <PriceChart
+            ticker={ticker}
+            candles={smallChartData}
+            overlays={chartPayload ?? undefined}
+            annotations={annotations}
+            visibility={chartVisibility}
+          />
           <div className="chart-annotation-strip">
             {annotations.setupLabel ? <span className="chart-pill chart-pill-setup">{annotations.setupLabel}</span> : null}
             {annotations.eventDate ? <span className="chart-pill chart-pill-event">{annotations.eventLabel ?? "Event"} {annotations.eventDate}</span> : null}
