@@ -197,36 +197,35 @@ class RrgService:
         trail_weeks: int,
     ) -> tuple[list[RrgSeries], list[str]]:
         benchmark_history = to_weekly_close(fetch_history(benchmark, period)).rename(benchmark)
-        weekly_closes: dict[str, pd.Series] = {benchmark: benchmark_history}
         failures: list[str] = []
-
-        for label, ticker in entries:
-            symbol = ticker.upper()
-            try:
-                weekly_closes[symbol] = to_weekly_close(fetch_history(symbol, period)).rename(symbol)
-            except Exception:
-                failures.append(symbol)
-
-        closes = pd.concat(weekly_closes.values(), axis=1, join="inner").dropna()
-        if closes.empty:
-            return [], sorted(set(failures))
 
         series_list: list[RrgSeries] = []
         for index, (label, ticker) in enumerate(entries):
             symbol = ticker.upper()
-            if symbol not in closes.columns:
+            try:
+                ticker_history = to_weekly_close(fetch_history(symbol, period)).rename(symbol)
+            except Exception:
                 failures.append(symbol)
                 continue
-            series = compute_rotation_series(
-                label=label,
-                ticker=symbol,
-                color=f"series-{index}",
-                closes=closes,
-                benchmark=benchmark,
-                ratio_window=DEFAULT_RATIO_WINDOW,
-                momentum_window=DEFAULT_MOMENTUM_WINDOW,
-                trail_weeks=trail_weeks,
-            )
+            closes = pd.concat([benchmark_history, ticker_history], axis=1, join="inner").dropna()
+            if closes.empty:
+                failures.append(symbol)
+                continue
+            series = None
+            max_trail = max(1, min(trail_weeks, len(closes)))
+            for effective_trail in range(max_trail, 0, -1):
+                series = compute_rotation_series(
+                    label=label,
+                    ticker=symbol,
+                    color=f"series-{index}",
+                    closes=closes,
+                    benchmark=benchmark,
+                    ratio_window=DEFAULT_RATIO_WINDOW,
+                    momentum_window=DEFAULT_MOMENTUM_WINDOW,
+                    trail_weeks=effective_trail,
+                )
+                if series is not None:
+                    break
             if series is None:
                 failures.append(symbol)
                 continue
