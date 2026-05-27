@@ -1,5 +1,6 @@
 import { ColorType, createChart } from "lightweight-charts";
 import { useEffect, useMemo, useRef } from "react";
+import { createGapZonePrimitive } from "./GapZonePrimitive";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
 
 export type ChartVisibility = {
@@ -164,6 +165,28 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     ma200Series.setData(options.maStack ? ma200 : []);
     rsSeries.setData(options.rsLine ? rsLine : []);
 
+    if (options.gapZones && visibleGapZones.length > 0) {
+      const gapPrimitive = createGapZonePrimitive(
+        visibleGapZones
+          .map((zone) => {
+            const startTime = candles[zone.startIndex]?.time;
+            const endTime = candles[Math.min(zone.endIndex, candles.length - 1)]?.time;
+            if (!startTime || !endTime) {
+              return null;
+            }
+            return {
+              startTime,
+              endTime,
+              lowerPrice: zone.remainingLowerPrice,
+              upperPrice: zone.remainingUpperPrice,
+              direction: zone.direction,
+            };
+          })
+          .filter((zone): zone is NonNullable<typeof zone> => zone !== null),
+      );
+      (candleSeries as any).attachPrimitive?.(gapPrimitive);
+    }
+
     const priceMarkers = [];
     if (annotations?.eventDate) {
       priceMarkers.push({
@@ -172,18 +195,6 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
         color: "#fbbf24",
         shape: "circle" as const,
       });
-    }
-    if (options.gapZones && visibleGapZones.length > 0) {
-      const latestGap = visibleGapZones[visibleGapZones.length - 1];
-      const latestTime = candles[latestGap.startIndex]?.time;
-      if (latestTime) {
-        priceMarkers.push({
-          time: latestTime,
-          position: "belowBar" as const,
-          color: latestGap.direction === "up" ? "#86efac" : "#fca5a5",
-          shape: "square" as const,
-        });
-      }
     }
     if (options.rsSignals) {
       for (const marker of rsMarkers) {
