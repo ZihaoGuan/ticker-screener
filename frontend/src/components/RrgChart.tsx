@@ -12,6 +12,8 @@ echarts.use([LineChart, ScatterChart, GraphicComponent, GridComponent, LegendCom
 type RrgChartProps = {
   benchmark: string;
   series: RrgSeries[];
+  compact?: boolean;
+  showLegend?: boolean;
 };
 
 type ChartBounds = {
@@ -30,7 +32,7 @@ const QUADRANT_COLORS = {
 
 const PALETTE = ["#34d399", "#38bdf8", "#f59e0b", "#f472b6", "#a78bfa", "#fb7185", "#22c55e", "#eab308", "#60a5fa", "#14b8a6", "#f97316", "#c084fc"];
 
-export function RrgChart({ benchmark, series }: RrgChartProps) {
+export function RrgChart({ benchmark, series, compact = false, showLegend = true }: RrgChartProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<EChartsType | null>(null);
 
@@ -65,14 +67,14 @@ export function RrgChart({ benchmark, series }: RrgChartProps) {
     if (!chart) {
       return;
     }
-    chart.setOption(buildOption(series, benchmark, bounds), true);
+    chart.setOption(buildOption(series, benchmark, bounds, compact, showLegend), true);
     applyQuadrantGraphics(chart, bounds);
-  }, [benchmark, bounds, series]);
+  }, [benchmark, bounds, compact, series, showLegend]);
 
-  return <div ref={rootRef} className="rrg-chart-root" />;
+  return <div ref={rootRef} className={`rrg-chart-root${compact ? " is-compact" : ""}`} />;
 }
 
-function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds) {
+function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds, compact: boolean, showLegend: boolean) {
   const chartSeries = series.flatMap((entry, index) => {
     const color = PALETTE[index % PALETTE.length];
     const displayName = `${entry.ticker} · ${entry.label}`;
@@ -138,18 +140,19 @@ function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds
     backgroundColor: "transparent",
     color: PALETTE,
     grid: {
-      left: 64,
-      right: 28,
-      top: 24,
-      bottom: 56,
+      left: compact ? 42 : 64,
+      right: compact ? 14 : 28,
+      top: compact ? 14 : 24,
+      bottom: compact ? 32 : 56,
       containLabel: false,
     },
     legend: {
+      show: showLegend,
       type: "scroll",
       top: 0,
       textStyle: {
         color: "#d4d4d8",
-        fontSize: 11,
+        fontSize: compact ? 10 : 11,
       },
       pageTextStyle: {
         color: "#d4d4d8",
@@ -196,6 +199,7 @@ function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds
       axisLabel: {
         color: "#a1a1aa",
         formatter: (value: number) => value.toFixed(1),
+        fontSize: compact ? 10 : 12,
       },
       axisLine: {
         lineStyle: {
@@ -207,12 +211,12 @@ function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds
           color: "#27272a",
         },
       },
-      name: "RS Ratio",
+      name: compact ? "" : "RS Ratio",
       nameLocation: "middle",
       nameGap: 34,
       nameTextStyle: {
         color: "#a1a1aa",
-        fontSize: 12,
+        fontSize: compact ? 10 : 12,
       },
     },
     yAxis: {
@@ -222,6 +226,7 @@ function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds
       axisLabel: {
         color: "#a1a1aa",
         formatter: (value: number) => value.toFixed(1),
+        fontSize: compact ? 10 : 12,
       },
       axisLine: {
         lineStyle: {
@@ -233,12 +238,12 @@ function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds
           color: "#27272a",
         },
       },
-      name: "RS Momentum",
+      name: compact ? "" : "RS Momentum",
       nameLocation: "middle",
       nameGap: 48,
       nameTextStyle: {
         color: "#a1a1aa",
-        fontSize: 12,
+        fontSize: compact ? 10 : 12,
       },
     },
     series: chartSeries,

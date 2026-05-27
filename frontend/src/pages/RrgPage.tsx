@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { RrgChart } from "../components/RrgChart";
+import { RrgValueChart } from "../components/RrgValueChart";
 import { fetchJson } from "../lib/api";
 import type { RrgCadence, RrgResponse, RrgSeries, RrgUniverse } from "../lib/types";
 
@@ -88,8 +89,8 @@ export function RrgPage() {
       .slice(0, 6);
   }, [visibleSeries]);
 
-  const title = `${labelForUniverse(universe)} RRG`;
-  const subtitle = `${labelForUniverse(universe)} rotation map vs ${payload.benchmark}`;
+  const title = `${labelForUniverse(universe)} Rotation`;
+  const subtitle = `${labelForUniverse(universe)} relative strength rotation vs ${payload.benchmark}`;
   const cadenceLabel = cadence === "daily-2m" ? "Daily 2M" : "Weekly";
 
   return (
@@ -186,63 +187,97 @@ export function RrgPage() {
           </p>
         </Panel>
       ) : (
-        <div className="rrg-layout">
-          <Panel title={`${labelForUniverse(universe)} Map`} className="rrg-chart-panel">
-            <RrgChart benchmark={payload.benchmark} series={visibleSeries} />
-          </Panel>
-
-          <div className="rrg-sidecar">
-            <Panel title="Summary" aside={<span className="eyebrow">{visibleSeries.length} symbols</span>}>
-              <div className="rrg-summary-grid">
-                <div className="rrg-summary-card">
-                  <span className="eyebrow">Leading</span>
-                  <strong>{quadrantCounts.Leading ?? 0}</strong>
-                </div>
-                <div className="rrg-summary-card">
-                  <span className="eyebrow">Weakening</span>
-                  <strong>{quadrantCounts.Weakening ?? 0}</strong>
-                </div>
-                <div className="rrg-summary-card">
-                  <span className="eyebrow">Lagging</span>
-                  <strong>{quadrantCounts.Lagging ?? 0}</strong>
-                </div>
-                <div className="rrg-summary-card">
-                  <span className="eyebrow">Improving</span>
-                  <strong>{quadrantCounts.Improving ?? 0}</strong>
-                </div>
-              </div>
+        <>
+          <div className="rrg-layout">
+            <Panel title={`${labelForUniverse(universe)} Map`} className="rrg-chart-panel">
+              <RrgChart benchmark={payload.benchmark} series={visibleSeries} />
             </Panel>
 
-            <Panel title="Strongest Leaders">
-              <div className="rrg-leader-list">
-                {leaders.map((entry) => (
-                  <article key={entry.ticker} className="rrg-leader-item">
+            <div className="rrg-sidecar">
+              <Panel title="Summary" aside={<span className="eyebrow">{visibleSeries.length} symbols</span>}>
+                <div className="rrg-summary-grid">
+                  <div className="rrg-summary-card">
+                    <span className="eyebrow">Leading</span>
+                    <strong>{quadrantCounts.Leading ?? 0}</strong>
+                  </div>
+                  <div className="rrg-summary-card">
+                    <span className="eyebrow">Weakening</span>
+                    <strong>{quadrantCounts.Weakening ?? 0}</strong>
+                  </div>
+                  <div className="rrg-summary-card">
+                    <span className="eyebrow">Lagging</span>
+                    <strong>{quadrantCounts.Lagging ?? 0}</strong>
+                  </div>
+                  <div className="rrg-summary-card">
+                    <span className="eyebrow">Improving</span>
+                    <strong>{quadrantCounts.Improving ?? 0}</strong>
+                  </div>
+                </div>
+              </Panel>
+
+              <Panel title="Strongest Leaders">
+                <div className="rrg-leader-list">
+                  {leaders.map((entry) => (
+                    <article key={entry.ticker} className="rrg-leader-item">
+                      <div>
+                        <div className="ticker-symbol">{entry.ticker}</div>
+                        <div className="ticker-company">{entry.label}</div>
+                      </div>
+                      <div className="rrg-leader-side">
+                        <div className={`status-pill status-${badgeClass(entry.quadrant)}`}>{entry.quadrant}</div>
+                        <div className="file-meta">
+                          {entry.latest.x.toFixed(1)} / {entry.latest.y.toFixed(1)}
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </Panel>
+
+              <Panel title="Notes">
+                <div className="rrg-notes">
+                  {(payload.meta.notes.length ? payload.meta.notes : ["Using the same RRG math as the static renderer."]).map((note) => (
+                    <p key={note} className="panel-copy">
+                      {note}
+                    </p>
+                  ))}
+                </div>
+              </Panel>
+            </div>
+          </div>
+
+          <Panel
+            title={`${labelForUniverse(universe)} Components`}
+            aside={<span className="eyebrow">{visibleSeries.length} mini charts</span>}
+          >
+            <div className="rrg-item-grid">
+              {visibleSeries.map((entry) => (
+                <article key={entry.ticker} className="rrg-item-card">
+                  <div className="rrg-item-head">
                     <div>
                       <div className="ticker-symbol">{entry.ticker}</div>
                       <div className="ticker-company">{entry.label}</div>
                     </div>
-                    <div className="rrg-leader-side">
-                      <div className={`status-pill status-${badgeClass(entry.quadrant)}`}>{entry.quadrant}</div>
-                      <div className="file-meta">
-                        {entry.latest.x.toFixed(1)} / {entry.latest.y.toFixed(1)}
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </Panel>
-
-            <Panel title="Notes">
-              <div className="rrg-notes">
-                {(payload.meta.notes.length ? payload.meta.notes : ["Using the same RRG math as the static renderer."]).map((note) => (
-                  <p key={note} className="panel-copy">
-                    {note}
-                  </p>
-                ))}
-              </div>
-            </Panel>
-          </div>
-        </div>
+                    <div className={`status-pill status-${badgeClass(entry.quadrant)}`}>{entry.quadrant}</div>
+                  </div>
+                  <div className="rrg-mini-metrics">
+                    <span className="file-meta">RS Ratio {entry.latest.x.toFixed(1)}</span>
+                    <span className="file-meta">Momentum {entry.latest.y.toFixed(1)}</span>
+                    <span className="file-meta">{entry.points.length} points</span>
+                  </div>
+                  <div className="rrg-item-chart">
+                    <div className="rrg-item-chart-label">RRG Trail</div>
+                    <RrgChart benchmark={payload.benchmark} series={[entry]} compact showLegend={false} />
+                  </div>
+                  <div className="rrg-item-chart">
+                    <div className="rrg-item-chart-label">RS Ratio vs Date</div>
+                    <RrgValueChart series={entry} />
+                  </div>
+                </article>
+              ))}
+            </div>
+          </Panel>
+        </>
       )}
     </div>
   );
