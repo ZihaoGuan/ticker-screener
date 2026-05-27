@@ -76,6 +76,26 @@ def rrg_latest(service: RrgService = Depends(get_rrg_service)) -> JSONResponse:
     return JSONResponse(service.get_latest_report())
 
 
+@router.get("/rrg/{universe}", response_class=JSONResponse)
+def rrg_universe_data(
+    universe: str,
+    benchmark: str = Query(default="SPY"),
+    period: str = Query(default="3y"),
+    trail_weeks: int = Query(default=12, alias="trailWeeks", ge=4, le=52),
+    service: RrgService = Depends(get_rrg_service),
+) -> JSONResponse:
+    if universe not in {"sector", "industry", "theme"}:
+        raise HTTPException(status_code=404, detail=f"Unsupported RRG universe: {universe}")
+    return JSONResponse(
+        service.get_universe_report(
+            universe=universe,
+            benchmark=benchmark,
+            period=period,
+            trail_weeks=trail_weeks,
+        )
+    )
+
+
 @router.get("/overlap/{date_label}", response_class=JSONResponse)
 def overlap_by_date(date_label: str, service: OverlapService = Depends(get_overlap_service)) -> JSONResponse:
     return JSONResponse(service.get_summary(date_label))

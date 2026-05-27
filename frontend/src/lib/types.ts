@@ -140,3 +140,47 @@ export type AdminResponse = {
   excluded_tickers: string[];
   excluded_count: number;
 };
+
+export type RrgUniverse = "sector" | "industry" | "theme";
+
+export type RrgPoint = {
+  x: number;
+  y: number;
+  date: string;
+};
+
+export type RrgSeries = {
+  ticker: string;
+  label: string;
+  points: RrgPoint[];
+  latest: RrgPoint;
+  quadrant: "Leading" | "Weakening" | "Lagging" | "Improving" | string;
+  distance: number;
+};
+
+export type RrgGroup = {
+  id: string;
+  title: string;
+  series: RrgSeries[];
+};
+
+export type RrgResponse = {
+  universe: RrgUniverse;
+  benchmark: string;
+  period: string;
+  trail_weeks: number;
+  generated_at: string;
+  series: RrgSeries[];
+  groups?: RrgGroup[];
+  quadrants: {
+    center_x: number;
+    center_y: number;
+    definitions: Array<{ name: string; x: string; y: string }>;
+  };
+  meta: {
+    count: number;
+    notes: string[];
+    failed_tickers?: string[];
+  };
+  static_report_url?: string;
+};

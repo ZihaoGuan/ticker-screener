@@ -15,7 +15,8 @@ export default function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/runs" element={<RunsPage />} />
         <Route path="/watchlists" element={<WatchlistsPage />} />
-        <Route path="/rrg" element={<RrgPage />} />
+        <Route path="/rrg" element={<Navigate to="/rrg/sector" replace />} />
+        <Route path="/rrg/:universe" element={<RrgPage />} />
         <Route path="/overlap" element={<OverlapPage />} />
         <Route path="/backtests" element={<BacktestsPage />} />
         <Route path="/admin" element={<AdminPage />} />
