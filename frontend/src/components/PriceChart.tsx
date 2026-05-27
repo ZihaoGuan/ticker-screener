@@ -130,14 +130,14 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
       },
     });
 
-    const ema8Series = priceChart.addLineSeries({ color: "#38bdf8", lineWidth: 2 });
-    const ema21Series = priceChart.addLineSeries({ color: "#f59e0b", lineWidth: 2 });
-    const weeklyEma8Series = priceChart.addLineSeries({ color: "#4ade80", lineWidth: 2 });
-    const ipoVwapSeries = priceChart.addLineSeries({ color: "#f472b6", lineWidth: 2 });
-    const ma20Series = priceChart.addLineSeries({ color: "rgba(56, 189, 248, 0.35)", lineWidth: 1 });
-    const ma50Series = priceChart.addLineSeries({ color: "rgba(251, 146, 60, 0.45)", lineWidth: 1 });
-    const ma200Series = priceChart.addLineSeries({ color: "rgba(167, 139, 250, 0.52)", lineWidth: 1 });
-    const rsSeries = rsChart.addLineSeries({ color: "#60a5fa", lineWidth: 2 });
+    const ema8Series = priceChart.addLineSeries({ color: "#38bdf8", lineWidth: 2, priceLineVisible: false });
+    const ema21Series = priceChart.addLineSeries({ color: "#f59e0b", lineWidth: 2, priceLineVisible: false });
+    const weeklyEma8Series = priceChart.addLineSeries({ color: "#4ade80", lineWidth: 2, priceLineVisible: false });
+    const ipoVwapSeries = priceChart.addLineSeries({ color: "#f472b6", lineWidth: 2, priceLineVisible: false });
+    const ma20Series = priceChart.addLineSeries({ color: "rgba(56, 189, 248, 0.35)", lineWidth: 1, priceLineVisible: false });
+    const ma50Series = priceChart.addLineSeries({ color: "rgba(251, 146, 60, 0.45)", lineWidth: 1, priceLineVisible: false });
+    const ma200Series = priceChart.addLineSeries({ color: "rgba(167, 139, 250, 0.52)", lineWidth: 1, priceLineVisible: false });
+    const rsSeries = rsChart.addLineSeries({ color: "#60a5fa", lineWidth: 2, priceLineVisible: false });
 
     candleSeries.setData(
       candles.map((item) => ({
