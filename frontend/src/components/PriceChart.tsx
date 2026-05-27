@@ -164,26 +164,6 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     ma200Series.setData(options.maStack ? ma200 : []);
     rsSeries.setData(options.rsLine ? rsLine : []);
 
-    const gapSeries = (options.gapZones ? visibleGapZones : []).flatMap((zone, index) => {
-      const startTime = candles[zone.startIndex]?.time;
-      const endTime = candles[zone.endIndex]?.time ?? candles[candles.length - 1]?.time;
-      if (!startTime || !endTime) {
-        return [];
-      }
-      const lineColor = zone.direction === "up" ? "rgba(110, 231, 183, 0.78)" : "rgba(252, 165, 165, 0.78)";
-      const upperSeries = priceChart.addLineSeries({ color: lineColor, lineWidth: index === visibleGapZones.length - 1 ? 2 : 1 });
-      upperSeries.setData([
-        { time: startTime, value: zone.remainingUpperPrice },
-        { time: endTime, value: zone.remainingUpperPrice },
-      ]);
-      const lowerSeries = priceChart.addLineSeries({ color: lineColor, lineWidth: index === visibleGapZones.length - 1 ? 2 : 1 });
-      lowerSeries.setData([
-        { time: startTime, value: zone.remainingLowerPrice },
-        { time: endTime, value: zone.remainingLowerPrice },
-      ]);
-      return [upperSeries, lowerSeries];
-    });
-
     const priceMarkers = [];
     if (annotations?.eventDate) {
       priceMarkers.push({
@@ -269,7 +249,6 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
 
     return () => {
       resizeObserver.disconnect();
-      void gapSeries;
       priceChart.remove();
       rsChart.remove();
     };
