@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { AdminPage } from "./pages/AdminPage";
 import { BacktestsPage } from "./pages/BacktestsPage";
@@ -17,8 +17,10 @@ export default function App() {
         <Route path="/guide" element={<GuidePage />} />
         <Route path="/runs" element={<RunsPage />} />
         <Route path="/watchlists" element={<WatchlistsPage />} />
-        <Route path="/rrg" element={<Navigate to="/rrg/sector" replace />} />
-        <Route path="/rrg/:universe" element={<RrgPage />} />
+        <Route path="/rotation" element={<Navigate to="/rotation/sector" replace />} />
+        <Route path="/rotation/:universe" element={<RrgPage />} />
+        <Route path="/rrg" element={<Navigate to="/rotation/sector" replace />} />
+        <Route path="/rrg/:universe" element={<LegacyRrgRedirect />} />
         <Route path="/overlap" element={<OverlapPage />} />
         <Route path="/backtests" element={<BacktestsPage />} />
         <Route path="/admin" element={<AdminPage />} />
@@ -26,4 +28,10 @@ export default function App() {
       </Routes>
     </AppLayout>
   );
+}
+
+function LegacyRrgRedirect() {
+  const params = useParams();
+  const universe = params.universe ?? "sector";
+  return <Navigate to={`/rotation/${universe}`} replace />;
 }

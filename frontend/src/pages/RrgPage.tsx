@@ -128,7 +128,7 @@ export function RrgPage() {
           </div>
           <div className="rrg-tabs">
             {universeTabs.map((tab) => (
-              <NavLink key={tab.value} className={({ isActive }) => `rrg-tab${isActive ? " is-active" : ""}`} to={`/rrg/${tab.value}`}>
+              <NavLink key={tab.value} className={({ isActive }) => `rrg-tab${isActive ? " is-active" : ""}`} to={`/rotation/${tab.value}`}>
                 {tab.label}
               </NavLink>
             ))}
@@ -255,7 +255,17 @@ export function RrgPage() {
                 <article key={entry.ticker} className="rrg-item-card">
                   <div className="rrg-item-head">
                     <div>
-                      <div className="ticker-symbol">{entry.ticker}</div>
+                      <div className="rrg-item-symbol-row">
+                        <div className="ticker-symbol">{entry.ticker}</div>
+                        <a
+                          className="rrg-item-link"
+                          href={holdingsUrl(entry.ticker)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Holdings
+                        </a>
+                      </div>
                       <div className="ticker-company">{entry.label}</div>
                     </div>
                     <div className={`status-pill status-${badgeClass(entry.quadrant)}`}>{entry.quadrant}</div>
@@ -321,4 +331,8 @@ function badgeClass(quadrant: string): "success" | "running" | "failed" {
     return "running";
   }
   return "failed";
+}
+
+function holdingsUrl(ticker: string): string {
+  return `https://nz.finance.yahoo.com/quote/${encodeURIComponent(ticker)}/holdings/`;
 }

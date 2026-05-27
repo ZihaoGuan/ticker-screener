@@ -727,6 +727,23 @@ a {
   align-items: start;
 }
 
+.rrg-item-symbol-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rrg-item-link {
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rrg-item-link:hover {
+  color: #bfdbfe;
+}
+
 .rrg-mini-metrics {
   display: flex;
   flex-wrap: wrap;
