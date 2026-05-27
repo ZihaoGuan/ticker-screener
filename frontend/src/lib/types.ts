@@ -93,11 +93,18 @@ export type WatchlistDetailResponse = {
 
 export type WatchlistChartResponse = {
   ticker: string;
+  benchmark_ticker: string;
   candles: Array<{ time: string; open: number; high: number; low: number; close: number }>;
   volume: Array<{ time: string; value: number }>;
   ma20: Array<{ time: string; value: number }>;
   ma50: Array<{ time: string; value: number }>;
   ma200: Array<{ time: string; value: number }>;
+  ema8: Array<{ time: string; value: number }>;
+  ema21: Array<{ time: string; value: number }>;
+  weekly_ema8: Array<{ time: string; value: number }>;
+  ipo_vwap: Array<{ time: string; value: number }>;
+  rs_line: Array<{ time: string; value: number }>;
+  rs_markers: Array<{ time: string; kind: "daily_new_high" | "daily_new_high_before_price" }>;
 };
 
 export type ChartAnnotations = {

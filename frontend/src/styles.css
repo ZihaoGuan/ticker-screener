@@ -171,6 +171,32 @@ a {
   padding: 18px;
 }
 
+.chart-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.chart-card {
+  width: 100%;
+  overflow: hidden;
+}
+
+.chart-card-price {
+  min-height: 458px;
+}
+
+.chart-card-rs {
+  min-height: 152px;
+}
+
+.chart-rs-header {
+  color: #a1a1aa;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .panel-head {
   align-items: center;
   display: flex;
@@ -604,6 +630,11 @@ a {
 .chart-pill-stop {
   color: #fda4af;
   border-color: rgba(251, 113, 133, 0.42);
+}
+
+.chart-pill-rs {
+  color: #93c5fd;
+  border-color: rgba(96, 165, 250, 0.4);
 }
 
 .tab-strip {

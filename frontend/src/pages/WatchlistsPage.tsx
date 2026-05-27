@@ -74,6 +74,7 @@ export function WatchlistsPage() {
     }),
     [selectedTicker],
   );
+  const latestRsMarker = chartPayload?.rs_markers?.[chartPayload.rs_markers.length - 1] ?? null;
 
   return (
     <div className="watchlists-layout">
@@ -157,7 +158,19 @@ export function WatchlistsPage() {
           </div>
         </section>
 
-        <Panel title="Candles" aside={<div className="legend-row"><span>MA (20)</span><span>MA (50)</span><span>MA (200)</span><span>Gap Zones</span><span>Trigger / Entry / Stop</span></div>}>
+        <Panel
+          title="Candles"
+          aside={
+            <div className="legend-row">
+              <span>EMA 8</span>
+              <span>EMA 21</span>
+              <span>Weekly 8 EMA</span>
+              <span>IPO VWAP</span>
+              <span>MA stack</span>
+              <span>Gap / RS / Entry</span>
+            </div>
+          }
+        >
           <PriceChart ticker={ticker} candles={smallChartData} overlays={chartPayload ?? undefined} annotations={annotations} />
           <div className="chart-annotation-strip">
             {annotations.setupLabel ? <span className="chart-pill chart-pill-setup">{annotations.setupLabel}</span> : null}
@@ -166,6 +179,12 @@ export function WatchlistsPage() {
             {annotations.entryPrice != null ? <span className="chart-pill chart-pill-entry">{annotations.entryLabel ?? "Entry"} {annotations.entryPrice.toFixed(2)}</span> : null}
             {annotations.secondaryEntryPrice != null ? <span className="chart-pill chart-pill-secondary">{annotations.secondaryEntryLabel ?? "Secondary"} {annotations.secondaryEntryPrice.toFixed(2)}</span> : null}
             {annotations.stopPrice != null ? <span className="chart-pill chart-pill-stop">{annotations.stopLabel ?? "Stop"} {annotations.stopPrice.toFixed(2)}</span> : null}
+            {chartPayload?.benchmark_ticker ? <span className="chart-pill chart-pill-rs">RS vs {chartPayload.benchmark_ticker}</span> : null}
+            {latestRsMarker ? (
+              <span className="chart-pill chart-pill-rs">
+                {latestRsMarker.kind === "daily_new_high_before_price" ? "RS new high before price" : "RS new high"}
+              </span>
+            ) : null}
           </div>
         </Panel>
 
