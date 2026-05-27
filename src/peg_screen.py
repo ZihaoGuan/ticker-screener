@@ -238,10 +238,11 @@ def run_peg_screen(
     recent_events: list[PegHit] = []
     failures: list[dict[str, str]] = []
     run_date = as_of_date or dt.date.today()
+    total_events = len(earnings_events)
 
     with freeze_cookstock_today(cookstock, as_of_date):
         for position, event in enumerate(earnings_events, start=1):
-            print(f"[{position}/{len(earnings_events)}] screening {event.ticker}")
+            print(f"[{position}/{total_events}] screening {event.ticker} | passed={len(hits)}")
             try:
                 financials = cookstock.cookFinancials(
                     event.ticker,
@@ -294,12 +295,14 @@ def run_peg_screen(
                 )
             except Exception as exc:
                 failures.append({"ticker": event.ticker, "error": str(exc)})
-                print(f"screening failed for {event.ticker}: {exc}")
+                print(f"[{position}/{total_events}] {event.ticker} error: {exc} | passed={len(hits)}")
+
+    print(f"screen complete: passed={len(hits)}, failed={len(failures)}, total={total_events}")
 
     return PegScreenResult(
         run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
-        total_tickers=len(earnings_events),
+        total_tickers=total_events,
         passed_tickers=len(hits),
         recent_event_tickers=len(recent_events),
         failed_tickers=failures,

@@ -70,9 +70,10 @@ export function RunsPage() {
             status={activeJob?.status ?? "success"}
             label={
               activeJob
-                ? `${activeJob.label} started ${activeJob.started_at || "just now"}`
+                ? `${activeJob.label} · ${activeJob.progress_label || `started ${activeJob.started_at || "just now"}`}`
                 : "No screener currently running"
             }
+            progress={activeJob?.progress_percent ?? null}
           />
         </div>
       </Panel>
@@ -101,7 +102,12 @@ export function RunsPage() {
                 <td>{job.started_at || "-"}</td>
                 <td>{job.finished_at || "-"}</td>
                 <td>
-                  <ProgressBar status={job.status} compact />
+                  <ProgressBar
+                    status={job.status}
+                    progress={job.progress_percent}
+                    label={job.progress_label ?? undefined}
+                    compact
+                  />
                 </td>
                 <td className="mono">{job.return_code ?? "-"}</td>
               </tr>

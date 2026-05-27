@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import datetime as dt
 from pathlib import Path
+import re
 import subprocess
 import sys
 import threading
@@ -20,6 +21,7 @@ class RunAction:
 
 
 class RunService:
+    _progress_pattern = re.compile(r"\[(\d{1,6})/(\d{1,6})\]")
     _actions = {
         "rs": RunAction("rs", "Run RS", "scripts/run_rs_screen.py"),
         "vcp": RunAction("vcp", "Run VCP", "scripts/run_vcp_screen.py"),
@@ -91,6 +93,10 @@ class RunService:
             "finished_at": "",
             "return_code": None,
             "log_tail": "Starting...\n",
+            "progress_current": None,
+            "progress_total": None,
+            "progress_percent": None,
+            "progress_label": "Starting…",
         }
 
         with self._jobs_lock:
@@ -120,6 +126,7 @@ class RunService:
             with self._jobs_lock:
                 job = self._jobs_by_id[job_id]
                 job["log_tail"] = "\n".join(log_lines)
+                self._update_progress(job, log_lines)
 
         return_code = process.wait()
         finished_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
@@ -129,3 +136,30 @@ class RunService:
             job["return_code"] = return_code
             job["finished_at"] = finished_at
             job["log_tail"] = "\n".join(log_lines) if log_lines else job["log_tail"]
+            if return_code == 0:
+                job["progress_percent"] = 100
+                job["progress_label"] = "Completed"
+            elif job.get("progress_percent") is None:
+                job["progress_label"] = "Failed"
+
+    def _update_progress(self, job: dict[str, Any], log_lines: list[str]) -> None:
+        current = None
+        total = None
+        last_line = ""
+        for line in reversed(log_lines):
+            match = self._progress_pattern.search(line)
+            if match:
+                current = int(match.group(1))
+                total = int(match.group(2))
+                last_line = line
+                break
+
+        if current is None or total is None or total <= 0:
+            return
+
+        percent = max(0, min(100, round((current / total) * 100)))
+        job["progress_current"] = current
+        job["progress_total"] = total
+        job["progress_percent"] = percent
+        detail = "screening" if "screening" in last_line.lower() else "processing"
+        job["progress_label"] = f"{current}/{total} {detail}"

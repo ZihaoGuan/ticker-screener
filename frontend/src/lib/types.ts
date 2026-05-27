@@ -78,6 +78,10 @@ export type JobsResponse = {
     return_code: number | null;
     command: string;
     log_tail: string;
+    progress_current: number | null;
+    progress_total: number | null;
+    progress_percent: number | null;
+    progress_label: string | null;
   }[];
 };
 

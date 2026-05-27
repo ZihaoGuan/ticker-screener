@@ -119,10 +119,11 @@ def run_rs_screen(
     hits: list[ScreenHit] = []
     failures: list[dict[str, str]] = []
     run_date = as_of_date or dt.date.today()
+    total_tickers = len(tickers)
 
     with freeze_cookstock_today(cookstock, as_of_date):
         for position, ticker in enumerate(tickers, start=1):
-            print(f"[{position}/{len(tickers)}] screening {ticker.symbol}")
+            print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
             try:
                 financials = cookstock.cookFinancials(
                     ticker.symbol,
@@ -138,12 +139,14 @@ def run_rs_screen(
                     hits.append(_to_hit(ticker, summary))
             except Exception as exc:
                 failures.append({"ticker": ticker.symbol, "error": str(exc)})
-                print(f"screening failed for {ticker.symbol}: {exc}")
+                print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+
+    print(f"screen complete: passed={len(hits)}, failed={len(failures)}, total={total_tickers}")
 
     return ScreenResult(
         run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
-        total_tickers=len(tickers),
+        total_tickers=total_tickers,
         passed_tickers=len(hits),
         failed_tickers=failures,
         hits=hits,

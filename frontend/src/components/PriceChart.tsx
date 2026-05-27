@@ -1,6 +1,7 @@
 import { ColorType, createChart } from "lightweight-charts";
 import { useEffect, useMemo, useRef } from "react";
 import { createGapZonePrimitive } from "./GapZonePrimitive";
+import { createHighTightFlagPrimitive } from "./HighTightFlagPrimitive";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
 
 export type ChartVisibility = {
@@ -10,6 +11,7 @@ export type ChartVisibility = {
   ipoVwap: boolean;
   maStack: boolean;
   gapZones: boolean;
+  htfBox: boolean;
   rsLine: boolean;
   rsSignals: boolean;
 };
@@ -44,6 +46,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     ipoVwap: true,
     maStack: true,
     gapZones: true,
+    htfBox: true,
     rsLine: true,
     rsSignals: true,
   };
@@ -62,6 +65,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     () => detectGapZones(candles).filter((zone) => zone.remainingUpperPrice > zone.remainingLowerPrice + 1e-6).slice(-4),
     [candles],
   );
+  const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations), [candles, annotations]);
 
   useEffect(() => {
     if (!priceRootRef.current || !rsRootRef.current) {
@@ -187,6 +191,11 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
       (candleSeries as any).attachPrimitive?.(gapPrimitive);
     }
 
+    if (options.htfBox && highTightFlagBox) {
+      const htfPrimitive = createHighTightFlagPrimitive(highTightFlagBox);
+      (candleSeries as any).attachPrimitive?.(htfPrimitive);
+    }
+
     const priceMarkers = [];
     if (annotations?.eventDate) {
       priceMarkers.push({
@@ -283,9 +292,11 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     options.ipoVwap,
     options.maStack,
     options.gapZones,
+    options.htfBox,
     options.rsLine,
     options.rsSignals,
     visibleGapZones,
+    highTightFlagBox,
     weeklyEma8,
   ]);
 
@@ -296,6 +307,51 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
       <div ref={rsRootRef} className="chart-card chart-card-rs" />
     </div>
   );
+}
+
+function detectHighTightFlagBox(candles: CandlePoint[], annotations?: ChartAnnotations) {
+  if (candles.length < 5) {
+    return null;
+  }
+
+  const setupLabel = String(annotations?.setupLabel ?? "").toLowerCase();
+  const looksLikeHighTightFlag =
+    setupLabel.includes("htf") ||
+    setupLabel.includes("high tight flag") ||
+    setupLabel.includes("tight flag");
+  if (!looksLikeHighTightFlag) {
+    return null;
+  }
+
+  const anchorIndex =
+    annotations?.eventDate != null
+      ? candles.findIndex((candle) => candle.time >= annotations.eventDate!)
+      : Math.max(0, candles.length - 15);
+  const startIndex = anchorIndex >= 0 ? anchorIndex : Math.max(0, candles.length - 15);
+  const window = candles.slice(startIndex);
+  if (window.length < 3) {
+    return null;
+  }
+
+  const upperFromWindow = Math.max(...window.map((candle) => candle.high));
+  const lowerFromWindow = Math.min(...window.map((candle) => candle.low));
+  const upperPrice = Math.max(upperFromWindow, annotations?.triggerPrice ?? Number.NEGATIVE_INFINITY);
+  const lowerPrice = lowerFromWindow;
+  if (!Number.isFinite(upperPrice) || !Number.isFinite(lowerPrice) || upperPrice <= lowerPrice) {
+    return null;
+  }
+
+  const pullbackPct = ((upperPrice - lowerPrice) / upperPrice) * 100;
+  if (pullbackPct > 35) {
+    return null;
+  }
+
+  return {
+    startTime: window[0].time,
+    endTime: window[window.length - 1].time,
+    lowerPrice: Number(lowerPrice.toFixed(4)),
+    upperPrice: Number(upperPrice.toFixed(4)),
+  };
 }
 
 function buildMovingAverage(candles: CandlePoint[], window: number) {
