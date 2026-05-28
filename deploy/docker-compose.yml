@@ -18,6 +18,20 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ../data/redis:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   web:
     image: python:3.12-slim
     restart: unless-stopped
@@ -30,6 +44,8 @@ services:
       TICKER_SCREENER_DATABASE_URL: ${TICKER_SCREENER_DATABASE_URL}
       TICKER_SCREENER_ARTIFACTS_DIR: /artifacts
       TICKER_SCREENER_OUTPUT_DIR: /artifacts/output
+      REDIS_URL: redis://redis:6379/0
+      REDIS_RESULT_BACKEND: redis://redis:6379/1
     entrypoint: ["sh", "/app/deploy/web-entrypoint.sh"]
     command: ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
@@ -38,6 +54,43 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      TICKER_SCREENER_DATABASE_URL: ${TICKER_SCREENER_DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_RESULT_BACKEND: redis://redis:6379/1
+    command: celery -A web.tasks.celery_app worker -l info -c 1 --queues screeners,default
+    volumes:
+      - ..:/app
+      - ../artifacts:/artifacts
+    depends_on:
+      - redis
+      - db
+
+  celery-beat:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      TICKER_SCREENER_DATABASE_URL: ${TICKER_SCREENER_DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_RESULT_BACKEND: redis://redis:6379/1
+    command: celery -A web.tasks.celery_app beat -l info
+    volumes:
+      - ..:/app
+    depends_on:
+      - redis
+      - db
 
   caddy:
     image: caddy:2

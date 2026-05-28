@@ -121,3 +121,65 @@ CREATE TABLE IF NOT EXISTS report_artifacts (
 
 CREATE INDEX IF NOT EXISTS idx_report_artifacts_strategy_date
   ON report_artifacts(strategy_id, run_date DESC);
+
+-- ============================================================================
+-- Task Queue Tables for Screener Runs
+-- ============================================================================
+
+-- Tracks screener execution runs (web app initiated)
+CREATE TABLE IF NOT EXISTS runs (
+  id BIGSERIAL PRIMARY KEY,
+  user_id INT,
+  screener_type VARCHAR(50) NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  task_id VARCHAR(255) UNIQUE,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  error_message TEXT,
+  result_count INT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_runs_user_id
+  ON runs(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_runs_status
+  ON runs(status);
+
+CREATE INDEX IF NOT EXISTS idx_runs_created_at
+  ON runs(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_runs_task_id
+  ON runs(task_id);
+
+-- Task logs for real-time streaming and audit trail
+CREATE TABLE IF NOT EXISTS task_logs (
+  id BIGSERIAL PRIMARY KEY,
+  run_id BIGINT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  message TEXT NOT NULL,
+  level VARCHAR(20) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_logs_run_id
+  ON task_logs(run_id);
+
+CREATE INDEX IF NOT EXISTS idx_task_logs_created_at
+  ON task_logs(created_at DESC);
+
+-- Distributed lock for concurrency control
+CREATE TABLE IF NOT EXISTS task_locks (
+  id BIGSERIAL PRIMARY KEY,
+  screener_type VARCHAR(50) NOT NULL,
+  user_id INT,
+  acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (screener_type, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_locks_expires_at
+  ON task_locks(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_task_locks_screener_type
+  ON task_locks(screener_type);
