@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import datetime as dt
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -76,6 +77,13 @@ class RunService:
         "date",
         help_text="Optional date anchor for the earnings watchlist source.",
     )
+    _market_data_source_field = RunField(
+        "market_data_source",
+        "Market Data Source",
+        "select",
+        help_text="Choose whether screeners pull directly from the internet or prefer Postgres daily_bars and fall back to the internet if needed.",
+        options=(("internet", "Internet"), ("database-first", "Database First, Fallback to Internet")),
+    )
     _filter_precedence_field = RunField(
         "filter_precedence",
         "Filter Precedence",
@@ -99,6 +107,7 @@ class RunService:
                 _tickers_field,
                 _date_label_field,
                 _as_of_date_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -117,6 +126,7 @@ class RunService:
                 _tickers_field,
                 _date_label_field,
                 _as_of_date_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -135,6 +145,7 @@ class RunService:
                 _tickers_field,
                 _date_label_field,
                 _as_of_date_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -153,6 +164,7 @@ class RunService:
                 _tickers_field,
                 _date_label_field,
                 _as_of_date_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -171,6 +183,7 @@ class RunService:
                 _tickers_field,
                 _date_label_field,
                 _as_of_date_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -189,6 +202,7 @@ class RunService:
                 _tickers_field,
                 _date_label_field,
                 _as_of_date_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -206,6 +220,7 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _date_label_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -223,6 +238,7 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _date_label_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -240,6 +256,7 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _date_label_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -261,6 +278,7 @@ class RunService:
                 _as_of_date_field,
                 _source_field,
                 _reference_date_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -282,6 +300,7 @@ class RunService:
                 _as_of_date_field,
                 _source_field,
                 _reference_date_field,
+                _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
                 _exclude_sectors_field,
@@ -379,7 +398,10 @@ class RunService:
             self._jobs_by_id[job_id] = job
             del self._jobs[50:]
 
-        thread = threading.Thread(target=self._run_job, args=(job_id, command), daemon=True)
+        env = os.environ.copy()
+        if normalized.get("market_data_source"):
+            env["TICKER_SCREENER_MARKET_DATA_SOURCE"] = str(normalized["market_data_source"])
+        thread = threading.Thread(target=self._run_job, args=(job_id, command, env), daemon=True)
         thread.start()
         return job_id
 
@@ -402,7 +424,7 @@ class RunService:
             if tickers:
                 normalized["tickers"] = tickers
 
-        for key in ("date_label", "as_of_date", "reference_date", "source", "filter_precedence"):
+        for key in ("date_label", "as_of_date", "reference_date", "source", "filter_precedence", "market_data_source"):
             value = options.get(key)
             if isinstance(value, str) and value.strip():
                 normalized[key] = value.strip()
@@ -449,10 +471,11 @@ class RunService:
             return [{"value": value, "label": value} for value in filter_catalog.get("themes", [])]
         return [{"value": value, "label": label} for value, label in field.options]
 
-    def _run_job(self, job_id: str, command: list[str]) -> None:
+    def _run_job(self, job_id: str, command: list[str], env: dict[str, str]) -> None:
         process = subprocess.Popen(
             command,
             cwd=str(self.project_root),
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

@@ -283,6 +283,32 @@ def _clean_nullable_int(value: object) -> int | None:
     return int(value)
 
 
+def _is_numeric_overflow_error(exc: Exception) -> bool:
+    return "numeric field overflow" in str(exc).lower()
+
+
+def _format_bar_row_for_log(row: tuple[object, ...]) -> str:
+    (
+        ticker,
+        trade_date,
+        open_value,
+        high_value,
+        low_value,
+        close_value,
+        adj_close_value,
+        volume,
+        dividend,
+        split_factor,
+        _source,
+        _updated_at,
+    ) = row
+    return (
+        f"ticker={ticker} trade_date={trade_date} "
+        f"open={open_value} high={high_value} low={low_value} close={close_value} "
+        f"adj_close={adj_close_value} volume={volume} dividend={dividend} split_factor={split_factor}"
+    )
+
+
 def _normalize_history_frame(history: "pd.DataFrame" | None) -> "pd.DataFrame":
     import pandas as pd
 
@@ -659,9 +685,9 @@ def _build_daily_bar_rows(
     return rows
 
 
-def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, ...]], batch_size: int) -> int:
+def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, ...]], batch_size: int) -> tuple[int, int]:
     if not rows:
-        return 0
+        return 0, 0
     sql = """
         INSERT INTO daily_bars (
           ticker, trade_date, open, high, low, close, adj_close, volume,
@@ -681,13 +707,41 @@ def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, .
           updated_at = EXCLUDED.updated_at
     """
     applied = 0
-    with connection.cursor() as cursor:
-        for index in range(0, len(rows), batch_size):
-            batch = rows[index : index + batch_size]
-            cursor.executemany(sql, batch)
+    skipped_overflow = 0
+    for index in range(0, len(rows), batch_size):
+        batch = rows[index : index + batch_size]
+        try:
+            with connection.cursor() as cursor:
+                cursor.executemany(sql, batch)
+            connection.commit()
             applied += len(batch)
-    connection.commit()
-    return applied
+            continue
+        except Exception as exc:
+            connection.rollback()
+            if not _is_numeric_overflow_error(exc):
+                raise
+            print(
+                f"warning: batch overflow detected; retrying row-by-row for batch starting at index={index}: {exc}",
+                flush=True,
+            )
+
+        for row in batch:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, row)
+                connection.commit()
+                applied += 1
+            except Exception as row_exc:
+                connection.rollback()
+                if _is_numeric_overflow_error(row_exc):
+                    skipped_overflow += 1
+                    print(
+                        f"overflow_row_skipped {_format_bar_row_for_log(row)} reason={row_exc}",
+                        flush=True,
+                    )
+                    continue
+                raise
+    return applied, skipped_overflow
 
 
 def _write_manifest(
@@ -702,6 +756,7 @@ def _write_manifest(
     source_label: str,
     database_url: str,
     updated_active_count: int,
+    skipped_overflow_rows: int,
     outcomes: list[TickerSyncOutcome],
 ) -> None:
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -738,6 +793,7 @@ def _write_manifest(
         "source_label": source_label,
         "database_url_configured": bool(database_url),
         "updated_active_flags": updated_active_count,
+        "skipped_overflow_rows": skipped_overflow_rows,
         "failure_count": len(failures),
         "partial_count": len(partials),
         "failures": failures,
@@ -774,6 +830,7 @@ def main() -> int:
     total_bar_rows = 0
     downloaded_ticker_count = 0
     updated_active_count = 0
+    skipped_overflow_rows = 0
     updated_at = _utc_now()
     outcomes: list[TickerSyncOutcome] = []
 
@@ -829,8 +886,9 @@ def main() -> int:
             downloaded_ticker_count += len(normalized_histories)
 
             bar_rows = _build_daily_bar_rows(normalized_histories, args.source_label, updated_at)
-            applied = _upsert_daily_bars(connection, bar_rows, args.batch_size)
+            applied, skipped_overflow = _upsert_daily_bars(connection, bar_rows, args.batch_size)
             total_bar_rows += applied
+            skipped_overflow_rows += skipped_overflow
             failed = [outcome for outcome in chunk_outcomes if outcome.status.startswith("failed") or outcome.status.startswith("skipped")]
             partial = [outcome for outcome in chunk_outcomes if outcome.status in {"synced_partial_window", "synced_inactive"}]
             print(
@@ -838,6 +896,7 @@ def main() -> int:
                     [
                         f"chunk_tickers_with_history={len(normalized_histories)}",
                         f"chunk_daily_bar_rows={applied}",
+                        f"chunk_overflow_skipped={skipped_overflow}",
                         f"chunk_failures={len(failed)}",
                         f"chunk_partials={len(partial)}",
                         f"total_daily_bar_rows={total_bar_rows}",
@@ -864,12 +923,14 @@ def main() -> int:
         source_label=args.source_label,
         database_url=database_url,
         updated_active_count=updated_active_count,
+        skipped_overflow_rows=skipped_overflow_rows,
         outcomes=outcomes,
     )
     total_failures = len([outcome for outcome in outcomes if outcome.status.startswith("failed") or outcome.status.startswith("skipped")])
     total_partials = len([outcome for outcome in outcomes if outcome.status in {"synced_partial_window", "synced_inactive"}])
     print(f"summary_failures={total_failures}", flush=True)
     print(f"summary_partials={total_partials}", flush=True)
+    print(f"summary_overflow_skipped={skipped_overflow_rows}", flush=True)
     print(f"manifest_path={manifest_path}", flush=True)
     print("postgres_sync=done", flush=True)
     return 0

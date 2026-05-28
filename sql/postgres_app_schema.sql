@@ -12,18 +12,26 @@ CREATE TABLE IF NOT EXISTS ticker_metadata (
 CREATE TABLE IF NOT EXISTS daily_bars (
   ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
   trade_date DATE NOT NULL,
-  open NUMERIC(18,6),
-  high NUMERIC(18,6),
-  low NUMERIC(18,6),
-  close NUMERIC(18,6),
-  adj_close NUMERIC(18,6),
+  open NUMERIC(24,6),
+  high NUMERIC(24,6),
+  low NUMERIC(24,6),
+  close NUMERIC(24,6),
+  adj_close NUMERIC(24,6),
   volume BIGINT,
-  dividend NUMERIC(18,6) NOT NULL DEFAULT 0,
-  split_factor NUMERIC(18,6) NOT NULL DEFAULT 1,
+  dividend NUMERIC(24,6) NOT NULL DEFAULT 0,
+  split_factor NUMERIC(24,6) NOT NULL DEFAULT 1,
   source TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (ticker, trade_date)
 );
+
+ALTER TABLE daily_bars ALTER COLUMN open TYPE NUMERIC(24,6);
+ALTER TABLE daily_bars ALTER COLUMN high TYPE NUMERIC(24,6);
+ALTER TABLE daily_bars ALTER COLUMN low TYPE NUMERIC(24,6);
+ALTER TABLE daily_bars ALTER COLUMN close TYPE NUMERIC(24,6);
+ALTER TABLE daily_bars ALTER COLUMN adj_close TYPE NUMERIC(24,6);
+ALTER TABLE daily_bars ALTER COLUMN dividend TYPE NUMERIC(24,6);
+ALTER TABLE daily_bars ALTER COLUMN split_factor TYPE NUMERIC(24,6);
 
 CREATE INDEX IF NOT EXISTS idx_daily_bars_trade_date
   ON daily_bars(trade_date);

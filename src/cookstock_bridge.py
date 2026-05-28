@@ -8,6 +8,13 @@ from pathlib import Path
 from types import ModuleType
 
 from .config import AppConfig, project_root
+from .market_data_access import (
+    build_cookstock_payload_from_frame,
+    build_cookstock_price_list_from_frame,
+    db_frame_has_recent_coverage,
+    load_daily_bars_frame_from_db,
+    resolve_market_data_source,
+)
 
 
 def vendor_cookstock_root() -> Path:
@@ -74,9 +81,83 @@ def apply_config_to_cookstock(module: ModuleType, config: AppConfig) -> None:
     algo.PRE_EARNINGS_RETRY_TIMEOUT_SECONDS = int(config.pre_earnings_retry_timeout_seconds)
 
 
-def load_configured_cookstock(config: AppConfig) -> ModuleType:
+def _apply_market_data_source_patches(module: ModuleType, market_data_source: str | None) -> None:
+    strategy = resolve_market_data_source(market_data_source)
+    setattr(module.algoParas, "MARKET_DATA_SOURCE", strategy)
+
+    cook_financials_cls = module.cookFinancials
+    if not hasattr(cook_financials_cls, "_ticker_screener_original_get_historical_price_data"):
+        cook_financials_cls._ticker_screener_original_get_historical_price_data = cook_financials_cls.get_historical_price_data
+    if not hasattr(cook_financials_cls, "_ticker_screener_original_get_benchmark_price_data"):
+        cook_financials_cls._ticker_screener_original_get_benchmark_price_data = cook_financials_cls._get_benchmark_price_data
+
+    original_get_historical_price_data = cook_financials_cls._ticker_screener_original_get_historical_price_data
+    original_get_benchmark_price_data = cook_financials_cls._ticker_screener_original_get_benchmark_price_data
+
+    def patched_get_historical_price_data(self, start_date, end_date, time_interval):
+        active_strategy = resolve_market_data_source(getattr(module.algoParas, "MARKET_DATA_SOURCE", strategy))
+        if active_strategy == "database-first" and time_interval == "daily":
+            start_dt = real_dt.date.fromisoformat(str(start_date))
+            end_dt = real_dt.date.fromisoformat(str(end_date))
+            frame = load_daily_bars_frame_from_db(str(self.ticker), start_dt, end_dt)
+            if frame is not None and db_frame_has_recent_coverage(frame, end_dt):
+                payload = build_cookstock_payload_from_frame(str(self.ticker), frame)
+                if payload is not None:
+                    print(f"market-data source=db ticker={self.ticker} bars={len(frame)}")
+                    return payload
+        return original_get_historical_price_data(self, start_date, end_date, time_interval)
+
+    def patched_get_benchmark_price_data(self, benchmarkTicker=None):
+        active_strategy = resolve_market_data_source(getattr(module.algoParas, "MARKET_DATA_SOURCE", strategy))
+        if active_strategy == "database-first":
+            ticker = self._resolve_benchmark_ticker(benchmarkTicker)
+            cache_key = (ticker, int(getattr(self, "history_lookback_days", 365)))
+            if cache_key in self.benchmark_price_cache:
+                return self.benchmark_price_cache[cache_key]
+            today = module.dt.date.today()
+            start_dt = today - real_dt.timedelta(days=int(getattr(self, "history_lookback_days", 365)))
+            frame = load_daily_bars_frame_from_db(ticker, start_dt, today)
+            if frame is not None and db_frame_has_recent_coverage(frame, today):
+                prices = build_cookstock_price_list_from_frame(frame)
+                self.benchmark_price_cache[cache_key] = prices
+                print(f"market-data source=db benchmark={ticker} bars={len(prices)}")
+                return prices
+        return original_get_benchmark_price_data(self, benchmarkTicker)
+
+    cook_financials_cls.get_historical_price_data = patched_get_historical_price_data
+    cook_financials_cls._get_benchmark_price_data = patched_get_benchmark_price_data
+
+    batch_process_cls = getattr(module, "batch_process", None)
+    if batch_process_cls is not None:
+        if not hasattr(batch_process_cls, "_ticker_screener_original_warm_shared_benchmark_cache"):
+            batch_process_cls._ticker_screener_original_warm_shared_benchmark_cache = batch_process_cls._warm_shared_benchmark_cache
+        original_warm_shared_benchmark_cache = batch_process_cls._ticker_screener_original_warm_shared_benchmark_cache
+
+        def patched_warm_shared_benchmark_cache(self, history_days):
+            active_strategy = resolve_market_data_source(getattr(module.algoParas, "MARKET_DATA_SOURCE", strategy))
+            if active_strategy == "database-first":
+                cache_key = (self.benchmark_ticker.upper(), int(history_days))
+                if cache_key in module.cookFinancials.benchmark_price_cache:
+                    self.shared_benchmark_cache_warmed = True
+                    return
+                today = module.dt.date.today()
+                start_dt = today - real_dt.timedelta(days=int(history_days))
+                frame = load_daily_bars_frame_from_db(self.benchmark_ticker.upper(), start_dt, today)
+                if frame is not None and db_frame_has_recent_coverage(frame, today):
+                    prices = build_cookstock_price_list_from_frame(frame)
+                    module.cookFinancials.benchmark_price_cache[cache_key] = prices
+                    self.shared_benchmark_cache_warmed = True
+                    print(f"market-data source=db benchmark-cache={self.benchmark_ticker.upper()} bars={len(prices)}")
+                    return
+            return original_warm_shared_benchmark_cache(self, history_days)
+
+        batch_process_cls._warm_shared_benchmark_cache = patched_warm_shared_benchmark_cache
+
+
+def load_configured_cookstock(config: AppConfig, *, market_data_source: str | None = None) -> ModuleType:
     module = load_cookstock_module()
     apply_config_to_cookstock(module, config)
+    _apply_market_data_source_patches(module, market_data_source)
     return module
 
 

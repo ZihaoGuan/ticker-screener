@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .config import AppConfig
+from .market_data_access import db_frame_has_recent_coverage, load_daily_bars_frame_from_db, resolve_market_data_source
 from .universe import UniverseTicker
 
 
@@ -97,9 +98,19 @@ def _period_to_start_date(period: str, as_of_date: dt.date) -> dt.date:
 
 
 def _fetch_history(ticker: str, period: str, *, as_of_date: dt.date | None = None) -> pd.DataFrame:
+    market_data_source = resolve_market_data_source()
+    start_date = _period_to_start_date(period, as_of_date or dt.date.today())
+    end_date = as_of_date or dt.date.today()
+    if market_data_source == "database-first":
+        db_frame = load_daily_bars_frame_from_db(ticker, start_date, end_date)
+        if db_frame is not None and db_frame_has_recent_coverage(db_frame, end_date):
+            clean = db_frame.loc[:, ["Open", "High", "Low", "Close", "Volume"]].copy()
+            clean = clean.dropna(subset=["High", "Low", "Close", "Volume"])
+            if not clean.empty:
+                return clean
+
     yf = _load_yfinance()
     if as_of_date is not None:
-        start_date = _period_to_start_date(period, as_of_date)
         history = yf.download(
             tickers=ticker,
             start=start_date.isoformat(),

@@ -13,6 +13,7 @@ class WebAppConfig:
     app_env: str = os.getenv("TICKER_SCREENER_APP_ENV", "dev")
     app_title: str = os.getenv("TICKER_SCREENER_APP_TITLE", "Ticker Screener")
     database_url: str = os.getenv("TICKER_SCREENER_DATABASE_URL", "")
+    market_data_source: str = os.getenv("TICKER_SCREENER_MARKET_DATA_SOURCE", "internet")
     artifacts_dir: Path = Path(os.getenv("TICKER_SCREENER_ARTIFACTS_DIR", str(PROJECT_ROOT / "artifacts")))
     output_dir: Path = Path(os.getenv("TICKER_SCREENER_OUTPUT_DIR", str(PROJECT_ROOT / "artifacts" / "output")))
     reports_fqdn: str = os.getenv("REPORTS_FQDN", "")

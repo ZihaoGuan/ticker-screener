@@ -15,6 +15,7 @@ export function RunsPage() {
     as_of_date: "",
     source: "universe",
     reference_date: "",
+    market_data_source: "internet",
     filter_precedence: "exclude",
     include_sectors: [],
     exclude_sectors: [],
