@@ -771,12 +771,16 @@ a {
 .files-pane {
   padding: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
 }
 
 .files-pane .panel-head,
 .inline-head {
   margin: 0;
   padding: 18px 18px 12px;
+  flex-shrink: 0;
 }
 
 .ticker-row {
@@ -847,6 +851,7 @@ a {
 .watchlists-main {
   display: grid;
   gap: 20px;
+  align-content: start;
 }
 
 .hero-strip {
@@ -999,120 +1004,77 @@ a {
 }
 
 .chart-pill-event {
-  color: #fde68a;
-  border-color: rgba(251, 191, 36, 0.45);
+  color: #fbbf24;
 }
 
 .chart-pill-trigger {
-  color: #fde047;
-  border-color: rgba(250, 204, 21, 0.42);
+  color: #fbbf24;
 }
 
 .chart-pill-entry {
-  color: #86efac;
-  border-color: rgba(74, 222, 128, 0.42);
+  color: #34d399;
 }
 
 .chart-pill-secondary {
-  color: #cbd5e1;
-  border-color: rgba(148, 163, 184, 0.42);
+  color: #34d399;
 }
 
 .chart-pill-stop {
-  color: #fda4af;
-  border-color: rgba(251, 113, 133, 0.42);
+  color: #fb7185;
 }
 
 .chart-pill-rs {
-  color: #93c5fd;
-  border-color: rgba(96, 165, 250, 0.4);
+  color: #60a5fa;
 }
 
 .tab-strip {
-  border-bottom: 1px solid #27272a;
   display: flex;
-  gap: 12px;
+  gap: 0;
+  border-bottom: 1px solid #27272a;
 }
 
 .tab-button {
+  appearance: none;
   background: transparent;
-  border: 0;
+  border: none;
   border-bottom: 2px solid transparent;
-  color: #a1a1aa;
+  color: #d4d4d8;
   cursor: pointer;
-  font-weight: 600;
-  padding: 14px 8px;
+  display: inline-block;
+  padding: 14px 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.tab-button:hover {
+  color: #f4f4f5;
 }
 
 .tab-button.is-active {
-  border-color: #34d399;
-  color: #f4f4f5;
+  border-bottom-color: #34d399;
+  color: #34d399;
 }
 
 .summary-grid {
   display: grid;
-  gap: 16px;
-  grid-template-columns: 1.2fr 0.8fr 0.8fr;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
 .summary-stat {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 10px;
 }
 
-.big-number {
-  font-size: 44px;
-  font-weight: 700;
+.file-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
-.pill-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.symbol-pill {
-  background: #202024;
-  border: 1px solid #3f3f46;
-  border-radius: 999px;
-  padding: 8px 12px;
-}
-
-.inline-code {
-  background: #09090b;
-  border: 1px solid #27272a;
-  border-radius: 4px;
-  display: inline-block;
-  margin-top: 12px;
-  padding: 10px 12px;
-}
-
-@media (max-width: 1280px) {
-  .app-shell {
-    grid-template-columns: 92px 1fr;
-  }
-
-  .brand-subtitle,
-  .nav-item span:not(.nav-icon),
-  .footer-link {
-    display: none;
-  }
-
-  .card-grid,
-  .summary-grid,
-  .split-grid,
-  .watchlists-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .hero-strip,
-  .run-toolbar,
-  .topbar {
-    grid-template-columns: 1fr;
-    display: grid;
-  }
-
-  .hero-stats {
-    flex-wrap: wrap;
-  }
+.ticker-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
