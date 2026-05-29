@@ -55,7 +55,7 @@ export function ScreenerConfigModal({
           <p className="modal-description">Define parameters for {action.label.toLowerCase()} detection.</p>
 
           <div className="modal-fields">
-            {action.fields.map((field) => (
+            {action.fields.map((field: typeof action.fields[0]) => (
               <label className="modal-field" key={field.id}>
                 <div className="field-header">
                   <span className="field-label">{field.label}</span>
@@ -69,7 +69,7 @@ export function ScreenerConfigModal({
                     className="modal-select"
                   >
                     <option value="">-- Select {field.label.toLowerCase()} --</option>
-                    {field.options.map((option) => (
+                    {field.options.map((option: { value: string; label: string }) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
@@ -87,7 +87,7 @@ export function ScreenerConfigModal({
                     }
                     className="modal-select modal-multiselect"
                   >
-                    {field.options.map((option) => (
+                    {field.options.map((option: { value: string; label: string }) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
