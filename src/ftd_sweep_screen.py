@@ -293,10 +293,27 @@ def _find_recent_sweep_breakout(
         post_end = min(latest_index, event.index + post_ftd_days)
         index = event.index + 1
         while index <= post_end:
-            if close_values[index] < threshold:
+            bar_swept = low_values[index] < threshold
+            closed_below = close_values[index] < threshold
+            same_bar_reclaim = bar_swept and close_values[index] > threshold
+            if bar_swept or closed_below:
                 sweep_start = index
                 sweep_window_end = min(post_end, sweep_start + sweep_range_days)
                 sweep_low = float(low_values[sweep_start])
+                if same_bar_reclaim:
+                    bars_since_breakout = latest_index - sweep_start
+                    held_breakout = bool(np.all(close_values[sweep_start:] >= threshold))
+                    if bars_since_breakout <= recent_lookback_days and held_breakout:
+                        candidates.append(
+                            _SweepCandidate(
+                                ftd_event=event,
+                                sweep_start_index=sweep_start,
+                                breakout_index=sweep_start,
+                                sweep_low=sweep_low,
+                            )
+                        )
+                    index = sweep_start + 1
+                    continue
                 for breakout_index in range(sweep_start + 1, sweep_window_end + 1):
                     sweep_low = min(sweep_low, float(low_values[breakout_index]))
                     if close_values[breakout_index - 1] <= threshold and close_values[breakout_index] > threshold:

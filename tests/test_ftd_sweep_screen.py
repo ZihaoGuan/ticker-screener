@@ -104,3 +104,30 @@ class FtdSweepScreenTests(unittest.TestCase):
         )
 
         self.assertIsNone(hit)
+
+    def test_detects_same_bar_wick_sweep_and_close_reclaim(self) -> None:
+        frame = _ftd_sweep_frame().iloc[:43].copy()
+        frame.iloc[39, frame.columns.get_loc("Open")] = 92.0
+        frame.iloc[39, frame.columns.get_loc("High")] = 93.3
+        frame.iloc[39, frame.columns.get_loc("Low")] = 90.2
+        frame.iloc[39, frame.columns.get_loc("Close")] = 92.8
+        frame.iloc[40, frame.columns.get_loc("Open")] = 92.7
+        frame.iloc[40, frame.columns.get_loc("High")] = 93.6
+        frame.iloc[40, frame.columns.get_loc("Low")] = 92.4
+        frame.iloc[40, frame.columns.get_loc("Close")] = 93.2
+        config = AppConfig(
+            ftd_sweep_history_days=90,
+            ftd_sweep_min_avg_volume=0,
+            ftd_sweep_min_avg_dollar_volume=0.0,
+        )
+
+        hit = find_recent_ftd_sweep_hit(
+            frame,
+            ticker=UniverseTicker(symbol="AAPL"),
+            benchmark_ticker="SPY",
+            config=config,
+        )
+
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertEqual(hit.sweep_breakout_date, frame.index[39].date().isoformat())
