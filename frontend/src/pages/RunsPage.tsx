@@ -10,8 +10,10 @@ import "./RunsPage.css";
 export function RunsPage() {
   const [payload, setPayload] = useState<JobsResponse | null>(null);
   const [selectedActionId, setSelectedActionId] = useState("");
+  const [selectedJobId, setSelectedJobId] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isCancellingJobId, setIsCancellingJobId] = useState("");
 
   const refresh = () => {
     void fetchJson<JobsResponse>("/api/jobs").then(setPayload).catch(() => setPayload({ actions: [], jobs: [] }));
@@ -30,12 +32,29 @@ export function RunsPage() {
     setSelectedActionId((current) => current || payload.actions[0].id);
   }, [payload]);
 
-  const latestLog = useMemo(() => payload?.jobs[0]?.log_tail ?? "No job log yet.", [payload]);
+  useEffect(() => {
+    if (!payload?.jobs?.length) {
+      setSelectedJobId("");
+      return;
+    }
+    setSelectedJobId((current) => {
+      if (current && payload.jobs.some((job) => job.job_id === current)) {
+        return current;
+      }
+      return payload.jobs[0].job_id;
+    });
+  }, [payload]);
+
   const activeJob = useMemo(() => payload?.jobs.find((job) => job.status === "running") ?? null, [payload]);
+  const selectedJob = useMemo(
+    () => payload?.jobs.find((job) => job.job_id === selectedJobId) ?? payload?.jobs[0] ?? null,
+    [payload, selectedJobId],
+  );
   const selectedAction = useMemo(
     () => payload?.actions.find((action) => action.id === selectedActionId) ?? payload?.actions[0] ?? null,
     [payload, selectedActionId],
   );
+  const selectedJobLog = useMemo(() => selectedJob?.log_tail ?? "No job log yet.", [selectedJob]);
 
   const handleRunAction = async (params: Record<string, string | string[]>) => {
     setIsRunning(true);
@@ -64,6 +83,34 @@ export function RunsPage() {
   const handleConfigureClick = (actionId: string) => {
     setSelectedActionId(actionId);
     setIsModalOpen(true);
+  };
+
+  const handleCancelJob = async (jobId: string) => {
+    setIsCancellingJobId(jobId);
+    try {
+      await fetchJson<{ ok: boolean; job: JobsResponse["jobs"][number] }>(`/api/jobs/${jobId}/cancel`, {
+        method: "POST",
+      });
+      refresh();
+    } finally {
+      setIsCancellingJobId("");
+    }
+  };
+
+  const formatDuration = (seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return "-";
+    }
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainingSeconds = seconds % 60;
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${remainingSeconds}s`;
+    }
+    if (minutes > 0) {
+      return `${minutes}m ${remainingSeconds}s`;
+    }
+    return `${remainingSeconds}s`;
   };
 
   return (
@@ -106,14 +153,26 @@ export function RunsPage() {
         >
           <div className="run-progress-panel">
             <ProgressBar
-              status={activeJob?.status ?? "success"}
+              status={activeJob?.status ?? "cancelled"}
               label={
                 activeJob
-                  ? `${activeJob.label} · ${activeJob.progress_label || `started ${activeJob.started_at || "just now"}`}`
+                  ? `${activeJob.label} · ${activeJob.progress_label || `started ${activeJob.started_at || "just now"}`} · ${activeJob.success_count} hits · ${formatDuration(activeJob.duration_seconds)}`
                   : "No screener currently running"
               }
               progress={activeJob?.progress_percent ?? null}
             />
+            {activeJob ? (
+              <div className="button-row">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void handleCancelJob(activeJob.job_id)}
+                  disabled={isCancellingJobId === activeJob.job_id}
+                >
+                  {isCancellingJobId === activeJob.job_id ? "Stopping..." : "Stop Current Job"}
+                </button>
+              </div>
+            ) : null}
           </div>
         </Panel>
 
@@ -126,13 +185,20 @@ export function RunsPage() {
                 <th>Status</th>
                 <th>Start Time</th>
                 <th>Finish Time</th>
+                <th>Hits</th>
+                <th>Duration</th>
                 <th>Progress</th>
                 <th>RC</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {(payload?.jobs ?? []).map((job) => (
-                <tr key={job.job_id}>
+                <tr
+                  key={job.job_id}
+                  className={job.job_id === selectedJob?.job_id ? "is-selected-row" : ""}
+                  onClick={() => setSelectedJobId(job.job_id)}
+                >
                   <td className="mono">#{job.job_id}</td>
                   <td>{job.label}</td>
                   <td>
@@ -140,6 +206,8 @@ export function RunsPage() {
                   </td>
                   <td>{job.started_at || "-"}</td>
                   <td>{job.finished_at || "-"}</td>
+                  <td>{job.success_count}</td>
+                  <td>{formatDuration(job.duration_seconds)}</td>
                   <td>
                     <ProgressBar
                       status={job.status}
@@ -149,14 +217,39 @@ export function RunsPage() {
                     />
                   </td>
                   <td className="mono">{job.return_code ?? "-"}</td>
+                  <td>
+                    {job.status === "running" ? (
+                      <button
+                        className="table-action-button"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleCancelJob(job.job_id);
+                        }}
+                        disabled={isCancellingJobId === job.job_id}
+                      >
+                        {isCancellingJobId === job.job_id ? "Stopping..." : "Stop"}
+                      </button>
+                    ) : (
+                      <span className="eyebrow">Done</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </Panel>
 
-        <Panel title="Console Tail" aside={<span className="eyebrow">Auto-refresh: 4s</span>}>
-          <pre className="console-surface">{latestLog}</pre>
+        <Panel
+          title="Console Tail"
+          aside={
+            <div className="runs-panel-aside">
+              <span className="eyebrow">{selectedJob ? `${selectedJob.label} · ${selectedJob.success_count} hits · ${formatDuration(selectedJob.duration_seconds)}` : "Auto-refresh: 4s"}</span>
+              {selectedJob ? <StatusPill status={selectedJob.status} /> : null}
+            </div>
+          }
+        >
+          <pre className="console-surface">{selectedJobLog}</pre>
         </Panel>
       </div>
 

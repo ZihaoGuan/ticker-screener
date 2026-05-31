@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import datetime as dt
+import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 import threading
 import uuid
 from typing import Any
@@ -37,6 +39,9 @@ class RunField:
 
 class RunService:
     _progress_pattern = re.compile(r"\[(\d{1,6})/(\d{1,6})\]")
+    _passed_pattern = re.compile(r"passed=(\d{1,6})")
+    _summary_path_pattern = re.compile(r"Wrote run summary to (.+)$")
+    _watchlist_path_pattern = re.compile(r"Wrote watchlist to (.+)$")
     _filter_catalog_cache: dict[str, dict[str, list[str]]] = {}
     _limit_field = RunField(
         "limit",
@@ -362,7 +367,27 @@ class RunService:
 
     def list_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._jobs_lock:
-            return [dict(item) for item in self._jobs[:limit]]
+            return [self._serialize_job(item) for item in self._jobs[:limit]]
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        with self._jobs_lock:
+            job = self._jobs_by_id.get(job_id)
+            if job is None:
+                raise ValueError(f"Unknown job: {job_id}")
+            return self._serialize_job(job)
+
+    def cancel(self, job_id: str) -> dict[str, Any]:
+        with self._jobs_lock:
+            job = self._jobs_by_id.get(job_id)
+            if job is None:
+                raise ValueError(f"Unknown job: {job_id}")
+            process = job.get("_process")
+            if job.get("status") != "running" or process is None:
+                raise ValueError(f"Job is not running: {job_id}")
+            job["cancel_requested"] = True
+            self._append_log_line(job, f"Cancellation requested at {self._now_iso()}")
+            process.terminate()
+            return self._serialize_job(job)
 
     def launch(self, action_id: str, *, options: dict[str, Any] | None = None) -> str:
         action = self._actions.get(action_id)
@@ -410,6 +435,11 @@ class RunService:
             "progress_total": None,
             "progress_percent": None,
             "progress_label": "Starting…",
+            "success_count": 0,
+            "watchlist_file": "",
+            "summary_file": "",
+            "cancel_requested": False,
+            "_started_monotonic": time.monotonic(),
         }
 
         with self._jobs_lock:
@@ -502,6 +532,9 @@ class RunService:
         )
 
         log_lines: list[str] = []
+        with self._jobs_lock:
+            job = self._jobs_by_id[job_id]
+            job["_process"] = process
         assert process.stdout is not None
         for line in process.stdout:
             log_lines.append(line.rstrip())
@@ -510,16 +543,23 @@ class RunService:
                 job = self._jobs_by_id[job_id]
                 job["log_tail"] = "\n".join(log_lines)
                 self._update_progress(job, log_lines)
+                self._update_artifacts(job, line.rstrip())
 
         return_code = process.wait()
         finished_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
         with self._jobs_lock:
             job = self._jobs_by_id[job_id]
-            job["status"] = "success" if return_code == 0 else "failed"
+            was_cancelled = bool(job.get("cancel_requested"))
+            job["status"] = "cancelled" if was_cancelled else ("success" if return_code == 0 else "failed")
             job["return_code"] = return_code
             job["finished_at"] = finished_at
             job["log_tail"] = "\n".join(log_lines) if log_lines else job["log_tail"]
-            if return_code == 0:
+            job["_finished_monotonic"] = time.monotonic()
+            job.pop("_process", None)
+            self._load_summary_metadata(job)
+            if was_cancelled:
+                job["progress_label"] = "Cancelled"
+            elif return_code == 0:
                 job["progress_percent"] = 100
                 job["progress_label"] = "Completed"
             elif job.get("progress_percent") is None:
@@ -529,13 +569,22 @@ class RunService:
         current = None
         total = None
         last_line = ""
+        success_count = None
         for line in reversed(log_lines):
             match = self._progress_pattern.search(line)
             if match:
                 current = int(match.group(1))
                 total = int(match.group(2))
                 last_line = line
+            if success_count is None:
+                passed_match = self._passed_pattern.search(line)
+                if passed_match:
+                    success_count = int(passed_match.group(1))
+            if current is not None and total is not None and success_count is not None:
                 break
+
+        if success_count is not None:
+            job["success_count"] = success_count
 
         if current is None or total is None or total <= 0:
             return
@@ -546,3 +595,71 @@ class RunService:
         job["progress_percent"] = percent
         detail = "screening" if "screening" in last_line.lower() else "processing"
         job["progress_label"] = f"{current}/{total} {detail}"
+
+    def _update_artifacts(self, job: dict[str, Any], line: str) -> None:
+        watchlist_match = self._watchlist_path_pattern.search(line)
+        if watchlist_match:
+            job["watchlist_file"] = watchlist_match.group(1).strip()
+
+        summary_match = self._summary_path_pattern.search(line)
+        if summary_match:
+            job["summary_file"] = summary_match.group(1).strip()
+
+    def _load_summary_metadata(self, job: dict[str, Any]) -> None:
+        summary_file = str(job.get("summary_file") or "").strip()
+        if not summary_file:
+            return
+        summary_path = Path(summary_file)
+        if not summary_path.exists():
+            return
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        passed_tickers = payload.get("passed_tickers")
+        if isinstance(passed_tickers, int):
+            job["success_count"] = passed_tickers
+        watchlist_file = payload.get("watchlist_file")
+        if isinstance(watchlist_file, str) and watchlist_file.strip():
+            job["watchlist_file"] = watchlist_file.strip()
+
+    def _serialize_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        duration_seconds = self._job_duration_seconds(job)
+        return {
+            "job_id": str(job.get("job_id") or ""),
+            "action_id": str(job.get("action_id") or ""),
+            "label": str(job.get("label") or ""),
+            "status": str(job.get("status") or "failed"),
+            "command": str(job.get("command") or ""),
+            "started_at": str(job.get("started_at") or ""),
+            "finished_at": str(job.get("finished_at") or ""),
+            "return_code": job.get("return_code"),
+            "log_tail": str(job.get("log_tail") or ""),
+            "progress_current": job.get("progress_current"),
+            "progress_total": job.get("progress_total"),
+            "progress_percent": job.get("progress_percent"),
+            "progress_label": job.get("progress_label"),
+            "success_count": int(job.get("success_count") or 0),
+            "watchlist_file": str(job.get("watchlist_file") or ""),
+            "summary_file": str(job.get("summary_file") or ""),
+            "cancel_requested": bool(job.get("cancel_requested")),
+            "duration_seconds": duration_seconds,
+        }
+
+    def _job_duration_seconds(self, job: dict[str, Any]) -> int:
+        started = job.get("_started_monotonic")
+        if not isinstance(started, (int, float)):
+            return 0
+        finished = job.get("_finished_monotonic")
+        end = finished if isinstance(finished, (int, float)) else time.monotonic()
+        return max(0, int(round(end - started)))
+
+    def _append_log_line(self, job: dict[str, Any], line: str) -> None:
+        log_tail = str(job.get("log_tail") or "")
+        log_lines = log_tail.splitlines() if log_tail else []
+        log_lines.append(line)
+        log_lines = log_lines[-80:]
+        job["log_tail"] = "\n".join(log_lines)
+
+    def _now_iso(self) -> str:
+        return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()

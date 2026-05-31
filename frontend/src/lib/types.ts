@@ -7,7 +7,7 @@ export type StrategyCard = {
   accent?: "up" | "neutral";
 };
 
-export type JobStatus = "running" | "success" | "failed";
+export type JobStatus = "running" | "success" | "failed" | "cancelled";
 
 export type ScreenerJob = {
   jobId: string;
@@ -97,6 +97,11 @@ export type JobsResponse = {
     progress_total: number | null;
     progress_percent: number | null;
     progress_label: string | null;
+    success_count: number;
+    watchlist_file: string;
+    summary_file: string;
+    cancel_requested: boolean;
+    duration_seconds: number;
   }[];
 };
 

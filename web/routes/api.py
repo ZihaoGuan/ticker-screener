@@ -36,6 +36,24 @@ def jobs_data(service: RunService = Depends(get_run_service)) -> JSONResponse:
     return JSONResponse({"actions": service.list_actions(), "jobs": service.list_jobs()})
 
 
+@router.get("/jobs/{job_id}", response_class=JSONResponse)
+def job_detail(job_id: str, service: RunService = Depends(get_run_service)) -> JSONResponse:
+    try:
+        return JSONResponse(service.get_job(job_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/jobs/{job_id}/cancel", response_class=JSONResponse)
+def cancel_job(job_id: str, service: RunService = Depends(get_run_service)) -> JSONResponse:
+    try:
+        return JSONResponse({"ok": True, "job": service.cancel(job_id)})
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if message.startswith("Unknown job") else 400
+        raise HTTPException(status_code=status_code, detail=message) from exc
+
+
 @router.post("/runs/{action_id}", response_class=JSONResponse)
 def run_action(
     action_id: str,

@@ -34,7 +34,9 @@ export function ProgressBar({ status, label, compact = false, progress }: Progre
               : "In progress"
             : status === "success"
               ? "Completed"
-              : "Failed"
+              : status === "cancelled"
+                ? "Cancelled"
+                : "Failed"
         }
       >
         <div

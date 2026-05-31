@@ -329,6 +329,19 @@ a {
   padding: 14px 10px;
 }
 
+.data-table tbody tr {
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.data-table tbody tr:hover {
+  background: rgba(52, 211, 153, 0.05);
+}
+
+.data-table tbody tr.is-selected-row {
+  background: rgba(52, 211, 153, 0.1);
+}
+
 .status-pill {
   border-radius: 999px;
   display: inline-flex;
@@ -351,6 +364,11 @@ a {
 .status-failed {
   background: rgba(244, 63, 94, 0.12);
   color: #fb7185;
+}
+
+.status-cancelled {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
 }
 
 .run-progress-panel {
@@ -393,6 +411,10 @@ a {
 
 .progress-failed {
   background: linear-gradient(90deg, #f43f5e, #fb7185);
+}
+
+.progress-cancelled {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
 }
 
 .progress-running {
@@ -516,6 +538,20 @@ a {
   gap: 10px;
 }
 
+.table-action-button {
+  background: transparent;
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  color: #f4f4f5;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.table-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .run-action-footer {
   align-items: center;
   display: flex;
@@ -540,6 +576,14 @@ a {
   overflow: auto;
   padding: 18px;
   white-space: pre-wrap;
+}
+
+.runs-panel-aside {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .watchlists-layout {
