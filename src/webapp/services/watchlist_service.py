@@ -2,23 +2,28 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import logging
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
 from ...config import AppConfig
-from ...etf_matcher import infer_theme_tags_for_ticker, load_ticker_theme_overrides
+from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ticker_filters import normalize_ticker_symbol
 from ...universe import UniverseTicker, load_universe
 from ...config import load_app_config
 from ..repositories.watchlist_repository import WatchlistRepository
 
 
+logger = logging.getLogger(__name__)
+
+
 class WatchlistService:
     def __init__(self, artifacts_dir: Path) -> None:
         self.repository = WatchlistRepository(artifacts_dir=artifacts_dir)
         self._universe_index: dict[str, UniverseTicker] | None = None
+        self._theme_catalog: list[dict[str, object]] | None = None
 
     def list_recent(self) -> list[dict[str, Any]]:
         return self.repository.list_recent_watchlists(limit=50)
@@ -159,6 +164,7 @@ class WatchlistService:
     def _enrich_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         universe_index = self._get_universe_index()
         overrides = load_ticker_theme_overrides()
+        theme_catalog = self._get_theme_catalog()
         enriched: list[dict[str, Any]] = []
         for raw_entry in entries:
             entry = dict(raw_entry)
@@ -173,6 +179,7 @@ class WatchlistService:
                     ticker=ticker,
                     sector=sector,
                     industry=industry,
+                    catalog=theme_catalog,
                     overrides=overrides,
                 )
             if ticker:
@@ -191,13 +198,27 @@ class WatchlistService:
     def _get_universe_index(self) -> dict[str, UniverseTicker]:
         if self._universe_index is not None:
             return self._universe_index
-        universe = load_universe(load_app_config())
+        try:
+            universe = load_universe(load_app_config())
+        except Exception as exc:
+            logger.warning("Watchlist universe enrichment unavailable; continuing without universe metadata: %s", exc)
+            universe = []
         self._universe_index = {
             normalize_ticker_symbol(item.symbol): item
             for item in universe
             if getattr(item, "symbol", "")
         }
         return self._universe_index
+
+    def _get_theme_catalog(self) -> list[dict[str, object]]:
+        if self._theme_catalog is not None:
+            return self._theme_catalog
+        try:
+            self._theme_catalog = load_etf_catalog()
+        except Exception as exc:
+            logger.warning("Watchlist theme enrichment unavailable; continuing without ETF catalog: %s", exc)
+            self._theme_catalog = []
+        return self._theme_catalog
 
 
 def _empty_chart_payload(ticker: str) -> dict[str, Any]:
