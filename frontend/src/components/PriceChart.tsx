@@ -1,4 +1,4 @@
-import { ColorType, createChart } from "lightweight-charts";
+import { ColorType, LineStyle, createChart } from "lightweight-charts";
 import { useEffect, useMemo, useRef } from "react";
 import { createGapZonePrimitive } from "./GapZonePrimitive";
 import { createHighTightFlagPrimitive } from "./HighTightFlagPrimitive";
@@ -36,6 +36,14 @@ type GapZone = {
   filled: boolean;
 };
 
+type HorizontalAnnotation = {
+  color: string;
+  lineWidth: 1 | 2 | 3 | 4;
+  lineStyle?: LineStyle;
+  label: string;
+  price: number;
+};
+
 export function PriceChart({ ticker, candles, overlays, annotations, visibility }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
@@ -66,6 +74,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     [candles],
   );
   const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations), [candles, annotations]);
+  const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations), [annotations]);
 
   useEffect(() => {
     if (!priceRootRef.current || !rsRootRef.current) {
@@ -143,6 +152,16 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     const ma50Series = priceChart.addLineSeries({ color: "rgba(251, 146, 60, 0.45)", lineWidth: 1, priceLineVisible: false });
     const ma200Series = priceChart.addLineSeries({ color: "rgba(167, 139, 250, 0.52)", lineWidth: 1, priceLineVisible: false });
     const rsSeries = rsChart.addLineSeries({ color: "#60a5fa", lineWidth: 2, priceLineVisible: false });
+    const annotationSeries = annotationLines.map((line) =>
+      priceChart.addLineSeries({
+        color: line.color,
+        lineWidth: line.lineWidth,
+        lineStyle: line.lineStyle,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      }),
+    );
 
     candleSeries.setData(
       candles.map((item) => ({
@@ -168,6 +187,17 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     ma50Series.setData(options.maStack ? ma50 : []);
     ma200Series.setData(options.maStack ? ma200 : []);
     rsSeries.setData(options.rsLine ? rsLine : []);
+    if (candles.length > 0) {
+      const startTime = candles[0].time;
+      const endTime = candles[candles.length - 1].time;
+      annotationSeries.forEach((series, index) => {
+        const line = annotationLines[index];
+        series.setData([
+          { time: startTime, value: line.price },
+          { time: endTime, value: line.price },
+        ]);
+      });
+    }
 
     if (options.gapZones && visibleGapZones.length > 0) {
       const gapPrimitive = createGapZonePrimitive(
@@ -218,6 +248,18 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     if (priceMarkers.length > 0) {
       candleSeries.setMarkers(priceMarkers);
     }
+
+    annotationSeries.forEach((series, index) => {
+      const line = annotationLines[index];
+      series.createPriceLine({
+        price: line.price,
+        color: line.color,
+        lineWidth: line.lineWidth,
+        lineStyle: line.lineStyle,
+        axisLabelVisible: true,
+        title: line.label,
+      });
+    });
 
     if (options.rsSignals && rsMarkers.length > 0) {
       rsSeries.setMarkers(
@@ -297,6 +339,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
     options.rsSignals,
     visibleGapZones,
     highTightFlagBox,
+    annotationLines,
     weeklyEma8,
   ]);
 
@@ -445,4 +488,39 @@ function detectGapZones(candles: CandlePoint[]): GapZone[] {
   }
 
   return zones;
+}
+
+function buildHorizontalAnnotations(annotations?: ChartAnnotations): HorizontalAnnotation[] {
+  if (!annotations) {
+    return [];
+  }
+  const lines: HorizontalAnnotation[] = [];
+  const addLine = (
+    price: number | null | undefined,
+    label: string,
+    color: string,
+    lineWidth: 1 | 2 | 3 | 4,
+    lineStyle?: LineStyle,
+  ) => {
+    if (price == null || !Number.isFinite(price)) {
+      return;
+    }
+    lines.push({ price, label, color, lineWidth, lineStyle });
+  };
+
+  addLine(annotations.triggerPrice, annotations.triggerLabel ?? "Trigger", "#eab308", 2, LineStyle.Dashed);
+  addLine(annotations.entryPrice, annotations.entryLabel ?? "Entry", "#22c55e", 2, LineStyle.Solid);
+  if (
+    annotations.secondaryEntryLow != null &&
+    annotations.secondaryEntryHigh != null &&
+    Number.isFinite(annotations.secondaryEntryLow) &&
+    Number.isFinite(annotations.secondaryEntryHigh)
+  ) {
+    addLine(annotations.secondaryEntryLow, `${annotations.secondaryEntryLabel ?? "Secondary"} low`, "#94a3b8", 1, LineStyle.LargeDashed);
+    addLine(annotations.secondaryEntryHigh, `${annotations.secondaryEntryLabel ?? "Secondary"} high`, "#94a3b8", 1, LineStyle.LargeDashed);
+  } else {
+    addLine(annotations.secondaryEntryPrice, annotations.secondaryEntryLabel ?? "Secondary", "#94a3b8", 1, LineStyle.LargeDashed);
+  }
+  addLine(annotations.stopPrice, annotations.stopLabel ?? "Stop", "#ef4444", 2, LineStyle.Dotted);
+  return lines;
 }

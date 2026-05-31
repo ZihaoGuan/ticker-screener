@@ -725,6 +725,16 @@ def _is_thirty_min_pivot_setup(entry: WatchlistEntry, note_lower: str) -> bool:
     )
 
 
+def _is_ftd_sweep_reclaim_setup(entry: WatchlistEntry, note_lower: str) -> bool:
+    style = (entry.entry_style or "").lower()
+    setup = (entry.setup_label or "").lower()
+    return (
+        style in {"ftd_sweep_reclaim", "ftd_sweep", "sweep_reclaim"}
+        or "ftd sweep" in setup
+        or ("follow through day" in note_lower and "sweep" in note_lower)
+    )
+
+
 def compute_rs_line(stock: pd.Series, benchmark: pd.Series) -> pd.Series:
     aligned = pd.concat([stock, benchmark], axis=1, join="inner").dropna()
     aligned.columns = ["stock", "benchmark"]
@@ -952,8 +962,24 @@ def build_entry_plan(
     note_lower = f"{entry.summary} {entry.master_note}".lower()
     weekly_pullback_reclaim = _is_weekly_pullback_reclaim_setup(entry, note_lower)
     thirty_min_pivot = _is_thirty_min_pivot_setup(entry, note_lower)
+    ftd_sweep_reclaim = _is_ftd_sweep_reclaim_setup(entry, note_lower)
     entry_ref = entry.entry_price if entry.entry_price is not None else trigger_price
     entry_label = entry.entry_label or ("30m pivot" if thirty_min_pivot else "Entry ref")
+
+    if ftd_sweep_reclaim:
+        lines = [
+            f"Entry plan: reclaim and hold > {entry_ref:.2f}",
+            "Wait for the liquidity sweep to reverse back through the FTD high",
+            f"FTD high: {trigger_price:.2f} | EMA21 ref: {ema21:.2f}",
+        ]
+        if entry.secondary_entry_low is not None and entry.secondary_entry_high is not None:
+            lines.append(
+                f"{entry.secondary_entry_label or 'Sweep reclaim zone'}: "
+                f"{entry.secondary_entry_low:.2f}-{entry.secondary_entry_high:.2f}"
+            )
+        elif entry.secondary_entry_price is not None:
+            lines.append(f"{entry.secondary_entry_label or 'Sweep low'}: {entry.secondary_entry_price:.2f}")
+        return lines, entry_ref, "#22c55e" if latest_close >= entry_ref else "#f97316"
 
     if thirty_min_pivot:
         lines = [
@@ -1029,6 +1055,7 @@ def build_stop_plan(
     note_lower = f"{entry.summary} {entry.master_note}".lower()
     weekly_pullback_reclaim = _is_weekly_pullback_reclaim_setup(entry, note_lower)
     thirty_min_pivot = _is_thirty_min_pivot_setup(entry, note_lower)
+    ftd_sweep_reclaim = _is_ftd_sweep_reclaim_setup(entry, note_lower)
     trigger_ref = entry.entry_price if entry.entry_price is not None else trigger_price
 
     if entry.stop_price is not None:
@@ -1039,6 +1066,16 @@ def build_stop_plan(
             f"Stop guide: {stop_label}{time_frame}",
             f"Stop ref: {stop_price:.2f}",
             f"Invalidate if price loses the stated level cleanly",
+        ]
+        return lines, stop_price, "#ef4444"
+
+    if ftd_sweep_reclaim:
+        sweep_floor = entry.secondary_entry_low if entry.secondary_entry_low is not None else recent_support
+        stop_price = min(sweep_floor, ema21) * 0.99
+        lines = [
+            "Stop guide: below sweep low / failed reclaim",
+            f"Stop ref: {stop_price:.2f}",
+            f"Support refs: sweep low {sweep_floor:.2f}, EMA21 {ema21:.2f}",
         ]
         return lines, stop_price, "#ef4444"
 
@@ -1223,6 +1260,7 @@ def render_watchlist_chart(
     recent_support = float(chart["Low"].tail(10).min()) if len(chart) >= 10 else float(chart["Low"].min())
     recent_ema21_flush = bool(((chart["Low"].tail(15) < chart["ema21"].tail(15)).fillna(False)).any() and latest_close > ema21_value)
     weekly_pullback_reclaim = _is_weekly_pullback_reclaim_setup(entry, note_lower)
+    ftd_sweep_reclaim = _is_ftd_sweep_reclaim_setup(entry, note_lower)
     timeframe_label = timeframe.title()
     lookback_label = "weeks" if timeframe == "weekly" else "sessions"
     pivot_20_label = "20w pivot" if timeframe == "weekly" else "20d pivot"
@@ -1394,6 +1432,19 @@ def render_watchlist_chart(
         svg.append(
             f'<text x="{left + 10}" y="{max(price_top + 18, flush_zone_y - 8):.1f}" fill="#fbbf24" font-size="12" font-family="Menlo, Consolas, monospace">Flush zone: EMA21 pressure inside weekly pullback</text>'
         )
+    elif ftd_sweep_reclaim and entry.secondary_entry_low is not None and entry.secondary_entry_high is not None:
+        sweep_zone_top_price = max(entry.secondary_entry_low, entry.secondary_entry_high)
+        sweep_zone_bottom_price = min(entry.secondary_entry_low, entry.secondary_entry_high)
+        sweep_zone_top_y = _price_y(sweep_zone_top_price, y_min, y_max, price_top, price_height)
+        sweep_zone_bottom_y = _price_y(sweep_zone_bottom_price, y_min, y_max, price_top, price_height)
+        sweep_zone_y = min(sweep_zone_top_y, sweep_zone_bottom_y)
+        sweep_zone_height = max(abs(sweep_zone_bottom_y - sweep_zone_top_y), 12.0)
+        svg.append(
+            f'<rect x="{left}" y="{sweep_zone_y:.1f}" width="{plot_width}" height="{sweep_zone_height:.1f}" fill="#94a3b8" opacity="0.08" rx="6" />'
+        )
+        svg.append(
+            f'<text x="{left + 10}" y="{max(price_top + 18, sweep_zone_y - 8):.1f}" fill="#cbd5e1" font-size="12" font-family="Menlo, Consolas, monospace">Sweep reclaim zone: look for rejection and re-entry through the FTD high</text>'
+        )
     entry_zone_top_price = max(entry_price, ema8_value if above_trigger else entry_price * 1.005)
     entry_zone_bottom_price = min(entry_price, trigger_price if above_trigger else entry_price)
     entry_zone_top_y = _price_y(entry_zone_top_price, y_min, y_max, price_top, price_height)
@@ -1414,6 +1465,8 @@ def render_watchlist_chart(
     chart_label_specs.append((trigger_y + 4, "#eab308", f"{trigger_label} {trigger_price:.2f}"))
     if weekly_pullback_reclaim:
         chart_label_specs.append((trigger_y - 14, "#fde68a", "Buy only after reclaim back up"))
+    elif ftd_sweep_reclaim:
+        chart_label_specs.append((trigger_y - 14, "#cbd5e1", "Wait for sweep rejection back above FTD high"))
 
     entry_y = _price_y(entry_price, y_min, y_max, price_top, price_height)
     svg.append(
@@ -1464,6 +1517,10 @@ def render_watchlist_chart(
     if weekly_pullback_reclaim:
         svg.append(
             f'<text x="{left + 10}" y="{entry_zone_y + entry_zone_height + 18:.1f}" fill="#86efac" font-size="12" font-family="Menlo, Consolas, monospace">Do not buy while price is still falling into support</text>'
+        )
+    elif ftd_sweep_reclaim:
+        svg.append(
+            f'<text x="{left + 10}" y="{entry_zone_y + entry_zone_height + 18:.1f}" fill="#86efac" font-size="12" font-family="Menlo, Consolas, monospace">Successful setup: reclaim holds after the sweep back under the FTD high</text>'
         )
     chart_label_specs.append((min(price_top + price_height - 8, stop_y + 34), "#ef4444", "Invalid below"))
 

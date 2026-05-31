@@ -395,6 +395,10 @@ def render_root_index(manifest: dict[str, Any]) -> str:
           <p>This looks for volatility contraction patterns where each pullback gets tighter, supply appears to dry up, and price is already pushing through a pivot with support underneath. The goal is to surface names under quiet institutional accumulation before an obvious breakout becomes crowded.</p>
         </article>
         <article class="philosophy-card">
+          <h3>FTD Sweep</h3>
+          <p>This looks for a Follow Through Day style reversal, then waits for a later liquidity sweep back under the reclaim level before price takes it back. The goal is to find early trend reversals where the weak hands have already been shaken out before the breakout sticks.</p>
+        </article>
+        <article class="philosophy-card">
           <h3>Next-Week Earnings Growth</h3>
           <p>This hunts for next-week earnings names with explosive revenue growth, repeated large post-earnings reactions, improving but still-negative EPS, meaningful institutional ownership, and a clean bullish moving-average stack. The idea is to find high-beta growth stories that institutions are already respecting before the report hits.</p>
         </article>
