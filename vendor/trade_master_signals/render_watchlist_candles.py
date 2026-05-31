@@ -735,6 +735,12 @@ def _is_ftd_sweep_reclaim_setup(entry: WatchlistEntry, note_lower: str) -> bool:
     )
 
 
+def _is_fearzone_setup(entry: WatchlistEntry, note_lower: str) -> bool:
+    style = (entry.entry_style or "").lower()
+    setup = (entry.setup_label or "").lower()
+    return style == "fearzone_buy" or "fearzone" in setup or "fearzone" in note_lower
+
+
 def compute_rs_line(stock: pd.Series, benchmark: pd.Series) -> pd.Series:
     aligned = pd.concat([stock, benchmark], axis=1, join="inner").dropna()
     aligned.columns = ["stock", "benchmark"]
@@ -856,6 +862,57 @@ def _text_block(svg: list[str], text: str, x: int, y: int, color: str, font_size
             f'font-size="{font_size}" font-family="Menlo, Consolas, monospace">{escape(line)}</text>'
         )
     return len(lines)
+
+
+def compute_fearzone_panel(frame: pd.DataFrame) -> dict[str, object]:
+    if frame.empty:
+        return {"rows": [], "signals": pd.Series(dtype=bool)}
+
+    source = frame[["Open", "High", "Low", "Close"]].mean(axis=1)
+    high_period = 22
+    band_period = 200
+    highest_source = source.rolling(high_period).max()
+    fz1_value = (highest_source - source) / highest_source.replace(0, np.nan)
+    fz1_basis = fz1_value.rolling(band_period).mean()
+    fz1_std = fz1_value.rolling(band_period).std(ddof=0)
+    fz1_upper = fz1_basis + fz1_std
+    in_fz1 = (fz1_value > fz1_upper).fillna(False)
+
+    source_ma = source.rolling(high_period).mean()
+    fz2_value = source - source_ma
+    fz2_basis = fz2_value.rolling(band_period).mean()
+    fz2_std = fz2_value.rolling(band_period).std(ddof=0)
+    fz2_lower = fz2_basis - fz2_std
+    in_fz2 = (fz2_value < fz2_lower).fillna(False)
+
+    impulse_pct = ((frame["Close"] / frame["Close"].shift(10)) - 1.0) * 100.0
+    negative_impulse = (impulse_pct <= -10.0).fillna(False)
+
+    bar_range = frame["High"] - frame["Low"]
+    range_floor = frame["Low"] + (bar_range * 0.10)
+    in_ricochet_zone = (frame["Close"] <= range_floor).fillna(False)
+
+    lowest_low = frame["Low"].rolling(2).min()
+    highest_high = frame["High"].rolling(2).max()
+    stoch_range = highest_high - lowest_low
+    raw_k = pd.Series(np.where(stoch_range > 0, (frame["Close"] - lowest_low) * 100.0 / stoch_range, np.nan), index=frame.index)
+    fast_k = raw_k.rolling(3).mean()
+    slow_k = fast_k.rolling(3).mean()
+    magic_k1 = (slow_k < 30.0).fillna(False)
+
+    ma200 = frame["Close"].rolling(200).mean()
+    above_ma200 = (frame["Close"] > ma200).fillna(False)
+
+    signals = (in_fz1 & in_fz2 & above_ma200 & (negative_impulse | in_ricochet_zone | magic_k1)).fillna(False)
+    rows = [
+        ("FZ1", "#4ade80", in_fz1),
+        ("FZ2", "#4ade80", in_fz2),
+        ("Down 10%", "#60a5fa", negative_impulse),
+        ("Ricochet", "#fde047", in_ricochet_zone),
+        ("Magic-K1", "#f8fafc", magic_k1),
+        ("Above MA200", "#4ade80", above_ma200),
+    ]
+    return {"rows": rows, "signals": signals}
 
 
 def _spread_label_positions(preferred_positions: list[float], minimum_gap: float, lower_bound: float, upper_bound: float) -> list[float]:
@@ -1202,7 +1259,10 @@ def render_watchlist_chart(
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     width = 1760
-    height = 1450
+    note_lower = f"{entry.summary} {entry.master_note}".lower()
+    show_fearzone_panel = _is_fearzone_setup(entry, note_lower)
+
+    height = 1620 if show_fearzone_panel else 1450
     left = 90
     plot_width = 960
     price_top = 80
@@ -1211,6 +1271,8 @@ def render_watchlist_chart(
     volume_height = 130
     rs_top = 860
     rs_height = 140
+    fearzone_top = 1048
+    fearzone_height = 176
     right_panel_x = 1210
 
     lows = chart["Low"]
@@ -1245,7 +1307,6 @@ def render_watchlist_chart(
     latest_weekly_bar_date = rs_analysis.weekly_new_high.index[-1] if not rs_analysis.weekly_new_high.empty else None
     above_trigger = float(latest["Close"]) > trigger_price
     latest_close = float(latest["Close"])
-    note_lower = f"{entry.summary} {entry.master_note}".lower()
     if entry.trigger_label:
         trigger_label = entry.trigger_label
     elif _is_weekly_pullback_reclaim_setup(entry, note_lower):
@@ -1266,6 +1327,15 @@ def render_watchlist_chart(
     pivot_20_label = "20w pivot" if timeframe == "weekly" else "20d pivot"
     pivot_50_label = "50w pivot" if timeframe == "weekly" else "50d pivot"
     rs_line_label = "weekly line" if timeframe == "weekly" else "daily line"
+    fearzone_panel = compute_fearzone_panel(history if not history.empty else chart)
+    fearzone_rows = []
+    fearzone_signals = pd.Series(dtype=bool)
+    if show_fearzone_panel:
+        fearzone_rows = [
+            (label, color, series.reindex(chart.index).fillna(False))
+            for label, color, series in list(fearzone_panel.get("rows", []))
+        ]
+        fearzone_signals = pd.Series(fearzone_panel.get("signals", pd.Series(dtype=bool))).reindex(chart.index).fillna(False)
     entry_lines, entry_price, entry_color = build_entry_plan(
         entry=entry,
         latest_close=latest_close,
@@ -1576,6 +1646,34 @@ def render_watchlist_chart(
     svg.append(
         f'<text x="{left}" y="{rs_top - 12}" fill="#94a3b8" font-size="13" font-family="Menlo, Consolas, monospace">Relative Strength vs {escape(benchmark_ticker)} ({rs_line_label}) | price-panel blue dots = historical RS new highs | ring = before price</text>'
     )
+    if show_fearzone_panel:
+        svg.append(
+            f'<text x="{left}" y="{fearzone_top - 12}" fill="#94a3b8" font-size="13" font-family="Menlo, Consolas, monospace">Fearzone Panel | vertical red stripes = full buy signal</text>'
+        )
+        svg.append(
+            f'<rect x="{left}" y="{fearzone_top:.1f}" width="{plot_width}" height="{fearzone_height:.1f}" fill="#0b1220" opacity="0.96" rx="8" />'
+        )
+        row_height = fearzone_height / max(len(fearzone_rows), 1)
+        inactive_color = "#71717a"
+        for row_index, (label, active_color, row_series) in enumerate(fearzone_rows):
+            row_y = fearzone_top + row_index * row_height
+            svg.append(
+                f'<text x="{left - 12}" y="{row_y + row_height * 0.62:.1f}" fill="#d4d4d8" font-size="12" text-anchor="end" font-family="Menlo, Consolas, monospace">{escape(label)}</text>'
+            )
+            for point_index, active in enumerate(row_series):
+                x = left + point_index * x_step
+                fill = active_color if bool(active) else inactive_color
+                opacity = "0.94" if bool(active) else "0.68"
+                svg.append(
+                    f'<rect x="{x:.1f}" y="{row_y + 2:.1f}" width="{max(x_step - 0.8, 1.2):.1f}" height="{max(row_height - 6, 8):.1f}" fill="{fill}" opacity="{opacity}" rx="1.8" />'
+                )
+        for point_index, active in enumerate(fearzone_signals):
+            if not bool(active):
+                continue
+            x = left + point_index * x_step + max(0.5, x_step / 2.0)
+            svg.append(
+                f'<line x1="{x:.1f}" y1="{fearzone_top + 4:.1f}" x2="{x:.1f}" y2="{fearzone_top + fearzone_height - 4:.1f}" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="3 4" opacity="0.95" />'
+            )
 
     rs_rating_text = f"{int(round(latest_rs_rating))}" if pd.notna(latest_rs_rating) else "n/a"
     rs_score_text = f"{float(latest_rs_score):.2f}" if pd.notna(latest_rs_score) else "n/a"
@@ -1613,6 +1711,11 @@ def render_watchlist_chart(
         f"Above SMA 50: {'yes' if latest_close > float(latest['sma50']) else 'no'}",
         f"Gap zones: {len(gap_zones)} total | open: {len(open_gap_zones)} | visible: {len(visible_gap_zones)}",
     ]
+    if show_fearzone_panel:
+        latest_signal_dates = [index.strftime("%Y-%m-%d") for index, active in fearzone_signals.items() if bool(active)]
+        info_lines.append(f"Fearzone panel: {'active' if latest_signal_dates else 'inactive'}")
+        if latest_signal_dates:
+            info_lines.append(f"Latest fearzone signal: {latest_signal_dates[-1]}")
     if entry.secondary_entry_price is not None:
         if entry.secondary_entry_low is not None and entry.secondary_entry_high is not None:
             info_lines.append(
@@ -1839,7 +1942,7 @@ def render_watchlist_index(
   <main>
     <header>
       <h1>Trade Master Watchlist</h1>
-      <p>{escape(timeframe.title())} setup charts generated from live market data. Each chart shows candles, EMA 8, EMA 21, a real weekly 8 EMA, IPO VWAP, SMA 50, SMA 200, reclaim and pivot context, volume, a {escape(timeframe)} RS line versus {escape(benchmark_ticker)}, RS new-high markers on both the RS panel and price pane, and explicit entry or stop guides when the watchlist provides them.</p>
+      <p>{escape(timeframe.title())} setup charts generated from live market data. Each chart shows candles, EMA 8, EMA 21, a real weekly 8 EMA, IPO VWAP, SMA 50, SMA 200, reclaim and pivot context, volume, a {escape(timeframe)} RS line versus {escape(benchmark_ticker)}, RS new-high markers on both the RS panel and price pane, explicit entry or stop guides when the watchlist provides them, and a full Fearzone panel when the setup uses Fearzone logic.</p>
     </header>
     <section class="grid">
       {"".join(cards)}

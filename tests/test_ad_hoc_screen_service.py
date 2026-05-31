@@ -81,6 +81,56 @@ def _ftd_sweep_frame() -> pd.DataFrame:
     )
 
 
+def _fearzone_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-02", periods=260, freq="B")
+    close = [90.0 + (idx * 0.16) for idx in range(240)]
+    close.extend(
+        [
+            129.0,
+            129.6,
+            128.8,
+            130.0,
+            131.2,
+            132.0,
+            131.0,
+            132.4,
+            131.6,
+            132.2,
+            131.8,
+            132.0,
+            131.4,
+            119.0,
+            121.4,
+            123.7,
+            124.9,
+            125.8,
+            126.7,
+            127.5,
+        ]
+    )
+    open_values = [value * 1.003 for value in close]
+    high = [max(op, cl) + 1.0 for op, cl in zip(open_values, close, strict=False)]
+    low = [min(op, cl) - 1.0 for op, cl in zip(open_values, close, strict=False)]
+    volume = [1_100_000.0 for _ in close]
+    signal_index = len(close) - 5
+    open_values[signal_index] = 126.5
+    close[signal_index] = 119.0
+    high[signal_index] = 127.0
+    low[signal_index] = 118.2
+    volume[signal_index] = 1_900_000.0
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": volume,
+        },
+        index=index,
+    )
+
+
 class AdHocScreenServiceTests(unittest.TestCase):
     def test_run_prefetches_once_and_evaluates_selected_screeners(self) -> None:
         ticker_frame = _frame("2026-01-01", 40)
@@ -164,4 +214,26 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "ftd_sweep")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_fearzone_catalog_entry(self) -> None:
+        ticker_frame = _fearzone_frame()
+        benchmark_frame = _frame("2025-01-02", 260)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 12, 30),
+                screener_ids=["fearzone"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "fearzone")
         self.assertTrue(payload["screeners"][0]["passed"])

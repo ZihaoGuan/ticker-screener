@@ -21,7 +21,7 @@ type PriceChartProps = {
   candles: CandlePoint[];
   overlays?: Pick<
     WatchlistChartResponse,
-    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "rs_line" | "rs_markers" | "benchmark_ticker"
+    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "rs_line" | "rs_markers" | "benchmark_ticker" | "fearzone_panel"
   >;
   annotations?: ChartAnnotations;
   visibility?: ChartVisibility;
@@ -68,7 +68,12 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
   const ipoVwap = useMemo(() => overlays?.ipo_vwap ?? [], [overlays?.ipo_vwap]);
   const rsLine = useMemo(() => overlays?.rs_line ?? [], [overlays?.rs_line]);
   const rsMarkers = useMemo(() => overlays?.rs_markers ?? [], [overlays?.rs_markers]);
+  const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
+  const showFearzonePanel = useMemo(() => {
+    const setupLabel = String(annotations?.setupLabel ?? "").toLowerCase();
+    return setupLabel.includes("fearzone") && fearzonePanel.rows.length > 0;
+  }, [annotations?.setupLabel, fearzonePanel.rows.length]);
   const visibleGapZones = useMemo(
     () => detectGapZones(candles).filter((zone) => zone.remainingUpperPrice > zone.remainingLowerPrice + 1e-6).slice(-4),
     [candles],
@@ -348,6 +353,71 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
       <div ref={priceRootRef} className="chart-card chart-card-price" />
       {options.rsLine ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
       <div ref={rsRootRef} className="chart-card chart-card-rs" />
+      {showFearzonePanel ? <FearzonePanel panel={fearzonePanel} /> : null}
+    </div>
+  );
+}
+
+function FearzonePanel({
+  panel,
+}: {
+  panel: WatchlistChartResponse["fearzone_panel"];
+}) {
+  const width = 1080;
+  const labelWidth = 96;
+  const rowHeight = 24;
+  const topPadding = 20;
+  const rows = panel.rows;
+  const pointCount = rows[0]?.points.length ?? 0;
+  const innerWidth = Math.max(1, width - labelWidth - 12);
+  const step = pointCount > 0 ? innerWidth / pointCount : innerWidth;
+  const height = topPadding + rows.length * rowHeight + 12;
+  const signalTimes = new Set(panel.signals.map((item) => item.time));
+
+  return (
+    <div
+      className="chart-card"
+      style={{
+        background: "#111114",
+        padding: "10px 12px 12px",
+      }}
+    >
+      <div style={{ color: "#d4d4d8", fontSize: 12, marginBottom: 8 }}>Fearzone Panel</div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 178, display: "block" }} preserveAspectRatio="none">
+        <rect x="0" y="0" width={width} height={height} fill="#111114" rx="10" />
+        {rows.map((row, rowIndex) => {
+          const y = topPadding + rowIndex * rowHeight;
+          return (
+            <g key={row.key}>
+              <text x={labelWidth - 8} y={y + 15} fill="#d4d4d8" fontSize="12" textAnchor="end">
+                {row.label}
+              </text>
+              {row.points.map((point, pointIndex) => {
+                const x = labelWidth + pointIndex * step;
+                return (
+                  <rect
+                    key={`${row.key}-${point.time}`}
+                    x={x}
+                    y={y}
+                    width={Math.max(1, step - 0.6)}
+                    height={18}
+                    fill={point.active ? row.active_color : row.inactive_color}
+                    opacity={point.active ? 0.92 : 0.68}
+                    rx={1.8}
+                  />
+                );
+              })}
+            </g>
+          );
+        })}
+        {rows[0]?.points.map((point, pointIndex) => {
+          if (!signalTimes.has(point.time)) {
+            return null;
+          }
+          const x = labelWidth + pointIndex * step + Math.max(0.5, step / 2);
+          return <line key={`signal-${point.time}`} x1={x} y1={8} x2={x} y2={height - 6} stroke="#fb7185" strokeWidth="1.5" strokeDasharray="3 4" opacity="0.9" />;
+        })}
+      </svg>
     </div>
   );
 }

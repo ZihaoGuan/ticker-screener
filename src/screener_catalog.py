@@ -6,6 +6,7 @@ from typing import Callable
 
 from .config import AppConfig
 from .cup_handle_screen import run_cup_handle_screen
+from .fearzone_screen import find_recent_fearzone_hit
 from .ftd_sweep_screen import find_recent_ftd_sweep_hit
 from .gap_fill_screen import run_gap_fill_screen
 from .htf_runup_screen import run_htf_runup_screen
@@ -105,6 +106,30 @@ def _run_ftd_sweep(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     )
 
 
+def _run_fearzone(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    ticker = _ticker_from_bundle(bundle)
+    hit = find_recent_fearzone_hit(
+        bundle.bars,
+        ticker=ticker,
+        benchmark_ticker=config.benchmark_ticker,
+        config=config,
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "signal_age_bars": payload["signal_age_bars"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_weekly_htf_pullback(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     return _single_ticker_result(bundle, run_weekly_htf_pullback_screen, config)
@@ -186,6 +211,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=max(int(config.ftd_sweep_history_days), 160),
             warmup_trading_days=10,
             evaluator=_run_ftd_sweep,
+        ),
+        "fearzone": ScreenerSpec(
+            id="fearzone",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=max(int(config.fearzone_band_period) + 20, int(config.fearzone_ma_long_period) + 20, 260),
+            warmup_trading_days=10,
+            evaluator=_run_fearzone,
         ),
         "weekly_htf_pullback": ScreenerSpec(
             id="weekly_htf_pullback",

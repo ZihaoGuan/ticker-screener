@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from ...config import AppConfig
 from ..repositories.watchlist_repository import WatchlistRepository
 
 
@@ -67,6 +69,7 @@ class WatchlistService:
         rs_line: pd.Series | None = None
         rs_new_high: pd.Series | None = None
         rs_new_high_before_price: pd.Series | None = None
+        fearzone_panel = _compute_fearzone_panel(frame)
         if benchmark_frame is not None and not benchmark_frame.empty:
             rs_line = _compute_rs_line(frame["Close"], benchmark_frame["Close"])
             rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
@@ -145,6 +148,7 @@ class WatchlistService:
             "ipo_vwap": ipo_vwap,
             "rs_line": rs_points,
             "rs_markers": rs_markers,
+            "fearzone_panel": fearzone_panel,
         }
 
 
@@ -163,6 +167,7 @@ def _empty_chart_payload(ticker: str) -> dict[str, Any]:
         "ipo_vwap": [],
         "rs_line": [],
         "rs_markers": [],
+        "fearzone_panel": {"rows": [], "signals": []},
     }
 
 
@@ -201,3 +206,82 @@ def _compute_rs_new_high_flags(rs_line: pd.Series, price_reference: pd.Series, l
     new_high = aligned["rs_line"] >= (rolling_rs_high - tolerance)
     new_high_before_price = new_high & (aligned["price_reference"] < (rolling_price_high - tolerance))
     return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
+
+
+def _compute_fearzone_panel(frame: pd.DataFrame) -> dict[str, Any]:
+    if frame.empty:
+        return {"rows": [], "signals": []}
+
+    config = AppConfig()
+    source = frame[["Open", "High", "Low", "Close"]].mean(axis=1)
+    high_period = int(config.fearzone_high_period)
+    band_period = int(config.fearzone_band_period)
+
+    highest_source = source.rolling(high_period).max()
+    fz1_value = (highest_source - source) / highest_source.replace(0, np.nan)
+    fz1_basis = fz1_value.rolling(band_period).mean()
+    fz1_std = fz1_value.rolling(band_period).std(ddof=0)
+    fz1_upper = fz1_basis + (fz1_std * float(config.fearzone_band_std_multiplier))
+    in_fz1 = (fz1_value > fz1_upper).fillna(False)
+
+    source_ma = source.rolling(high_period).mean()
+    fz2_value = source - source_ma
+    fz2_basis = fz2_value.rolling(band_period).mean()
+    fz2_std = fz2_value.rolling(band_period).std(ddof=0)
+    fz2_lower = fz2_basis - (fz2_std * float(config.fearzone_band_std_multiplier))
+    in_fz2 = (fz2_value < fz2_lower).fillna(False)
+
+    impulse_pct = ((frame["Close"] / frame["Close"].shift(int(config.fearzone_negative_impulse_lookback_days))) - 1.0) * 100.0
+    negative_impulse = (impulse_pct <= (-abs(float(config.fearzone_negative_impulse_pct)))).fillna(False)
+
+    bar_range = frame["High"] - frame["Low"]
+    range_floor = frame["Low"] + (bar_range * float(config.fearzone_ricochet_zone_pct))
+    in_ricochet_zone = (frame["Close"] <= range_floor).fillna(False)
+
+    lowest_low = frame["Low"].rolling(int(config.fearzone_stochastic_k)).min()
+    highest_high = frame["High"].rolling(int(config.fearzone_stochastic_k)).max()
+    stoch_range = highest_high - lowest_low
+    raw_k = pd.Series(
+        np.where(stoch_range > 0, (frame["Close"] - lowest_low) * 100.0 / stoch_range, np.nan),
+        index=frame.index,
+    )
+    fast_k = raw_k.rolling(int(config.fearzone_stochastic_d)).mean()
+    slow_k = fast_k.rolling(int(config.fearzone_stochastic_d)).mean()
+    magic_k1 = (slow_k < float(config.fearzone_magic_k1_threshold)).fillna(False)
+
+    ma200 = frame["Close"].rolling(int(config.fearzone_ma_long_period)).mean()
+    above_ma200 = (frame["Close"] > ma200).fillna(False)
+
+    signals = (in_fz1 & in_fz2 & above_ma200 & (negative_impulse | in_ricochet_zone | magic_k1)).fillna(False)
+
+    row_defs = [
+        ("fz1", "FZ1", "#4ade80", in_fz1),
+        ("fz2", "FZ2", "#4ade80", in_fz2),
+        ("negative_impulse", "Down 10%", "#60a5fa", negative_impulse),
+        ("ricochet_zone", "Ricochet", "#fde047", in_ricochet_zone),
+        ("magic_k1", "Magic-K1", "#f8fafc", magic_k1),
+        ("above_ma200", "Above MA200", "#4ade80", above_ma200),
+    ]
+
+    rows: list[dict[str, Any]] = []
+    for key, label, active_color, series in row_defs:
+        points: list[dict[str, Any]] = []
+        for index, active in series.items():
+            points.append(
+                {
+                    "time": pd.Timestamp(index).date().isoformat(),
+                    "active": bool(active),
+                }
+            )
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "active_color": active_color,
+                "inactive_color": "#71717a",
+                "points": points,
+            }
+        )
+
+    signal_points = [{"time": pd.Timestamp(index).date().isoformat()} for index, active in signals.items() if bool(active)]
+    return {"rows": rows, "signals": signal_points}

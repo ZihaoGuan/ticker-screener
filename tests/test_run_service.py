@@ -128,6 +128,10 @@ class RunServiceTests(unittest.TestCase):
         tickers_index = command.index("--tickers")
         self.assertEqual(command[tickers_index + 1 : tickers_index + 3], ["AAPL", "NVDA"])
 
+    def test_list_actions_includes_fearzone(self) -> None:
+        action_ids = {item["id"] for item in self.service.list_actions()}
+        self.assertIn("fearzone", action_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

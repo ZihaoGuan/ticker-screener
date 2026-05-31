@@ -15,6 +15,7 @@
   <div class="chart-layout">
     <div class="chart-surface">
       <div id="priceChart" class="chart-canvas"></div>
+      <div id="fearzonePanel" style="display:none; margin-top:12px; padding:10px 12px 12px; border-radius:16px; background:#0f172a;"></div>
       <div id="chartSummary" class="chart-summary">{{ entries[0].get("summary", "") if entries else "No watchlist entries available." }}</div>
     </div>
     <aside class="chart-sidebar">
@@ -81,6 +82,7 @@
   const chartEntry = document.getElementById('chartEntry');
   const chartTrigger = document.getElementById('chartTrigger');
   const chartStop = document.getElementById('chartStop');
+  const fearzonePanelRoot = document.getElementById('fearzonePanel');
 
   const chart = LightweightCharts.createChart(chartRoot, {
     layout: {
@@ -124,6 +126,51 @@
   const ma50Series = chart.addLineSeries({ color: '#f59e0b', lineWidth: 2 });
   const ma200Series = chart.addLineSeries({ color: '#7c3aed', lineWidth: 2 });
 
+  function renderFearzonePanel(payload, setupLabel) {
+    const rows = payload?.fearzone_panel?.rows || [];
+    const signals = new Set((payload?.fearzone_panel?.signals || []).map((item) => item.time));
+    const isFearzone = String(setupLabel || '').toLowerCase().includes('fearzone');
+    if (!fearzonePanelRoot) {
+      return;
+    }
+    if (!isFearzone || rows.length === 0) {
+      fearzonePanelRoot.style.display = 'none';
+      fearzonePanelRoot.innerHTML = '';
+      return;
+    }
+    const width = 1080;
+    const labelWidth = 96;
+    const rowHeight = 24;
+    const topPadding = 20;
+    const pointCount = rows[0]?.points?.length || 0;
+    const innerWidth = Math.max(1, width - labelWidth - 12);
+    const step = pointCount > 0 ? innerWidth / pointCount : innerWidth;
+    const height = topPadding + rows.length * rowHeight + 12;
+    let body = `<div style="color:#d4d4d8;font-size:12px;margin-bottom:8px;">Fearzone Panel</div>`;
+    body += `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:178px;display:block">`;
+    body += `<rect x="0" y="0" width="${width}" height="${height}" fill="#0f172a" rx="10"></rect>`;
+    rows.forEach((row, rowIndex) => {
+      const y = topPadding + rowIndex * rowHeight;
+      body += `<text x="${labelWidth - 8}" y="${y + 15}" fill="#d4d4d8" font-size="12" text-anchor="end">${row.label}</text>`;
+      (row.points || []).forEach((point, pointIndex) => {
+        const x = labelWidth + pointIndex * step;
+        const fill = point.active ? row.active_color : row.inactive_color;
+        const opacity = point.active ? 0.92 : 0.68;
+        body += `<rect x="${x}" y="${y}" width="${Math.max(1, step - 0.6)}" height="18" fill="${fill}" opacity="${opacity}" rx="1.8"></rect>`;
+      });
+    });
+    (rows[0]?.points || []).forEach((point, pointIndex) => {
+      if (!signals.has(point.time)) {
+        return;
+      }
+      const x = labelWidth + pointIndex * step + Math.max(0.5, step / 2);
+      body += `<line x1="${x}" y1="8" x2="${x}" y2="${height - 6}" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="3 4" opacity="0.9"></line>`;
+    });
+    body += `</svg>`;
+    fearzonePanelRoot.innerHTML = body;
+    fearzonePanelRoot.style.display = '';
+  }
+
   function resizeChart() {
     chart.applyOptions({ width: chartRoot.clientWidth, height: 520 });
     chart.timeScale().fitContent();
@@ -150,6 +197,7 @@
     ma20Series.setData(payload.ma20 || []);
     ma50Series.setData(payload.ma50 || []);
     ma200Series.setData(payload.ma200 || []);
+    renderFearzonePanel(payload, row.dataset.setup || '');
     chart.timeScale().fitContent();
   }
 

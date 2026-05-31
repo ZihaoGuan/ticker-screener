@@ -22,6 +22,17 @@ class AppConfig:
     htf_min_runup_pct: float = 100.0
     htf_max_correction_pct: float = 25.0
     weekly_htf_ema8_breach_tolerance_pct: float = 0.02
+    fearzone_high_period: int = 22
+    fearzone_band_period: int = 200
+    fearzone_band_std_multiplier: float = 1.0
+    fearzone_negative_impulse_lookback_days: int = 10
+    fearzone_negative_impulse_pct: float = 10.0
+    fearzone_ricochet_zone_pct: float = 0.10
+    fearzone_stochastic_k: int = 2
+    fearzone_stochastic_d: int = 3
+    fearzone_magic_k1_threshold: float = 30.0
+    fearzone_ma_long_period: int = 200
+    fearzone_recent_signal_lookback_days: int = 5
     ftd_sweep_history_days: int = 365
     ftd_sweep_pivot_lookback_left: int = 21
     ftd_sweep_pivot_lookback_right: int = 1
