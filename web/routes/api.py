@@ -5,8 +5,7 @@ import datetime as dt
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from src.config import load_app_config
-from src.ticker_filters import load_excluded_tickers
+from src.webapp.services.admin_service import AdminService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.rrg_service import RrgService
@@ -15,6 +14,7 @@ from src.webapp.services.run_service import RunService
 from src.webapp.services.watchlist_service import WatchlistService
 from web.dependencies import (
     get_ad_hoc_screen_service,
+    get_admin_service,
     get_dashboard_service,
     get_overlap_service,
     get_rrg_service,
@@ -171,7 +171,25 @@ def backtests_data() -> JSONResponse:
 
 
 @router.get("/admin/exclusions", response_class=JSONResponse)
-def exclusions_data() -> JSONResponse:
-    config = load_app_config()
-    excluded = sorted(load_excluded_tickers(config))
-    return JSONResponse({"excluded_tickers": excluded[:500], "excluded_count": len(excluded)})
+def exclusions_data(
+    coverage_start: str = Query(default="2020-01-01", alias="coverageStart"),
+    service: AdminService = Depends(get_admin_service),
+) -> JSONResponse:
+    return JSONResponse(service.get_context(coverage_start=coverage_start))
+
+
+@router.post("/admin/history-sync", response_class=JSONResponse)
+def launch_history_sync(
+    payload: dict[str, object] | None = Body(default=None),
+    service: RunService = Depends(get_run_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    options: dict[str, object] = {}
+    for key in ("start_date", "end_date", "tickers", "chunk_size"):
+        if key in request_payload:
+            options[key] = request_payload[key]
+    try:
+        job_id = service.launch("sync_postgres_market_data", options=options)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"ok": True, "job_id": job_id})

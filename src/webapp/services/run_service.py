@@ -25,6 +25,7 @@ class RunAction:
     supports_limit: bool = True
     extra_args: tuple[str, ...] = ()
     fields: tuple["RunField", ...] = ()
+    visible_in_runs: bool = True
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,16 @@ class RunService:
     _include_themes_field = RunField("include_themes", "Only Themes", "multiselect")
     _exclude_themes_field = RunField("exclude_themes", "Exclude Themes", "multiselect")
     _actions = {
+        "sync_postgres_market_data": RunAction(
+            "sync_postgres_market_data",
+            "Sync Postgres Market Data",
+            "scripts/sync_postgres_market_data.py",
+            supports_limit=False,
+            fields=(
+                _tickers_field,
+            ),
+            visible_in_runs=False,
+        ),
         "rs": RunAction(
             "rs",
             "Run RS",
@@ -363,6 +374,7 @@ class RunService:
                 ],
             }
             for action in self._actions.values()
+            if action.visible_in_runs
         ]
 
     def list_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -412,6 +424,12 @@ class RunService:
             command.extend(["--source", str(normalized["source"])])
         if normalized.get("reference_date"):
             command.extend(["--reference-date", str(normalized["reference_date"])])
+        if normalized.get("start_date"):
+            command.extend(["--start-date", str(normalized["start_date"])])
+        if normalized.get("end_date"):
+            command.extend(["--end-date", str(normalized["end_date"])])
+        if normalized.get("chunk_size") is not None:
+            command.extend(["--chunk-size", str(normalized["chunk_size"])])
         if normalized.get("filter_precedence"):
             command.extend(["--filter-precedence", str(normalized["filter_precedence"])])
         self._append_multi_args(command, "--include-sectors", normalized.get("include_sectors"))
@@ -473,10 +491,28 @@ class RunService:
             if tickers:
                 normalized["tickers"] = tickers
 
-        for key in ("date_label", "as_of_date", "reference_date", "source", "filter_precedence", "market_data_source"):
+        for key in (
+            "date_label",
+            "as_of_date",
+            "reference_date",
+            "source",
+            "filter_precedence",
+            "market_data_source",
+            "start_date",
+            "end_date",
+        ):
             value = options.get(key)
             if isinstance(value, str) and value.strip():
                 normalized[key] = value.strip()
+
+        for key in ("chunk_size",):
+            value = options.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                normalized[key] = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{key.replace('_', ' ').title()} must be an integer.") from exc
 
         for key in (
             "include_sectors",

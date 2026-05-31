@@ -96,6 +96,38 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(payload["job_id"], "job-1")
         self.assertIn("Cancellation requested", job["log_tail"])
 
+    def test_launch_sync_job_applies_start_date_end_date_chunk_size_and_tickers(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "sync_postgres_market_data",
+            options={
+                "start_date": "2020-01-01",
+                "end_date": "2026-05-31",
+                "chunk_size": "55",
+                "tickers": "AAPL NVDA",
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        self.assertIn("scripts/sync_postgres_market_data.py", command)
+        self.assertIn("--start-date", command)
+        self.assertIn("2020-01-01", command)
+        self.assertIn("--end-date", command)
+        self.assertIn("2026-05-31", command)
+        self.assertIn("--chunk-size", command)
+        self.assertIn("55", command)
+        tickers_index = command.index("--tickers")
+        self.assertEqual(command[tickers_index + 1 : tickers_index + 3], ["AAPL", "NVDA"])
+
 
 if __name__ == "__main__":
     unittest.main()

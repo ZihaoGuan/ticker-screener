@@ -163,6 +163,25 @@ export type BacktestsResponse = {
 export type AdminResponse = {
   excluded_tickers: string[];
   excluded_count: number;
+  database_status: {
+    database_configured: boolean;
+    coverage_start: string;
+    coverage_end: string;
+    target_universe_count: number;
+    db_ticker_count: number;
+    covered_ticker_count: number;
+    partial_ticker_count: number;
+    missing_ticker_count: number;
+    total_bar_rows: number;
+    overall_first_trade_date: string | null;
+    overall_last_trade_date: string | null;
+    latest_metadata_update_at: string | null;
+    stale_ticker_count: number;
+    coverage_percent: number;
+    sample_missing_tickers: string[];
+    sample_partial_tickers: string[];
+    notes: string[];
+  };
 };
 
 export type RrgUniverse = "sector" | "industry" | "theme";
