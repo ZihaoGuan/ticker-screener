@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { LoadingBlock } from "../components/LoadingBlock";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/Panel";
 import { ProgressBar } from "../components/ProgressBar";
 import { ScreenerConfigModal } from "../components/ScreenerConfigModal";
 import { fetchJson } from "../lib/api";
+import { formatLocalDateTime } from "../lib/format";
 import type { JobsResponse } from "../lib/types";
 import "./RunsPage.css";
 
@@ -14,9 +17,20 @@ export function RunsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isCancellingJobId, setIsCancellingJobId] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   const refresh = () => {
-    void fetchJson<JobsResponse>("/api/jobs").then(setPayload).catch(() => setPayload({ actions: [], jobs: [] }));
+    void fetchJson<JobsResponse>("/api/jobs")
+      .then((nextPayload) => {
+        setPayload(nextPayload);
+        setHasError(false);
+      })
+      .catch(() => {
+        setPayload({ actions: [], jobs: [] });
+        setHasError(true);
+      })
+      .finally(() => setIsLoading(false));
   };
 
   useEffect(() => {
@@ -117,6 +131,7 @@ export function RunsPage() {
     <>
       <div className="page-grid">
         <Panel title="Available Screeners">
+          {isLoading && !payload ? <LoadingBlock label="Loading available screeners…" /> : null}
           <div className="screeners-grid">
             {(payload?.actions ?? []).map((action) => (
               <div key={action.id} className="screener-card">
@@ -177,6 +192,7 @@ export function RunsPage() {
         </Panel>
 
         <Panel title="Recent Screener Jobs">
+          {isLoading && !payload ? <LoadingBlock label="Loading recent jobs…" /> : null}
           <table className="data-table">
             <thead>
               <tr>
@@ -204,8 +220,8 @@ export function RunsPage() {
                   <td>
                     <StatusPill status={job.status} />
                   </td>
-                  <td>{job.started_at || "-"}</td>
-                  <td>{job.finished_at || "-"}</td>
+                  <td>{formatLocalDateTime(job.started_at)}</td>
+                  <td>{formatLocalDateTime(job.finished_at)}</td>
                   <td>{job.success_count}</td>
                   <td>{formatDuration(job.duration_seconds)}</td>
                   <td>
@@ -230,6 +246,14 @@ export function RunsPage() {
                       >
                         {isCancellingJobId === job.job_id ? "Stopping..." : "Stop"}
                       </button>
+                    ) : job.watchlist_url ? (
+                      <Link
+                        className="table-action-button table-link-button"
+                        to={job.watchlist_url}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        Open Result
+                      </Link>
                     ) : (
                       <span className="eyebrow">Done</span>
                     )}
@@ -238,6 +262,7 @@ export function RunsPage() {
               ))}
             </tbody>
           </table>
+          {hasError ? <p className="panel-copy">Latest job snapshot failed to refresh. Showing empty fallback.</p> : null}
         </Panel>
 
         <Panel

@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
+import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
 import type { OverlapResponse } from "../lib/types";
 
 export function OverlapPage() {
   const [payload, setPayload] = useState<OverlapResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    void fetchJson<OverlapResponse>("/api/overlap/latest").then(setPayload).catch(() => setPayload(null));
+    void fetchJson<OverlapResponse>("/api/overlap/latest")
+      .then(setPayload)
+      .catch(() => setPayload(null))
+      .finally(() => setIsLoading(false));
   }, []);
 
   return (
     <div className="page-grid">
       <Panel title="Overlap Summary" aside={<span className="eyebrow">Latest daily snapshot</span>}>
+        {isLoading ? <LoadingBlock label="Loading overlap summary…" compact /> : null}
         <div className="card-grid overlap-cards">
           <article className="metric-card">
             <h3>Unique Tickers</h3>
@@ -30,6 +36,7 @@ export function OverlapPage() {
       </Panel>
 
       <Panel title="Candidates">
+        {isLoading ? <LoadingBlock label="Loading overlap candidates…" compact /> : null}
         <table className="data-table">
           <thead>
             <tr>

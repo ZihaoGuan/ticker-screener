@@ -8,18 +8,23 @@ import pandas as pd
 import yfinance as yf
 
 from ...config import AppConfig
+from ...etf_matcher import infer_theme_tags_for_ticker, load_ticker_theme_overrides
+from ...ticker_filters import normalize_ticker_symbol
+from ...universe import UniverseTicker, load_universe
+from ...config import load_app_config
 from ..repositories.watchlist_repository import WatchlistRepository
 
 
 class WatchlistService:
     def __init__(self, artifacts_dir: Path) -> None:
         self.repository = WatchlistRepository(artifacts_dir=artifacts_dir)
+        self._universe_index: dict[str, UniverseTicker] | None = None
 
     def list_recent(self) -> list[dict[str, Any]]:
         return self.repository.list_recent_watchlists(limit=50)
 
     def get_watchlist_detail(self, stem: str) -> dict[str, Any]:
-        entries = self.repository.load_watchlist(stem)
+        entries = self._enrich_entries(self.repository.load_watchlist(stem))
         return {
             "stem": stem,
             "entry_count": len(entries),
@@ -150,6 +155,49 @@ class WatchlistService:
             "rs_markers": rs_markers,
             "fearzone_panel": fearzone_panel,
         }
+
+    def _enrich_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        universe_index = self._get_universe_index()
+        overrides = load_ticker_theme_overrides()
+        enriched: list[dict[str, Any]] = []
+        for raw_entry in entries:
+            entry = dict(raw_entry)
+            ticker = normalize_ticker_symbol(str(entry.get("ticker", "")))
+            metadata = universe_index.get(ticker)
+            sector = _coalesce_text(entry.get("sector"), metadata.sector if metadata else None)
+            industry = _coalesce_text(entry.get("industry"), metadata.industry if metadata else None)
+            exchange = _coalesce_text(entry.get("exchange"), metadata.exchange if metadata else None)
+            theme_tags = _normalize_theme_tags(entry.get("theme_tags"))
+            if not theme_tags and ticker:
+                theme_tags = infer_theme_tags_for_ticker(
+                    ticker=ticker,
+                    sector=sector,
+                    industry=industry,
+                    overrides=overrides,
+                )
+            if ticker:
+                entry["ticker"] = ticker
+            if sector:
+                entry["sector"] = sector
+            if industry:
+                entry["industry"] = industry
+            if exchange:
+                entry["exchange"] = exchange
+            if theme_tags:
+                entry["theme_tags"] = theme_tags
+            enriched.append(entry)
+        return enriched
+
+    def _get_universe_index(self) -> dict[str, UniverseTicker]:
+        if self._universe_index is not None:
+            return self._universe_index
+        universe = load_universe(load_app_config())
+        self._universe_index = {
+            normalize_ticker_symbol(item.symbol): item
+            for item in universe
+            if getattr(item, "symbol", "")
+        }
+        return self._universe_index
 
 
 def _empty_chart_payload(ticker: str) -> dict[str, Any]:
@@ -285,3 +333,22 @@ def _compute_fearzone_panel(frame: pd.DataFrame) -> dict[str, Any]:
 
     signal_points = [{"time": pd.Timestamp(index).date().isoformat()} for index, active in signals.items() if bool(active)]
     return {"rows": rows, "signals": signal_points}
+
+
+def _coalesce_text(*values: object) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _normalize_theme_tags(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    tags: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in tags:
+            tags.append(text)
+    return tags

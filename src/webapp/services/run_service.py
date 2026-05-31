@@ -680,6 +680,8 @@ class RunService:
 
     def _serialize_job(self, job: dict[str, Any]) -> dict[str, Any]:
         duration_seconds = self._job_duration_seconds(job)
+        watchlist_file = str(job.get("watchlist_file") or "")
+        watchlist_stem = self._watchlist_stem_from_path(watchlist_file)
         return {
             "job_id": str(job.get("job_id") or ""),
             "action_id": str(job.get("action_id") or ""),
@@ -695,7 +697,9 @@ class RunService:
             "progress_percent": job.get("progress_percent"),
             "progress_label": job.get("progress_label"),
             "success_count": int(job.get("success_count") or 0),
-            "watchlist_file": str(job.get("watchlist_file") or ""),
+            "watchlist_file": watchlist_file,
+            "watchlist_stem": watchlist_stem,
+            "watchlist_url": f"/watchlists?stem={watchlist_stem}" if watchlist_stem else "",
             "summary_file": str(job.get("summary_file") or ""),
             "cancel_requested": bool(job.get("cancel_requested")),
             "duration_seconds": duration_seconds,
@@ -718,3 +722,11 @@ class RunService:
 
     def _now_iso(self) -> str:
         return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+    def _watchlist_stem_from_path(self, watchlist_file: str) -> str:
+        if not watchlist_file:
+            return ""
+        path = Path(watchlist_file.strip())
+        if path.suffix.lower() != ".json":
+            return ""
+        return path.stem

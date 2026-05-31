@@ -22,9 +22,30 @@ export const consoleTail = [
 ].join("\n");
 
 export const watchlistFiles: WatchlistFile[] = [
-  { stem: "rs_20260526", name: "rs_20260526.json", path: "/tmp/rs_20260526.json" },
-  { stem: "vcp_20260525", name: "vcp_20260525.json", path: "/tmp/vcp_20260525.json" },
-  { stem: "growth_leaders_20260524", name: "growth_leaders_20260524.json", path: "/tmp/growth_leaders_20260524.json" },
+  {
+    stem: "rs_20260526",
+    name: "rs_20260526.json",
+    path: "/tmp/rs_20260526.json",
+    group_key: "rs",
+    group_label: "RS",
+    captured_at: "2026-05-26T09:30:00Z",
+  },
+  {
+    stem: "vcp_20260525",
+    name: "vcp_20260525.json",
+    path: "/tmp/vcp_20260525.json",
+    group_key: "vcp",
+    group_label: "VCP",
+    captured_at: "2026-05-25T09:30:00Z",
+  },
+  {
+    stem: "growth_leaders_20260524",
+    name: "growth_leaders_20260524.json",
+    path: "/tmp/growth_leaders_20260524.json",
+    group_key: "other",
+    group_label: "Other",
+    captured_at: "2026-05-24T09:30:00Z",
+  },
 ];
 
 export const watchlistTickers: WatchlistTicker[] = [

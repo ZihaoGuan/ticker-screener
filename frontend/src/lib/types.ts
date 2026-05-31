@@ -24,6 +24,10 @@ export type WatchlistFile = {
   stem: string;
   name: string;
   path: string;
+  group_key: string;
+  group_label: string;
+  captured_at: string;
+  sort_date?: string | null;
 };
 
 export type WatchlistTicker = {
@@ -99,6 +103,8 @@ export type JobsResponse = {
     progress_label: string | null;
     success_count: number;
     watchlist_file: string;
+    watchlist_stem: string;
+    watchlist_url: string;
     summary_file: string;
     cancel_requested: boolean;
     duration_seconds: number;
@@ -113,6 +119,31 @@ export type WatchlistDetailResponse = {
   stem: string;
   entry_count: number;
   entries: Record<string, unknown>[];
+};
+
+export type ExclusionEntry = {
+  ticker: string;
+  reason: string;
+  reasons: string[];
+  sources: string[];
+  source_kinds: string[];
+  removable: boolean;
+};
+
+export type PartialTickerSummary = {
+  ticker: string;
+};
+
+export type PartialTickerDetailResponse = {
+  ticker: string;
+  coverage_start: string;
+  coverage_end: string;
+  first_trade_date: string | null;
+  last_trade_date: string | null;
+  bar_count: number;
+  missing_ranges: Array<{ start: string; end: string; days: number }>;
+  missing_date_count: number;
+  sample_missing_dates: string[];
 };
 
 export type WatchlistChartResponse = {
@@ -171,7 +202,7 @@ export type BacktestsResponse = {
 };
 
 export type AdminResponse = {
-  excluded_tickers: string[];
+  excluded_tickers: ExclusionEntry[];
   excluded_count: number;
   database_status: {
     database_configured: boolean;
@@ -188,8 +219,8 @@ export type AdminResponse = {
     latest_metadata_update_at: string | null;
     stale_ticker_count: number;
     coverage_percent: number;
-    sample_missing_tickers: string[];
-    sample_partial_tickers: string[];
+    sample_missing_tickers: PartialTickerSummary[];
+    sample_partial_tickers: PartialTickerSummary[];
     notes: string[];
   };
 };
