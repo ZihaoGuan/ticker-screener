@@ -269,7 +269,95 @@ def _find_ftd_events(frame: pd.DataFrame, config: AppConfig) -> list[_FtdEvent]:
         exhaust_accum = 0
         exhaustion_ready = False
 
-    return events
+    fallback_events = _find_ftd_events_from_pivot_recovery(
+        frame=frame,
+        config=config,
+        pivot_lows=pivot_lows,
+        close_sma_21=close_sma_21,
+        obv_values=obv_values,
+        obv_sma_9=obv_sma_9,
+        bullish_body_pct=bullish_body_pct,
+    )
+    merged: dict[str, _FtdEvent] = {event.date: event for event in events}
+    for event in fallback_events:
+        merged.setdefault(event.date, event)
+    return sorted(merged.values(), key=lambda item: item.index)
+
+
+def _find_ftd_events_from_pivot_recovery(
+    *,
+    frame: pd.DataFrame,
+    config: AppConfig,
+    pivot_lows: np.ndarray,
+    close_sma_21: np.ndarray,
+    obv_values: np.ndarray,
+    obv_sma_9: np.ndarray,
+    bullish_body_pct: np.ndarray,
+) -> list[_FtdEvent]:
+    left = int(config.ftd_sweep_pivot_lookback_left)
+    open_values = frame["Open"].to_numpy(dtype=float)
+    high_values = frame["High"].to_numpy(dtype=float)
+    close_values = frame["Close"].to_numpy(dtype=float)
+    volume_values = frame["Volume"].to_numpy(dtype=float)
+    dates = frame.index
+    fallback_events: list[_FtdEvent] = []
+
+    for pivot_index, pivot_low in enumerate(pivot_lows):
+        if not np.isfinite(pivot_low):
+            continue
+        if pivot_index < left:
+            continue
+
+        recovery_index: int | None = None
+        recovery_search_end = min(len(frame) - 1, pivot_index + 3)
+        for index in range(pivot_index + 1, recovery_search_end + 1):
+            if close_values[index] > open_values[index] and close_values[index] > close_values[index - 1]:
+                recovery_index = index
+                break
+        if recovery_index is None:
+            continue
+
+        confirmation_end = recovery_index + 2
+        if confirmation_end >= len(frame):
+            continue
+        if np.any(close_values[recovery_index: confirmation_end + 1] <= float(pivot_low)):
+            continue
+
+        breakout_start = recovery_index + 3
+        breakout_end = min(len(frame) - 1, recovery_index + 7)
+        if breakout_start > breakout_end:
+            continue
+
+        bullish_average = bullish_body_pct[: breakout_end + 1]
+        bullish_average = bullish_average[bullish_average > 0]
+        avg_bullish_body_pct = float(bullish_average.mean()) if bullish_average.size else 0.0
+
+        for breakout_index in range(breakout_start, breakout_end + 1):
+            breakout_body_pct = bullish_body_pct[breakout_index]
+            if breakout_body_pct <= avg_bullish_body_pct:
+                continue
+            if not np.isfinite(close_sma_21[breakout_index]) or close_values[breakout_index] <= close_sma_21[breakout_index]:
+                continue
+            if volume_values[breakout_index - 1] <= 0:
+                continue
+            if volume_values[breakout_index] <= float(config.ftd_sweep_breakout_volume_multiplier) * volume_values[breakout_index - 1]:
+                continue
+            if obv_values[breakout_index] <= obv_values[breakout_index - 1]:
+                continue
+            if not np.isfinite(obv_sma_9[breakout_index]) or obv_values[breakout_index] <= obv_sma_9[breakout_index]:
+                continue
+            fallback_events.append(
+                _FtdEvent(
+                    index=breakout_index,
+                    date=dates[breakout_index].date().isoformat(),
+                    high=float(high_values[breakout_index]),
+                    pivot_low=float(pivot_low),
+                    volume_ratio=float(volume_values[breakout_index] / volume_values[breakout_index - 1]),
+                )
+            )
+            break
+
+    return fallback_events
 
 
 def _find_recent_sweep_breakout(
