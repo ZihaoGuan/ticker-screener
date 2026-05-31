@@ -70,7 +70,7 @@ export function RunsPage() {
   );
   const selectedJobLog = useMemo(() => selectedJob?.log_tail ?? "No job log yet.", [selectedJob]);
 
-  const handleRunAction = async (params: Record<string, string | string[]>) => {
+  const handleRunAction = async (params: Record<string, string | string[]>, actionId = selectedActionId) => {
     setIsRunning(true);
     try {
       const body: Record<string, string | string[]> = {};
@@ -83,7 +83,7 @@ export function RunsPage() {
           body[key] = value.trim();
         }
       }
-      await fetchJson<{ ok: boolean; job_id: string }>(`/api/runs/${selectedActionId}`, {
+      await fetchJson<{ ok: boolean; job_id: string }>(`/api/runs/${actionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -97,6 +97,11 @@ export function RunsPage() {
   const handleConfigureClick = (actionId: string) => {
     setSelectedActionId(actionId);
     setIsModalOpen(true);
+  };
+
+  const handleQuickRun = async (actionId: string) => {
+    setSelectedActionId(actionId);
+    await handleRunAction({}, actionId);
   };
 
   const handleCancelJob = async (jobId: string) => {
@@ -140,17 +145,29 @@ export function RunsPage() {
                 </div>
                 <p className="screener-description">
                   {action.fields.length > 0
-                    ? "Click to configure parameters and run"
-                    : "Click to run without parameters"}
+                    ? "Run with defaults now, or open config for custom parameters."
+                    : "Run immediately with the default screener settings."}
                 </p>
-                <button
-                  className="screener-run-button"
-                  onClick={() => handleConfigureClick(action.id)}
-                  type="button"
-                  disabled={isRunning}
-                >
-                  CONFIGURE & RUN
-                </button>
+                <div className="screener-card-actions">
+                  <button
+                    className="screener-run-button"
+                    onClick={() => void handleQuickRun(action.id)}
+                    type="button"
+                    disabled={isRunning}
+                  >
+                    RUN DEFAULT
+                  </button>
+                  {action.fields.length > 0 ? (
+                    <button
+                      className="screener-config-button"
+                      onClick={() => handleConfigureClick(action.id)}
+                      type="button"
+                      disabled={isRunning}
+                    >
+                      CONFIGURE
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>

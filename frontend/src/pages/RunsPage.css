@@ -74,6 +74,41 @@
   cursor: not-allowed;
 }
 
+.screener-card-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.screener-config-button {
+  background: transparent;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  color: #f4f4f5;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex: 1;
+}
+
+.screener-config-button:hover:not(:disabled) {
+  border-color: #34d399;
+  color: #34d399;
+}
+
+.screener-config-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.screener-run-button {
+  flex: 1;
+}
+
 .run-progress-panel {
   display: flex;
   flex-direction: column;
@@ -93,5 +128,9 @@
 
   .screener-card {
     padding: 16px;
+  }
+
+  .screener-card-actions {
+    flex-direction: column;
   }
 }
