@@ -210,75 +210,77 @@ export function RunsPage() {
 
         <Panel title="Recent Screener Jobs">
           {isLoading && !payload ? <LoadingBlock label="Loading recent jobs…" /> : null}
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Job ID</th>
-                <th>Screener</th>
-                <th>Status</th>
-                <th>Start Time</th>
-                <th>Finish Time</th>
-                <th>Hits</th>
-                <th>Duration</th>
-                <th>Progress</th>
-                <th>RC</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(payload?.jobs ?? []).map((job) => (
-                <tr
-                  key={job.job_id}
-                  className={job.job_id === selectedJob?.job_id ? "is-selected-row" : ""}
-                  onClick={() => setSelectedJobId(job.job_id)}
-                >
-                  <td className="mono">#{job.job_id}</td>
-                  <td>{job.label}</td>
-                  <td>
-                    <StatusPill status={job.status} />
-                  </td>
-                  <td>{formatLocalDateTime(job.started_at)}</td>
-                  <td>{formatLocalDateTime(job.finished_at)}</td>
-                  <td>{job.success_count}</td>
-                  <td>{formatDuration(job.duration_seconds)}</td>
-                  <td>
-                    <ProgressBar
-                      status={job.status}
-                      progress={job.progress_percent}
-                      label={job.progress_label ?? undefined}
-                      compact
-                    />
-                  </td>
-                  <td className="mono">{job.return_code ?? "-"}</td>
-                  <td>
-                    {job.status === "running" ? (
-                      <button
-                        className="table-action-button"
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleCancelJob(job.job_id);
-                        }}
-                        disabled={isCancellingJobId === job.job_id}
-                      >
-                        {isCancellingJobId === job.job_id ? "Stopping..." : "Stop"}
-                      </button>
-                    ) : job.watchlist_url ? (
-                      <Link
-                        className="table-action-button table-link-button"
-                        to={job.watchlist_url}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        Open Result
-                      </Link>
-                    ) : (
-                      <span className="eyebrow">Done</span>
-                    )}
-                  </td>
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Job ID</th>
+                  <th>Screener</th>
+                  <th>Status</th>
+                  <th>Start Time</th>
+                  <th>Finish Time</th>
+                  <th>Hits</th>
+                  <th>Duration</th>
+                  <th>Progress</th>
+                  <th>RC</th>
+                  <th>Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {(payload?.jobs ?? []).map((job) => (
+                  <tr
+                    key={job.job_id}
+                    className={job.job_id === selectedJob?.job_id ? "is-selected-row" : ""}
+                    onClick={() => setSelectedJobId(job.job_id)}
+                  >
+                    <td data-label="Job ID" className="mono">#{job.job_id}</td>
+                    <td data-label="Screener">{job.label}</td>
+                    <td data-label="Status">
+                      <StatusPill status={job.status} />
+                    </td>
+                    <td data-label="Start Time">{formatLocalDateTime(job.started_at)}</td>
+                    <td data-label="Finish Time">{formatLocalDateTime(job.finished_at)}</td>
+                    <td data-label="Hits">{job.success_count}</td>
+                    <td data-label="Duration">{formatDuration(job.duration_seconds)}</td>
+                    <td data-label="Progress">
+                      <ProgressBar
+                        status={job.status}
+                        progress={job.progress_percent}
+                        label={job.progress_label ?? undefined}
+                        compact
+                      />
+                    </td>
+                    <td data-label="RC" className="mono">{job.return_code ?? "-"}</td>
+                    <td data-label="Action">
+                      {job.status === "running" ? (
+                        <button
+                          className="table-action-button"
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleCancelJob(job.job_id);
+                          }}
+                          disabled={isCancellingJobId === job.job_id}
+                        >
+                          {isCancellingJobId === job.job_id ? "Stopping..." : "Stop"}
+                        </button>
+                      ) : job.watchlist_url ? (
+                        <Link
+                          className="table-action-button table-link-button"
+                          to={job.watchlist_url}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          Open Result
+                        </Link>
+                      ) : (
+                        <span className="eyebrow">Done</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {hasError ? <p className="panel-copy">Latest job snapshot failed to refresh. Showing empty fallback.</p> : null}
         </Panel>
 

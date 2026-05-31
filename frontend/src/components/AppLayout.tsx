@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import { useEffect, useState, type PropsWithChildren } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
 const navItems = [
@@ -14,15 +14,20 @@ const navItems = [
 
 export function AppLayout({ children }: PropsWithChildren) {
   const location = useLocation();
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    setIsMobileNavOpen(false);
+  }, [location.pathname]);
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={`sidebar${isMobileNavOpen ? " is-open" : ""}`}>
         <div className="brand-block">
           <div className="brand-title">Ticker Screener</div>
           <div className="brand-subtitle">Clinical Analytics</div>
         </div>
-        <nav className="sidebar-nav">
+        <nav id="primary-navigation" className="sidebar-nav">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -48,7 +53,18 @@ export function AppLayout({ children }: PropsWithChildren) {
       </aside>
       <div className="main-shell">
         <header className="topbar">
-          <div className="search-box">CMD + K to search…</div>
+          <div className="topbar-main">
+            <button
+              className="mobile-nav-toggle"
+              type="button"
+              onClick={() => setIsMobileNavOpen((current) => !current)}
+              aria-expanded={isMobileNavOpen}
+              aria-controls="primary-navigation"
+            >
+              {isMobileNavOpen ? "Close" : "Menu"}
+            </button>
+            <div className="search-box">CMD + K to search…</div>
+          </div>
           <div className="topbar-status">
             <span className="status-chip">WEB: HEALTHY</span>
             <span className="status-chip">DB: CONNECTED</span>

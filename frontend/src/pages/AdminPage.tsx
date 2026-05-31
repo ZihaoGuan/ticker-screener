@@ -178,46 +178,48 @@ export function AdminPage() {
             </article>
           </div>
 
-          <table className="data-table">
-            <tbody>
-              <tr>
-                <td>Database Configured</td>
-                <td>{db.database_configured ? "Yes" : "No"}</td>
-              </tr>
-              <tr>
-                <td>Coverage Window</td>
-                <td>{db.coverage_start} to {db.coverage_end || "-"}</td>
-              </tr>
-              <tr>
-                <td>DB Tickers</td>
-                <td>{formatCount(db.db_ticker_count)}</td>
-              </tr>
-              <tr>
-                <td>Total Bar Rows</td>
-                <td>{formatCount(db.total_bar_rows)}</td>
-              </tr>
-              <tr>
-                <td>Overall First / Last Trade Date</td>
-                <td>{db.overall_first_trade_date || "-"} / {db.overall_last_trade_date || "-"}</td>
-              </tr>
-              <tr>
-                <td>Latest Metadata Update</td>
-                <td>{formatLocalDateTime(db.latest_metadata_update_at)}</td>
-              </tr>
-              <tr>
-                <td>Partial Tickers</td>
-                <td>{formatCount(db.partial_ticker_count)}</td>
-              </tr>
-              <tr>
-                <td>Missing Tickers</td>
-                <td>{formatCount(db.missing_ticker_count)}</td>
-              </tr>
-              <tr>
-                <td>Stale Tickers</td>
-                <td>{formatCount(db.stale_ticker_count)}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <tbody>
+                <tr>
+                  <td data-label="Metric">Database Configured</td>
+                  <td data-label="Value">{db.database_configured ? "Yes" : "No"}</td>
+                </tr>
+                <tr>
+                  <td data-label="Metric">Coverage Window</td>
+                  <td data-label="Value">{db.coverage_start} to {db.coverage_end || "-"}</td>
+                </tr>
+                <tr>
+                  <td data-label="Metric">DB Tickers</td>
+                  <td data-label="Value">{formatCount(db.db_ticker_count)}</td>
+                </tr>
+                <tr>
+                  <td data-label="Metric">Total Bar Rows</td>
+                  <td data-label="Value">{formatCount(db.total_bar_rows)}</td>
+                </tr>
+                <tr>
+                  <td data-label="Metric">Overall First / Last Trade Date</td>
+                  <td data-label="Value">{db.overall_first_trade_date || "-"} / {db.overall_last_trade_date || "-"}</td>
+                </tr>
+                <tr>
+                  <td data-label="Metric">Latest Metadata Update</td>
+                  <td data-label="Value">{formatLocalDateTime(db.latest_metadata_update_at)}</td>
+                </tr>
+                <tr>
+                  <td data-label="Metric">Partial Tickers</td>
+                  <td data-label="Value">{formatCount(db.partial_ticker_count)}</td>
+                </tr>
+                <tr>
+                  <td data-label="Metric">Missing Tickers</td>
+                  <td data-label="Value">{formatCount(db.missing_ticker_count)}</td>
+                </tr>
+                <tr>
+                  <td data-label="Metric">Stale Tickers</td>
+                  <td data-label="Value">{formatCount(db.stale_ticker_count)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           {db.notes.length > 0 ? <div className="panel-copy">{db.notes.join(" ")}</div> : null}
 

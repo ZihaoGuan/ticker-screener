@@ -44,26 +44,28 @@ export function DashboardPage() {
 
       <div className="split-grid">
         <Panel title="Recent Screening Activity" aside={<Link className="ghost-button" to="/runs">View all runs</Link>}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Screener</th>
-                <th>Timestamp</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((job) => (
-                <tr key={job.job_id}>
-                  <td>{job.label}</td>
-                  <td>{formatLocalDateTime(job.started_at)}</td>
-                  <td>
-                    <StatusPill status={job.status} />
-                  </td>
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Screener</th>
+                  <th>Timestamp</th>
+                  <th>Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {jobs.map((job) => (
+                  <tr key={job.job_id}>
+                    <td data-label="Screener">{job.label}</td>
+                    <td data-label="Timestamp">{formatLocalDateTime(job.started_at)}</td>
+                    <td data-label="Status">
+                      <StatusPill status={job.status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Panel>
 
         <Panel title="Recent Watchlists">

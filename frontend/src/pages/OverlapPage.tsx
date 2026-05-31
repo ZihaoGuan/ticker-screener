@@ -37,26 +37,28 @@ export function OverlapPage() {
 
       <Panel title="Candidates">
         {isLoading ? <LoadingBlock label="Loading overlap candidates…" compact /> : null}
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Ticker</th>
-              <th>Overlap</th>
-              <th>Pipelines</th>
-              <th>Sector</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(payload?.overlap_two_plus ?? []).map((entry) => (
-              <tr key={entry.ticker}>
-                <td>{entry.ticker}</td>
-                <td>{entry.pipeline_count}</td>
-                <td>{entry.pipeline_labels.join(", ")}</td>
-                <td>{entry.sector ?? "-"}</td>
+        <div className="data-table-responsive">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Overlap</th>
+                <th>Pipelines</th>
+                <th>Sector</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(payload?.overlap_two_plus ?? []).map((entry) => (
+                <tr key={entry.ticker}>
+                  <td data-label="Ticker">{entry.ticker}</td>
+                  <td data-label="Overlap">{entry.pipeline_count}</td>
+                  <td data-label="Pipelines">{entry.pipeline_labels.join(", ")}</td>
+                  <td data-label="Sector">{entry.sector ?? "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Panel>
     </div>
   );
