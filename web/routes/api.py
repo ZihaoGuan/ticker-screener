@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
@@ -8,9 +10,11 @@ from src.ticker_filters import load_excluded_tickers
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.rrg_service import RrgService
+from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.watchlist_service import WatchlistService
 from web.dependencies import (
+    get_ad_hoc_screen_service,
     get_dashboard_service,
     get_overlap_service,
     get_rrg_service,
@@ -44,6 +48,33 @@ def run_action(
         status_code = 404 if str(exc).startswith("Unknown run action") else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return JSONResponse({"ok": True, "job_id": job_id})
+
+
+@router.post("/ad-hoc-screen", response_class=JSONResponse)
+def ad_hoc_screen(
+    payload: dict[str, object] | None = Body(default=None),
+    service: AdHocScreenService = Depends(get_ad_hoc_screen_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    ticker = str(request_payload.get("ticker") or "").strip()
+    as_of_date_raw = str(request_payload.get("as_of_date") or "").strip()
+    screener_ids_raw = request_payload.get("screeners")
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+    if not as_of_date_raw:
+        raise HTTPException(status_code=400, detail="as_of_date is required")
+    try:
+        as_of_date = dt.date.fromisoformat(as_of_date_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="as_of_date must be YYYY-MM-DD") from exc
+    if not isinstance(screener_ids_raw, list) or not screener_ids_raw:
+        raise HTTPException(status_code=400, detail="screeners must be a non-empty array")
+    screener_ids = [str(item).strip() for item in screener_ids_raw if str(item).strip()]
+    try:
+        result = service.run(ticker=ticker, as_of_date=as_of_date, screener_ids=screener_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(result)
 
 
 @router.get("/watchlists", response_class=JSONResponse)

@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import datetime as dt
 
 from .config import AppConfig
-from .cookstock_bridge import freeze_cookstock_today, load_configured_cookstock
+from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
 from .universe import UniverseTicker
 
 
@@ -117,60 +117,69 @@ def run_htf_runup_screen(
     )
 
     with freeze_cookstock_today(cookstock, as_of_date):
-        for position, ticker in enumerate(tickers, start=1):
-            print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
-            try:
-                financials = cookstock.cookFinancials(
-                    ticker.symbol,
-                    benchmarkTicker=config.benchmark_ticker,
-                    historyLookbackDays=history_days,
-                )
-                runup_summary = financials._get_htf_runup_summary(config.htf_runup_window_days)
-                if not runup_summary:
-                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no 8W runup summary | passed={len(hits)}")
-                    continue
-                ema_21 = financials._get_latest_ema_value(21)
-                current_price = float(runup_summary["current_price"])
-                if ema_21 is None:
-                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing 21 EMA | passed={len(hits)}")
-                    continue
-                if current_price <= float(ema_21):
-                    print(
-                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                        f"current {current_price:.2f} <= 21 EMA {float(ema_21):.2f} | passed={len(hits)}"
+        position = 0
+        for ticker_batch in iter_prefetched_cookstock_batches(
+            config,
+            tickers,
+            as_of_date=as_of_date,
+            history_lookback_days=history_days,
+            benchmark_ticker=config.benchmark_ticker,
+        ):
+            for ticker in ticker_batch:
+                position += 1
+                print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
+                try:
+                    financials = cookstock.cookFinancials(
+                        ticker.symbol,
+                        benchmarkTicker=config.benchmark_ticker,
+                        historyLookbackDays=history_days,
                     )
-                    continue
-                runup_pct = float(runup_summary["runup_pct"])
-                if runup_pct < min_runup_pct:
-                    print(
-                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                        f"runup {runup_pct:.1f}% < {min_runup_pct:.1f}% | passed={len(hits)}"
+                    runup_summary = financials._get_htf_runup_summary(config.htf_runup_window_days)
+                    if not runup_summary:
+                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no 8W runup summary | passed={len(hits)}")
+                        continue
+                    ema_21 = financials._get_latest_ema_value(21)
+                    current_price = float(runup_summary["current_price"])
+                    if ema_21 is None:
+                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing 21 EMA | passed={len(hits)}")
+                        continue
+                    if current_price <= float(ema_21):
+                        print(
+                            f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                            f"current {current_price:.2f} <= 21 EMA {float(ema_21):.2f} | passed={len(hits)}"
+                        )
+                        continue
+                    runup_pct = float(runup_summary["runup_pct"])
+                    if runup_pct < min_runup_pct:
+                        print(
+                            f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                            f"runup {runup_pct:.1f}% < {min_runup_pct:.1f}% | passed={len(hits)}"
+                        )
+                        continue
+                    htf_summary = financials.get_htf_leader_summary(
+                        sectorName=ticker.sector,
+                        benchmarkTicker=config.benchmark_ticker,
                     )
-                    continue
-                htf_summary = financials.get_htf_leader_summary(
-                    sectorName=ticker.sector,
-                    benchmarkTicker=config.benchmark_ticker,
-                )
-                htf_grade = str(htf_summary.get("htf_grade", "")).upper() if htf_summary else ""
-                runup_summary["has_htf_shape"] = htf_grade in {"A", "B"}
-                runup_summary["htf_grade"] = htf_grade or None
-                runup_summary["htf_score"] = htf_summary.get("htf_score") if htf_summary else None
-                runup_summary["htf_trade_plan"] = htf_summary.get("trade_plan") if htf_summary else None
-                runup_summary["ema_21"] = float(ema_21)
-                runup_summary["price_above_ema21"] = True
-                hits.append(_to_hit(ticker, config.benchmark_ticker, runup_summary))
-                latest_hit = hits[-1]
-                htf_suffix = ""
-                if latest_hit.has_htf_shape and latest_hit.htf_score is not None:
-                    htf_suffix = f" | HTF {latest_hit.htf_grade} {latest_hit.htf_score:.1f}"
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} passed: "
-                    f"runup {latest_hit.runup_pct:.1f}% pullback {latest_hit.pullback_from_high_pct:.1f}% "
-                    f"above 21 EMA {latest_hit.ema_21:.2f}{htf_suffix} | passed={len(hits)}"
-                )
-            except Exception as exc:
-                failures.append({"ticker": ticker.symbol, "error": str(exc)})
-                print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+                    htf_grade = str(htf_summary.get("htf_grade", "")).upper() if htf_summary else ""
+                    runup_summary["has_htf_shape"] = htf_grade in {"A", "B"}
+                    runup_summary["htf_grade"] = htf_grade or None
+                    runup_summary["htf_score"] = htf_summary.get("htf_score") if htf_summary else None
+                    runup_summary["htf_trade_plan"] = htf_summary.get("trade_plan") if htf_summary else None
+                    runup_summary["ema_21"] = float(ema_21)
+                    runup_summary["price_above_ema21"] = True
+                    hits.append(_to_hit(ticker, config.benchmark_ticker, runup_summary))
+                    latest_hit = hits[-1]
+                    htf_suffix = ""
+                    if latest_hit.has_htf_shape and latest_hit.htf_score is not None:
+                        htf_suffix = f" | HTF {latest_hit.htf_grade} {latest_hit.htf_score:.1f}"
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} passed: "
+                        f"runup {latest_hit.runup_pct:.1f}% pullback {latest_hit.pullback_from_high_pct:.1f}% "
+                        f"above 21 EMA {latest_hit.ema_21:.2f}{htf_suffix} | passed={len(hits)}"
+                    )
+                except Exception as exc:
+                    failures.append({"ticker": ticker.symbol, "error": str(exc)})
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
 
     hits.sort(
         key=lambda hit: (

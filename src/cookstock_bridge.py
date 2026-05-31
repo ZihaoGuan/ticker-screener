@@ -1,20 +1,28 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 import datetime as real_dt
 import importlib
+import math
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Iterable
 
 from .config import AppConfig, project_root
 from .market_data_access import (
     build_cookstock_payload_from_frame,
     build_cookstock_price_list_from_frame,
     db_frame_has_recent_coverage,
+    load_many_ticker_windows,
     load_daily_bars_frame_from_db,
     resolve_market_data_source,
+    resolve_database_url,
 )
+
+
+_prefetched_market_data: ContextVar[dict[str, object] | None] = ContextVar("_prefetched_market_data", default=None)
 
 
 def vendor_cookstock_root() -> Path:
@@ -95,6 +103,17 @@ def _apply_market_data_source_patches(module: ModuleType, market_data_source: st
     original_get_benchmark_price_data = cook_financials_cls._ticker_screener_original_get_benchmark_price_data
 
     def patched_get_historical_price_data(self, start_date, end_date, time_interval):
+        prefetched = _prefetched_market_data.get()
+        if prefetched and time_interval == "daily":
+            ticker_frames = prefetched.get("ticker_frames", {})
+            frame = ticker_frames.get(str(self.ticker).upper())
+            if frame is not None:
+                start_dt = real_dt.date.fromisoformat(str(start_date))
+                end_dt = real_dt.date.fromisoformat(str(end_date))
+                sliced = frame.loc[(frame.index.date >= start_dt) & (frame.index.date <= end_dt)]
+                payload = build_cookstock_payload_from_frame(str(self.ticker), sliced)
+                if payload is not None:
+                    return payload
         active_strategy = resolve_market_data_source(getattr(module.algoParas, "MARKET_DATA_SOURCE", strategy))
         if active_strategy == "database-first" and time_interval == "daily":
             start_dt = real_dt.date.fromisoformat(str(start_date))
@@ -108,6 +127,16 @@ def _apply_market_data_source_patches(module: ModuleType, market_data_source: st
         return original_get_historical_price_data(self, start_date, end_date, time_interval)
 
     def patched_get_benchmark_price_data(self, benchmarkTicker=None):
+        prefetched = _prefetched_market_data.get()
+        if prefetched:
+            ticker = self._resolve_benchmark_ticker(benchmarkTicker).upper()
+            benchmark_frames = prefetched.get("benchmark_frames", {})
+            frame = benchmark_frames.get(ticker) or prefetched.get("ticker_frames", {}).get(ticker)
+            if frame is not None:
+                cache_key = (ticker, int(getattr(self, "history_lookback_days", 365)))
+                if cache_key not in self.benchmark_price_cache:
+                    self.benchmark_price_cache[cache_key] = build_cookstock_price_list_from_frame(frame)
+                return self.benchmark_price_cache[cache_key]
         active_strategy = resolve_market_data_source(getattr(module.algoParas, "MARKET_DATA_SOURCE", strategy))
         if active_strategy == "database-first":
             ticker = self._resolve_benchmark_ticker(benchmarkTicker)
@@ -134,6 +163,15 @@ def _apply_market_data_source_patches(module: ModuleType, market_data_source: st
         original_warm_shared_benchmark_cache = batch_process_cls._ticker_screener_original_warm_shared_benchmark_cache
 
         def patched_warm_shared_benchmark_cache(self, history_days):
+            prefetched = _prefetched_market_data.get()
+            if prefetched:
+                cache_key = (self.benchmark_ticker.upper(), int(history_days))
+                benchmark_frames = prefetched.get("benchmark_frames", {})
+                frame = benchmark_frames.get(self.benchmark_ticker.upper())
+                if frame is not None:
+                    module.cookFinancials.benchmark_price_cache[cache_key] = build_cookstock_price_list_from_frame(frame)
+                    self.shared_benchmark_cache_warmed = True
+                    return
             active_strategy = resolve_market_data_source(getattr(module.algoParas, "MARKET_DATA_SOURCE", strategy))
             if active_strategy == "database-first":
                 cache_key = (self.benchmark_ticker.upper(), int(history_days))
@@ -159,6 +197,108 @@ def load_configured_cookstock(config: AppConfig, *, market_data_source: str | No
     apply_config_to_cookstock(module, config)
     _apply_market_data_source_patches(module, market_data_source)
     return module
+
+
+def resolve_prefetch_batch_size(total_tickers: int, *, override: int | None = None) -> int:
+    if override is not None and override > 0:
+        return override
+    candidate = 250
+    raw = str(Path.cwd().joinpath(".").name)  # keep deterministic branch below even without env
+    _ = raw
+    try:
+        import os
+
+        env_value = os.getenv("TICKER_SCREENER_PREFETCH_BATCH_SIZE", "").strip()
+        if env_value:
+            candidate = int(env_value)
+    except Exception:
+        candidate = 250
+    return max(1, min(max(1, total_tickers), candidate))
+
+
+def should_use_prefetched_market_data(*, market_data_source: str | None = None, database_url: str | None = None) -> bool:
+    return resolve_market_data_source(market_data_source) == "database-first" and bool(resolve_database_url(database_url))
+
+
+@contextmanager
+def use_prefetched_market_data(*, ticker_frames: dict[str, object], benchmark_frames: dict[str, object]) -> None:
+    token = _prefetched_market_data.set(
+        {
+            "ticker_frames": {str(key).upper(): value for key, value in ticker_frames.items()},
+            "benchmark_frames": {str(key).upper(): value for key, value in benchmark_frames.items()},
+        }
+    )
+    try:
+        yield
+    finally:
+        _prefetched_market_data.reset(token)
+
+
+@contextmanager
+def prefetched_cookstock_market_data(
+    config: AppConfig,
+    tickers: Iterable[str],
+    *,
+    as_of_date: real_dt.date | None,
+    history_lookback_days: int,
+    benchmark_ticker: str | None = None,
+    market_data_source: str | None = None,
+    database_url: str | None = None,
+):
+    if not should_use_prefetched_market_data(market_data_source=market_data_source, database_url=database_url):
+        yield
+        return
+
+    target_date = as_of_date or real_dt.date.today()
+    ticker_list = [str(item).strip().upper() for item in tickers if str(item).strip()]
+    benchmark = (benchmark_ticker or config.benchmark_ticker).strip().upper()
+    if benchmark:
+        ticker_list.append(benchmark)
+    trading_days_needed = max(1, int(math.ceil(int(history_lookback_days) * 0.75)) + 20)
+    frames = load_many_ticker_windows(ticker_list, target_date, trading_days_needed, database_url=database_url)
+    ticker_frames = {ticker: frame for ticker, frame in frames.items() if ticker != benchmark}
+    benchmark_frames = {benchmark: frames[benchmark]} if benchmark in frames else {}
+    print(
+        "market-data prefetch="
+        f"tickers:{len(ticker_frames)} "
+        f"benchmark:{benchmark if benchmark_frames else 'missing'} "
+        f"trading_days:{trading_days_needed}"
+    )
+    with use_prefetched_market_data(ticker_frames=ticker_frames, benchmark_frames=benchmark_frames):
+        yield
+
+
+def iter_prefetched_cookstock_batches(
+    config: AppConfig,
+    tickers: list[object],
+    *,
+    as_of_date: real_dt.date | None,
+    history_lookback_days: int,
+    benchmark_ticker: str | None = None,
+    batch_size: int | None = None,
+    market_data_source: str | None = None,
+    database_url: str | None = None,
+):
+    if not tickers:
+        return
+    if not should_use_prefetched_market_data(market_data_source=market_data_source, database_url=database_url):
+        yield tickers
+        return
+
+    size = resolve_prefetch_batch_size(len(tickers), override=batch_size)
+    for start in range(0, len(tickers), size):
+        batch = tickers[start : start + size]
+        symbols = [str(getattr(item, "symbol", item)).strip().upper() for item in batch if str(getattr(item, "symbol", item)).strip()]
+        with prefetched_cookstock_market_data(
+            config,
+            symbols,
+            as_of_date=as_of_date,
+            history_lookback_days=history_lookback_days,
+            benchmark_ticker=benchmark_ticker,
+            market_data_source=market_data_source,
+            database_url=database_url,
+        ):
+            yield batch
 
 
 @contextmanager

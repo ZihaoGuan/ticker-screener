@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import datetime as dt
 
 from .config import AppConfig
-from .cookstock_bridge import freeze_cookstock_today, load_configured_cookstock
+from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
 from .universe import UniverseTicker
 
 
@@ -190,103 +190,113 @@ def run_vcp_screen(
     run_date = as_of_date or dt.date.today()
     date_from = run_date - dt.timedelta(days=100)
     total_tickers = len(tickers)
+    history_days = max(config.rs_new_high_history_days, 365)
 
     with freeze_cookstock_today(cookstock, as_of_date):
-        for position, ticker in enumerate(tickers, start=1):
-            print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
-            try:
-                financials = cookstock.cookFinancials(
-                    ticker.symbol,
-                    benchmarkTicker=config.benchmark_ticker,
-                    historyLookbackDays=max(config.rs_new_high_history_days, 365),
-                )
-                passed = financials.combined_best_strategy(
-                    sectorName=ticker.sector,
-                    benchmarkTicker=config.benchmark_ticker,
-                    screenProfile=screen_profile,
-                )
-                if not passed:
-                    continue
-
-                vcp_contractions_count, vcp_record = financials.find_volatility_contraction_pattern(date_from)
-                footprint = financials.get_footPrint()
-                is_good_pivot, current_price, support_price, pivot_price = financials.is_pivot_good()
-                is_deep_correction = financials.is_correction_deep()
-                is_demand_dry, start_date, end_date, _, slope, _, _, _, _, slope_recent, _ = financials.is_demand_dry()
-                is_breakout_volume_confirmed, breakout_day_volume, breakout_avg_volume_50 = financials.is_breakout_volume_confirmed()
-
-                payload: dict[str, object] = {
-                    "current_price": current_price,
-                    "support_price": support_price,
-                    "pivot_price": pivot_price,
-                    "vcp_contractions_count": vcp_contractions_count,
-                    "vcp_record": vcp_record,
-                    "footprint": footprint,
-                    "is_vcp_structure_valid": financials.is_vcp_structure_valid(),
-                    "is_good_pivot": is_good_pivot,
-                    "is_deep_correction": is_deep_correction,
-                    "is_demand_dry": is_demand_dry,
-                    "demand_dry_start_date": start_date if start_date not in (-1, None) else None,
-                    "demand_dry_end_date": end_date if end_date not in (-1, None) else None,
-                    "demand_dry_volume_slope": slope,
-                    "demand_dry_recent_volume_slope": slope_recent,
-                    "is_breakout_volume_confirmed": is_breakout_volume_confirmed,
-                    "breakout_day_volume": breakout_day_volume,
-                    "breakout_avg_volume_50": breakout_avg_volume_50,
-                    "is_near_year_high": None,
-                    "year_high": None,
-                    "distance_from_year_high_pct": None,
-                    "is_strong_rs": None,
-                    "stock_return_vs_rs_window_pct": None,
-                    "benchmark_return_vs_rs_window_pct": None,
-                    "current_rs_line": None,
-                    "rs_line_high": None,
-                    "is_sector_etf_strong": None,
-                    "sector_etf": None,
-                    "sector_etf_near_year_high": None,
-                    "sector_etf_distance_from_year_high_pct": None,
-                    "sector_etf_return_vs_rs_window_pct": None,
-                    "sector_benchmark_return_vs_rs_window_pct": None,
-                }
-
-                if screen_profile != "legacy":
-                    is_near_year_high, _, year_high, year_high_distance = financials.is_near_year_high()
-                    is_strong_rs, stock_return, benchmark_return, current_rs_line, rs_line_high = financials.is_relative_strength_strong(
-                        config.benchmark_ticker
+        position = 0
+        for ticker_batch in iter_prefetched_cookstock_batches(
+            config,
+            tickers,
+            as_of_date=as_of_date,
+            history_lookback_days=history_days,
+            benchmark_ticker=config.benchmark_ticker,
+        ):
+            for ticker in ticker_batch:
+                position += 1
+                print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
+                try:
+                    financials = cookstock.cookFinancials(
+                        ticker.symbol,
+                        benchmarkTicker=config.benchmark_ticker,
+                        historyLookbackDays=history_days,
                     )
-                    (
-                        is_sector_etf_strong,
-                        sector_etf,
-                        sector_etf_near_year_high,
-                        _sector_etf_current,
-                        _sector_etf_year_high,
-                        sector_etf_distance_from_year_high_pct,
-                        sector_etf_return_vs_rs_window_pct,
-                        sector_benchmark_return_vs_rs_window_pct,
-                    ) = financials.is_sector_etf_strong(ticker.sector, config.benchmark_ticker)
-                    payload.update(
-                        {
-                            "is_near_year_high": is_near_year_high,
-                            "year_high": year_high,
-                            "distance_from_year_high_pct": year_high_distance,
-                            "is_strong_rs": is_strong_rs,
-                            "stock_return_vs_rs_window_pct": stock_return,
-                            "benchmark_return_vs_rs_window_pct": benchmark_return,
-                            "current_rs_line": current_rs_line,
-                            "rs_line_high": rs_line_high,
-                            "is_sector_etf_strong": is_sector_etf_strong,
-                            "sector_etf": sector_etf,
-                            "sector_etf_near_year_high": sector_etf_near_year_high,
-                            "sector_etf_distance_from_year_high_pct": sector_etf_distance_from_year_high_pct,
-                            "sector_etf_return_vs_rs_window_pct": sector_etf_return_vs_rs_window_pct,
-                            "sector_benchmark_return_vs_rs_window_pct": sector_benchmark_return_vs_rs_window_pct,
-                        }
+                    passed = financials.combined_best_strategy(
+                        sectorName=ticker.sector,
+                        benchmarkTicker=config.benchmark_ticker,
+                        screenProfile=screen_profile,
                     )
+                    if not passed:
+                        continue
 
-                hits.append(_to_hit(ticker, config.benchmark_ticker, screen_profile, payload, run_date))
-            except Exception as exc:
-                failures.append({"ticker": ticker.symbol, "error": str(exc)})
-                print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+                    vcp_contractions_count, vcp_record = financials.find_volatility_contraction_pattern(date_from)
+                    footprint = financials.get_footPrint()
+                    is_good_pivot, current_price, support_price, pivot_price = financials.is_pivot_good()
+                    is_deep_correction = financials.is_correction_deep()
+                    is_demand_dry, start_date, end_date, _, slope, _, _, _, _, slope_recent, _ = financials.is_demand_dry()
+                    is_breakout_volume_confirmed, breakout_day_volume, breakout_avg_volume_50 = financials.is_breakout_volume_confirmed()
+
+                    payload: dict[str, object] = {
+                        "current_price": current_price,
+                        "support_price": support_price,
+                        "pivot_price": pivot_price,
+                        "vcp_contractions_count": vcp_contractions_count,
+                        "vcp_record": vcp_record,
+                        "footprint": footprint,
+                        "is_vcp_structure_valid": financials.is_vcp_structure_valid(),
+                        "is_good_pivot": is_good_pivot,
+                        "is_deep_correction": is_deep_correction,
+                        "is_demand_dry": is_demand_dry,
+                        "demand_dry_start_date": start_date if start_date not in (-1, None) else None,
+                        "demand_dry_end_date": end_date if end_date not in (-1, None) else None,
+                        "demand_dry_volume_slope": slope,
+                        "demand_dry_recent_volume_slope": slope_recent,
+                        "is_breakout_volume_confirmed": is_breakout_volume_confirmed,
+                        "breakout_day_volume": breakout_day_volume,
+                        "breakout_avg_volume_50": breakout_avg_volume_50,
+                        "is_near_year_high": None,
+                        "year_high": None,
+                        "distance_from_year_high_pct": None,
+                        "is_strong_rs": None,
+                        "stock_return_vs_rs_window_pct": None,
+                        "benchmark_return_vs_rs_window_pct": None,
+                        "current_rs_line": None,
+                        "rs_line_high": None,
+                        "is_sector_etf_strong": None,
+                        "sector_etf": None,
+                        "sector_etf_near_year_high": None,
+                        "sector_etf_distance_from_year_high_pct": None,
+                        "sector_etf_return_vs_rs_window_pct": None,
+                        "sector_benchmark_return_vs_rs_window_pct": None,
+                    }
+
+                    if screen_profile != "legacy":
+                        is_near_year_high, _, year_high, year_high_distance = financials.is_near_year_high()
+                        is_strong_rs, stock_return, benchmark_return, current_rs_line, rs_line_high = financials.is_relative_strength_strong(
+                            config.benchmark_ticker
+                        )
+                        (
+                            is_sector_etf_strong,
+                            sector_etf,
+                            sector_etf_near_year_high,
+                            _sector_etf_current,
+                            _sector_etf_year_high,
+                            sector_etf_distance_from_year_high_pct,
+                            sector_etf_return_vs_rs_window_pct,
+                            sector_benchmark_return_vs_rs_window_pct,
+                        ) = financials.is_sector_etf_strong(ticker.sector, config.benchmark_ticker)
+                        payload.update(
+                            {
+                                "is_near_year_high": is_near_year_high,
+                                "year_high": year_high,
+                                "distance_from_year_high_pct": year_high_distance,
+                                "is_strong_rs": is_strong_rs,
+                                "stock_return_vs_rs_window_pct": stock_return,
+                                "benchmark_return_vs_rs_window_pct": benchmark_return,
+                                "current_rs_line": current_rs_line,
+                                "rs_line_high": rs_line_high,
+                                "is_sector_etf_strong": is_sector_etf_strong,
+                                "sector_etf": sector_etf,
+                                "sector_etf_near_year_high": sector_etf_near_year_high,
+                                "sector_etf_distance_from_year_high_pct": sector_etf_distance_from_year_high_pct,
+                                "sector_etf_return_vs_rs_window_pct": sector_etf_return_vs_rs_window_pct,
+                                "sector_benchmark_return_vs_rs_window_pct": sector_benchmark_return_vs_rs_window_pct,
+                            }
+                        )
+
+                    hits.append(_to_hit(ticker, config.benchmark_ticker, screen_profile, payload, run_date))
+                except Exception as exc:
+                    failures.append({"ticker": ticker.symbol, "error": str(exc)})
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
 
     print(f"screen complete: passed={len(hits)}, failed={len(failures)}, total={total_tickers}")
 

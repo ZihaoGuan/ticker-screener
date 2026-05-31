@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.templating import Jinja2Templates
 
 from src.webapp.config import PROJECT_ROOT, load_webapp_config
+from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.rrg_service import RrgService
@@ -32,3 +33,7 @@ def get_overlap_service() -> OverlapService:
 
 def get_rrg_service() -> RrgService:
     return RrgService(output_dir=config.output_dir, reports_fqdn=config.reports_fqdn)
+
+
+def get_ad_hoc_screen_service() -> AdHocScreenService:
+    return AdHocScreenService(database_url=config.database_url)
