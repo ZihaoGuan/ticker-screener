@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import datetime as dt
 import unittest
 from unittest.mock import patch
 
-from src.webapp.services.admin_service import AdminService
+from src.webapp.services.admin_service import AdminService, _build_missing_ranges
 
 
 class AdminServiceTests(unittest.TestCase):
@@ -54,8 +55,27 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(db["partial_ticker_count"], 1)
         self.assertEqual(db["missing_ticker_count"], 1)
         self.assertEqual(db["coverage_percent"], 33.3)
-        self.assertEqual(db["sample_missing_tickers"], ["NVDA"])
-        self.assertEqual(db["sample_partial_tickers"], ["MSFT"])
+        self.assertEqual(db["sample_missing_tickers"], [{"ticker": "NVDA"}])
+        self.assertEqual(db["sample_partial_tickers"], [{"ticker": "MSFT"}])
+
+    def test_build_missing_ranges_combines_edge_windows_and_internal_gaps(self) -> None:
+        payload = _build_missing_ranges(
+            coverage_start=dt.date(2020, 1, 1),
+            coverage_end=dt.date(2020, 1, 31),
+            first_trade_date=dt.date(2020, 1, 10),
+            last_trade_date=dt.date(2020, 1, 24),
+            missing_dates=[dt.date(2020, 1, 15), dt.date(2020, 1, 16), dt.date(2020, 1, 21)],
+        )
+
+        self.assertEqual(
+            payload,
+            [
+                {"start": "2020-01-01", "end": "2020-01-09", "days": 9},
+                {"start": "2020-01-25", "end": "2020-01-31", "days": 7},
+                {"start": "2020-01-15", "end": "2020-01-16", "days": 2},
+                {"start": "2020-01-21", "end": "2020-01-21", "days": 1},
+            ],
+        )
 
 
 if __name__ == "__main__":

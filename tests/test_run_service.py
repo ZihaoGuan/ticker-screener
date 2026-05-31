@@ -62,6 +62,25 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(job["success_count"], 7)
         self.assertEqual(job["watchlist_file"], "/tmp/watchlist.json")
 
+    def test_serialize_job_exposes_watchlist_navigation_fields(self) -> None:
+        payload = self.service._serialize_job(
+            {
+                "job_id": "job-1",
+                "action_id": "rs",
+                "label": "Run RS",
+                "status": "success",
+                "command": "python scripts/run_rs_screen.py",
+                "started_at": "2026-05-31T00:00:00+00:00",
+                "finished_at": "2026-05-31T00:02:00+00:00",
+                "watchlist_file": "/tmp/rs_new_high_2026-05-31.json",
+                "_started_monotonic": 1.0,
+                "_finished_monotonic": 2.0,
+            }
+        )
+
+        self.assertEqual(payload["watchlist_stem"], "rs_new_high_2026-05-31")
+        self.assertEqual(payload["watchlist_url"], "/watchlists?stem=rs_new_high_2026-05-31")
+
     def test_cancel_marks_job_and_terminates_process(self) -> None:
         process = _DummyProcess()
         job = {

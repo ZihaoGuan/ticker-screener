@@ -1,16 +1,22 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { LoadingBlock } from "../components/LoadingBlock";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
+import { formatLocalDateTime } from "../lib/format";
 import type { DashboardResponse, JobsResponse } from "../lib/types";
 
 export function DashboardPage() {
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [jobs, setJobs] = useState<JobsResponse["jobs"]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    void fetchJson<DashboardResponse>("/api/dashboard").then(setDashboard).catch(() => setDashboard(null));
-    void fetchJson<JobsResponse>("/api/jobs").then((payload) => setJobs(payload.jobs)).catch(() => setJobs([]));
+    Promise.all([
+      fetchJson<DashboardResponse>("/api/dashboard").then(setDashboard).catch(() => setDashboard(null)),
+      fetchJson<JobsResponse>("/api/jobs").then((payload) => setJobs(payload.jobs)).catch(() => setJobs([])),
+    ]).finally(() => setIsLoading(false));
   }, []);
 
   const strategyCards = dashboard?.strategy_cards ?? [];
@@ -19,6 +25,7 @@ export function DashboardPage() {
   return (
     <div className="page-grid">
       <Panel title="Key Strategy Metrics" aside={<span className="eyebrow">Last 24 hours</span>}>
+        {isLoading ? <LoadingBlock label="Loading dashboard metrics…" compact /> : null}
         <div className="card-grid">
           {strategyCards.map((card) => (
             <article key={card.id} className="metric-card">
@@ -36,7 +43,7 @@ export function DashboardPage() {
       </Panel>
 
       <div className="split-grid">
-        <Panel title="Recent Screening Activity" aside={<button className="ghost-button">View all runs</button>}>
+        <Panel title="Recent Screening Activity" aside={<Link className="ghost-button" to="/runs">View all runs</Link>}>
           <table className="data-table">
             <thead>
               <tr>
@@ -49,7 +56,7 @@ export function DashboardPage() {
               {jobs.map((job) => (
                 <tr key={job.job_id}>
                   <td>{job.label}</td>
-                  <td>{job.started_at || "-"}</td>
+                  <td>{formatLocalDateTime(job.started_at)}</td>
                   <td>
                     <StatusPill status={job.status} />
                   </td>
@@ -60,6 +67,7 @@ export function DashboardPage() {
         </Panel>
 
         <Panel title="Recent Watchlists">
+          {isLoading ? <LoadingBlock label="Loading recent watchlists…" compact /> : null}
           <div className="file-list">
             {watchlistFiles.map((file) => (
               <div key={file.stem} className="file-row">

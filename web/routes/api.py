@@ -178,6 +178,51 @@ def exclusions_data(
     return JSONResponse(service.get_context(coverage_start=coverage_start))
 
 
+@router.get("/admin/partial-tickers/{ticker}", response_class=JSONResponse)
+def partial_ticker_detail(
+    ticker: str,
+    coverage_start: str = Query(default="2020-01-01", alias="coverageStart"),
+    service: AdminService = Depends(get_admin_service),
+) -> JSONResponse:
+    try:
+        return JSONResponse(service.get_partial_ticker_detail(ticker=ticker, coverage_start=coverage_start))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/admin/exclusions", response_class=JSONResponse)
+def add_exclusion(
+    payload: dict[str, object] | None = Body(default=None),
+    service: AdminService = Depends(get_admin_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        entry = service.add_exclusion(
+            ticker=str(request_payload.get("ticker") or ""),
+            reason=str(request_payload.get("reason") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"ok": True, "entry": entry})
+
+
+@router.post("/admin/exclusions/{ticker}/remove", response_class=JSONResponse)
+def remove_exclusion(
+    ticker: str,
+    payload: dict[str, object] | None = Body(default=None),
+    service: AdminService = Depends(get_admin_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        entry = service.remove_exclusion(
+            ticker=ticker,
+            reason=str(request_payload.get("reason") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"ok": True, "entry": entry})
+
+
 @router.post("/admin/history-sync", response_class=JSONResponse)
 def launch_history_sync(
     payload: dict[str, object] | None = Body(default=None),
