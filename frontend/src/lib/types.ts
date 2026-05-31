@@ -90,6 +90,8 @@ export type JobsResponse = {
   actions: RunAction[];
   jobs: {
     job_id: string;
+    action_id: string;
+    job_run_id?: number | null;
     label: string;
     status: JobStatus;
     started_at: string;
@@ -106,6 +108,9 @@ export type JobsResponse = {
     watchlist_stem: string;
     watchlist_url: string;
     summary_file: string;
+    raw_results_file?: string;
+    screen_run_id?: number | null;
+    backtest_run_id?: number | null;
     cancel_requested: boolean;
     duration_seconds: number;
   }[];
@@ -197,8 +202,70 @@ export type OverlapResponse = {
   pipeline_status: Array<{ label: string; count: number; file_present: boolean }>;
 };
 
+export type ScreenerRunSummary = {
+  id: number;
+  strategy_id: string;
+  run_date: string;
+  config_hash: string;
+  market_data_mode: string;
+  source_kind: string;
+  hit_count: number;
+  failure_count: number;
+  raw_artifact_path: string;
+  watchlist_artifact_path: string;
+  report_artifact_path: string;
+  result_summary_json?: Record<string, unknown>;
+  deleted_at?: string | null;
+  deleted_reason?: string | null;
+  created_at?: string;
+};
+
+export type SignalCacheCoverage = {
+  strategy_id: string;
+  run_count: number;
+  run_with_hits_count: number;
+  first_run_date: string | null;
+  last_run_date: string | null;
+};
+
+export type ScreenerRunsResponse = {
+  configured: boolean;
+  runs: ScreenerRunSummary[];
+  coverage: SignalCacheCoverage[];
+  available_strategies: Array<{ id: string; label: string }>;
+};
+
+export type BacktestRunSummary = {
+  id: number;
+  strategy_id: string;
+  start_date: string;
+  end_date: string;
+  parameters: Record<string, unknown>;
+  summary: {
+    entry_count?: number;
+    signal_count?: number;
+    partial?: boolean;
+    results_by_rule?: Record<string, { trade_count: number; avg_return_pct: number | null; median_return_pct: number | null; win_rate_pct: number | null }>;
+  };
+  html_report_path: string;
+  json_report_path: string;
+  job_run_id?: number | null;
+  created_at?: string;
+};
+
 export type BacktestsResponse = {
-  backtest_templates: Array<{ label: string; description: string; command: string }>;
+  backtest_templates: Array<{
+    label: string;
+    description: string;
+    entry_rule: { mode: "min_count_same_day"; screener_ids: string[]; min_count: number };
+    exit_rules: Array<Record<string, unknown>>;
+    signal_cache_policy: "reuse_then_fill" | "reuse_only";
+    market_data_mode: "database_only";
+  }>;
+  backtest_runs: BacktestRunSummary[];
+  signal_cache: SignalCacheCoverage[];
+  available_strategies: Array<{ id: string; label: string }>;
+  default_exit_rules: Array<Record<string, unknown>>;
 };
 
 export type AdminResponse = {

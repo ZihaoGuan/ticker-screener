@@ -5,10 +5,12 @@ from fastapi.templating import Jinja2Templates
 from src.webapp.config import PROJECT_ROOT, load_webapp_config
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.admin_service import AdminService
+from src.webapp.services.backtest_service import BacktestService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.run_service import RunService
+from src.webapp.services.screener_history_service import ScreenerHistoryService
 from src.webapp.services.watchlist_service import WatchlistService
 
 
@@ -29,7 +31,15 @@ def get_watchlist_service() -> WatchlistService:
 
 
 def get_run_service() -> RunService:
-    return RunService(project_root=PROJECT_ROOT)
+    return RunService(project_root=PROJECT_ROOT, database_url=config.database_url, artifacts_dir=config.artifacts_dir)
+
+
+def get_screener_history_service() -> ScreenerHistoryService:
+    return ScreenerHistoryService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
+
+
+def get_backtest_service() -> BacktestService:
+    return BacktestService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
 
 
 def get_overlap_service() -> OverlapService:

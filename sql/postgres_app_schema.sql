@@ -79,18 +79,53 @@ CREATE TABLE IF NOT EXISTS screen_runs (
   strategy_id TEXT NOT NULL,
   run_date DATE NOT NULL,
   job_run_id BIGINT REFERENCES job_runs(id) ON DELETE SET NULL,
+  config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  config_hash TEXT NOT NULL DEFAULT '',
+  scope_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  scope_hash TEXT NOT NULL DEFAULT '',
+  market_data_mode TEXT NOT NULL DEFAULT 'internet',
+  source_kind TEXT NOT NULL DEFAULT 'exchange-universe',
   hit_count INTEGER NOT NULL DEFAULT 0,
   failure_count INTEGER NOT NULL DEFAULT 0,
+  result_summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   raw_artifact_path TEXT,
   watchlist_artifact_path TEXT,
   report_artifact_path TEXT,
   notes TEXT,
+  deleted_at TIMESTAMPTZ,
+  deleted_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (strategy_id, run_date)
+  UNIQUE (strategy_id, run_date, config_hash, scope_hash)
 );
 
 CREATE INDEX IF NOT EXISTS idx_screen_runs_strategy_run_date
   ON screen_runs(strategy_id, run_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_screen_runs_not_deleted
+  ON screen_runs(strategy_id, deleted_at, run_date DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_screen_runs_unique_scope
+  ON screen_runs(strategy_id, run_date, config_hash, scope_hash);
+
+CREATE TABLE IF NOT EXISTS screen_run_hits (
+  id BIGSERIAL PRIMARY KEY,
+  screen_run_id BIGINT NOT NULL REFERENCES screen_runs(id) ON DELETE CASCADE,
+  strategy_id TEXT NOT NULL,
+  signal_date DATE NOT NULL,
+  ticker TEXT NOT NULL,
+  passed BOOLEAN NOT NULL DEFAULT FALSE,
+  rank INTEGER,
+  metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  reasons_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  hit_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_screen_run_hits_strategy_signal_passed
+  ON screen_run_hits(strategy_id, signal_date DESC, passed);
+
+CREATE INDEX IF NOT EXISTS idx_screen_run_hits_ticker_signal_date
+  ON screen_run_hits(ticker, signal_date DESC);
 
 CREATE TABLE IF NOT EXISTS backtest_runs (
   id BIGSERIAL PRIMARY KEY,
@@ -121,3 +156,29 @@ CREATE TABLE IF NOT EXISTS report_artifacts (
 
 CREATE INDEX IF NOT EXISTS idx_report_artifacts_strategy_date
   ON report_artifacts(strategy_id, run_date DESC);
+
+ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS scope_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS scope_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS market_data_mode TEXT NOT NULL DEFAULT 'internet';
+ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS source_kind TEXT NOT NULL DEFAULT 'exchange-universe';
+ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS result_summary_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS deleted_reason TEXT;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.table_constraints
+    WHERE table_name = 'screen_runs'
+      AND constraint_name = 'screen_runs_strategy_id_run_date_key'
+  ) THEN
+    ALTER TABLE screen_runs DROP CONSTRAINT screen_runs_strategy_id_run_date_key;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN
+    NULL;
+END
+$$;

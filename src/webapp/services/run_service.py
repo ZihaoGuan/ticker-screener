@@ -15,6 +15,8 @@ from typing import Any
 
 from src.config import load_app_config
 from src.universe_filters import build_filter_option_catalog
+from src.webapp.services.screener_history_service import ScreenerHistoryService
+from src.webapp.repositories.history_repository import HistoryRepository
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,20 @@ class RunService:
     _include_themes_field = RunField("include_themes", "Only Themes", "multiselect")
     _exclude_themes_field = RunField("exclude_themes", "Exclude Themes", "multiselect")
     _actions = {
+        "screener_history_batch": RunAction(
+            "screener_history_batch",
+            "Batch Screener History Cache",
+            "scripts/run_screener_history_batch.py",
+            supports_limit=False,
+            visible_in_runs=False,
+        ),
+        "backtest_v1": RunAction(
+            "backtest_v1",
+            "Run Backtest",
+            "scripts/run_backtest.py",
+            supports_limit=False,
+            visible_in_runs=False,
+        ),
         "sync_postgres_market_data": RunAction(
             "sync_postgres_market_data",
             "Sync Postgres Market Data",
@@ -369,8 +385,16 @@ class RunService:
     _jobs: list[dict[str, Any]] = []
     _jobs_by_id: dict[str, dict[str, Any]] = {}
 
-    def __init__(self, project_root: Path) -> None:
+    def __init__(self, project_root: Path, *, database_url: str = "", artifacts_dir: Path | None = None) -> None:
         self.project_root = project_root
+        self.database_url = database_url
+        self.artifacts_dir = artifacts_dir or (project_root / "artifacts")
+        self.history_repository = HistoryRepository(database_url=database_url, artifacts_dir=self.artifacts_dir)
+        self.screener_history_service = ScreenerHistoryService(
+            database_url=database_url,
+            artifacts_dir=self.artifacts_dir,
+            repository=self.history_repository,
+        )
 
     def list_actions(self) -> list[dict[str, Any]]:
         filter_catalog = self._get_filter_catalog()
@@ -426,6 +450,16 @@ class RunService:
             raise ValueError(f"Unknown run action: {action_id}")
 
         normalized = self._normalize_options(action, options or {})
+        request_payload = {"action_id": action_id, "options": normalized}
+        job_run_id = self.history_repository.create_job_run(
+            job_type=self._job_type_for_action(action_id),
+            job_name=action.label,
+            status="running",
+            trigger_source="manual",
+            request_payload=request_payload,
+        )
+        if job_run_id is not None:
+            normalized["job_run_id"] = job_run_id
         job_id = uuid.uuid4().hex[:12]
         started_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
         command = [sys.executable, action.script_path]
@@ -449,6 +483,28 @@ class RunService:
             command.extend(["--end-date", str(normalized["end_date"])])
         if normalized.get("chunk_size") is not None:
             command.extend(["--chunk-size", str(normalized["chunk_size"])])
+        if normalized.get("strategy_ids_json"):
+            command.extend(["--strategy-ids-json", str(normalized["strategy_ids_json"])])
+        if normalized.get("overwrite_policy"):
+            command.extend(["--overwrite-policy", str(normalized["overwrite_policy"])])
+        if normalized.get("scope_json"):
+            command.extend(["--scope-json", str(normalized["scope_json"])])
+        if normalized.get("entry_rule_json"):
+            command.extend(["--entry-rule-json", str(normalized["entry_rule_json"])])
+        if normalized.get("date_range_json"):
+            command.extend(["--date-range-json", str(normalized["date_range_json"])])
+        if normalized.get("exit_rules_json"):
+            command.extend(["--exit-rules-json", str(normalized["exit_rules_json"])])
+        if normalized.get("position_rules_json"):
+            command.extend(["--position-rules-json", str(normalized["position_rules_json"])])
+        if normalized.get("signal_cache_policy"):
+            command.extend(["--signal-cache-policy", str(normalized["signal_cache_policy"])])
+        if normalized.get("market_data_mode"):
+            command.extend(["--market-data-mode", str(normalized["market_data_mode"])])
+        if action_id == "screener_history_batch" and normalized.get("market_data_source"):
+            command.extend(["--market-data-source", str(normalized["market_data_source"])])
+        if action_id in {"screener_history_batch", "backtest_v1"} and normalized.get("job_run_id") is not None:
+            command.extend(["--job-run-id", str(normalized["job_run_id"])])
         if normalized.get("filter_precedence"):
             command.extend(["--filter-precedence", str(normalized["filter_precedence"])])
         self._append_multi_args(command, "--include-sectors", normalized.get("include_sectors"))
@@ -461,6 +517,7 @@ class RunService:
         job = {
             "job_id": job_id,
             "action_id": action_id,
+            "job_run_id": job_run_id,
             "label": action.label,
             "status": "running",
             "command": " ".join(command),
@@ -476,6 +533,7 @@ class RunService:
             "watchlist_file": "",
             "summary_file": "",
             "cancel_requested": False,
+            "options": normalized,
             "_started_monotonic": time.monotonic(),
         }
 
@@ -487,6 +545,8 @@ class RunService:
         env = os.environ.copy()
         if normalized.get("market_data_source"):
             env["TICKER_SCREENER_MARKET_DATA_SOURCE"] = str(normalized["market_data_source"])
+        if self.database_url:
+            env["TICKER_SCREENER_DATABASE_URL"] = self.database_url
         thread = threading.Thread(target=self._run_job, args=(job_id, command, env), daemon=True)
         thread.start()
         return job_id
@@ -519,6 +579,9 @@ class RunService:
             "market_data_source",
             "start_date",
             "end_date",
+            "overwrite_policy",
+            "signal_cache_policy",
+            "market_data_mode",
         ):
             value = options.get(key)
             if isinstance(value, str) and value.strip():
@@ -546,6 +609,26 @@ class RunService:
                 normalized_values = [str(item).strip() for item in value if str(item).strip()]
                 if normalized_values:
                     normalized[key] = normalized_values
+
+        if isinstance(options.get("strategy_ids"), list):
+            strategy_ids = [str(item).strip() for item in options["strategy_ids"] if str(item).strip()]
+            if strategy_ids:
+                normalized["strategy_ids"] = strategy_ids
+                normalized["strategy_ids_json"] = json.dumps(strategy_ids)
+
+        for key, fallback in (
+            ("scope", {}),
+            ("entry_rule", {}),
+            ("date_range", {}),
+            ("position_rules", {}),
+        ):
+            value = options.get(key)
+            if isinstance(value, dict):
+                normalized[f"{key}_json"] = json.dumps(value)
+        if isinstance(options.get("exit_rules"), list):
+            normalized["exit_rules_json"] = json.dumps(options["exit_rules"])
+        if "job_run_id" in options and options.get("job_run_id") not in (None, ""):
+            normalized["job_run_id"] = int(options["job_run_id"])
 
         return normalized
 
@@ -619,6 +702,7 @@ class RunService:
                 job["progress_label"] = "Completed"
             elif job.get("progress_percent") is None:
                 job["progress_label"] = "Failed"
+        self._persist_completed_job(job_id)
 
     def _update_progress(self, job: dict[str, Any], log_lines: list[str]) -> None:
         current = None
@@ -677,6 +761,9 @@ class RunService:
         watchlist_file = payload.get("watchlist_file")
         if isinstance(watchlist_file, str) and watchlist_file.strip():
             job["watchlist_file"] = watchlist_file.strip()
+        raw_results_file = payload.get("raw_results_file")
+        if isinstance(raw_results_file, str) and raw_results_file.strip():
+            job["raw_results_file"] = raw_results_file.strip()
 
     def _serialize_job(self, job: dict[str, Any]) -> dict[str, Any]:
         duration_seconds = self._job_duration_seconds(job)
@@ -701,6 +788,10 @@ class RunService:
             "watchlist_stem": watchlist_stem,
             "watchlist_url": f"/watchlists?stem={watchlist_stem}" if watchlist_stem else "",
             "summary_file": str(job.get("summary_file") or ""),
+            "raw_results_file": str(job.get("raw_results_file") or ""),
+            "job_run_id": job.get("job_run_id"),
+            "screen_run_id": job.get("screen_run_id"),
+            "backtest_run_id": job.get("backtest_run_id"),
             "cancel_requested": bool(job.get("cancel_requested")),
             "duration_seconds": duration_seconds,
         }
@@ -730,3 +821,84 @@ class RunService:
         if path.suffix.lower() != ".json":
             return ""
         return path.stem
+
+    def _job_type_for_action(self, action_id: str) -> str:
+        if action_id in {"screener_history_batch"}:
+            return "screen_cache_batch"
+        if action_id in {"backtest_v1"}:
+            return "backtest"
+        if action_id in {"sync_postgres_market_data"}:
+            return "admin_sync"
+        return "screen_run"
+
+    def _persist_completed_job(self, job_id: str) -> None:
+        with self._jobs_lock:
+            job = dict(self._jobs_by_id.get(job_id) or {})
+        if not job:
+            return
+        result_payload = {
+            "job_id": job.get("job_id"),
+            "status": job.get("status"),
+            "return_code": job.get("return_code"),
+            "summary_file": job.get("summary_file"),
+            "watchlist_file": job.get("watchlist_file"),
+            "raw_results_file": job.get("raw_results_file"),
+            "success_count": job.get("success_count"),
+        }
+        artifact_path = str(job.get("summary_file") or job.get("watchlist_file") or "")
+        self.history_repository.update_job_run(
+            job.get("job_run_id"),
+            status=str(job.get("status") or "failed"),
+            result_payload=result_payload,
+            artifact_path=artifact_path or None,
+            finished_at=str(job.get("finished_at")) if job.get("finished_at") else None,
+        )
+        if str(job.get("status")) != "success":
+            return
+        action_id = str(job.get("action_id") or "")
+        if action_id in {"screener_history_batch", "sync_postgres_market_data"}:
+            return
+        summary_file = str(job.get("summary_file") or "").strip()
+        if not summary_file:
+            return
+        summary_path = Path(summary_file)
+        if not summary_path.exists():
+            return
+        try:
+            summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if action_id == "backtest_v1":
+            self._persist_backtest_job(job, summary_payload)
+            return
+        raw_results_file = str(summary_payload.get("raw_results_file") or job.get("raw_results_file") or "").strip()
+        if not raw_results_file:
+            return
+        raw_path = Path(raw_results_file)
+        if not raw_path.exists():
+            return
+        try:
+            raw_payload = json.loads(raw_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        screen_run_id = self.screener_history_service.persist_screen_run(
+            strategy_id=action_id,
+            options=dict(job.get("options") or {}),
+            summary_payload=summary_payload,
+            raw_payload=raw_payload,
+            job_run_id=job.get("job_run_id"),
+        )
+        if screen_run_id is not None:
+            with self._jobs_lock:
+                live = self._jobs_by_id.get(job_id)
+                if live is not None:
+                    live["screen_run_id"] = screen_run_id
+
+    def _persist_backtest_job(self, job: dict[str, Any], summary_payload: dict[str, Any]) -> None:
+        backtest_run_id = summary_payload.get("backtest_run_id")
+        if backtest_run_id is None:
+            return
+        with self._jobs_lock:
+            live = self._jobs_by_id.get(str(job.get("job_id") or ""))
+            if live is not None:
+                live["backtest_run_id"] = backtest_run_id

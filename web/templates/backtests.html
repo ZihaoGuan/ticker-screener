@@ -3,12 +3,51 @@
 {% block content %}
 <section class="band">
   <h1>Backtests</h1>
+  <p>Signal cache and persisted backtest runs now live through the API and React app. This server-rendered page shows the same durable summaries.</p>
+  <div class="grid cards-2">
+    <article class="card">
+      <h3>Signal Cache Coverage</h3>
+      {% if signal_cache %}
+      <ul>
+        {% for item in signal_cache %}
+        <li>{{ item.strategy_id }}: {{ item.run_count }} cached days, {{ item.run_with_hits_count }} with hits</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>No persisted screener history yet.</p>
+      {% endif %}
+    </article>
+    <article class="card">
+      <h3>Available Strategies</h3>
+      <ul>
+        {% for item in available_strategies %}
+        <li>{{ item.label }} ({{ item.id }})</li>
+        {% endfor %}
+      </ul>
+    </article>
+  </div>
+  <h2>Templates</h2>
   <div class="grid cards-2">
     {% for item in backtest_templates %}
     <article class="card">
       <h3>{{ item.label }}</h3>
       <p>{{ item.description }}</p>
-      <pre>{{ item.command }}</pre>
+      <pre>{{ item.entry_rule }}</pre>
+    </article>
+    {% endfor %}
+  </div>
+  <h2>Recent Backtest Runs</h2>
+  <div class="grid cards-2">
+    {% for item in backtest_runs %}
+    <article class="card">
+      <h3>{{ item.strategy_id }}</h3>
+      <p>{{ item.start_date }} to {{ item.end_date }}</p>
+      <p>JSON: {{ item.json_report_path }}</p>
+      <p>HTML: {{ item.html_report_path }}</p>
+    </article>
+    {% else %}
+    <article class="card">
+      <p>No persisted backtest runs yet.</p>
     </article>
     {% endfor %}
   </div>

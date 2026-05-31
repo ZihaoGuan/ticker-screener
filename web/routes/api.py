@@ -3,22 +3,27 @@ from __future__ import annotations
 import datetime as dt
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from src.webapp.services.admin_service import AdminService
+from src.webapp.services.backtest_service import BacktestService, DEFAULT_EXIT_RULES
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.run_service import RunService
+from src.webapp.services.screener_history_service import ScreenerHistoryService
 from src.webapp.services.watchlist_service import WatchlistService
 from web.dependencies import (
     get_ad_hoc_screen_service,
     get_admin_service,
+    get_backtest_service,
     get_dashboard_service,
     get_overlap_service,
     get_rrg_service,
     get_run_service,
+    get_screener_history_service,
     get_watchlist_service,
 )
 
@@ -95,6 +100,99 @@ def ad_hoc_screen(
     return JSONResponse(result)
 
 
+@router.get("/screener-runs", response_class=JSONResponse)
+def screener_runs_data(
+    strategy_id: str = Query(default="", alias="strategyId"),
+    from_date: str = Query(default="", alias="from"),
+    to_date: str = Query(default="", alias="to"),
+    include_deleted: bool = Query(default=False, alias="includeDeleted"),
+    config_hash: str = Query(default="", alias="configHash"),
+    has_hits_raw: str = Query(default="", alias="hasHits"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    service: ScreenerHistoryService = Depends(get_screener_history_service),
+    run_service: RunService = Depends(get_run_service),
+) -> JSONResponse:
+    start_date = dt.date.fromisoformat(from_date) if from_date else None
+    end_date = dt.date.fromisoformat(to_date) if to_date else None
+    has_hits = None
+    if has_hits_raw.strip().lower() in {"true", "1", "yes"}:
+        has_hits = True
+    elif has_hits_raw.strip().lower() in {"false", "0", "no"}:
+        has_hits = False
+    payload = {
+        "configured": service.is_configured(),
+        "runs": service.list_runs(
+            strategy_id=strategy_id,
+            start_date=start_date,
+            end_date=end_date,
+            include_deleted=include_deleted,
+            config_hash=config_hash,
+            has_hits=has_hits,
+            limit=limit,
+            offset=offset,
+        ),
+        "coverage": service.list_signal_cache_summary(start_date=start_date, end_date=end_date),
+        "available_strategies": [{"id": item["id"], "label": item["label"]} for item in run_service.list_actions()],
+    }
+    return JSONResponse(jsonable_encoder(payload))
+
+
+@router.get("/screener-runs/{run_id}", response_class=JSONResponse)
+def screener_run_detail(
+    run_id: int,
+    include_hits: bool = Query(default=True, alias="includeHits"),
+    hit_limit: int = Query(default=200, alias="hitLimit", ge=1, le=1000),
+    hit_offset: int = Query(default=0, alias="hitOffset", ge=0),
+    service: ScreenerHistoryService = Depends(get_screener_history_service),
+) -> JSONResponse:
+    payload = service.get_run(run_id, include_hits=include_hits, hit_limit=hit_limit, hit_offset=hit_offset)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Unknown screener run: {run_id}")
+    return JSONResponse(jsonable_encoder(payload))
+
+
+@router.post("/screener-runs/{run_id}/delete", response_class=JSONResponse)
+def soft_delete_screener_run(
+    run_id: int,
+    payload: dict[str, object] | None = Body(default=None),
+    service: ScreenerHistoryService = Depends(get_screener_history_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    deleted = service.soft_delete(run_id, reason=str(request_payload.get("reason") or ""))
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Unknown screener run: {run_id}")
+    return JSONResponse({"ok": True})
+
+
+@router.post("/screener-runs/batch", response_class=JSONResponse)
+def launch_screener_history_batch(
+    payload: dict[str, object] | None = Body(default=None),
+    service: RunService = Depends(get_run_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    strategy_ids = request_payload.get("strategy_ids")
+    start_date = str(request_payload.get("start_date") or "").strip()
+    end_date = str(request_payload.get("end_date") or "").strip()
+    if not isinstance(strategy_ids, list) or not strategy_ids:
+        raise HTTPException(status_code=400, detail="strategy_ids must be a non-empty array")
+    if not start_date or not end_date:
+        raise HTTPException(status_code=400, detail="start_date and end_date are required")
+    scope = request_payload.get("scope")
+    if scope is not None and not isinstance(scope, dict):
+        raise HTTPException(status_code=400, detail="scope must be an object")
+    options = {
+        "strategy_ids": strategy_ids,
+        "start_date": start_date,
+        "end_date": end_date,
+        "market_data_source": str(request_payload.get("market_data_mode") or "database-first"),
+        "overwrite_policy": str(request_payload.get("overwrite_policy") or "skip_existing"),
+        "scope": dict(scope or {}),
+    }
+    job_id = service.launch("screener_history_batch", options=options)
+    return JSONResponse({"ok": True, "job_id": job_id})
+
+
 @router.get("/watchlists", response_class=JSONResponse)
 def watchlists_data(service: WatchlistService = Depends(get_watchlist_service)) -> JSONResponse:
     return JSONResponse({"watchlists": service.list_recent()})
@@ -156,18 +254,52 @@ def overlap_by_date(date_label: str, service: OverlapService = Depends(get_overl
 
 
 @router.get("/backtests", response_class=JSONResponse)
-def backtests_data() -> JSONResponse:
+def backtests_data(
+    service: BacktestService = Depends(get_backtest_service),
+    history_service: ScreenerHistoryService = Depends(get_screener_history_service),
+    run_service: RunService = Depends(get_run_service),
+) -> JSONResponse:
     return JSONResponse(
-        {
-            "backtest_templates": [
-                {
-                    "label": "Overlap Count Backtest",
-                    "description": "Historical overlap summary forward-return study.",
-                    "command": "python scripts/build_overlap_backtest_report.py --start-date 2024-01-01 --end-date 2026-05-01",
-                }
-            ]
-        }
+        jsonable_encoder(
+            {
+                "backtest_templates": service.default_templates(),
+                "backtest_runs": service.list_runs(limit=20),
+                "signal_cache": history_service.list_signal_cache_summary(),
+                "available_strategies": [{"id": item["id"], "label": item["label"]} for item in run_service.list_actions()],
+                "default_exit_rules": DEFAULT_EXIT_RULES,
+            }
+        )
     )
+
+
+@router.post("/backtests", response_class=JSONResponse)
+def launch_backtest(
+    payload: dict[str, object] | None = Body(default=None),
+    service: RunService = Depends(get_run_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    entry_rule = request_payload.get("entry_rule")
+    date_range = request_payload.get("date_range")
+    exit_rules = request_payload.get("exit_rules")
+    position_rules = request_payload.get("position_rules")
+    if not isinstance(entry_rule, dict):
+        raise HTTPException(status_code=400, detail="entry_rule must be an object")
+    if not isinstance(date_range, dict):
+        raise HTTPException(status_code=400, detail="date_range must be an object")
+    if exit_rules is not None and not isinstance(exit_rules, list):
+        raise HTTPException(status_code=400, detail="exit_rules must be an array")
+    if position_rules is not None and not isinstance(position_rules, dict):
+        raise HTTPException(status_code=400, detail="position_rules must be an object")
+    options = {
+        "entry_rule": entry_rule,
+        "date_range": date_range,
+        "exit_rules": list(exit_rules or DEFAULT_EXIT_RULES),
+        "position_rules": dict(position_rules or {}),
+        "signal_cache_policy": str(request_payload.get("signal_cache_policy") or "reuse_then_fill"),
+        "market_data_mode": str(request_payload.get("market_data_mode") or "database_only"),
+    }
+    job_id = service.launch("backtest_v1", options=options)
+    return JSONResponse({"ok": True, "job_id": job_id})
 
 
 @router.get("/admin/exclusions", response_class=JSONResponse)
