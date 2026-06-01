@@ -218,6 +218,10 @@ class WatchlistService:
             ticker_frame = _normalize_download_frame(frames.get(ticker))
             benchmark_frame = _normalize_download_frame(frames.get(benchmark_ticker))
             if ticker_frame is not None and not ticker_frame.empty:
+                if benchmark_frame is None or benchmark_frame.empty:
+                    benchmark_frame = _download_history_frame(ticker=benchmark_ticker, start_date=start_date, end_date=end_date)
+                    if benchmark_frame is not None and not benchmark_frame.empty:
+                        return ticker_frame, benchmark_frame, "database+ticker/internet+benchmark"
                 return ticker_frame, benchmark_frame, "database"
 
         ticker_frame = _download_history_frame(ticker=ticker, start_date=start_date, end_date=end_date)
