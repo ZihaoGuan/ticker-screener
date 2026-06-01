@@ -432,3 +432,4 @@ It also maintains these bucket-root files:
 The root `index.html` acts as a landing page across published workflows and lets you filter runs by workflow, text, and minimum hit count.
 
 The Discord notification will include the public `index.html` link when `R2_PUBLIC_BASE_URL` is set. Without the R2 secrets, the publish job is skipped and the rest of the workflow still runs normally.
+
