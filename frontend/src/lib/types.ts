@@ -298,6 +298,7 @@ export type WatchlistChartResponse = {
   ipo_vwap: Array<{ time: string; value: number }>;
   rs_line: Array<{ time: string; value: number }>;
   rs_markers: Array<{ time: string; kind: "daily_new_high" | "daily_new_high_before_price" }>;
+  setup_markers?: Array<{ time: string; kind: string; label?: string }>;
   fearzone_panel: {
     rows: Array<{
       key: string;

@@ -21,10 +21,11 @@ type PriceChartProps = {
   candles: CandlePoint[];
   overlays?: Pick<
     WatchlistChartResponse,
-    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "rs_line" | "rs_markers" | "benchmark_ticker" | "fearzone_panel"
+    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "rs_line" | "rs_markers" | "setup_markers" | "benchmark_ticker" | "fearzone_panel"
   >;
   annotations?: ChartAnnotations;
   extraAnnotations?: ChartAnnotations[];
+  extraMarkers?: Array<{ time: string; label?: string; color: string; shape: "circle" | "square"; position: "aboveBar" | "belowBar" }>;
   visibility?: ChartVisibility;
   forceFearzonePanel?: boolean;
 };
@@ -46,7 +47,7 @@ type HorizontalAnnotation = {
   price: number;
 };
 
-export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations = [], visibility, forceFearzonePanel = false }: PriceChartProps) {
+export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations = [], extraMarkers = [], visibility, forceFearzonePanel = false }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
   const priceChartApiRef = useRef<IChartApi | null>(null);
@@ -282,6 +283,14 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         });
       }
     }
+    for (const marker of extraMarkers) {
+      priceMarkers.push({
+        time: marker.time,
+        position: marker.position,
+        color: marker.color,
+        shape: marker.shape,
+      });
+    }
     if (priceMarkers.length > 0) {
       candleSeries.setMarkers(priceMarkers);
     }
@@ -418,6 +427,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     highTightFlagBox,
     annotationLines,
     extraAnnotations,
+    extraMarkers,
     weeklyEma8,
   ]);
 

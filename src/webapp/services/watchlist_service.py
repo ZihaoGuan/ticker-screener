@@ -11,6 +11,7 @@ import yfinance as yf
 
 from ...config import AppConfig
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
+from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
 from ...market_data_access import load_many_ticker_windows_for_range, resolve_database_url, resolve_market_data_source
 from ...ticker_filters import normalize_ticker_symbol
 from ...universe import UniverseTicker, load_universe
@@ -106,6 +107,12 @@ class WatchlistService:
             _compute_fearzone_panel(frame),
             visible_dates={pd.Timestamp(index).date().isoformat() for index in visible_frame.index},
         )
+        setup_markers = _compute_ftd_sweep_markers(
+            frame=frame,
+            visible_dates={pd.Timestamp(index).date().isoformat() for index in visible_frame.index},
+            ticker=normalized_ticker,
+            benchmark_ticker=self.benchmark_ticker,
+        )
         if benchmark_frame is not None and not benchmark_frame.empty:
             benchmark_frame = benchmark_frame.sort_index()
             benchmark_frame = benchmark_frame.loc[benchmark_frame.index <= pd.Timestamp(resolved_as_of_date)].copy()
@@ -195,6 +202,7 @@ class WatchlistService:
             "ipo_vwap": ipo_vwap,
             "rs_line": rs_points,
             "rs_markers": rs_markers,
+            "setup_markers": setup_markers,
             "fearzone_panel": fearzone_panel,
         }
 
@@ -316,6 +324,7 @@ def _empty_chart_payload(
         "ipo_vwap": [],
         "rs_line": [],
         "rs_markers": [],
+        "setup_markers": [],
         "fearzone_panel": {"rows": [], "signals": []},
     }
 
@@ -413,6 +422,45 @@ def _compute_rs_new_high_flags(rs_line: pd.Series, price_reference: pd.Series, l
     new_high = aligned["rs_line"] >= (rolling_rs_high - tolerance)
     new_high_before_price = new_high & (aligned["price_reference"] < (rolling_price_high - tolerance))
     return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
+
+
+def _compute_ftd_sweep_markers(
+    *,
+    frame: pd.DataFrame,
+    visible_dates: set[str],
+    ticker: str,
+    benchmark_ticker: str,
+) -> list[dict[str, Any]]:
+    normalized = _normalize_download_frame(frame)
+    if normalized is None or normalized.empty or not visible_dates:
+        return []
+    config = load_app_config()
+    ticker_meta = UniverseTicker(symbol=ticker.upper(), sector=None, industry=None, exchange=None)
+    markers: list[dict[str, Any]] = []
+    seen_dates: set[str] = set()
+    minimum_bars = max(int(config.ftd_sweep_pivot_lookback_left) + 15, 40)
+    for end_index in range(minimum_bars - 1, len(normalized)):
+        prefix = normalized.iloc[: end_index + 1]
+        current_date = prefix.index[-1].date().isoformat()
+        if current_date not in visible_dates:
+            continue
+        hit = find_recent_ftd_sweep_hit(
+            prefix,
+            ticker=ticker_meta,
+            benchmark_ticker=benchmark_ticker,
+            config=config,
+        )
+        if hit is None or hit.sweep_breakout_date != current_date or current_date in seen_dates:
+            continue
+        seen_dates.add(current_date)
+        markers.append(
+            {
+                "time": current_date,
+                "kind": "ftd_sweep_breakout",
+                "label": "FTD Sweep",
+            }
+        )
+    return markers
 
 
 def _compute_fearzone_panel(frame: pd.DataFrame) -> dict[str, Any]:

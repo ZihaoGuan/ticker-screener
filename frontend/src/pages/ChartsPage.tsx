@@ -136,6 +136,20 @@ export function ChartsPage() {
       .map((item) => buildSetupAnnotation(item.id, item.hit!))
       .filter((item): item is ChartAnnotations => item !== null);
   }, [setupPayload]);
+  const historicalSetupMarkers = useMemo(() => {
+    if (!selectedSetups.ftd_sweep) {
+      return [];
+    }
+    return (payload?.setup_markers ?? [])
+      .filter((marker) => marker.kind === "ftd_sweep_breakout")
+      .map((marker) => ({
+        time: marker.time,
+        label: marker.label ?? "FTD Sweep",
+        color: "#f97316",
+        shape: "square" as const,
+        position: "belowBar" as const,
+      }));
+  }, [payload?.setup_markers, selectedSetups.ftd_sweep]);
   const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
     { key: "ema8", label: "EMA 8" },
     { key: "ema21", label: "EMA 21" },
@@ -308,6 +322,7 @@ export function ChartsPage() {
               candles={chartData}
               overlays={payload ?? undefined}
               extraAnnotations={setupAnnotations}
+              extraMarkers={historicalSetupMarkers}
               visibility={chartVisibility}
               forceFearzonePanel
             />
@@ -320,6 +335,7 @@ export function ChartsPage() {
                 </span>
               ) : null}
               {payload?.data_source ? <span className="chart-pill chart-pill-setup">Source {payload.data_source}</span> : null}
+              {historicalSetupMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{historicalSetupMarkers.length} old FTD sweep marker(s)</span> : null}
               {setupAnnotations.map((item, index) =>
                 item.setupLabel ? (
                   <span key={`${item.setupLabel}-${index}`} className="chart-pill chart-pill-setup">
