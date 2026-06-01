@@ -189,6 +189,36 @@ export type JobsResponse = {
     backtest_run_id?: number | null;
     cancel_requested: boolean;
     duration_seconds: number;
+    child_job_summary: {
+      total: number;
+      running: number;
+      success: number;
+      failed: number;
+      cancelled: number;
+    };
+    child_jobs: Array<{
+      job_run_id: number;
+      parent_job_run_id?: number | null;
+      job_type: string;
+      label: string;
+      status: JobStatus;
+      started_at: string;
+      finished_at: string;
+      artifact_path: string;
+      command: string;
+      strategy_id: string;
+      run_date: string;
+      screen_run_id?: number | null;
+      success_count: number;
+      summary_file: string;
+      watchlist_file: string;
+      raw_results_file: string;
+      log_tail: string;
+      log_file: string;
+      message: string;
+      skipped: boolean;
+      duration_seconds: number;
+    }>;
   }[];
 };
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
@@ -13,6 +13,7 @@ const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth
 
 export function BacktestsPage() {
   const auth = useAuth();
+  const canRunJobs = auth.hasCapability("run_screeners");
   const [payload, setPayload] = useState<BacktestsResponse | null>(null);
   const [screenRuns, setScreenRuns] = useState<ScreenerRunsResponse | null>(null);
   const [jobs, setJobs] = useState<JobsResponse | null>(null);
@@ -29,6 +30,8 @@ export function BacktestsPage() {
   const [selectedCacheDate, setSelectedCacheDate] = useState("");
   const [selectedRunDetail, setSelectedRunDetail] = useState<ScreenerRunDetail | null>(null);
   const [isLoadingRunDetail, setIsLoadingRunDetail] = useState(false);
+  const [expandedResearchJobId, setExpandedResearchJobId] = useState("");
+  const [selectedChildJobRunId, setSelectedChildJobRunId] = useState<number | null>(null);
   const [backtestStrategies, setBacktestStrategies] = useState<string[]>([]);
   const [backtestMinCount, setBacktestMinCount] = useState("2");
   const [backtestStartDate, setBacktestStartDate] = useState(ninetyDaysAgo);
@@ -37,10 +40,13 @@ export function BacktestsPage() {
   const [statusMessage, setStatusMessage] = useState("");
 
   const refresh = () => {
+    const jobsPromise = canRunJobs
+      ? fetchJson<JobsResponse>("/api/jobs").catch(() => ({ actions: [], jobs: [] }))
+      : Promise.resolve<JobsResponse>({ actions: [], jobs: [] });
     return Promise.all([
       fetchJson<BacktestsResponse>("/api/backtests"),
       fetchJson<ScreenerRunsResponse>(`/api/screener-runs?includeDeleted=${includeDeleted ? "true" : "false"}&limit=20`),
-      fetchJson<JobsResponse>("/api/jobs"),
+      jobsPromise,
     ]).then(([backtestsPayload, screenRunsPayload, jobsPayload]) => {
       setPayload(backtestsPayload);
       setScreenRuns(screenRunsPayload);
@@ -87,7 +93,7 @@ export function BacktestsPage() {
         setCalendarPayload(null);
       })
       .finally(() => setIsLoading(false));
-  }, [includeDeleted]);
+  }, [includeDeleted, canRunJobs]);
 
   useEffect(() => {
     if (!payload?.available_strategies?.length) {
@@ -115,6 +121,25 @@ export function BacktestsPage() {
       ),
     [jobs],
   );
+  const hasRunningResearchJobs = useMemo(() => activeResearchJobs.some((item) => item.status === "running"), [activeResearchJobs]);
+  const expandedResearchJob = useMemo(
+    () => activeResearchJobs.find((item) => item.job_id === expandedResearchJobId) ?? null,
+    [activeResearchJobs, expandedResearchJobId],
+  );
+  const selectedChildJob = useMemo(
+    () => expandedResearchJob?.child_jobs.find((item) => item.job_run_id === selectedChildJobRunId) ?? expandedResearchJob?.child_jobs[0] ?? null,
+    [expandedResearchJob, selectedChildJobRunId],
+  );
+
+  useEffect(() => {
+    if (!hasRunningResearchJobs) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refresh().catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [hasRunningResearchJobs, includeDeleted]);
 
   const toggleStrategy = (current: string[], strategyId: string) =>
     current.includes(strategyId) ? current.filter((item) => item !== strategyId) : [...current, strategyId];
@@ -544,19 +569,149 @@ export function BacktestsPage() {
                 <th>Status</th>
                 <th>Started</th>
                 <th>Finished</th>
+                <th>Sub-jobs</th>
                 <th>Output</th>
               </tr>
             </thead>
             <tbody>
-              {activeResearchJobs.map((job) => (
-                <tr key={job.job_id}>
-                  <td>{job.label}</td>
-                  <td><StatusPill status={job.status} /></td>
-                  <td>{formatLocalDateTime(job.started_at)}</td>
-                  <td>{formatLocalDateTime(job.finished_at)}</td>
-                  <td>{job.summary_file || job.watchlist_file || "-"}</td>
-                </tr>
-              ))}
+              {activeResearchJobs.map((job) => {
+                const isExpanded = expandedResearchJobId === job.job_id;
+                return (
+                  <Fragment key={job.job_id}>
+                    <tr>
+                      <td>{job.label}</td>
+                      <td><StatusPill status={job.status} /></td>
+                      <td>{formatLocalDateTime(job.started_at)}</td>
+                      <td>{formatLocalDateTime(job.finished_at)}</td>
+                      <td>
+                        {job.child_job_summary.total > 0 ? (
+                          <button
+                            type="button"
+                            className="table-action-button"
+                            onClick={() => {
+                              if (isExpanded) {
+                                setExpandedResearchJobId("");
+                                setSelectedChildJobRunId(null);
+                              } else {
+                                setExpandedResearchJobId(job.job_id);
+                                setSelectedChildJobRunId(job.child_jobs[0]?.job_run_id ?? null);
+                              }
+                            }}
+                          >
+                            {isExpanded ? "Hide" : "View"} {job.child_job_summary.total}
+                          </button>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td>{job.summary_file || job.watchlist_file || "-"}</td>
+                    </tr>
+                    {isExpanded ? (
+                      <tr>
+                        <td colSpan={6}>
+                          <div className="split-grid" style={{ marginTop: 12 }}>
+                            <div>
+                              <p className="panel-copy" style={{ marginTop: 0 }}>
+                                Sub-jobs: {job.child_job_summary.success} success, {job.child_job_summary.failed} failed, {job.child_job_summary.running} running, {job.child_job_summary.cancelled} cancelled.
+                              </p>
+                              <div className="data-table-responsive">
+                                <table className="data-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Strategy</th>
+                                      <th>Date</th>
+                                      <th>Status</th>
+                                      <th>Hits</th>
+                                      <th>Finished</th>
+                                      <th>Actions</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {job.child_jobs.length === 0 ? (
+                                      <tr>
+                                        <td colSpan={6}>No persisted sub-jobs yet.</td>
+                                      </tr>
+                                    ) : (
+                                      job.child_jobs.map((child) => (
+                                        <tr key={child.job_run_id} className={selectedChildJob?.job_run_id === child.job_run_id ? "is-selected-row" : ""}>
+                                          <td>{child.strategy_id || child.label}</td>
+                                          <td>{child.run_date || "-"}</td>
+                                          <td><StatusPill status={child.status} /></td>
+                                          <td>{child.success_count}</td>
+                                          <td>{formatLocalDateTime(child.finished_at)}</td>
+                                          <td>
+                                            <div className="button-row" style={{ flexWrap: "wrap", gap: 8 }}>
+                                              <button
+                                                type="button"
+                                                className="table-action-button"
+                                                onClick={() => setSelectedChildJobRunId(child.job_run_id)}
+                                              >
+                                                View Logs
+                                              </button>
+                                              {typeof child.screen_run_id === "number" ? (
+                                                <button
+                                                  type="button"
+                                                  className="table-action-button"
+                                                  onClick={() => void loadRunDetail(Number(child.screen_run_id))}
+                                                >
+                                                  View Cached Result
+                                                </button>
+                                              ) : null}
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      ))
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                            <div>
+                              {!selectedChildJob ? (
+                                <p className="panel-copy" style={{ marginTop: 0 }}>Select a sub-job to inspect its persisted log tail.</p>
+                              ) : (
+                                <div className="detail-card">
+                                  <div className="detail-card-head">
+                                    <div>
+                                      <div className="ticker-symbol">{selectedChildJob.strategy_id || selectedChildJob.label}</div>
+                                      <div className="file-meta">
+                                        {selectedChildJob.run_date || "-"} · {selectedChildJob.skipped ? "skipped" : selectedChildJob.status}
+                                      </div>
+                                    </div>
+                                    <StatusPill status={selectedChildJob.status} />
+                                  </div>
+                                  <div className="detail-grid">
+                                    <div>
+                                      <div className="eyebrow">Message</div>
+                                      <div className="panel-copy">{selectedChildJob.message || "-"}</div>
+                                    </div>
+                                    <div>
+                                      <div className="eyebrow">Log File</div>
+                                      <div className="panel-copy">{selectedChildJob.log_file || "-"}</div>
+                                    </div>
+                                  </div>
+                                  <div className="detail-subsection">
+                                    <div className="eyebrow">Command</div>
+                                    <pre className="panel-copy" style={{ whiteSpace: "pre-wrap" }}>
+                                      {selectedChildJob.command || "-"}
+                                    </pre>
+                                  </div>
+                                  <div className="detail-subsection">
+                                    <div className="eyebrow">Persisted Log Tail</div>
+                                    <pre className="panel-copy" style={{ whiteSpace: "pre-wrap" }}>
+                                      {selectedChildJob.log_tail || "No log output captured."}
+                                    </pre>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 from pathlib import Path
 import tempfile
@@ -150,6 +151,63 @@ class RunServiceTests(unittest.TestCase):
     def test_list_actions_includes_fearzone(self) -> None:
         action_ids = {item["id"] for item in self.service.list_actions()}
         self.assertIn("fearzone", action_ids)
+
+    def test_list_jobs_attaches_batch_child_job_logs(self) -> None:
+        RunService._jobs = [
+            {
+                "job_id": "job-1",
+                "action_id": "screener_history_batch",
+                "job_run_id": 101,
+                "label": "Batch Screener History Cache",
+                "status": "running",
+                "command": "python scripts/run_screener_history_batch.py",
+                "started_at": "2026-06-01T00:00:00+00:00",
+                "finished_at": "",
+                "return_code": None,
+                "log_tail": "Starting...\n",
+                "progress_current": None,
+                "progress_total": None,
+                "progress_percent": None,
+                "progress_label": "Starting…",
+                "success_count": 0,
+                "watchlist_file": "",
+                "summary_file": "",
+                "cancel_requested": False,
+                "_started_monotonic": 10.0,
+            }
+        ]
+        RunService._jobs_by_id = {"job-1": RunService._jobs[0]}
+        self.service.history_repository.list_child_job_runs = lambda parent_ids: [  # type: ignore[method-assign]
+            {
+                "id": 501,
+                "parent_job_run_id": 101,
+                "job_type": "screen_run",
+                "job_name": "Run RS (2026-05-31)",
+                "status": "success",
+                "request_payload": {"strategy_id": "rs", "run_date": "2026-05-31", "command": "python scripts/run_rs_screen.py"},
+                "result_payload": {
+                    "strategy_id": "rs",
+                    "run_date": "2026-05-31",
+                    "screen_run_id": 77,
+                    "success_count": 3,
+                    "log_tail": "line one\nline two",
+                    "message": "Persisted cached screener result",
+                },
+                "artifact_path": "/tmp/summary.json",
+                "started_at": dt.datetime(2026, 6, 1, 0, 0, tzinfo=dt.timezone.utc),
+                "finished_at": dt.datetime(2026, 6, 1, 0, 1, tzinfo=dt.timezone.utc),
+                "created_at": dt.datetime(2026, 6, 1, 0, 0, tzinfo=dt.timezone.utc),
+            }
+        ]
+
+        payload = self.service.list_jobs(limit=10)
+
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["child_job_summary"]["total"], 1)
+        self.assertEqual(payload[0]["child_job_summary"]["success"], 1)
+        self.assertEqual(payload[0]["child_jobs"][0]["strategy_id"], "rs")
+        self.assertEqual(payload[0]["child_jobs"][0]["screen_run_id"], 77)
+        self.assertIn("line two", payload[0]["child_jobs"][0]["log_tail"])
 
 
 if __name__ == "__main__":

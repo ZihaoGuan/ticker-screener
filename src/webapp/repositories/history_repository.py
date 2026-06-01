@@ -53,18 +53,19 @@ class HistoryRepository:
         status: str,
         trigger_source: str,
         request_payload: dict[str, Any],
+        parent_job_run_id: int | None = None,
     ) -> int | None:
         connection = self._connect()
         if connection is None:
             return None
         sql = """
-            INSERT INTO job_runs (job_type, job_name, status, trigger_source, request_payload)
-            VALUES (%s, %s, %s, %s, %s::jsonb)
+            INSERT INTO job_runs (parent_job_run_id, job_type, job_name, status, trigger_source, request_payload)
+            VALUES (%s, %s, %s, %s, %s, %s::jsonb)
             RETURNING id
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (job_type, job_name, status, trigger_source, json.dumps(request_payload)))
+                cursor.execute(sql, (parent_job_run_id, job_type, job_name, status, trigger_source, json.dumps(request_payload)))
                 row = cursor.fetchone()
             connection.commit()
         return int(row[0]) if row else None
@@ -366,6 +367,24 @@ class HistoryRepository:
         with connection:
             with connection.cursor() as cursor:
                 cursor.execute(sql, tuple(params))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def list_child_job_runs(self, parent_job_run_ids: list[int]) -> list[dict[str, Any]]:
+        if not parent_job_run_ids:
+            return []
+        connection = self._connect()
+        if connection is None:
+            return []
+        sql = """
+            SELECT id, parent_job_run_id, job_type, job_name, status, trigger_source,
+                   request_payload, result_payload, artifact_path, started_at, finished_at, created_at
+            FROM job_runs
+            WHERE parent_job_run_id = ANY(%s)
+            ORDER BY started_at ASC NULLS LAST, id ASC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (parent_job_run_ids,))
                 return self._rows_to_dicts(cursor, cursor.fetchall())
 
     def list_signal_cache_calendar(

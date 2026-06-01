@@ -422,14 +422,17 @@ class RunService:
 
     def list_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._jobs_lock:
-            return [self._serialize_job(item) for item in self._jobs[:limit]]
+            jobs = [self._serialize_job(item) for item in self._jobs[:limit]]
+        return self._attach_child_jobs(jobs)
 
     def get_job(self, job_id: str) -> dict[str, Any]:
         with self._jobs_lock:
             job = self._jobs_by_id.get(job_id)
             if job is None:
                 raise ValueError(f"Unknown job: {job_id}")
-            return self._serialize_job(job)
+            jobs = [self._serialize_job(job)]
+        enriched = self._attach_child_jobs(jobs)
+        return enriched[0]
 
     def cancel(self, job_id: str) -> dict[str, Any]:
         with self._jobs_lock:
@@ -457,6 +460,7 @@ class RunService:
             status="running",
             trigger_source="manual",
             request_payload=request_payload,
+            parent_job_run_id=None,
         )
         if job_run_id is not None:
             normalized["job_run_id"] = job_run_id
@@ -794,6 +798,8 @@ class RunService:
             "backtest_run_id": job.get("backtest_run_id"),
             "cancel_requested": bool(job.get("cancel_requested")),
             "duration_seconds": duration_seconds,
+            "child_jobs": [],
+            "child_job_summary": {"total": 0, "running": 0, "success": 0, "failed": 0, "cancelled": 0},
         }
 
     def _job_duration_seconds(self, job: dict[str, Any]) -> int:
@@ -902,3 +908,82 @@ class RunService:
             live = self._jobs_by_id.get(str(job.get("job_id") or ""))
             if live is not None:
                 live["backtest_run_id"] = backtest_run_id
+
+    def _attach_child_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        parent_job_run_ids = [
+            int(job["job_run_id"])
+            for job in jobs
+            if job.get("action_id") == "screener_history_batch" and isinstance(job.get("job_run_id"), int)
+        ]
+        if not parent_job_run_ids:
+            return jobs
+        child_rows = self.history_repository.list_child_job_runs(parent_job_run_ids)
+        grouped: dict[int, list[dict[str, Any]]] = {}
+        for row in child_rows:
+            parent_id = row.get("parent_job_run_id")
+            if isinstance(parent_id, int):
+                grouped.setdefault(parent_id, []).append(self._serialize_child_job_run(row))
+        for job in jobs:
+            parent_id = job.get("job_run_id")
+            if not isinstance(parent_id, int):
+                continue
+            child_jobs = grouped.get(parent_id, [])
+            job["child_jobs"] = child_jobs
+            job["child_job_summary"] = self._summarize_child_jobs(child_jobs)
+        return jobs
+
+    def _serialize_child_job_run(self, row: dict[str, Any]) -> dict[str, Any]:
+        request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
+        result_payload = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
+        started_at = self._stringify_timestamp(row.get("started_at"))
+        finished_at = self._stringify_timestamp(row.get("finished_at"))
+        return {
+            "job_run_id": int(row["id"]),
+            "parent_job_run_id": row.get("parent_job_run_id"),
+            "job_type": str(row.get("job_type") or ""),
+            "label": str(row.get("job_name") or ""),
+            "status": str(row.get("status") or "failed"),
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "artifact_path": str(row.get("artifact_path") or ""),
+            "command": str(request_payload.get("command") or ""),
+            "strategy_id": str(result_payload.get("strategy_id") or request_payload.get("strategy_id") or ""),
+            "run_date": str(result_payload.get("run_date") or request_payload.get("run_date") or ""),
+            "screen_run_id": result_payload.get("screen_run_id"),
+            "success_count": int(result_payload.get("success_count") or 0),
+            "summary_file": str(result_payload.get("summary_file") or ""),
+            "watchlist_file": str(result_payload.get("watchlist_file") or ""),
+            "raw_results_file": str(result_payload.get("raw_results_file") or ""),
+            "log_tail": str(result_payload.get("log_tail") or ""),
+            "log_file": str(result_payload.get("log_file") or ""),
+            "message": str(result_payload.get("message") or ""),
+            "skipped": bool(result_payload.get("skipped")),
+            "duration_seconds": self._duration_seconds_from_iso(started_at, finished_at),
+        }
+
+    def _summarize_child_jobs(self, child_jobs: list[dict[str, Any]]) -> dict[str, int]:
+        summary = {"total": len(child_jobs), "running": 0, "success": 0, "failed": 0, "cancelled": 0}
+        for job in child_jobs:
+            status = str(job.get("status") or "")
+            if status in summary:
+                summary[status] += 1
+        return summary
+
+    def _duration_seconds_from_iso(self, started_at: str, finished_at: str) -> int:
+        if not started_at:
+            return 0
+        try:
+            started = dt.datetime.fromisoformat(started_at)
+        except ValueError:
+            return 0
+        end_raw = finished_at or self._now_iso()
+        try:
+            finished = dt.datetime.fromisoformat(end_raw)
+        except ValueError:
+            return 0
+        return max(0, int(round((finished - started).total_seconds())))
+
+    def _stringify_timestamp(self, value: Any) -> str:
+        if isinstance(value, dt.datetime):
+            return value.isoformat()
+        return str(value or "")

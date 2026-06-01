@@ -59,6 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_earnings_events_earnings_date
 
 CREATE TABLE IF NOT EXISTS job_runs (
   id BIGSERIAL PRIMARY KEY,
+  parent_job_run_id BIGINT REFERENCES job_runs(id) ON DELETE SET NULL,
   job_type TEXT NOT NULL,
   job_name TEXT NOT NULL,
   status TEXT NOT NULL,
@@ -71,8 +72,13 @@ CREATE TABLE IF NOT EXISTS job_runs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS parent_job_run_id BIGINT REFERENCES job_runs(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS idx_job_runs_job_type_started_at
   ON job_runs(job_type, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_job_runs_parent_started_at
+  ON job_runs(parent_job_run_id, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS screen_runs (
   id BIGSERIAL PRIMARY KEY,
