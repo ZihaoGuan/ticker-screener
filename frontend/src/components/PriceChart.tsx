@@ -1,5 +1,5 @@
 import { ColorType, LineStyle, createChart, type IChartApi } from "lightweight-charts";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createGapZonePrimitive } from "./GapZonePrimitive";
 import { createHighTightFlagPrimitive } from "./HighTightFlagPrimitive";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
@@ -50,6 +50,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
   const rsRootRef = useRef<HTMLDivElement | null>(null);
   const priceChartApiRef = useRef<IChartApi | null>(null);
   const rsChartApiRef = useRef<IChartApi | null>(null);
+  const [visibleIndexRange, setVisibleIndexRange] = useState<{ from: number; to: number } | null>(null);
   const options = visibility ?? {
     ema8: true,
     ema21: true,
@@ -294,6 +295,25 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
 
     let syncingPriceToRs = false;
     let syncingRsToPrice = false;
+    const syncVisibleIndexRange = (from: number, to: number) => {
+      if (candles.length === 0) {
+        return;
+      }
+      const nextFrom = Math.max(0, Math.floor(from));
+      const nextTo = Math.min(candles.length - 1, Math.ceil(to));
+      setVisibleIndexRange((current) => {
+        if (current && current.from === nextFrom && current.to === nextTo) {
+          return current;
+        }
+        return { from: nextFrom, to: nextTo };
+      });
+    };
+    const priceLogicalRange = priceChart.timeScale().getVisibleLogicalRange();
+    if (priceLogicalRange) {
+      syncVisibleIndexRange(priceLogicalRange.from, priceLogicalRange.to);
+    } else if (candles.length > 0) {
+      syncVisibleIndexRange(0, candles.length - 1);
+    }
     priceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
       if (!showRsPane || !range || syncingRsToPrice) {
         return;
@@ -301,6 +321,12 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
       syncingPriceToRs = true;
       rsChart.timeScale().setVisibleRange(range);
       syncingPriceToRs = false;
+    });
+    priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (!range) {
+        return;
+      }
+      syncVisibleIndexRange(range.from, range.to);
     });
     rsChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
       if (!showRsPane || !range || syncingPriceToRs) {
@@ -397,22 +423,33 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
       <div ref={priceRootRef} className="chart-card chart-card-price" />
       {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
       <div ref={rsRootRef} className="chart-card chart-card-rs" />
-      {showFearzonePanel ? <FearzonePanel panel={fearzonePanel} /> : null}
+      {showFearzonePanel ? <FearzonePanel panel={fearzonePanel} visibleIndexRange={visibleIndexRange} /> : null}
     </div>
   );
 }
 
 function FearzonePanel({
   panel,
+  visibleIndexRange,
 }: {
   panel: WatchlistChartResponse["fearzone_panel"];
+  visibleIndexRange: { from: number; to: number } | null;
 }) {
   const width = 1080;
   const labelWidth = 96;
   const rowHeight = 24;
   const topPadding = 20;
   const bottomPadding = 26;
-  const rows = panel.rows;
+  const rows = useMemo(() => {
+    const range = visibleIndexRange;
+    if (!range) {
+      return panel.rows;
+    }
+    return panel.rows.map((row) => ({
+      ...row,
+      points: row.points.slice(range.from, range.to + 1),
+    }));
+  }, [panel.rows, visibleIndexRange]);
   const pointCount = rows[0]?.points.length ?? 0;
   const innerWidth = Math.max(1, width - labelWidth - 12);
   const step = pointCount > 0 ? innerWidth / pointCount : innerWidth;
