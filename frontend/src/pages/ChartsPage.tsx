@@ -344,10 +344,12 @@ function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAn
     case "ftd_sweep":
       return {
         setupLabel: "FTD Sweep Breakout",
-        eventDate: readString(hit.ftd_date),
-        eventLabel: "FTD",
+        eventDate: readString(hit.sweep_breakout_date),
+        eventLabel: "Sweep breakout",
         triggerPrice: readNumber(hit.ftd_high),
         triggerLabel: "FTD High",
+        entryPrice: readNumber(hit.breakout_level),
+        entryLabel: "Breakout",
         secondaryEntryPrice: readNumber(hit.sweep_low),
         secondaryEntryLabel: "Sweep low",
         secondaryEntryLow: readNumber(hit.sweep_low),
