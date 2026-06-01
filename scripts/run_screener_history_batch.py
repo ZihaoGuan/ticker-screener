@@ -112,7 +112,7 @@ def main() -> int:
                 print(f"[{completed}/{total}] processing {strategy_id} {target_date.isoformat()} | passed={len(persisted_runs)}")
                 continue
 
-            command = [sys.executable, action.script_path, "--date-label", target_date.isoformat(), "--as-of-date", target_date.isoformat()]
+            command = [sys.executable, "-u", action.script_path, "--date-label", target_date.isoformat(), "--as-of-date", target_date.isoformat()]
             command.extend(action.extra_args)
             tickers = scope.get("tickers")
             if isinstance(tickers, list) and tickers:
@@ -131,25 +131,38 @@ def main() -> int:
             )
             process_env = os.environ.copy()
             process_env["TICKER_SCREENER_MARKET_DATA_SOURCE"] = args.market_data_source
+            process_env["PYTHONUNBUFFERED"] = "1"
             if config.database_url:
                 process_env["TICKER_SCREENER_DATABASE_URL"] = config.database_url
-            result = subprocess.run(
-                command,
-                cwd=str(PROJECT_ROOT),
-                env=process_env,
-                capture_output=True,
-                text=True,
-            )
-            combined_log = _combine_logs(result.stdout, result.stderr)
-            log_tail = _log_tail(combined_log)
-            log_file = _write_child_log(
+            log_file = _child_log_path(
                 artifacts_dir=config.artifacts_dir,
                 parent_job_run_id=args.job_run_id,
                 strategy_id=strategy_id,
                 run_date=target_date,
-                log_text=combined_log,
             )
-            if result.returncode != 0:
+            _initialize_child_log(log_file)
+            _update_child_job(
+                run_service=run_service,
+                child_job_run_id=child_job_run_id,
+                status="running",
+                strategy_id=strategy_id,
+                run_date=target_date.isoformat(),
+                success_count=0,
+                log_tail="Starting screener sub-job...",
+                log_file=str(log_file),
+                message=f"Running screener for {strategy_id} {target_date.isoformat()}",
+                skipped=False,
+            )
+            return_code, log_tail, summary_path = _stream_screener_sub_job(
+                command=command,
+                process_env=process_env,
+                log_file=log_file,
+                run_service=run_service,
+                child_job_run_id=child_job_run_id,
+                strategy_id=strategy_id,
+                run_date=target_date.isoformat(),
+            )
+            if return_code != 0:
                 run_service.history_repository.update_job_run(
                     child_job_run_id,
                     status="failed",
@@ -167,7 +180,6 @@ def main() -> int:
                 print(f"Sub-job failed {strategy_id} {target_date.isoformat()} | see child log tail in webapp.")
                 raise RuntimeError(f"Historical screener failed for {strategy_id} {target_date.isoformat()}")
 
-            summary_path = _extract_summary_path(result.stdout)
             if not summary_path:
                 run_service.history_repository.update_job_run(
                     child_job_run_id,
@@ -251,6 +263,61 @@ def main() -> int:
     return 0
 
 
+def _stream_screener_sub_job(
+    *,
+    command: list[str],
+    process_env: dict[str, str],
+    log_file: Path,
+    run_service: RunService,
+    child_job_run_id: int | None,
+    strategy_id: str,
+    run_date: str,
+) -> tuple[int, str, str]:
+    process = subprocess.Popen(
+        command,
+        cwd=str(PROJECT_ROOT),
+        env=process_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    collected_lines: list[str] = []
+    line_counter = 0
+    summary_path = ""
+    assert process.stdout is not None
+    with log_file.open("a", encoding="utf-8") as handle:
+        for raw_line in process.stdout:
+            line = raw_line.rstrip()
+            collected_lines.append(line)
+            if len(collected_lines) > 160:
+                collected_lines = collected_lines[-160:]
+            handle.write(raw_line)
+            handle.flush()
+            print(line, flush=True)
+            line_counter += 1
+            if not summary_path and line.startswith("Wrote run summary to "):
+                summary_path = line.removeprefix("Wrote run summary to ").strip()
+            if line_counter == 1 or line_counter % 5 == 0:
+                _update_child_job(
+                    run_service=run_service,
+                    child_job_run_id=child_job_run_id,
+                    status="running",
+                    strategy_id=strategy_id,
+                    run_date=run_date,
+                    success_count=_extract_success_count(collected_lines),
+                    log_tail="\n".join(collected_lines[-120:]),
+                    log_file=str(log_file),
+                    message=f"Running screener for {strategy_id} {run_date}",
+                    skipped=False,
+                )
+    return_code = process.wait()
+    log_tail = "\n".join(collected_lines[-120:])
+    if not summary_path:
+        summary_path = _extract_summary_path(log_tail)
+    return return_code, log_tail, summary_path
+
+
 def _extract_summary_path(stdout: str) -> str:
     for line in (stdout or "").splitlines():
         if line.startswith("Wrote run summary to "):
@@ -258,37 +325,61 @@ def _extract_summary_path(stdout: str) -> str:
     return ""
 
 
-def _combine_logs(stdout: str, stderr: str) -> str:
-    stdout_value = (stdout or "").strip()
-    stderr_value = (stderr or "").strip()
-    if stdout_value and stderr_value:
-        return f"{stdout_value}\n{stderr_value}\n"
-    if stdout_value:
-        return f"{stdout_value}\n"
-    if stderr_value:
-        return f"{stderr_value}\n"
-    return ""
-
-
-def _log_tail(log_text: str, limit: int = 120) -> str:
-    lines = [line for line in (log_text or "").splitlines()]
-    return "\n".join(lines[-limit:])
-
-
-def _write_child_log(
+def _child_log_path(
     *,
     artifacts_dir: Path,
     parent_job_run_id: int | None,
     strategy_id: str,
     run_date: dt.date,
-    log_text: str,
 ) -> Path:
     output_dir = artifacts_dir / "raw" / "batch_subjob_logs"
     output_dir.mkdir(parents=True, exist_ok=True)
     parent_prefix = str(parent_job_run_id) if parent_job_run_id is not None else "batch"
-    output_path = output_dir / f"{parent_prefix}_{strategy_id}_{run_date.isoformat()}.log"
-    output_path.write_text(log_text, encoding="utf-8")
-    return output_path
+    return output_dir / f"{parent_prefix}_{strategy_id}_{run_date.isoformat()}.log"
+
+
+def _initialize_child_log(log_file: Path) -> None:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text("", encoding="utf-8")
+
+
+def _extract_success_count(lines: list[str]) -> int:
+    for line in reversed(lines):
+        if "passed=" not in line:
+            continue
+        try:
+            return int(line.split("passed=", 1)[1].split()[0])
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _update_child_job(
+    *,
+    run_service: RunService,
+    child_job_run_id: int | None,
+    status: str,
+    strategy_id: str,
+    run_date: str,
+    success_count: int,
+    log_tail: str,
+    log_file: str,
+    message: str,
+    skipped: bool,
+) -> None:
+    run_service.history_repository.update_job_run(
+        child_job_run_id,
+        status=status,
+        result_payload={
+            "strategy_id": strategy_id,
+            "run_date": run_date,
+            "success_count": success_count,
+            "log_tail": log_tail,
+            "log_file": log_file,
+            "message": message,
+            "skipped": skipped,
+        },
+    )
 
 
 if __name__ == "__main__":
