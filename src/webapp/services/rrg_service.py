@@ -288,9 +288,9 @@ class RrgService:
         return to_weekly_close(history)
 
     def _fearzone_payload(self, ticker: str, history: pd.DataFrame) -> dict[str, Any]:
-        fearzone_history = history
+        fearzone_history = self._normalize_ohlc_frame(history)
         if len(fearzone_history) < self._fearzone_min_history_bars():
-            fearzone_history = self._history_frame(ticker, "3y")
+            fearzone_history = self._normalize_ohlc_frame(self._history_frame(ticker, "3y"))
 
         hit = find_recent_fearzone_hit(
             fearzone_history,
@@ -366,6 +366,19 @@ class RrgService:
             "trigger_labels": trigger_labels,
             "conditions": latest_conditions,
         }
+
+    def _normalize_ohlc_frame(self, history: pd.DataFrame) -> pd.DataFrame:
+        normalized = history.copy()
+        close_column = "Close" if "Close" in normalized.columns else None
+        if close_column is None and "Adj Close" in normalized.columns:
+            normalized["Close"] = normalized["Adj Close"]
+            close_column = "Close"
+        if close_column is None:
+            raise ValueError("Fearzone payload requires Close history.")
+        for column in ("Open", "High", "Low"):
+            if column not in normalized.columns:
+                normalized[column] = normalized[close_column]
+        return normalized
 
     def _fearzone_min_history_bars(self) -> int:
         return max(

@@ -172,6 +172,35 @@ class RrgServiceTests(unittest.TestCase):
         self.assertIn(("XLK", "3y"), calls)
         self.assertTrue(payload["series"][0]["fearzone"]["active"])
 
+    def test_close_only_history_does_not_crash_fearzone_payload(self) -> None:
+        benchmark_frame = _rotation_frame("2025-01-02", 260)
+        ticker_frame = _fearzone_frame()[["Close", "Adj Close", "Volume"]].copy()
+
+        def fake_fetch_history(ticker: str, period: str) -> pd.DataFrame:
+            if ticker == "SPY":
+                return benchmark_frame
+            if ticker == "XLK":
+                return ticker_frame
+            raise AssertionError(f"unexpected ticker {ticker}")
+
+        with patch.object(self.service, "_universe_entries", return_value=[("Technology", "XLK")]), patch(
+            "src.webapp.services.rrg_service.fetch_history",
+            side_effect=fake_fetch_history,
+        ), patch(
+            "src.webapp.services.rrg_service.compute_rotation_series",
+            side_effect=lambda **kwargs: _mock_rotation_series(kwargs["closes"]),
+        ):
+            payload = self.service.get_universe_report(
+                universe="sector",
+                benchmark="SPY",
+                period="3y",
+                trail_weeks=12,
+                cadence="weekly",
+            )
+
+        self.assertEqual(payload["series"][0]["ticker"], "XLK")
+        self.assertIn("fearzone", payload["series"][0])
+
 
 if __name__ == "__main__":
     unittest.main()
