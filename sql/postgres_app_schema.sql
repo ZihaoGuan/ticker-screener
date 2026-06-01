@@ -98,15 +98,6 @@ CREATE TABLE IF NOT EXISTS screen_runs (
   UNIQUE (strategy_id, run_date, config_hash, scope_hash)
 );
 
-CREATE INDEX IF NOT EXISTS idx_screen_runs_strategy_run_date
-  ON screen_runs(strategy_id, run_date DESC);
-
-CREATE INDEX IF NOT EXISTS idx_screen_runs_not_deleted
-  ON screen_runs(strategy_id, deleted_at, run_date DESC);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_screen_runs_unique_scope
-  ON screen_runs(strategy_id, run_date, config_hash, scope_hash);
-
 CREATE TABLE IF NOT EXISTS screen_run_hits (
   id BIGSERIAL PRIMARY KEY,
   screen_run_id BIGINT NOT NULL REFERENCES screen_runs(id) ON DELETE CASCADE,
@@ -215,6 +206,15 @@ ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS source_kind TEXT NOT NULL DEFAU
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS result_summary_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS deleted_reason TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_screen_runs_strategy_run_date
+  ON screen_runs(strategy_id, run_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_screen_runs_not_deleted
+  ON screen_runs(strategy_id, deleted_at, run_date DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_screen_runs_unique_scope
+  ON screen_runs(strategy_id, run_date, config_hash, scope_hash);
 
 DO $$
 BEGIN
