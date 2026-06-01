@@ -4,7 +4,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
-import type { CandlePoint, WatchlistChartResponse } from "../lib/types";
+import type { AdHocScreenResponse, CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
 
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
@@ -19,15 +19,30 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
 };
 
 export function ChartsPage() {
+  const setupOptions = [
+    { id: "ftd_sweep", label: "FTD Sweep" },
+    { id: "weekly_htf_pullback", label: "Weekly HTF Pullback" },
+    { id: "htf_8w_runup", label: "HTF 8W Runup" },
+    { id: "vcp", label: "VCP" },
+  ] as const;
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTicker = (searchParams.get("ticker") ?? "").trim().toUpperCase();
   const requestedDate = (searchParams.get("date") ?? "").trim();
   const [tickerInput, setTickerInput] = useState(requestedTicker);
   const [dateInput, setDateInput] = useState(requestedDate);
   const [payload, setPayload] = useState<WatchlistChartResponse | null>(null);
+  const [setupPayload, setSetupPayload] = useState<AdHocScreenResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSetupLoading, setIsSetupLoading] = useState(false);
   const [notice, setNotice] = useState("");
+  const [setupNotice, setSetupNotice] = useState("");
   const [chartVisibility, setChartVisibility] = useState<ChartVisibility>(DEFAULT_CHART_VISIBILITY);
+  const [selectedSetups, setSelectedSetups] = useState<Record<string, boolean>>({
+    ftd_sweep: false,
+    weekly_htf_pullback: false,
+    htf_8w_runup: false,
+    vcp: false,
+  });
 
   useEffect(() => {
     setTickerInput(requestedTicker);
@@ -37,6 +52,7 @@ export function ChartsPage() {
   useEffect(() => {
     if (!requestedTicker) {
       setPayload(null);
+      setSetupPayload(null);
       setNotice("");
       return;
     }
@@ -63,6 +79,41 @@ export function ChartsPage() {
       .finally(() => setIsLoading(false));
   }, [requestedDate, requestedTicker]);
 
+  const selectedSetupIds = useMemo(
+    () => setupOptions.filter((option) => selectedSetups[option.id]).map((option) => option.id),
+    [selectedSetups],
+  );
+
+  useEffect(() => {
+    if (!requestedTicker || !payload?.resolved_as_of_date || selectedSetupIds.length === 0) {
+      setSetupPayload(null);
+      setSetupNotice("");
+      return;
+    }
+    setIsSetupLoading(true);
+    setSetupNotice("");
+    void fetchJson<AdHocScreenResponse>("/api/ad-hoc-screen", {
+      method: "POST",
+      body: JSON.stringify({
+        ticker: requestedTicker,
+        as_of_date: payload.resolved_as_of_date,
+        screeners: selectedSetupIds,
+      }),
+    })
+      .then((response) => {
+        setSetupPayload(response);
+        const failed = response.screeners.filter((item) => !item.passed);
+        if (failed.length > 0) {
+          setSetupNotice(`Some setups not active: ${failed.map((item) => item.id).join(", ")}`);
+        }
+      })
+      .catch((error) => {
+        setSetupPayload(null);
+        setSetupNotice(error instanceof Error ? error.message : "Failed to load setup overlays.");
+      })
+      .finally(() => setIsSetupLoading(false));
+  }, [payload?.resolved_as_of_date, requestedTicker, selectedSetupIds]);
+
   const chartData = useMemo<CandlePoint[]>(
     () =>
       (payload?.candles ?? []).map((item, index) => ({
@@ -79,6 +130,12 @@ export function ChartsPage() {
       ? ((lastCandle.close - previousCandle.close) / previousCandle.close) * 100
       : null;
   const latestRsMarker = payload?.rs_markers?.[payload.rs_markers.length - 1] ?? null;
+  const setupAnnotations = useMemo<ChartAnnotations[]>(() => {
+    return (setupPayload?.screeners ?? [])
+      .filter((item) => item.passed && item.hit)
+      .map((item) => buildSetupAnnotation(item.id, item.hit!))
+      .filter((item): item is ChartAnnotations => item !== null);
+  }, [setupPayload]);
   const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
     { key: "ema8", label: "EMA 8" },
     { key: "ema21", label: "EMA 21" },
@@ -184,6 +241,28 @@ export function ChartsPage() {
         </form>
       </Panel>
 
+      <Panel title="Setup Overlays" aside={<span className="eyebrow">Optional screener overlays for this ticker/date</span>}>
+        <div className="chart-toolbar">
+          {setupOptions.map((option) => (
+            <label key={option.id} className="chart-toggle">
+              <input
+                type="checkbox"
+                checked={selectedSetups[option.id]}
+                onChange={() =>
+                  setSelectedSetups((current) => ({
+                    ...current,
+                    [option.id]: !current[option.id],
+                  }))
+                }
+              />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>
+        {isSetupLoading ? <LoadingBlock label="Loading setup overlays…" compact /> : null}
+        {setupNotice ? <p className="panel-copy">{setupNotice}</p> : null}
+      </Panel>
+
       <Panel
         title="Candles"
         aside={
@@ -228,6 +307,7 @@ export function ChartsPage() {
               ticker={requestedTicker}
               candles={chartData}
               overlays={payload ?? undefined}
+              extraAnnotations={setupAnnotations}
               visibility={chartVisibility}
               forceFearzonePanel
             />
@@ -240,6 +320,13 @@ export function ChartsPage() {
                 </span>
               ) : null}
               {payload?.data_source ? <span className="chart-pill chart-pill-setup">Source {payload.data_source}</span> : null}
+              {setupAnnotations.map((item, index) =>
+                item.setupLabel ? (
+                  <span key={`${item.setupLabel}-${index}`} className="chart-pill chart-pill-setup">
+                    {item.setupLabel}
+                  </span>
+                ) : null,
+              )}
             </div>
           </>
         ) : null}
@@ -250,4 +337,61 @@ export function ChartsPage() {
 
 function formatPrice(value: number | null) {
   return value == null ? "--" : `$${value.toFixed(2)}`;
+}
+
+function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAnnotations | null {
+  switch (id) {
+    case "ftd_sweep":
+      return {
+        setupLabel: "FTD Sweep Breakout",
+        eventDate: readString(hit.ftd_date),
+        eventLabel: "FTD",
+        triggerPrice: readNumber(hit.ftd_high),
+        triggerLabel: "FTD High",
+        secondaryEntryPrice: readNumber(hit.sweep_low),
+        secondaryEntryLabel: "Sweep low",
+        secondaryEntryLow: readNumber(hit.sweep_low),
+        secondaryEntryHigh: readNumber(hit.ftd_high),
+        stopPrice: readNumber(hit.ftd_pivot_low),
+        stopLabel: "Pivot low",
+      };
+    case "weekly_htf_pullback":
+      return {
+        setupLabel: "Weekly HTF Pullback",
+        eventDate: readString(hit.htf_runup_high_date),
+        eventLabel: "Runup high",
+        triggerPrice: readNumber(hit.weekly_ema8),
+        triggerLabel: "8W EMA",
+        secondaryEntryPrice: readNumber(hit.htf_runup_high),
+        secondaryEntryLabel: "Runup high",
+      };
+    case "htf_8w_runup":
+      return {
+        setupLabel: "HTF 8W Runup",
+        eventDate: readString(hit.runup_high_date),
+        eventLabel: "Runup high",
+        triggerPrice: readNumber(hit.runup_high),
+        triggerLabel: "Runup high",
+      };
+    case "vcp":
+      return {
+        setupLabel: "VCP",
+        triggerPrice: readNumber(hit.pivot_price),
+        triggerLabel: "Pivot",
+        entryPrice: readNumber(hit.pivot_price),
+        entryLabel: "Pivot",
+        stopPrice: readNumber(hit.support_price),
+        stopLabel: "Support",
+      };
+    default:
+      return null;
+  }
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

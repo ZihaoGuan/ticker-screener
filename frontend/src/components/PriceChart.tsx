@@ -24,6 +24,7 @@ type PriceChartProps = {
     "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "rs_line" | "rs_markers" | "benchmark_ticker" | "fearzone_panel"
   >;
   annotations?: ChartAnnotations;
+  extraAnnotations?: ChartAnnotations[];
   visibility?: ChartVisibility;
   forceFearzonePanel?: boolean;
 };
@@ -45,7 +46,7 @@ type HorizontalAnnotation = {
   price: number;
 };
 
-export function PriceChart({ ticker, candles, overlays, annotations, visibility, forceFearzonePanel = false }: PriceChartProps) {
+export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations = [], visibility, forceFearzonePanel = false }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
   const priceChartApiRef = useRef<IChartApi | null>(null);
@@ -81,8 +82,8 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
     () => detectGapZones(candles).filter((zone) => zone.remainingUpperPrice > zone.remainingLowerPrice + 1e-6).slice(-4),
     [candles],
   );
-  const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations), [candles, annotations]);
-  const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations), [annotations]);
+  const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations, extraAnnotations), [candles, annotations, extraAnnotations]);
+  const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, extraAnnotations), [annotations, extraAnnotations]);
   const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
     const point = param.point;
     const normalizedTime = normalizeCrosshairTime(param.time);
@@ -259,9 +260,13 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
     }
 
     const priceMarkers = [];
-    if (annotations?.eventDate) {
+    const eventAnnotations = [annotations, ...extraAnnotations].filter((item): item is ChartAnnotations => Boolean(item?.eventDate));
+    for (const eventAnnotation of eventAnnotations) {
+      if (!eventAnnotation.eventDate) {
+        continue;
+      }
       priceMarkers.push({
-        time: annotations.eventDate,
+        time: eventAnnotation.eventDate,
         position: "aboveBar" as const,
         color: "#fbbf24",
         shape: "circle" as const,
@@ -412,6 +417,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
     visibleGapZones,
     highTightFlagBox,
     annotationLines,
+    extraAnnotations,
     weeklyEma8,
   ]);
 
@@ -667,23 +673,24 @@ function normalizeCrosshairTime(value: unknown): string | null {
   return null;
 }
 
-function detectHighTightFlagBox(candles: CandlePoint[], annotations?: ChartAnnotations) {
+function detectHighTightFlagBox(candles: CandlePoint[], annotations?: ChartAnnotations, extraAnnotations: ChartAnnotations[] = []) {
   if (candles.length < 5) {
     return null;
   }
 
-  const setupLabel = String(annotations?.setupLabel ?? "").toLowerCase();
-  const looksLikeHighTightFlag =
-    setupLabel.includes("htf") ||
-    setupLabel.includes("high tight flag") ||
-    setupLabel.includes("tight flag");
-  if (!looksLikeHighTightFlag) {
+  const htfAnnotation =
+    [annotations, ...extraAnnotations].find((item) => {
+      const setupLabel = String(item?.setupLabel ?? "").toLowerCase();
+      return setupLabel.includes("htf") || setupLabel.includes("high tight flag") || setupLabel.includes("tight flag");
+    }) ?? null;
+  if (!htfAnnotation) {
     return null;
   }
+  const htfEventDate = htfAnnotation.eventDate ?? null;
 
   const anchorIndex =
-    annotations?.eventDate != null
-      ? candles.findIndex((candle) => candle.time >= annotations.eventDate!)
+    htfEventDate
+      ? candles.findIndex((candle) => candle.time >= htfEventDate)
       : Math.max(0, candles.length - 15);
   const startIndex = anchorIndex >= 0 ? anchorIndex : Math.max(0, candles.length - 15);
   const window = candles.slice(startIndex);
@@ -693,7 +700,7 @@ function detectHighTightFlagBox(candles: CandlePoint[], annotations?: ChartAnnot
 
   const upperFromWindow = Math.max(...window.map((candle) => candle.high));
   const lowerFromWindow = Math.min(...window.map((candle) => candle.low));
-  const upperPrice = Math.max(upperFromWindow, annotations?.triggerPrice ?? Number.NEGATIVE_INFINITY);
+  const upperPrice = Math.max(upperFromWindow, htfAnnotation.triggerPrice ?? Number.NEGATIVE_INFINITY);
   const lowerPrice = lowerFromWindow;
   if (!Number.isFinite(upperPrice) || !Number.isFinite(lowerPrice) || upperPrice <= lowerPrice) {
     return null;
@@ -805,10 +812,7 @@ function detectGapZones(candles: CandlePoint[]): GapZone[] {
   return zones;
 }
 
-function buildHorizontalAnnotations(annotations?: ChartAnnotations): HorizontalAnnotation[] {
-  if (!annotations) {
-    return [];
-  }
+function buildHorizontalAnnotations(annotations?: ChartAnnotations, extraAnnotations: ChartAnnotations[] = []): HorizontalAnnotation[] {
   const lines: HorizontalAnnotation[] = [];
   const addLine = (
     price: number | null | undefined,
@@ -823,19 +827,24 @@ function buildHorizontalAnnotations(annotations?: ChartAnnotations): HorizontalA
     lines.push({ price, label, color, lineWidth, lineStyle });
   };
 
-  addLine(annotations.triggerPrice, annotations.triggerLabel ?? "Trigger", "#eab308", 2, LineStyle.Dashed);
-  addLine(annotations.entryPrice, annotations.entryLabel ?? "Entry", "#22c55e", 2, LineStyle.Solid);
-  if (
-    annotations.secondaryEntryLow != null &&
-    annotations.secondaryEntryHigh != null &&
-    Number.isFinite(annotations.secondaryEntryLow) &&
-    Number.isFinite(annotations.secondaryEntryHigh)
-  ) {
-    addLine(annotations.secondaryEntryLow, `${annotations.secondaryEntryLabel ?? "Secondary"} low`, "#94a3b8", 1, LineStyle.LargeDashed);
-    addLine(annotations.secondaryEntryHigh, `${annotations.secondaryEntryLabel ?? "Secondary"} high`, "#94a3b8", 1, LineStyle.LargeDashed);
-  } else {
-    addLine(annotations.secondaryEntryPrice, annotations.secondaryEntryLabel ?? "Secondary", "#94a3b8", 1, LineStyle.LargeDashed);
+  for (const item of [annotations, ...extraAnnotations]) {
+    if (!item) {
+      continue;
+    }
+    addLine(item.triggerPrice, item.triggerLabel ?? "Trigger", "#eab308", 2, LineStyle.Dashed);
+    addLine(item.entryPrice, item.entryLabel ?? "Entry", "#22c55e", 2, LineStyle.Solid);
+    if (
+      item.secondaryEntryLow != null &&
+      item.secondaryEntryHigh != null &&
+      Number.isFinite(item.secondaryEntryLow) &&
+      Number.isFinite(item.secondaryEntryHigh)
+    ) {
+      addLine(item.secondaryEntryLow, `${item.secondaryEntryLabel ?? "Secondary"} low`, "#94a3b8", 1, LineStyle.LargeDashed);
+      addLine(item.secondaryEntryHigh, `${item.secondaryEntryLabel ?? "Secondary"} high`, "#94a3b8", 1, LineStyle.LargeDashed);
+    } else {
+      addLine(item.secondaryEntryPrice, item.secondaryEntryLabel ?? "Secondary", "#94a3b8", 1, LineStyle.LargeDashed);
+    }
+    addLine(item.stopPrice, item.stopLabel ?? "Stop", "#ef4444", 2, LineStyle.Dotted);
   }
-  addLine(annotations.stopPrice, annotations.stopLabel ?? "Stop", "#ef4444", 2, LineStyle.Dotted);
   return lines;
 }

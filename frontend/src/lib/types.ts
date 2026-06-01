@@ -326,6 +326,33 @@ export type ChartAnnotations = {
   stopLabel?: string | null;
 };
 
+export type AdHocScreenResult = {
+  id: string;
+  passed: boolean;
+  error?: string | null;
+  timing_ms: number;
+  metrics: Record<string, unknown>;
+  reasons: string[];
+  hit: Record<string, unknown> | null;
+};
+
+export type AdHocScreenResponse = {
+  ticker: string;
+  as_of_date: string;
+  screeners: AdHocScreenResult[];
+  timing: {
+    total_ms: number;
+    market_data_source?: string;
+    market_data_tickers_loaded?: string[];
+    trading_days_requested?: number;
+  };
+  summary: {
+    requested_screener_count: number;
+    passed_screener_count: number;
+    failed_screener_count: number;
+  };
+};
+
 export type OverlapResponse = {
   date_label: string;
   unique_ticker_count: number;
