@@ -83,6 +83,28 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
   );
   const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations), [candles, annotations]);
   const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations), [annotations]);
+  const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
+    const point = param.point;
+    const normalizedTime = normalizeCrosshairTime(param.time);
+    if (
+      !point ||
+      width <= 0 ||
+      !normalizedTime ||
+      point.x < 0 ||
+      point.x > width ||
+      point.y < 0
+    ) {
+      setHoverGuide(null);
+      return;
+    }
+    const xRatio = Math.max(0, Math.min(1, point.x / width));
+    setHoverGuide((current) => {
+      if (current && current.time === normalizedTime && Math.abs(current.xRatio - xRatio) < 0.0005) {
+        return current;
+      }
+      return { time: normalizedTime, xRatio };
+    });
+  };
 
   useEffect(() => {
     if (!priceRootRef.current || !rsRootRef.current) {
@@ -331,26 +353,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
     });
     priceChart.subscribeCrosshairMove((param) => {
       const width = priceRootRef.current?.clientWidth ?? 0;
-      const point = param.point;
-      const normalizedTime = normalizeCrosshairTime(param.time);
-      if (
-        !point ||
-        width <= 0 ||
-        !normalizedTime ||
-        point.x < 0 ||
-        point.x > width ||
-        point.y < 0
-      ) {
-        setHoverGuide(null);
-        return;
-      }
-      const xRatio = Math.max(0, Math.min(1, point.x / width));
-      setHoverGuide((current) => {
-        if (current && current.time === normalizedTime && Math.abs(current.xRatio - xRatio) < 0.0005) {
-          return current;
-        }
-        return { time: normalizedTime, xRatio };
-      });
+      updateHoverGuideFromSurface({ point: param.point, time: param.time }, width);
     });
     rsChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
       if (!showRsPane || !range || syncingPriceToRs) {
@@ -359,6 +362,13 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
       syncingRsToPrice = true;
       priceChart.timeScale().setVisibleRange(range);
       syncingRsToPrice = false;
+    });
+    rsChart.subscribeCrosshairMove((param) => {
+      if (!showRsPane) {
+        return;
+      }
+      const width = rsRootRef.current?.clientWidth ?? 0;
+      updateHoverGuideFromSurface({ point: param.point, time: param.time }, width);
     });
 
     const resizeObserver = new ResizeObserver(() => {
@@ -444,13 +454,29 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
           +
         </button>
       </div>
-      <div ref={priceRootRef} className="chart-card chart-card-price" />
+      <div className="chart-pane">
+        <div ref={priceRootRef} className="chart-card chart-card-price" />
+        {hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
+      </div>
       {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
       <div className="chart-pane">
         <div ref={rsRootRef} className="chart-card chart-card-rs" />
         {showRsPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
-      {showFearzonePanel ? <FearzonePanel panel={fearzonePanel} visibleIndexRange={visibleIndexRange} hoveredTime={hoverGuide?.time ?? null} /> : null}
+      {showFearzonePanel ? (
+        <FearzonePanel
+          panel={fearzonePanel}
+          visibleIndexRange={visibleIndexRange}
+          hoveredTime={hoverGuide?.time ?? null}
+          onHoverTime={(time, xRatio) => {
+            if (!time || xRatio == null) {
+              setHoverGuide(null);
+              return;
+            }
+            setHoverGuide({ time, xRatio });
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -459,10 +485,12 @@ function FearzonePanel({
   panel,
   visibleIndexRange,
   hoveredTime,
+  onHoverTime,
 }: {
   panel: WatchlistChartResponse["fearzone_panel"];
   visibleIndexRange: { from: number; to: number } | null;
   hoveredTime: string | null;
+  onHoverTime: (time: string | null, xRatio: number | null) => void;
 }) {
   const width = 1080;
   const labelWidth = 96;
@@ -497,7 +525,37 @@ function FearzonePanel({
       }}
     >
       <div style={{ color: "#d4d4d8", fontSize: 12, marginBottom: 8 }}>Fearzone Panel</div>
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 178, display: "block" }} preserveAspectRatio="none">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        style={{ width: "100%", height: 178, display: "block" }}
+        preserveAspectRatio="none"
+        onMouseMove={(event) => {
+          if (pointCount === 0) {
+            onHoverTime(null, null);
+            return;
+          }
+          const bounds = event.currentTarget.getBoundingClientRect();
+          if (bounds.width <= 0) {
+            onHoverTime(null, null);
+            return;
+          }
+          const rawX = ((event.clientX - bounds.left) / bounds.width) * width;
+          const translatedX = rawX - labelWidth;
+          if (translatedX < 0) {
+            onHoverTime(null, null);
+            return;
+          }
+          const pointIndex = Math.max(0, Math.min(pointCount - 1, Math.floor(translatedX / Math.max(step, 1e-6))));
+          const point = rows[0]?.points[pointIndex];
+          if (!point) {
+            onHoverTime(null, null);
+            return;
+          }
+          const xRatio = Math.max(0, Math.min(1, (labelWidth + pointIndex * step + Math.max(0.5, step / 2)) / width));
+          onHoverTime(point.time, xRatio);
+        }}
+        onMouseLeave={() => onHoverTime(null, null)}
+      >
         <rect x="0" y="0" width={width} height={height} fill="#111114" rx="10" />
         {rows.map((row, rowIndex) => {
           const y = topPadding + rowIndex * rowHeight;
