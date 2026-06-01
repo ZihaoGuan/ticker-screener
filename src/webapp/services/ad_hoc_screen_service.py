@@ -4,6 +4,9 @@ import datetime as dt
 import time
 from typing import Any
 
+import pandas as pd
+import yfinance as yf
+
 from src.config import AppConfig, load_app_config
 from src.cookstock_bridge import use_prefetched_market_data
 from src.market_data_access import load_many_ticker_windows, load_ticker_metadata_map, resolve_database_url
@@ -64,7 +67,9 @@ class AdHocScreenService:
         benchmark_ticker = self.app_config.benchmark_ticker.upper()
         benchmark_bars = frame_map.get(benchmark_ticker)
         if benchmark_bars is None or getattr(benchmark_bars, "empty", False):
-            raise ValueError(f"No benchmark daily_bars coverage for {benchmark_ticker}.")
+            benchmark_bars = _download_history_frame(benchmark_ticker, as_of_date, trading_days_needed)
+        if benchmark_bars is None or getattr(benchmark_bars, "empty", False):
+            raise ValueError(f"No benchmark daily_bars coverage for {benchmark_ticker}, and internet fallback also failed.")
 
         metadata_map = load_ticker_metadata_map([normalized_ticker], database_url=self.database_url)
         bundle = ScreenerInputBundle(
@@ -143,3 +148,27 @@ class AdHocScreenService:
                 "failed_screener_count": len(specs) - passed_count,
             },
         }
+
+
+def _download_history_frame(ticker: str, as_of_date: dt.date, trading_days_needed: int) -> pd.DataFrame | None:
+    start_date = as_of_date - dt.timedelta(days=max(30, int(trading_days_needed) * 2))
+    history = yf.download(
+        tickers=ticker,
+        start=start_date.isoformat(),
+        end=(as_of_date + dt.timedelta(days=1)).isoformat(),
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+    )
+    if history is None or history.empty:
+        return None
+    frame = history.copy()
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame.columns = frame.columns.get_level_values(0)
+    frame = frame.rename(columns=str)
+    for column in ("Open", "High", "Low", "Close", "Adj Close", "Volume"):
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame.dropna(subset=["Open", "High", "Low", "Close", "Volume"]).sort_index()
+    return frame if not frame.empty else None

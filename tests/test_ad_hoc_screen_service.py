@@ -237,3 +237,47 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "fearzone")
         self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_falls_back_to_internet_when_benchmark_missing_in_db(self) -> None:
+        ticker_frame = _frame("2026-01-01", 40)
+        benchmark_frame = _frame("2026-01-01", 40)
+
+        def _evaluator(bundle):
+            return ScreenerEvaluationResult(
+                passed=True,
+                metrics={"benchmark_close": float(bundle.benchmark_bars["Close"].iloc[-1])},
+                reasons=("ok",),
+                hit={"ticker": bundle.ticker},
+            )
+
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+        service.catalog = {
+            "demo": ScreenerSpec(
+                id="demo",
+                required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+                lookback_trading_days=25,
+                warmup_trading_days=5,
+                evaluator=_evaluator,
+            )
+        }
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology"}},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service._download_history_frame",
+            return_value=benchmark_frame,
+        ) as download_history:
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2026, 2, 27),
+                screener_ids=["demo"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "demo")
+        self.assertTrue(payload["screeners"][0]["passed"])
+        download_history.assert_called_once()
