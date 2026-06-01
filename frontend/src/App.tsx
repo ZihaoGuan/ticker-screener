@@ -7,6 +7,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { GuidePage } from "./pages/GuidePage";
 import { LoginPage } from "./pages/LoginPage";
 import { OverlapPage } from "./pages/OverlapPage";
+import { ChartsPage } from "./pages/ChartsPage";
 import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
 import { WatchlistsPage } from "./pages/WatchlistsPage";
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/guide" element={<GuidePage />} />
+        <Route path="/charts" element={<ChartsPage />} />
         <Route
           path="/runs"
           element={

@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from src.webapp.services import run_service as run_service_module
 from src.webapp.services.run_service import RunService
 
 
@@ -208,6 +209,43 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(payload[0]["child_jobs"][0]["strategy_id"], "rs")
         self.assertEqual(payload[0]["child_jobs"][0]["screen_run_id"], 77)
         self.assertIn("line two", payload[0]["child_jobs"][0]["log_tail"])
+
+    def test_precheck_reports_db_ready_vs_fallback(self) -> None:
+        self.service.history_repository.is_configured = lambda: True  # type: ignore[method-assign]
+        original_load_app_config = run_service_module.load_app_config
+        original_build_screener_catalog = run_service_module.build_screener_catalog
+        original_load_universe = run_service_module.load_universe
+        original_load_many_ticker_windows = run_service_module.load_many_ticker_windows
+        original_db_frame_has_recent_coverage = run_service_module.db_frame_has_recent_coverage
+        self.addCleanup(setattr, run_service_module, "load_app_config", original_load_app_config)
+        self.addCleanup(setattr, run_service_module, "build_screener_catalog", original_build_screener_catalog)
+        self.addCleanup(setattr, run_service_module, "load_universe", original_load_universe)
+        self.addCleanup(setattr, run_service_module, "load_many_ticker_windows", original_load_many_ticker_windows)
+        self.addCleanup(setattr, run_service_module, "db_frame_has_recent_coverage", original_db_frame_has_recent_coverage)
+
+        class _Frame:
+            def __init__(self, count: int) -> None:
+                self.count = count
+
+            def __len__(self) -> int:
+                return self.count
+
+        run_service_module.load_app_config = lambda: original_load_app_config()  # type: ignore[assignment]
+        run_service_module.build_screener_catalog = lambda config: {"rs": type("Spec", (), {"lookback_trading_days": 100, "warmup_trading_days": 20, "required_inputs": ("daily_bars", "benchmark_bars", "metadata")})()}  # type: ignore[assignment]
+        run_service_module.load_universe = lambda config, limit=None: [run_service_module.UniverseTicker(symbol="AAPL"), run_service_module.UniverseTicker(symbol="MSFT")]  # type: ignore[assignment]
+        run_service_module.load_many_ticker_windows = lambda tickers, as_of_date, trading_days_needed, database_url=None: {  # type: ignore[assignment]
+            "AAPL": _Frame(120),
+            "MSFT": _Frame(50),
+            "SPY": _Frame(120),
+        }
+        run_service_module.db_frame_has_recent_coverage = lambda frame, end_date, tolerance_days=7: True  # type: ignore[assignment]
+
+        result = self.service.precheck("rs", options={"market_data_source": "database-first"})
+
+        self.assertTrue(result["applicable"])
+        self.assertEqual(result["db_ready_tickers"], 1)
+        self.assertEqual(result["fallback_tickers"], 1)
+        self.assertEqual(result["sample_fallback_tickers"], ["MSFT"])
 
 
 if __name__ == "__main__":

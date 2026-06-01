@@ -25,6 +25,7 @@ type PriceChartProps = {
   >;
   annotations?: ChartAnnotations;
   visibility?: ChartVisibility;
+  forceFearzonePanel?: boolean;
 };
 
 type GapZone = {
@@ -44,7 +45,7 @@ type HorizontalAnnotation = {
   price: number;
 };
 
-export function PriceChart({ ticker, candles, overlays, annotations, visibility }: PriceChartProps) {
+export function PriceChart({ ticker, candles, overlays, annotations, visibility, forceFearzonePanel = false }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
   const options = visibility ?? {
@@ -71,9 +72,12 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility 
   const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
   const showFearzonePanel = useMemo(() => {
+    if (forceFearzonePanel) {
+      return fearzonePanel.rows.length > 0;
+    }
     const setupLabel = String(annotations?.setupLabel ?? "").toLowerCase();
     return setupLabel.includes("fearzone") && fearzonePanel.rows.length > 0;
-  }, [annotations?.setupLabel, fearzonePanel.rows.length]);
+  }, [annotations?.setupLabel, fearzonePanel.rows.length, forceFearzonePanel]);
   const visibleGapZones = useMemo(
     () => detectGapZones(candles).filter((zone) => zone.remainingUpperPrice > zone.remainingLowerPrice + 1e-6).slice(-4),
     [candles],

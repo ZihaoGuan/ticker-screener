@@ -46,7 +46,11 @@ def get_admin_service() -> AdminService:
 
 
 def get_watchlist_service() -> WatchlistService:
-    return WatchlistService(artifacts_dir=config.artifacts_dir)
+    return WatchlistService(
+        artifacts_dir=config.artifacts_dir,
+        database_url=config.database_url,
+        market_data_source=config.market_data_source,
+    )
 
 
 def get_run_service() -> RunService:

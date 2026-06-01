@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -46,6 +48,7 @@ def watchlist_detail(
 def watchlist_chart_data(
     ticker: str,
     period: str = Query(default="18mo"),
+    as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
     service: WatchlistService = Depends(get_watchlist_service),
 ) -> JSONResponse:
-    return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period))
+    return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period, as_of_date=as_of_date))

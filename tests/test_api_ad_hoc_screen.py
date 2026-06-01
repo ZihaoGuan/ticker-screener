@@ -19,6 +19,7 @@ if TestClient is not None:
         get_run_service,
         get_screener_history_service,
         get_user_admin_service,
+        get_watchlist_service,
     )
     from src.webapp.access_control import principal_for_user, anonymous_principal
 
@@ -149,6 +150,37 @@ class _FakeUserAdminService:
         return {"id": request_id, "email": "visitor@example.com", "requested_role": "premium", "status": "denied"}
 
 
+class _FakeWatchlistService:
+    def list_recent(self):
+        return []
+
+    def get_watchlist_detail(self, stem: str):
+        return {"stem": stem, "entry_count": 0, "entries": []}
+
+    def get_chart_payload(self, ticker: str, period: str = "18mo", *, as_of_date: dt.date | None = None):
+        return {
+            "ticker": ticker.upper(),
+            "benchmark_ticker": "SPY",
+            "period": period,
+            "requested_as_of_date": as_of_date.isoformat() if as_of_date else None,
+            "resolved_as_of_date": "2026-05-30",
+            "latest_available_date": "2026-05-30",
+            "data_source": "internet",
+            "candles": [{"time": "2026-05-30", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5}],
+            "volume": [{"time": "2026-05-30", "value": 1000}],
+            "ma20": [],
+            "ma50": [],
+            "ma200": [],
+            "ema8": [],
+            "ema21": [],
+            "weekly_ema8": [],
+            "ipo_vwap": [],
+            "rs_line": [],
+            "rs_markers": [],
+            "fearzone_panel": {"rows": [], "signals": []},
+        }
+
+
 @unittest.skipIf(TestClient is None, "fastapi test dependencies are not installed")
 class ApiAdHocScreenTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -159,6 +191,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_auth_service] = lambda: _FakeAuthService()
         app.dependency_overrides[get_audit_service] = lambda: _FakeAuditService()
         app.dependency_overrides[get_user_admin_service] = lambda: _FakeUserAdminService()
+        app.dependency_overrides[get_watchlist_service] = lambda: _FakeWatchlistService()
         app.dependency_overrides[get_current_principal] = anonymous_principal
         self.client = TestClient(app)
 
@@ -179,6 +212,14 @@ class ApiAdHocScreenTests(unittest.TestCase):
         response = self.client.post("/api/ad-hoc-screen", json={"ticker": "aapl"})
         self.assertEqual(response.status_code, 400)
         self.assertIn("as_of_date", response.json()["detail"])
+
+    def test_get_standalone_chart(self) -> None:
+        response = self.client.get("/api/charts/nvda?asOfDate=2026-05-31")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["ticker"], "NVDA")
+        self.assertEqual(payload["requested_as_of_date"], "2026-05-31")
+        self.assertEqual(payload["resolved_as_of_date"], "2026-05-30")
 
     def test_post_screener_runs_batch_requires_strategy_ids(self) -> None:
         response = self.client.post("/api/screener-runs/batch", json={"start_date": "2026-01-01", "end_date": "2026-01-31"})

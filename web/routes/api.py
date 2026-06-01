@@ -246,6 +246,21 @@ def run_action(
     return JSONResponse({"ok": True, "job_id": job_id})
 
 
+@router.post("/runs/{action_id}/precheck", response_class=JSONResponse)
+def run_action_precheck(
+    action_id: str,
+    payload: dict[str, object] | None = Body(default=None),
+    service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_run_screeners),
+) -> JSONResponse:
+    try:
+        result = service.precheck(action_id, options=payload or {})
+    except ValueError as exc:
+        status_code = 404 if str(exc).startswith("Unknown run action") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder(result))
+
+
 @router.post("/ad-hoc-screen", response_class=JSONResponse)
 def ad_hoc_screen(
     payload: dict[str, object] | None = Body(default=None),
@@ -449,10 +464,21 @@ def watchlist_chart_data(
     stem: str,
     ticker: str,
     period: str = Query(default="18mo"),
+    as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
     service: WatchlistService = Depends(get_watchlist_service),
 ) -> JSONResponse:
     _ = stem
-    return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period))
+    return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period, as_of_date=as_of_date))
+
+
+@router.get("/charts/{ticker}", response_class=JSONResponse)
+def ticker_chart_data(
+    ticker: str,
+    period: str = Query(default="18mo"),
+    as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
+    service: WatchlistService = Depends(get_watchlist_service),
+) -> JSONResponse:
+    return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period, as_of_date=as_of_date))
 
 
 @router.get("/overlap/latest", response_class=JSONResponse)

@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { RunAction } from "../lib/types";
+import type { RunPrecheckResponse } from "../lib/types";
+import { fetchJson } from "../lib/api";
 import "./ScreenerConfigModal.css";
 
 interface ScreenerConfigModalProps {
@@ -18,6 +20,35 @@ export function ScreenerConfigModal({
   isLoading,
 }: ScreenerConfigModalProps) {
   const [fieldValues, setFieldValues] = useState<Record<string, string | string[]>>({});
+  const [precheck, setPrecheck] = useState<RunPrecheckResponse | null>(null);
+  const [isLoadingPrecheck, setIsLoadingPrecheck] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || !action) {
+      setIsLoadingPrecheck(false);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setIsLoadingPrecheck(true);
+      void fetchJson<RunPrecheckResponse>(`/api/runs/${action.id}/precheck`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fieldValues),
+      })
+        .then((result) => setPrecheck(result))
+        .catch(() =>
+          setPrecheck({
+            applicable: false,
+            configured: false,
+            action_id: action.id,
+            market_data_source: String(fieldValues.market_data_source || "internet"),
+            message: "Unable to load DB coverage precheck.",
+          }),
+        )
+        .finally(() => setIsLoadingPrecheck(false));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [action, fieldValues, isOpen]);
 
   if (!isOpen || !action) {
     return null;
@@ -38,6 +69,7 @@ export function ScreenerConfigModal({
 
   const handleCancel = () => {
     setFieldValues({});
+    setPrecheck(null);
     onClose();
   };
 
@@ -53,6 +85,60 @@ export function ScreenerConfigModal({
 
         <div className="modal-body">
           <p className="modal-description">Define parameters for {action.label.toLowerCase()} detection.</p>
+
+          <div className="detail-card" style={{ marginBottom: 18 }}>
+            <div className="detail-card-head">
+              <div>
+                <div className="ticker-symbol">DB Precheck</div>
+                <div className="file-meta">Estimate DB-ready vs fallback-needed tickers before launch.</div>
+              </div>
+              <span className="eyebrow">{isLoadingPrecheck ? "checking" : precheck?.applicable ? "ready" : "n/a"}</span>
+            </div>
+            {isLoadingPrecheck ? (
+              <p className="panel-copy">Checking DB coverage…</p>
+            ) : precheck?.applicable ? (
+              <>
+                <div className="detail-grid">
+                  <div>
+                    <div className="eyebrow">DB Ready</div>
+                    <div className="panel-copy">
+                      {precheck.db_ready_tickers ?? 0} / {precheck.total_tickers ?? 0} ({precheck.db_ready_pct ?? 0}%)
+                    </div>
+                  </div>
+                  <div>
+                    <div className="eyebrow">Fallback Needed</div>
+                    <div className="panel-copy">{precheck.fallback_tickers ?? 0}</div>
+                  </div>
+                </div>
+                <div className="detail-grid">
+                  <div>
+                    <div className="eyebrow">As Of Date</div>
+                    <div className="panel-copy">{precheck.as_of_date || "-"}</div>
+                  </div>
+                  <div>
+                    <div className="eyebrow">Lookback Days</div>
+                    <div className="panel-copy">{precheck.lookback_trading_days ?? "-"}</div>
+                  </div>
+                </div>
+                {precheck.benchmark?.required ? (
+                  <div className="detail-subsection">
+                    <div className="eyebrow">Benchmark</div>
+                    <div className="panel-copy">
+                      {precheck.benchmark.ticker}: {precheck.benchmark.db_ready ? "DB ready" : "needs fallback"}
+                    </div>
+                  </div>
+                ) : null}
+                {(precheck.sample_fallback_tickers ?? []).length > 0 ? (
+                  <div className="detail-subsection">
+                    <div className="eyebrow">Sample Fallback Tickers</div>
+                    <div className="panel-copy">{(precheck.sample_fallback_tickers ?? []).join(", ")}</div>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="panel-copy">{precheck?.message || "DB precheck is not applicable for the current settings."}</p>
+            )}
+          </div>
 
           <div className="modal-fields">
             {action.fields.map((field: typeof action.fields[0]) => (

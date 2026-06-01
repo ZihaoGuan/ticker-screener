@@ -162,6 +162,28 @@ export type RunAction = {
   }>;
 };
 
+export type RunPrecheckResponse = {
+  applicable: boolean;
+  configured: boolean;
+  action_id: string;
+  market_data_source: string;
+  message?: string;
+  as_of_date?: string;
+  lookback_trading_days?: number;
+  total_tickers?: number;
+  db_ready_tickers?: number;
+  fallback_tickers?: number;
+  db_ready_pct?: number;
+  sample_fallback_tickers?: string[];
+  benchmark?: {
+    ticker: string;
+    required: boolean;
+    db_ready: boolean;
+    bar_count?: number | null;
+  };
+  notes?: string[];
+};
+
 export type JobsResponse = {
   actions: RunAction[];
   jobs: {
@@ -260,6 +282,11 @@ export type PartialTickerDetailResponse = {
 export type WatchlistChartResponse = {
   ticker: string;
   benchmark_ticker: string;
+  period?: string;
+  requested_as_of_date?: string | null;
+  resolved_as_of_date?: string | null;
+  latest_available_date?: string | null;
+  data_source?: string | null;
   candles: Array<{ time: string; open: number; high: number; low: number; close: number }>;
   volume: Array<{ time: string; value: number }>;
   ma20: Array<{ time: string; value: number }>;

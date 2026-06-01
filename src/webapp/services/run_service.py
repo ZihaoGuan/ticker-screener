@@ -14,7 +14,11 @@ import uuid
 from typing import Any
 
 from src.config import load_app_config
+from src.market_data_access import db_frame_has_recent_coverage, load_many_ticker_windows
+from src.screener_catalog import build_screener_catalog
 from src.universe_filters import build_filter_option_catalog
+from src.universe import UniverseTicker, load_universe
+from src.universe_filters import UniverseFilterCriteria, filter_universe_by_criteria
 from src.webapp.services.screener_history_service import ScreenerHistoryService
 from src.webapp.repositories.history_repository import HistoryRepository
 
@@ -433,6 +437,95 @@ class RunService:
             jobs = [self._serialize_job(job)]
         enriched = self._attach_child_jobs(jobs)
         return enriched[0]
+
+    def precheck(self, action_id: str, *, options: dict[str, Any] | None = None) -> dict[str, Any]:
+        action = self._actions.get(action_id)
+        if action is None:
+            raise ValueError(f"Unknown run action: {action_id}")
+        normalized = self._normalize_options(action, options or {})
+        market_data_source = str(normalized.get("market_data_source") or "internet").strip().lower()
+        if market_data_source != "database-first":
+            return {
+                "applicable": False,
+                "configured": self.history_repository.is_configured(),
+                "action_id": action_id,
+                "market_data_source": market_data_source or "internet",
+                "message": "DB coverage precheck is only used for database-first runs.",
+            }
+        if not self.history_repository.is_configured():
+            return {
+                "applicable": False,
+                "configured": False,
+                "action_id": action_id,
+                "market_data_source": market_data_source,
+                "message": "Database URL is not configured for DB coverage precheck.",
+            }
+
+        config = load_app_config()
+        catalog = build_screener_catalog(config)
+        spec = catalog.get(action_id)
+        if spec is None:
+            return {
+                "applicable": False,
+                "configured": True,
+                "action_id": action_id,
+                "market_data_source": market_data_source,
+                "message": "DB coverage precheck is not available for this screener yet.",
+            }
+
+        target_date = self._resolve_as_of_date(normalized)
+        lookback_trading_days = int(spec.lookback_trading_days) + int(spec.warmup_trading_days)
+        universe = self._resolve_precheck_universe(config=config, normalized=normalized)
+        universe_symbols = [item.symbol.upper() for item in universe]
+        benchmark_ticker = config.benchmark_ticker.upper()
+        query_tickers = universe_symbols + ([benchmark_ticker] if "benchmark_bars" in spec.required_inputs else [])
+        frames = load_many_ticker_windows(
+            query_tickers,
+            target_date,
+            lookback_trading_days,
+            database_url=self.database_url,
+        )
+        benchmark_ready = True
+        benchmark_bar_count = None
+        if "benchmark_bars" in spec.required_inputs:
+            benchmark_frame = frames.get(benchmark_ticker)
+            benchmark_bar_count = len(benchmark_frame) if benchmark_frame is not None else 0
+            benchmark_ready = self._frame_is_db_ready(benchmark_frame, target_date, lookback_trading_days)
+
+        db_ready_tickers = 0
+        fallback_tickers: list[str] = []
+        for symbol in universe_symbols:
+            frame = frames.get(symbol)
+            ticker_ready = self._frame_is_db_ready(frame, target_date, lookback_trading_days)
+            if ticker_ready and benchmark_ready:
+                db_ready_tickers += 1
+            else:
+                fallback_tickers.append(symbol)
+
+        total_tickers = len(universe_symbols)
+        return {
+            "applicable": True,
+            "configured": True,
+            "action_id": action_id,
+            "market_data_source": market_data_source,
+            "as_of_date": target_date.isoformat(),
+            "lookback_trading_days": lookback_trading_days,
+            "total_tickers": total_tickers,
+            "db_ready_tickers": db_ready_tickers,
+            "fallback_tickers": len(fallback_tickers),
+            "db_ready_pct": round((db_ready_tickers / total_tickers) * 100, 1) if total_tickers > 0 else 0.0,
+            "sample_fallback_tickers": fallback_tickers[:12],
+            "benchmark": {
+                "ticker": benchmark_ticker,
+                "required": "benchmark_bars" in spec.required_inputs,
+                "db_ready": benchmark_ready,
+                "bar_count": benchmark_bar_count,
+            },
+            "notes": [
+                "Counts estimate whether DB coverage is good enough before fallback would be needed.",
+                "Fallback-needed means at least one required DB input looks incomplete or too stale for this screener.",
+            ],
+        }
 
     def cancel(self, job_id: str) -> dict[str, Any]:
         with self._jobs_lock:
@@ -987,3 +1080,34 @@ class RunService:
         if isinstance(value, dt.datetime):
             return value.isoformat()
         return str(value or "")
+
+    def _resolve_as_of_date(self, normalized: dict[str, Any]) -> dt.date:
+        value = str(normalized.get("as_of_date") or "").strip()
+        if value:
+            return dt.date.fromisoformat(value)
+        return dt.date.today()
+
+    def _resolve_precheck_universe(self, *, config: Any, normalized: dict[str, Any]) -> list[UniverseTicker]:
+        tickers = normalized.get("tickers")
+        if isinstance(tickers, list) and tickers:
+            return [UniverseTicker(symbol=str(item).strip().upper()) for item in tickers if str(item).strip()]
+        universe = load_universe(config, limit=normalized.get("limit"))
+        criteria = UniverseFilterCriteria(
+            filter_precedence=str(normalized.get("filter_precedence") or "exclude"),
+            include_sectors=tuple(str(item).strip().lower() for item in normalized.get("include_sectors") or [] if str(item).strip()),
+            exclude_sectors=tuple(str(item).strip().lower() for item in normalized.get("exclude_sectors") or [] if str(item).strip()),
+            include_industries=tuple(str(item).strip().lower() for item in normalized.get("include_industries") or [] if str(item).strip()),
+            exclude_industries=tuple(str(item).strip().lower() for item in normalized.get("exclude_industries") or [] if str(item).strip()),
+            include_themes=tuple(str(item).strip().lower() for item in normalized.get("include_themes") or [] if str(item).strip()),
+            exclude_themes=tuple(str(item).strip().lower() for item in normalized.get("exclude_themes") or [] if str(item).strip()),
+        )
+        return filter_universe_by_criteria(universe, criteria)
+
+    def _frame_is_db_ready(self, frame: Any, target_date: dt.date, minimum_rows: int) -> bool:
+        if frame is None:
+            return False
+        try:
+            row_count = len(frame)
+        except TypeError:
+            return False
+        return row_count >= minimum_rows and db_frame_has_recent_coverage(frame, target_date)
