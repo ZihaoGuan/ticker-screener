@@ -343,6 +343,17 @@ export type RrgSeries = {
   latest: RrgPoint;
   quadrant: "Leading" | "Weakening" | "Lagging" | "Improving" | string;
   distance: number;
+  fearzone: {
+    active: boolean;
+    signal_date: string | null;
+    signal_age_bars: number | null;
+    trigger_labels: string[];
+    conditions: Array<{
+      key: string;
+      label: string;
+      active: boolean;
+    }>;
+  };
 };
 
 export type RrgGroup = {

@@ -7,6 +7,9 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from src.config import AppConfig, load_app_config
+from src.fearzone_screen import find_recent_fearzone_hit
+from src.universe import UniverseTicker
 from scripts.render_sector_rotation_rrg import build_theme_universe, chunked
 from vendor.trade_master_signals.render_sector_rotation_rrg import (
     DEFAULT_INDUSTRY_ETFS,
@@ -43,6 +46,7 @@ class RrgSeries:
     latest: RrgPoint
     quadrant: str
     distance: float
+    fearzone: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -53,9 +57,10 @@ class RrgGroup:
 
 
 class RrgService:
-    def __init__(self, output_dir: Path, reports_fqdn: str = "") -> None:
+    def __init__(self, output_dir: Path, reports_fqdn: str = "", app_config: AppConfig | None = None) -> None:
         self.output_dir = output_dir
         self.reports_fqdn = reports_fqdn.strip()
+        self.app_config = app_config or load_app_config()
 
     def get_latest_report(self) -> dict[str, Any]:
         report_dir = self._resolve_latest_report_dir()
@@ -213,14 +218,15 @@ class RrgService:
         trail_weeks: int,
         cadence: CadenceName,
     ) -> tuple[list[RrgSeries], list[str]]:
-        benchmark_history = self._history_series(benchmark, period, cadence).rename(benchmark)
+        benchmark_history = self._close_series(self._history_frame(benchmark, period), cadence).rename(benchmark)
         failures: list[str] = []
 
         series_list: list[RrgSeries] = []
         for index, (label, ticker) in enumerate(entries):
             symbol = ticker.upper()
             try:
-                ticker_history = self._history_series(symbol, period, cadence).rename(symbol)
+                ticker_frame = self._history_frame(symbol, period)
+                ticker_history = self._close_series(ticker_frame, cadence).rename(symbol)
             except Exception:
                 failures.append(symbol)
                 continue
@@ -265,15 +271,109 @@ class RrgService:
                     latest=points[-1],
                     quadrant=series.quadrant,
                     distance=round(float(series.distance), 3),
+                    fearzone=self._fearzone_payload(symbol, ticker_frame),
                 )
             )
         return series_list, sorted(set(failures))
 
-    def _history_series(self, ticker: str, period: str, cadence: CadenceName) -> pd.Series:
+    def _history_frame(self, ticker: str, period: str) -> pd.DataFrame:
         history = fetch_history(ticker, period)
+        if history is None or history.empty:
+            raise ValueError(f"No history for {ticker}")
+        return history
+
+    def _close_series(self, history: pd.DataFrame, cadence: CadenceName) -> pd.Series:
         if cadence == "daily-2m":
             return history["Close"].dropna()
         return to_weekly_close(history)
+
+    def _fearzone_payload(self, ticker: str, history: pd.DataFrame) -> dict[str, Any]:
+        fearzone_history = history
+        if len(fearzone_history) < self._fearzone_min_history_bars():
+            fearzone_history = self._history_frame(ticker, "3y")
+
+        hit = find_recent_fearzone_hit(
+            fearzone_history,
+            ticker=UniverseTicker(symbol=ticker),
+            benchmark_ticker=self.app_config.benchmark_ticker,
+            config=self.app_config,
+        )
+        source = fearzone_history[["Open", "High", "Low", "Close"]].mean(axis=1)
+        high_period = int(self.app_config.fearzone_high_period)
+        band_period = int(self.app_config.fearzone_band_period)
+
+        highest_source = source.rolling(high_period).max()
+        fz1_value = (highest_source - source) / highest_source.replace(0, pd.NA)
+        fz1_basis = fz1_value.rolling(band_period).mean()
+        fz1_std = fz1_value.rolling(band_period).std(ddof=0)
+        fz1_upper = fz1_basis + (fz1_std * float(self.app_config.fearzone_band_std_multiplier))
+        in_fz1 = (fz1_value > fz1_upper).fillna(False)
+
+        source_ma = source.rolling(high_period).mean()
+        fz2_value = source - source_ma
+        fz2_basis = fz2_value.rolling(band_period).mean()
+        fz2_std = fz2_value.rolling(band_period).std(ddof=0)
+        fz2_lower = fz2_basis - (fz2_std * float(self.app_config.fearzone_band_std_multiplier))
+        in_fz2 = (fz2_value < fz2_lower).fillna(False)
+
+        impulse_pct = (
+            (fearzone_history["Close"] / fearzone_history["Close"].shift(int(self.app_config.fearzone_negative_impulse_lookback_days))) - 1.0
+        ) * 100.0
+        negative_impulse = (impulse_pct <= (-abs(float(self.app_config.fearzone_negative_impulse_pct)))).fillna(False)
+
+        bar_range = fearzone_history["High"] - fearzone_history["Low"]
+        range_floor = fearzone_history["Low"] + (bar_range * float(self.app_config.fearzone_ricochet_zone_pct))
+        in_ricochet_zone = (fearzone_history["Close"] <= range_floor).fillna(False)
+
+        lowest_low = fearzone_history["Low"].rolling(int(self.app_config.fearzone_stochastic_k)).min()
+        highest_high = fearzone_history["High"].rolling(int(self.app_config.fearzone_stochastic_k)).max()
+        stoch_range = highest_high - lowest_low
+        raw_k = ((fearzone_history["Close"] - lowest_low) * 100.0 / stoch_range.where(stoch_range != 0)).astype(float)
+        fast_k = raw_k.rolling(int(self.app_config.fearzone_stochastic_d)).mean()
+        slow_k = fast_k.rolling(int(self.app_config.fearzone_stochastic_d)).mean()
+        magic_k1 = (slow_k < float(self.app_config.fearzone_magic_k1_threshold)).fillna(False)
+
+        ma200 = fearzone_history["Close"].rolling(int(self.app_config.fearzone_ma_long_period)).mean()
+        above_ma200 = (fearzone_history["Close"] > ma200).fillna(False)
+
+        condition_defs = [
+            ("fz1", "FZ1", in_fz1),
+            ("fz2", "FZ2", in_fz2),
+            ("negative_impulse", "Down 10%", negative_impulse),
+            ("ricochet_zone", "Ricochet", in_ricochet_zone),
+            ("magic_k1", "Magic-K1", magic_k1),
+            ("above_ma200", "Above MA200", above_ma200),
+        ]
+        latest_conditions = [
+            {"key": key, "label": label, "active": bool(series.iloc[-1])}
+            for key, label, series in condition_defs
+            if not series.empty
+        ]
+
+        trigger_labels: list[str] = []
+        if hit is not None:
+            if hit.trigger_negative_impulse:
+                trigger_labels.append("Down 10%")
+            if hit.trigger_ricochet_zone:
+                trigger_labels.append("Ricochet")
+            if hit.trigger_magic_k1:
+                trigger_labels.append("Magic-K1")
+
+        return {
+            "active": hit is not None,
+            "signal_date": hit.signal_date if hit is not None else None,
+            "signal_age_bars": hit.signal_age_bars if hit is not None else None,
+            "trigger_labels": trigger_labels,
+            "conditions": latest_conditions,
+        }
+
+    def _fearzone_min_history_bars(self) -> int:
+        return max(
+            int(self.app_config.fearzone_high_period),
+            int(self.app_config.fearzone_band_period),
+            int(self.app_config.fearzone_ma_long_period),
+            int(self.app_config.fearzone_negative_impulse_lookback_days) + 5,
+        )
 
     def _universe_entries(self, universe: UniverseName) -> list[tuple[str, str]]:
         if universe == "sector":

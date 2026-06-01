@@ -275,6 +275,35 @@ export function RrgPage() {
                     <span className="file-meta">Momentum {entry.latest.y.toFixed(1)}</span>
                     <span className="file-meta">{entry.points.length} points</span>
                   </div>
+                  <div className="rrg-fearzone-card">
+                    <div className="rrg-fearzone-head">
+                      <div className="rrg-item-chart-label">Fearzone</div>
+                      <div className={`status-pill status-${entry.fearzone.active ? "success" : "failed"}`}>
+                        {entry.fearzone.active ? "Active" : "Inactive"}
+                      </div>
+                    </div>
+                    <div className="rrg-mini-metrics">
+                      <span className="file-meta">
+                        Signal {entry.fearzone.signal_date ?? "None"}
+                      </span>
+                      <span className="file-meta">
+                        Age {entry.fearzone.signal_age_bars ?? "-"} bars
+                      </span>
+                      <span className="file-meta">
+                        Trigger {entry.fearzone.trigger_labels.length ? entry.fearzone.trigger_labels.join(", ") : "None"}
+                      </span>
+                    </div>
+                    <div className="rrg-fearzone-indicators">
+                      {entry.fearzone.conditions.map((condition) => (
+                        <span
+                          key={`${entry.ticker}-${condition.key}`}
+                          className={`rrg-fearzone-indicator${condition.active ? " is-active" : ""}`}
+                        >
+                          {condition.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                   <div className="rrg-item-chart">
                     <div className="rrg-item-chart-label">RRG Trail</div>
                     <RrgChart benchmark={payload.benchmark} series={[entry]} compact showLegend={false} />
