@@ -61,6 +61,28 @@ class AuthService:
         )
         return {"ok": True, "email": clean_email, "expires_at": expires_at.isoformat()}
 
+    def request_premium_access(self, *, email: str) -> dict[str, Any]:
+        if not self.repository.is_configured():
+            raise ValueError("Authentication requires TICKER_SCREENER_DATABASE_URL.")
+        self.ensure_bootstrap_admins()
+        clean_email = str(email).strip().lower()
+        if not clean_email:
+            raise ValueError("email is required")
+        user = self.repository.get_user_by_email(clean_email)
+        if user is not None:
+            if not bool(user.get("is_active")):
+                raise ValueError("Account is inactive.")
+            role = normalize_role(user.get("role"))
+            if role in {"premium", "admin"}:
+                return {"ok": True, "email": clean_email, "status": "already_granted", "message": "This email already has access."}
+        existing = self.repository.get_pending_access_request_by_email(clean_email)
+        if existing is not None:
+            return {"ok": True, "email": clean_email, "status": "already_pending", "message": "A premium access request is already pending."}
+        request_record = self.repository.create_access_request(email=clean_email, requested_role="premium")
+        if request_record is None:
+            raise ValueError("Unable to create access request.")
+        return {"ok": True, "email": clean_email, "status": "pending", "message": "Premium access request submitted."}
+
     def verify_magic_link(self, *, token: str, request_ip: str, request_user_agent: str) -> dict[str, Any]:
         if not self.repository.is_configured():
             raise ValueError("Authentication requires TICKER_SCREENER_DATABASE_URL.")
@@ -185,6 +207,30 @@ class AuthService:
                 server.login(self.config.smtp_username, self.config.smtp_password)
             server.send_message(message)
 
+    def _deliver_role_grant_link(self, *, user_id: int, email: str, subject: str, intro: str) -> dict[str, Any]:
+        self.repository.revoke_magic_links_for_user(user_id=user_id)
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = self._hash_token(raw_token)
+        expires_at = self._now() + dt.timedelta(minutes=max(1, int(self.config.auth_magic_link_ttl_minutes)))
+        self.repository.create_magic_link(
+            user_id=user_id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            request_ip="admin-grant",
+            request_user_agent="system",
+        )
+        link = self._build_magic_link(raw_token)
+        self._send_email(
+            to_address=email,
+            subject=subject,
+            body=(
+                f"{intro}\n\n"
+                f"{link}\n\n"
+                f"This link expires at {expires_at.isoformat()} UTC."
+            ),
+        )
+        return {"ok": True, "email": email, "expires_at": expires_at.isoformat()}
+
     def _now(self) -> dt.datetime:
         return dt.datetime.now(dt.timezone.utc)
 
@@ -201,6 +247,11 @@ class UserAdminService:
         users = self.repository.list_users()
         return [self._normalize_user(item) for item in users]
 
+    def list_access_requests(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        if not self.repository.is_configured():
+            return []
+        return [self._normalize_access_request(item) for item in self.repository.list_access_requests(status=status)]
+
     def invite_or_create_user(self, *, email: str, role: str) -> dict[str, Any]:
         if not self.repository.is_configured():
             raise ValueError("Authentication requires TICKER_SCREENER_DATABASE_URL.")
@@ -210,7 +261,75 @@ class UserAdminService:
         user = self.repository.upsert_user(email=clean_email, role=normalize_role(role), is_active=True)
         if user is None:
             raise ValueError("Unable to create user.")
+        auth_service = AuthService(config=self.config, repository=self.repository)
+        auth_service._ensure_email_delivery_configured()
+        auth_service._deliver_role_grant_link(
+            user_id=int(user["id"]),
+            email=clean_email,
+            subject=f"{self.config.app_title} invitation",
+            intro=(
+                f"You have been granted {normalize_role(role)} access to {self.config.app_title}.\n\n"
+                "Use the sign-in link below to access the app."
+            ),
+        )
         return self._normalize_user(user)
+
+    def approve_access_request(self, *, request_id: int, reviewed_by_user_id: int) -> dict[str, Any]:
+        if not self.repository.is_configured():
+            raise ValueError("Authentication requires TICKER_SCREENER_DATABASE_URL.")
+        request_record = self.repository.get_access_request_by_id(request_id)
+        if request_record is None:
+            raise ValueError("Unknown access request.")
+        if str(request_record.get("status")) != "pending":
+            raise ValueError("Access request is not pending.")
+        email = str(request_record["email"]).strip().lower()
+        user = self.repository.get_user_by_email(email)
+        if user is not None and not bool(user.get("is_active")):
+            user = self.repository.update_user_active(user_id=int(user["id"]), is_active=True)
+        if user is None:
+            user = self.repository.upsert_user(email=email, role="premium", is_active=True)
+        else:
+            user = self.repository.update_user_role(user_id=int(user["id"]), role="premium")
+        if user is None:
+            raise ValueError("Unable to grant premium access.")
+        auth_service = AuthService(config=self.config, repository=self.repository)
+        auth_service._ensure_email_delivery_configured()
+        auth_service._deliver_role_grant_link(
+            user_id=int(user["id"]),
+            email=email,
+            subject=f"{self.config.app_title} premium access approved",
+            intro=(
+                f"Your premium access request for {self.config.app_title} has been approved.\n\n"
+                "Use the sign-in link below to access the app."
+            ),
+        )
+        resolved = self.repository.resolve_access_request(
+            request_id=request_id,
+            status="approved",
+            reviewed_by_user_id=reviewed_by_user_id,
+            invited_user_id=int(user["id"]),
+        )
+        if resolved is None:
+            raise ValueError("Unable to update access request.")
+        return self._normalize_access_request({**resolved, "invited_user_email": email})
+
+    def deny_access_request(self, *, request_id: int, reviewed_by_user_id: int, deny_reason: str = "") -> dict[str, Any]:
+        if not self.repository.is_configured():
+            raise ValueError("Authentication requires TICKER_SCREENER_DATABASE_URL.")
+        request_record = self.repository.get_access_request_by_id(request_id)
+        if request_record is None:
+            raise ValueError("Unknown access request.")
+        if str(request_record.get("status")) != "pending":
+            raise ValueError("Access request is not pending.")
+        resolved = self.repository.resolve_access_request(
+            request_id=request_id,
+            status="denied",
+            reviewed_by_user_id=reviewed_by_user_id,
+            deny_reason=deny_reason,
+        )
+        if resolved is None:
+            raise ValueError("Unable to update access request.")
+        return self._normalize_access_request(resolved)
 
     def update_role(self, *, user_id: int, role: str) -> dict[str, Any]:
         if not self.repository.is_configured():
@@ -245,4 +364,20 @@ class UserAdminService:
             "created_at": user.get("created_at"),
             "updated_at": user.get("updated_at"),
             "last_login_at": user.get("last_login_at"),
+        }
+
+    def _normalize_access_request(self, item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(item["id"]),
+            "email": str(item["email"]),
+            "requested_role": normalize_role(item.get("requested_role")),
+            "status": str(item.get("status") or "pending"),
+            "requested_at": item.get("requested_at"),
+            "reviewed_at": item.get("reviewed_at"),
+            "reviewed_by_user_id": item.get("reviewed_by_user_id"),
+            "reviewed_by_email": item.get("reviewed_by_email"),
+            "deny_reason": item.get("deny_reason") or "",
+            "invited_user_id": item.get("invited_user_id"),
+            "invited_user_email": item.get("invited_user_email"),
+            "created_at": item.get("created_at"),
         }

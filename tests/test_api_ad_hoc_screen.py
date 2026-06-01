@@ -75,6 +75,11 @@ class _FakeAuthService:
             raise ValueError("Email is required.")
         return {"ok": True, "message": f"Sent sign-in link to {email.lower()}."}
 
+    def request_premium_access(self, *, email: str):
+        if not email:
+            raise ValueError("Email is required.")
+        return {"ok": True, "email": email.lower(), "message": "Premium access request submitted."}
+
     def verify_magic_link(self, *, token: str, request_ip: str, request_user_agent: str):
         _ = (request_ip, request_user_agent)
         if token != "valid-token":
@@ -87,6 +92,10 @@ class _FakeUserAdminService:
     def list_users(self):
         return [{"id": 7, "email": "admin@example.com", "role": "admin", "is_active": True, "last_login_at": None}]
 
+    def list_access_requests(self, *, status: str | None = None):
+        _ = status
+        return [{"id": 1, "email": "visitor@example.com", "requested_role": "premium", "status": "pending"}]
+
     def invite_or_create_user(self, *, email: str, role: str):
         return {"id": 9, "email": email.lower(), "role": role, "is_active": True}
 
@@ -98,6 +107,14 @@ class _FakeUserAdminService:
 
     def reactivate(self, *, user_id: int):
         return {"id": user_id, "email": "user@example.com", "role": "premium", "is_active": True}
+
+    def approve_access_request(self, *, request_id: int, reviewed_by_user_id: int):
+        _ = reviewed_by_user_id
+        return {"id": request_id, "email": "visitor@example.com", "requested_role": "premium", "status": "approved"}
+
+    def deny_access_request(self, *, request_id: int, reviewed_by_user_id: int, deny_reason: str = ""):
+        _ = (reviewed_by_user_id, deny_reason)
+        return {"id": request_id, "email": "visitor@example.com", "requested_role": "premium", "status": "denied"}
 
 
 @unittest.skipIf(TestClient is None, "fastapi test dependencies are not installed")
@@ -166,6 +183,11 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
 
+    def test_request_premium_access(self) -> None:
+        response = self.client.post("/api/auth/request-premium", json={"email": "visitor@example.com"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["message"], "Premium access request submitted.")
+
     def test_verify_magic_link_sets_cookie(self) -> None:
         response = self.client.post("/api/auth/verify-link", json={"token": "valid-token"})
         self.assertEqual(response.status_code, 200)
@@ -207,3 +229,4 @@ class ApiAdHocScreenTests(unittest.TestCase):
         response = self.client.get("/api/admin/users")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["users"][0]["email"], "admin@example.com")
+        self.assertEqual(response.json()["access_requests"][0]["email"], "visitor@example.com")

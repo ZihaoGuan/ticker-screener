@@ -10,6 +10,7 @@ type AuthContextValue = {
   capabilities: CapabilityName[];
   refresh: () => Promise<void>;
   requestMagicLink: (email: string) => Promise<string>;
+  requestPremiumAccess: (email: string) => Promise<string>;
   verifyMagicLink: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   hasCapability: (capability: CapabilityName) => boolean;
@@ -47,6 +48,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return `Magic link sent to ${response.email}.`;
   };
 
+  const requestPremiumAccess = async (email: string) => {
+    const response = await fetchJson<{ ok: boolean; email: string; message: string }>("/api/auth/request-premium", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+    return response.message;
+  };
+
   const verifyMagicLink = async (token: string) => {
     await fetchJson("/api/auth/verify-link", {
       method: "POST",
@@ -68,6 +77,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     capabilities: payload.capabilities,
     refresh,
     requestMagicLink,
+    requestPremiumAccess,
     verifyMagicLink,
     logout,
     hasCapability: (capability) => payload.capabilities.includes(capability),

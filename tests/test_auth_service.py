@@ -22,6 +22,7 @@ class _FakeAuthRepository:
         }
         self.magic_links: dict[str, dict[str, object]] = {}
         self.sessions: dict[str, dict[str, object]] = {}
+        self.access_requests: dict[int, dict[str, object]] = {}
 
     def is_configured(self) -> bool:
         return True
@@ -139,6 +140,67 @@ class _FakeAuthRepository:
             user["last_login_at"] = dt.datetime.now(dt.timezone.utc)
             self.users[user["email"]] = user
 
+    def get_pending_access_request_by_email(self, email: str):
+        matches = [
+            dict(item)
+            for item in self.access_requests.values()
+            if item["email"] == email and item["status"] == "pending"
+        ]
+        matches.sort(key=lambda item: item["requested_at"], reverse=True)
+        return matches[0] if matches else None
+
+    def create_access_request(self, *, email: str, requested_role: str = "premium"):
+        existing = self.get_pending_access_request_by_email(email)
+        if existing:
+            return existing
+        request_id = len(self.access_requests) + 1
+        item = {
+            "id": request_id,
+            "email": email,
+            "requested_role": requested_role,
+            "status": "pending",
+            "requested_at": dt.datetime.now(dt.timezone.utc),
+            "reviewed_at": None,
+            "reviewed_by_user_id": None,
+            "reviewed_by_email": None,
+            "deny_reason": "",
+            "invited_user_id": None,
+            "invited_user_email": None,
+            "created_at": dt.datetime.now(dt.timezone.utc),
+        }
+        self.access_requests[request_id] = item
+        return dict(item)
+
+    def list_access_requests(self, *, status: str | None = None, limit: int = 200):
+        items = [dict(item) for item in self.access_requests.values()]
+        if status:
+            items = [item for item in items if item["status"] == status]
+        items.sort(key=lambda item: (0 if item["status"] == "pending" else 1, -item["id"]))
+        return items[:limit]
+
+    def get_access_request_by_id(self, request_id: int):
+        item = self.access_requests.get(request_id)
+        return dict(item) if item else None
+
+    def resolve_access_request(self, *, request_id: int, status: str, reviewed_by_user_id: int, deny_reason: str = "", invited_user_id: int | None = None):
+        item = self.access_requests.get(request_id)
+        if not item:
+            return None
+        reviewer = self.get_user_by_id(reviewed_by_user_id)
+        invited = self.get_user_by_id(invited_user_id) if invited_user_id is not None else None
+        item.update(
+            {
+                "status": status,
+                "reviewed_at": dt.datetime.now(dt.timezone.utc),
+                "reviewed_by_user_id": reviewed_by_user_id,
+                "reviewed_by_email": reviewer["email"] if reviewer else None,
+                "deny_reason": deny_reason,
+                "invited_user_id": invited_user_id,
+                "invited_user_email": invited["email"] if invited else None,
+            }
+        )
+        return dict(item)
+
 
 class AuthServiceTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -153,9 +215,13 @@ class AuthServiceTests(unittest.TestCase):
             smtp_use_ssl=False,
             auth_bootstrap_admin_emails_raw="admin@example.com",
         )
+        self._original_send_email = AuthService._send_email
+        AuthService._send_email = lambda *_, **__: None  # type: ignore[method-assign]
         self.service = AuthService(config=self.config, repository=self.repo)  # type: ignore[arg-type]
-        self.service._send_email = lambda **_: None  # type: ignore[method-assign]
         self.user_admin = UserAdminService(repository=self.repo, config=self.config)  # type: ignore[arg-type]
+
+    def tearDown(self) -> None:
+        AuthService._send_email = self._original_send_email  # type: ignore[assignment]
 
     def test_request_and_verify_magic_link_creates_authenticated_principal(self) -> None:
         request_result = self.service.request_magic_link(
@@ -215,6 +281,25 @@ class AuthServiceTests(unittest.TestCase):
         self.assertEqual(updated["role"], "admin")
         users = self.user_admin.list_users()
         self.assertEqual(len(users), 2)
+
+    def test_request_premium_access_creates_pending_request(self) -> None:
+        first = self.service.request_premium_access(email="visitor@example.com")
+        second = self.service.request_premium_access(email="visitor@example.com")
+
+        self.assertEqual(first["status"], "pending")
+        self.assertEqual(second["status"], "already_pending")
+        self.assertEqual(len(self.repo.access_requests), 1)
+
+    def test_approve_access_request_grants_premium_and_resolves_request(self) -> None:
+        self.service.request_premium_access(email="visitor@example.com")
+
+        approved = self.user_admin.approve_access_request(request_id=1, reviewed_by_user_id=1)
+
+        self.assertEqual(approved["status"], "approved")
+        user = self.repo.get_user_by_email("visitor@example.com")
+        self.assertIsNotNone(user)
+        self.assertEqual(user["role"], "premium")
+        self.assertTrue(self.repo.magic_links)
 
 
 if __name__ == "__main__":

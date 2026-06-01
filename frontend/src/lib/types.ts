@@ -35,6 +35,23 @@ export type AuthMeResponse = {
   capabilities: CapabilityName[];
 };
 
+export type AccessRequestStatus = "pending" | "approved" | "denied";
+
+export type AccessRequestSummary = {
+  id: number;
+  email: string;
+  requested_role: RoleName;
+  status: AccessRequestStatus;
+  requested_at?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by_user_id?: number | null;
+  reviewed_by_email?: string | null;
+  deny_reason?: string;
+  invited_user_id?: number | null;
+  invited_user_email?: string | null;
+  created_at?: string | null;
+};
+
 export type ScreenerJob = {
   jobId: string;
   label: string;
@@ -306,6 +323,7 @@ export type AdminResponse = {
     updated_at?: string | null;
     last_login_at?: string | null;
   }>;
+  access_requests?: AccessRequestSummary[];
   database_status: {
     database_configured: boolean;
     coverage_start: string;

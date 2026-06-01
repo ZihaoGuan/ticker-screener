@@ -4,7 +4,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { AdminResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName } from "../lib/types";
+import type { AccessRequestSummary, AdminResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName } from "../lib/types";
 
 const EMPTY_ADMIN_RESPONSE: AdminResponse = {
   excluded_tickers: [],
@@ -54,6 +54,7 @@ export function AdminPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<RoleName>("visitor");
   const [isSavingUser, setIsSavingUser] = useState(false);
+  const [accessRequests, setAccessRequests] = useState<AccessRequestSummary[]>([]);
 
   const loadAdmin = (start: string) => {
     setIsLoading(true);
@@ -74,9 +75,15 @@ export function AdminPage() {
 
   useEffect(() => {
     loadAdmin(coverageStart);
-    void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }> }>("/api/admin/users")
-      .then((result) => setUsers(result.users))
-      .catch(() => setUsers([]));
+    void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
+      .then((result) => {
+        setUsers(result.users);
+        setAccessRequests(result.access_requests ?? []);
+      })
+      .catch(() => {
+        setUsers([]);
+        setAccessRequests([]);
+      });
   }, [coverageStart]);
 
   const handleLaunchSync = async (event: FormEvent<HTMLFormElement>) => {
@@ -161,9 +168,15 @@ export function AdminPage() {
   const db = payload.database_status;
 
   const refreshUsers = () => {
-    void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }> }>("/api/admin/users")
-      .then((result) => setUsers(result.users))
-      .catch(() => setUsers([]));
+    void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
+      .then((result) => {
+        setUsers(result.users);
+        setAccessRequests(result.access_requests ?? []);
+      })
+      .catch(() => {
+        setUsers([]);
+        setAccessRequests([]);
+      });
   };
 
   const handleInviteUser = async (event: FormEvent<HTMLFormElement>) => {
@@ -177,7 +190,7 @@ export function AdminPage() {
       });
       setInviteEmail("");
       setInviteRole("visitor");
-      setNotice("User saved.");
+      setNotice("User saved and sign-in email sent.");
       refreshUsers();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to save user.");
@@ -214,6 +227,39 @@ export function AdminPage() {
       refreshUsers();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to update user.");
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const handleApproveAccessRequest = async (requestId: number) => {
+    setIsSavingUser(true);
+    setNotice("");
+    try {
+      await fetchJson<{ ok: boolean }>(`/api/admin/access-requests/${requestId}/approve`, {
+        method: "POST",
+      });
+      setNotice("Access request approved and sign-in email sent.");
+      refreshUsers();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to approve access request.");
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const handleDenyAccessRequest = async (requestId: number) => {
+    setIsSavingUser(true);
+    setNotice("");
+    try {
+      await fetchJson<{ ok: boolean }>(`/api/admin/access-requests/${requestId}/deny`, {
+        method: "POST",
+        body: JSON.stringify({ deny_reason: "" }),
+      });
+      setNotice("Access request denied.");
+      refreshUsers();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to deny access request.");
     } finally {
       setIsSavingUser(false);
     }
@@ -469,6 +515,54 @@ export function AdminPage() {
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      <Panel title="Premium Access Requests" aside={<span className="eyebrow">{accessRequests.filter((item) => item.status === "pending").length} pending</span>}>
+        <div className="data-table-responsive">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Requested Role</th>
+                <th>Status</th>
+                <th>Requested</th>
+                <th>Reviewed</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accessRequests.length === 0 ? (
+                <tr>
+                  <td colSpan={6}>No access requests yet.</td>
+                </tr>
+              ) : (
+                accessRequests.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.email}</td>
+                    <td>{item.requested_role}</td>
+                    <td>{item.status}</td>
+                    <td>{formatLocalDateTime(item.requested_at)}</td>
+                    <td>{item.reviewed_at ? `${formatLocalDateTime(item.reviewed_at)}${item.reviewed_by_email ? ` · ${item.reviewed_by_email}` : ""}` : "-"}</td>
+                    <td>
+                      {item.status === "pending" ? (
+                        <div className="button-row">
+                          <button className="table-action-button" type="button" disabled={isSavingUser} onClick={() => void handleApproveAccessRequest(item.id)}>
+                            Approve
+                          </button>
+                          <button className="table-action-button" type="button" disabled={isSavingUser} onClick={() => void handleDenyAccessRequest(item.id)}>
+                            Deny
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="file-meta">{item.status === "approved" ? `Granted${item.invited_user_email ? ` · ${item.invited_user_email}` : ""}` : item.deny_reason || "Closed"}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

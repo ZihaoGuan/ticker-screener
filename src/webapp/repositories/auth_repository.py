@@ -201,6 +201,122 @@ class AuthRepository:
     def update_last_login(self, *, user_id: int) -> None:
         self._execute("UPDATE app_users SET last_login_at = NOW(), updated_at = NOW() WHERE id = %s", (user_id,))
 
+    def get_pending_access_request_by_email(self, email: str) -> dict[str, Any] | None:
+        return self._fetch_one(
+            """
+            SELECT requests.id, requests.email, requests.requested_role, requests.status, requests.requested_at,
+                   requests.reviewed_at, requests.reviewed_by_user_id, requests.deny_reason, requests.invited_user_id,
+                   requests.created_at,
+                   reviewer.email AS reviewed_by_email
+            FROM app_access_requests requests
+            LEFT JOIN app_users reviewer ON reviewer.id = requests.reviewed_by_user_id
+            WHERE requests.email = %s
+              AND requests.status = 'pending'
+            ORDER BY requests.requested_at DESC
+            LIMIT 1
+            """,
+            (email.lower(),),
+        )
+
+    def create_access_request(self, *, email: str, requested_role: str = "premium") -> dict[str, Any] | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            INSERT INTO app_access_requests (email, requested_role, status)
+            VALUES (%s, %s, 'pending')
+            ON CONFLICT DO NOTHING
+            RETURNING id, email, requested_role, status, requested_at, reviewed_at, reviewed_by_user_id,
+                      deny_reason, invited_user_id, created_at
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (email.lower(), requested_role))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        if rows:
+            return rows[0]
+        return self.get_pending_access_request_by_email(email.lower())
+
+    def list_access_requests(self, *, status: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        conditions = []
+        params: list[object] = []
+        if status:
+            conditions.append("requests.status = %s")
+            params.append(status)
+        where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        sql = f"""
+            SELECT requests.id, requests.email, requests.requested_role, requests.status, requests.requested_at,
+                   requests.reviewed_at, requests.reviewed_by_user_id, requests.deny_reason, requests.invited_user_id,
+                   requests.created_at,
+                   reviewer.email AS reviewed_by_email,
+                   invited.email AS invited_user_email
+            FROM app_access_requests requests
+            LEFT JOIN app_users reviewer ON reviewer.id = requests.reviewed_by_user_id
+            LEFT JOIN app_users invited ON invited.id = requests.invited_user_id
+            {where_sql}
+            ORDER BY
+              CASE WHEN requests.status = 'pending' THEN 0 ELSE 1 END,
+              requests.requested_at DESC
+            LIMIT %s
+        """
+        params.append(limit)
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, tuple(params))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def get_access_request_by_id(self, request_id: int) -> dict[str, Any] | None:
+        return self._fetch_one(
+            """
+            SELECT requests.id, requests.email, requests.requested_role, requests.status, requests.requested_at,
+                   requests.reviewed_at, requests.reviewed_by_user_id, requests.deny_reason, requests.invited_user_id,
+                   requests.created_at,
+                   reviewer.email AS reviewed_by_email,
+                   invited.email AS invited_user_email
+            FROM app_access_requests requests
+            LEFT JOIN app_users reviewer ON reviewer.id = requests.reviewed_by_user_id
+            LEFT JOIN app_users invited ON invited.id = requests.invited_user_id
+            WHERE requests.id = %s
+            """,
+            (request_id,),
+        )
+
+    def resolve_access_request(
+        self,
+        *,
+        request_id: int,
+        status: str,
+        reviewed_by_user_id: int,
+        deny_reason: str = "",
+        invited_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            UPDATE app_access_requests
+            SET status = %s,
+                reviewed_at = NOW(),
+                reviewed_by_user_id = %s,
+                deny_reason = %s,
+                invited_user_id = %s
+            WHERE id = %s
+            RETURNING id, email, requested_role, status, requested_at, reviewed_at, reviewed_by_user_id,
+                      deny_reason, invited_user_id, created_at
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (status, reviewed_by_user_id, deny_reason or "", invited_user_id, request_id))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        if rows:
+            return rows[0]
+        return None
+
     def _update_user(self, *, user_id: int, field_sql: str, value: object) -> dict[str, Any] | None:
         connection = self._connect()
         if connection is None:

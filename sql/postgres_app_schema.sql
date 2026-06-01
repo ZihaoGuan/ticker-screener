@@ -197,6 +197,29 @@ CREATE INDEX IF NOT EXISTS idx_app_sessions_session_id
 CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id
   ON app_sessions(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS app_access_requests (
+  id BIGSERIAL PRIMARY KEY,
+  email TEXT NOT NULL,
+  requested_role TEXT NOT NULL DEFAULT 'premium',
+  status TEXT NOT NULL DEFAULT 'pending',
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  deny_reason TEXT,
+  invited_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_access_requests_email_requested_at
+  ON app_access_requests(email, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_app_access_requests_status_requested_at
+  ON app_access_requests(status, requested_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_access_requests_pending_email
+  ON app_access_requests(email)
+  WHERE status = 'pending';
+
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS scope_json JSONB NOT NULL DEFAULT '{}'::jsonb;

@@ -11,8 +11,11 @@ export function LoginPage() {
   const token = searchParams.get("token") ?? "";
   const nextPath = searchParams.get("next") ?? "/";
   const [email, setEmail] = useState("");
+  const [premiumEmail, setPremiumEmail] = useState("");
   const [message, setMessage] = useState("");
+  const [premiumMessage, setPremiumMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmittingPremium, setIsSubmittingPremium] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -44,6 +47,21 @@ export function LoginPage() {
     }
   };
 
+  const handlePremiumRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSubmittingPremium(true);
+    setPremiumMessage("");
+    try {
+      const responseMessage = await auth.requestPremiumAccess(premiumEmail);
+      setPremiumMessage(responseMessage);
+      setPremiumEmail("");
+    } catch (error) {
+      setPremiumMessage(error instanceof Error ? error.message : "Unable to request premium access.");
+    } finally {
+      setIsSubmittingPremium(false);
+    }
+  };
+
   return (
     <div className="page-grid">
       <Panel title="Sign In" aside={<span className="eyebrow">Magic Link</span>}>
@@ -69,6 +87,29 @@ export function LoginPage() {
           </div>
         </form>
         {message ? <p className="panel-copy">{message}</p> : null}
+      </Panel>
+      <Panel title="Request Premium Access" aside={<span className="eyebrow">Visitor</span>}>
+        <p className="panel-copy">Visitors can browse results. Request premium access here if you want screener run permissions.</p>
+        <form className="run-toolbar" onSubmit={(event) => void handlePremiumRequest(event)}>
+          <div className="run-params-grid">
+            <label className="field">
+              <span>Email</span>
+              <input
+                type="email"
+                value={premiumEmail}
+                onChange={(event) => setPremiumEmail(event.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+            </label>
+          </div>
+          <div className="button-row">
+            <button className="primary-button" type="submit" disabled={isSubmittingPremium || token.length > 0}>
+              {isSubmittingPremium ? "Submitting..." : "Request Premium"}
+            </button>
+          </div>
+        </form>
+        {premiumMessage ? <p className="panel-copy">{premiumMessage}</p> : null}
       </Panel>
     </div>
   );

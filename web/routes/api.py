@@ -72,6 +72,19 @@ def request_magic_link(
     return JSONResponse(jsonable_encoder(result))
 
 
+@router.post("/auth/request-premium", response_class=JSONResponse)
+def request_premium_access(
+    payload: dict[str, object] | None = Body(default=None),
+    service: AuthService = Depends(get_auth_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        result = service.request_premium_access(email=str(request_payload.get("email") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder(result))
+
+
 @router.post("/auth/verify-link", response_class=JSONResponse)
 def verify_magic_link(
     request: Request,
@@ -467,7 +480,7 @@ def admin_users(
     service: UserAdminService = Depends(get_user_admin_service),
     _: Principal = Depends(require_manage_users),
 ) -> JSONResponse:
-    return JSONResponse(jsonable_encoder({"users": service.list_users()}))
+    return JSONResponse(jsonable_encoder({"users": service.list_users(), "access_requests": service.list_access_requests()}))
 
 
 @router.post("/admin/users/invite", response_class=JSONResponse)
@@ -526,3 +539,49 @@ def admin_reactivate_user(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(jsonable_encoder({"ok": True, "user": user}))
+
+
+@router.get("/admin/access-requests", response_class=JSONResponse)
+def admin_access_requests(
+    status: str = Query(default="", alias="status"),
+    service: UserAdminService = Depends(get_user_admin_service),
+    _: Principal = Depends(require_manage_users),
+) -> JSONResponse:
+    normalized_status = status.strip().lower() or None
+    return JSONResponse(jsonable_encoder({"access_requests": service.list_access_requests(status=normalized_status)}))
+
+
+@router.post("/admin/access-requests/{request_id}/approve", response_class=JSONResponse)
+def admin_approve_access_request(
+    request_id: int,
+    principal: Principal = Depends(require_manage_users),
+    service: UserAdminService = Depends(get_user_admin_service),
+) -> JSONResponse:
+    if principal.user_id is None:
+        raise HTTPException(status_code=400, detail="Authenticated admin user id is required.")
+    try:
+        access_request = service.approve_access_request(request_id=request_id, reviewed_by_user_id=int(principal.user_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder({"ok": True, "access_request": access_request}))
+
+
+@router.post("/admin/access-requests/{request_id}/deny", response_class=JSONResponse)
+def admin_deny_access_request(
+    request_id: int,
+    payload: dict[str, object] | None = Body(default=None),
+    principal: Principal = Depends(require_manage_users),
+    service: UserAdminService = Depends(get_user_admin_service),
+) -> JSONResponse:
+    if principal.user_id is None:
+        raise HTTPException(status_code=400, detail="Authenticated admin user id is required.")
+    request_payload = payload or {}
+    try:
+        access_request = service.deny_access_request(
+            request_id=request_id,
+            reviewed_by_user_id=int(principal.user_id),
+            deny_reason=str(request_payload.get("deny_reason") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder({"ok": True, "access_request": access_request}))
