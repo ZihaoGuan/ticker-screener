@@ -323,6 +323,9 @@ def _normalize_download_frame(history: pd.DataFrame | None) -> pd.DataFrame | No
     if isinstance(frame.columns, pd.MultiIndex):
         frame.columns = frame.columns.get_level_values(0)
     frame = frame.rename(columns=str)
+    for column in ("Open", "High", "Low", "Close", "Adj Close", "Volume"):
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame = frame.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
     return frame if not frame.empty else None
 

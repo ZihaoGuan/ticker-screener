@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 from pathlib import Path
 import tempfile
 import unittest
@@ -63,6 +64,31 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["latest_available_date"], "2026-05-29")
         self.assertEqual(payload["candles"][-1]["time"], "2026-05-29")
         self.assertEqual(payload["data_source"], "internet")
+
+    def test_get_chart_payload_coerces_decimal_db_values(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "Open": [Decimal("100.0"), Decimal("102.0")],
+                "High": [Decimal("103.0"), Decimal("104.0")],
+                "Low": [Decimal("99.0"), Decimal("101.0")],
+                "Close": [Decimal("102.0"), Decimal("103.0")],
+                "Adj Close": [Decimal("102.0"), Decimal("103.0")],
+                "Volume": [1000000, 1200000],
+            },
+            index=pd.to_datetime(["2026-05-28", "2026-05-29"]),
+        )
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame.copy(), "SPY": frame.copy()}):
+            payload = service.get_chart_payload("NVDA", as_of_date=dt.date(2026, 5, 29))
+
+        self.assertEqual(payload["data_source"], "database")
+        self.assertAlmostEqual(payload["ipo_vwap"][-1]["value"], 102.06060606060605)
+        self.assertEqual(payload["candles"][-1]["close"], 103.0)
 
 
 if __name__ == "__main__":
