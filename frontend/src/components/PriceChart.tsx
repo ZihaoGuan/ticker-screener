@@ -51,6 +51,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
   const priceChartApiRef = useRef<IChartApi | null>(null);
   const rsChartApiRef = useRef<IChartApi | null>(null);
   const [visibleIndexRange, setVisibleIndexRange] = useState<{ from: number; to: number } | null>(null);
+  const [hoverGuide, setHoverGuide] = useState<{ time: string; xRatio: number } | null>(null);
   const options = visibility ?? {
     ema8: true,
     ema21: true,
@@ -328,6 +329,29 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
       }
       syncVisibleIndexRange(range.from, range.to);
     });
+    priceChart.subscribeCrosshairMove((param) => {
+      const width = priceRootRef.current?.clientWidth ?? 0;
+      const point = param.point;
+      const normalizedTime = normalizeCrosshairTime(param.time);
+      if (
+        !point ||
+        width <= 0 ||
+        !normalizedTime ||
+        point.x < 0 ||
+        point.x > width ||
+        point.y < 0
+      ) {
+        setHoverGuide(null);
+        return;
+      }
+      const xRatio = Math.max(0, Math.min(1, point.x / width));
+      setHoverGuide((current) => {
+        if (current && current.time === normalizedTime && Math.abs(current.xRatio - xRatio) < 0.0005) {
+          return current;
+        }
+        return { time: normalizedTime, xRatio };
+      });
+    });
     rsChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
       if (!showRsPane || !range || syncingPriceToRs) {
         return;
@@ -422,8 +446,11 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
       </div>
       <div ref={priceRootRef} className="chart-card chart-card-price" />
       {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
-      <div ref={rsRootRef} className="chart-card chart-card-rs" />
-      {showFearzonePanel ? <FearzonePanel panel={fearzonePanel} visibleIndexRange={visibleIndexRange} /> : null}
+      <div className="chart-pane">
+        <div ref={rsRootRef} className="chart-card chart-card-rs" />
+        {showRsPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
+      </div>
+      {showFearzonePanel ? <FearzonePanel panel={fearzonePanel} visibleIndexRange={visibleIndexRange} hoveredTime={hoverGuide?.time ?? null} /> : null}
     </div>
   );
 }
@@ -431,9 +458,11 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
 function FearzonePanel({
   panel,
   visibleIndexRange,
+  hoveredTime,
 }: {
   panel: WatchlistChartResponse["fearzone_panel"];
   visibleIndexRange: { from: number; to: number } | null;
+  hoveredTime: string | null;
 }) {
   const width = 1080;
   const labelWidth = 96;
@@ -456,6 +485,8 @@ function FearzonePanel({
   const height = topPadding + rows.length * rowHeight + bottomPadding;
   const signalTimes = new Set(panel.signals.map((item) => item.time));
   const dateMarkers = buildFearzoneDateMarkers(rows[0]?.points ?? [], labelWidth, step);
+  const hoverPointIndex = hoveredTime ? rows[0]?.points.findIndex((point) => point.time === hoveredTime) ?? -1 : -1;
+  const hoverX = hoverPointIndex >= 0 ? labelWidth + hoverPointIndex * step + Math.max(0.5, step / 2) : null;
 
   return (
     <div
@@ -500,6 +531,18 @@ function FearzonePanel({
           const x = labelWidth + pointIndex * step + Math.max(0.5, step / 2);
           return <line key={`signal-${point.time}`} x1={x} y1={8} x2={x} y2={height - 6} stroke="#fb7185" strokeWidth="1.5" strokeDasharray="3 4" opacity="0.9" />;
         })}
+        {hoverX != null ? (
+          <line
+            x1={hoverX}
+            y1={8}
+            x2={hoverX}
+            y2={height - 6}
+            stroke="#60a5fa"
+            strokeWidth="1"
+            strokeDasharray="4 4"
+            opacity="0.95"
+          />
+        ) : null}
         {dateMarkers.map((marker) => (
           <g key={`date-${marker.time}`}>
             <line
@@ -547,6 +590,23 @@ function formatFearzoneDate(value: string) {
     return value;
   }
   return `${year.slice(2)}-${month}-${day}`;
+}
+
+function normalizeCrosshairTime(value: unknown): string | null {
+  if (typeof value === "string" && value) {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    const candidate = value as { year?: number; month?: number; day?: number };
+    if (
+      typeof candidate.year === "number" &&
+      typeof candidate.month === "number" &&
+      typeof candidate.day === "number"
+    ) {
+      return `${String(candidate.year).padStart(4, "0")}-${String(candidate.month).padStart(2, "0")}-${String(candidate.day).padStart(2, "0")}`;
+    }
+  }
+  return null;
 }
 
 function detectHighTightFlagBox(candles: CandlePoint[], annotations?: ChartAnnotations) {

@@ -330,6 +330,22 @@ a {
   overflow: hidden;
 }
 
+.chart-pane {
+  position: relative;
+}
+
+.chart-hover-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed #60a5fa;
+  opacity: 0.95;
+  pointer-events: none;
+  transform: translateX(-0.5px);
+  z-index: 2;
+}
+
 .chart-card-price {
   min-height: 458px;
 }
