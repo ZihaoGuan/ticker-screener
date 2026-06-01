@@ -74,13 +74,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
   const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
   const showRsPane = options.rsLine && rsLine.length > 0;
-  const showFearzonePanel = useMemo(() => {
-    if (forceFearzonePanel) {
-      return fearzonePanel.rows.length > 0;
-    }
-    const setupLabel = String(annotations?.setupLabel ?? "").toLowerCase();
-    return setupLabel.includes("fearzone") && fearzonePanel.rows.length > 0;
-  }, [annotations?.setupLabel, fearzonePanel.rows.length, forceFearzonePanel]);
+  const showFearzonePanel = useMemo(() => forceFearzonePanel || fearzonePanel.rows.length > 0, [fearzonePanel.rows.length, forceFearzonePanel]);
   const visibleGapZones = useMemo(
     () => detectGapZones(candles).filter((zone) => zone.remainingUpperPrice > zone.remainingLowerPrice + 1e-6).slice(-4),
     [candles],

@@ -46,15 +46,17 @@ export function WatchlistsPage() {
     void fetchJson<{ watchlists: WatchlistFile[] }>("/api/watchlists")
       .then((payload) => {
         setWatchlists(payload.watchlists);
-        const nextStem =
-          payload.watchlists.find((item) => item.stem === selectedStem)?.stem ??
-          payload.watchlists.find((item) => item.stem === requestedStem)?.stem ??
-          payload.watchlists[0]?.stem ??
-          "";
-        setSelectedStem(nextStem);
+        setSelectedStem((current) => {
+          return (
+            payload.watchlists.find((item) => item.stem === current)?.stem ??
+            payload.watchlists.find((item) => item.stem === requestedStem)?.stem ??
+            payload.watchlists[0]?.stem ??
+            ""
+          );
+        });
       })
       .finally(() => setIsFilesLoading(false));
-  }, [requestedStem, selectedStem]);
+  }, [requestedStem]);
 
   useEffect(() => {
     if (!selectedStem) {
@@ -82,7 +84,7 @@ export function WatchlistsPage() {
     void fetchJson<WatchlistChartResponse>(`/api/watchlists/${selectedStem}/chart/${ticker}`)
       .then(setChartPayload)
       .finally(() => setIsChartLoading(false));
-  }, [selectedStem, selectedTicker]);
+  }, [selectedStem, selectedTicker?.ticker]);
 
   useEffect(() => {
     if (!selectedStem) {
