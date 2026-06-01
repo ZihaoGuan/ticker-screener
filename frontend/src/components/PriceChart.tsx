@@ -1,4 +1,4 @@
-import { ColorType, LineStyle, createChart } from "lightweight-charts";
+import { ColorType, LineStyle, createChart, type IChartApi } from "lightweight-charts";
 import { useEffect, useMemo, useRef } from "react";
 import { createGapZonePrimitive } from "./GapZonePrimitive";
 import { createHighTightFlagPrimitive } from "./HighTightFlagPrimitive";
@@ -48,6 +48,8 @@ type HorizontalAnnotation = {
 export function PriceChart({ ticker, candles, overlays, annotations, visibility, forceFearzonePanel = false }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
+  const priceChartApiRef = useRef<IChartApi | null>(null);
+  const rsChartApiRef = useRef<IChartApi | null>(null);
   const options = visibility ?? {
     ema8: true,
     ema21: true,
@@ -71,6 +73,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
   const rsMarkers = useMemo(() => overlays?.rs_markers ?? [], [overlays?.rs_markers]);
   const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
+  const showRsPane = options.rsLine && rsLine.length > 0;
   const showFearzonePanel = useMemo(() => {
     if (forceFearzonePanel) {
       return fearzonePanel.rows.length > 0;
@@ -132,8 +135,10 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
         mode: 0,
       },
     });
+    priceChartApiRef.current = priceChart;
+    rsChartApiRef.current = rsChart;
 
-    priceChart.timeScale().applyOptions({ visible: !options.rsLine });
+    priceChart.timeScale().applyOptions({ visible: !showRsPane });
 
     const candleSeries = priceChart.addCandlestickSeries({
       upColor: "#10b981",
@@ -195,7 +200,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
     ma20Series.setData(options.maStack ? ma20 : []);
     ma50Series.setData(options.maStack ? ma50 : []);
     ma200Series.setData(options.maStack ? ma200 : []);
-    rsSeries.setData(options.rsLine ? rsLine : []);
+    rsSeries.setData(showRsPane ? rsLine : []);
     if (candles.length > 0) {
       const startTime = candles[0].time;
       const endTime = candles[candles.length - 1].time;
@@ -282,10 +287,12 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
     }
 
     priceChart.timeScale().fitContent();
-    rsChart.timeScale().fitContent();
-    rsChart.timeScale().applyOptions({ visible: options.rsLine });
-    rsChart.applyOptions({ handleScroll: options.rsLine, handleScale: options.rsLine });
-    if (!options.rsLine && rsRootRef.current) {
+    if (showRsPane) {
+      rsChart.timeScale().fitContent();
+    }
+    rsChart.timeScale().applyOptions({ visible: showRsPane });
+    rsChart.applyOptions({ handleScroll: showRsPane, handleScale: showRsPane });
+    if (!showRsPane && rsRootRef.current) {
       rsRootRef.current.style.display = "none";
     } else if (rsRootRef.current) {
       rsRootRef.current.style.display = "";
@@ -294,7 +301,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
     let syncingPriceToRs = false;
     let syncingRsToPrice = false;
     priceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-      if (!range || syncingRsToPrice) {
+      if (!showRsPane || !range || syncingRsToPrice) {
         return;
       }
       syncingPriceToRs = true;
@@ -302,7 +309,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
       syncingPriceToRs = false;
     });
     rsChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-      if (!range || syncingPriceToRs) {
+      if (!showRsPane || !range || syncingPriceToRs) {
         return;
       }
       syncingRsToPrice = true;
@@ -321,6 +328,8 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
 
     return () => {
       resizeObserver.disconnect();
+      priceChartApiRef.current = null;
+      rsChartApiRef.current = null;
       priceChart.remove();
       rsChart.remove();
     };
@@ -344,18 +353,55 @@ export function PriceChart({ ticker, candles, overlays, annotations, visibility,
     options.maStack,
     options.gapZones,
     options.htfBox,
-    options.rsLine,
     options.rsSignals,
+    showRsPane,
     visibleGapZones,
     highTightFlagBox,
     annotationLines,
     weeklyEma8,
   ]);
 
+  const handleZoom = (direction: "in" | "out" | "reset") => {
+    const priceChart = priceChartApiRef.current;
+    if (!priceChart || candles.length === 0) {
+      return;
+    }
+    if (direction === "reset") {
+      priceChart.timeScale().fitContent();
+      if (showRsPane && rsChartApiRef.current) {
+        rsChartApiRef.current.timeScale().fitContent();
+      }
+      return;
+    }
+    const logicalRange = priceChart.timeScale().getVisibleLogicalRange();
+    if (!logicalRange) {
+      priceChart.timeScale().fitContent();
+      return;
+    }
+    const currentBars = logicalRange.to - logicalRange.from;
+    const center = (logicalRange.from + logicalRange.to) / 2;
+    const nextBars = direction === "in" ? Math.max(20, currentBars * 0.75) : Math.min(candles.length + 20, currentBars * 1.35);
+    priceChart.timeScale().setVisibleLogicalRange({
+      from: center - nextBars / 2,
+      to: center + nextBars / 2,
+    });
+  };
+
   return (
     <div className="chart-stack">
+      <div className="chart-zoom-row">
+        <button className="chart-zoom-button" type="button" onClick={() => handleZoom("out")}>
+          -
+        </button>
+        <button className="chart-zoom-button" type="button" onClick={() => handleZoom("reset")}>
+          Reset
+        </button>
+        <button className="chart-zoom-button" type="button" onClick={() => handleZoom("in")}>
+          +
+        </button>
+      </div>
       <div ref={priceRootRef} className="chart-card chart-card-price" />
-      {options.rsLine ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
+      {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
       <div ref={rsRootRef} className="chart-card chart-card-rs" />
       {showFearzonePanel ? <FearzonePanel panel={fearzonePanel} /> : null}
     </div>
@@ -371,12 +417,14 @@ function FearzonePanel({
   const labelWidth = 96;
   const rowHeight = 24;
   const topPadding = 20;
+  const bottomPadding = 26;
   const rows = panel.rows;
   const pointCount = rows[0]?.points.length ?? 0;
   const innerWidth = Math.max(1, width - labelWidth - 12);
   const step = pointCount > 0 ? innerWidth / pointCount : innerWidth;
-  const height = topPadding + rows.length * rowHeight + 12;
+  const height = topPadding + rows.length * rowHeight + bottomPadding;
   const signalTimes = new Set(panel.signals.map((item) => item.time));
+  const dateMarkers = buildFearzoneDateMarkers(rows[0]?.points ?? [], labelWidth, step);
 
   return (
     <div
@@ -421,9 +469,53 @@ function FearzonePanel({
           const x = labelWidth + pointIndex * step + Math.max(0.5, step / 2);
           return <line key={`signal-${point.time}`} x1={x} y1={8} x2={x} y2={height - 6} stroke="#fb7185" strokeWidth="1.5" strokeDasharray="3 4" opacity="0.9" />;
         })}
+        {dateMarkers.map((marker) => (
+          <g key={`date-${marker.time}`}>
+            <line
+              x1={marker.x}
+              y1={topPadding + rows.length * rowHeight}
+              x2={marker.x}
+              y2={topPadding + rows.length * rowHeight + 5}
+              stroke="#a1a1aa"
+              strokeWidth="1"
+            />
+            <text x={marker.x} y={height - 6} fill="#a1a1aa" fontSize="11" textAnchor="middle">
+              {marker.label}
+            </text>
+          </g>
+        ))}
       </svg>
     </div>
   );
+}
+
+function buildFearzoneDateMarkers(points: Array<{ time: string; active: boolean }>, labelWidth: number, step: number) {
+  if (points.length === 0) {
+    return [];
+  }
+  const targetCount = Math.min(6, points.length);
+  const markers: Array<{ time: string; label: string; x: number }> = [];
+  for (let markerIndex = 0; markerIndex < targetCount; markerIndex += 1) {
+    const pointIndex = targetCount === 1 ? points.length - 1 : Math.round((markerIndex * (points.length - 1)) / (targetCount - 1));
+    const point = points[pointIndex];
+    if (!point) {
+      continue;
+    }
+    markers.push({
+      time: point.time,
+      label: formatFearzoneDate(point.time),
+      x: labelWidth + pointIndex * step + Math.max(0.5, step / 2),
+    });
+  }
+  return markers.filter((marker, index, source) => source.findIndex((item) => item.time === marker.time) === index);
+}
+
+function formatFearzoneDate(value: string) {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) {
+    return value;
+  }
+  return `${year.slice(2)}-${month}-${day}`;
 }
 
 function detectHighTightFlagBox(candles: CandlePoint[], annotations?: ChartAnnotations) {
