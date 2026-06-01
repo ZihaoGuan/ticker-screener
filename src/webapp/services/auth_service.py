@@ -252,6 +252,18 @@ class UserAdminService:
             return []
         return [self._normalize_access_request(item) for item in self.repository.list_access_requests(status=status)]
 
+    def get_user(self, *, user_id: int) -> dict[str, Any] | None:
+        if not self.repository.is_configured():
+            return None
+        user = self.repository.get_user_by_id(user_id)
+        return self._normalize_user(user) if user is not None else None
+
+    def get_access_request(self, *, request_id: int) -> dict[str, Any] | None:
+        if not self.repository.is_configured():
+            return None
+        item = self.repository.get_access_request_by_id(request_id)
+        return self._normalize_access_request(item) if item is not None else None
+
     def invite_or_create_user(self, *, email: str, role: str) -> dict[str, Any]:
         if not self.repository.is_configured():
             raise ValueError("Authentication requires TICKER_SCREENER_DATABASE_URL.")

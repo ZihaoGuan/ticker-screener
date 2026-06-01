@@ -13,6 +13,7 @@ if TestClient is not None:
     from web.dependencies import (
         get_ad_hoc_screen_service,
         get_auth_service,
+        get_audit_service,
         get_backtest_service,
         get_current_principal,
         get_run_service,
@@ -88,6 +89,37 @@ class _FakeAuthService:
         return {"principal": principal, "session_cookie_value": "signed-session"}
 
 
+class _FakeAuditService:
+    def is_configured(self):
+        return True
+
+    def record_event(self, **_: object):
+        return {"id": 1}
+
+    def list_events(self, **_: object):
+        return {
+            "events": [
+                {
+                    "id": 1,
+                    "event_at": "2026-06-01T00:00:00+00:00",
+                    "actor_email": "admin@example.com",
+                    "actor_role": "admin",
+                    "action": "admin.user.invite",
+                    "resource_type": "user",
+                    "resource_id": "9",
+                    "resource_label": "user@example.com",
+                    "status": "success",
+                    "message": "Invited or updated user user@example.com.",
+                    "metadata_json": {},
+                }
+            ],
+            "filters": {"actorEmail": "", "action": "", "resourceType": "", "from": "", "to": "", "limit": 50, "offset": 0},
+            "limit": 50,
+            "offset": 0,
+            "has_more": False,
+        }
+
+
 class _FakeUserAdminService:
     def list_users(self):
         return [{"id": 7, "email": "admin@example.com", "role": "admin", "is_active": True, "last_login_at": None}]
@@ -125,6 +157,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_screener_history_service] = lambda: _FakeScreenerHistoryService()
         app.dependency_overrides[get_backtest_service] = lambda: _FakeBacktestService()
         app.dependency_overrides[get_auth_service] = lambda: _FakeAuthService()
+        app.dependency_overrides[get_audit_service] = lambda: _FakeAuditService()
         app.dependency_overrides[get_user_admin_service] = lambda: _FakeUserAdminService()
         app.dependency_overrides[get_current_principal] = anonymous_principal
         self.client = TestClient(app)
@@ -230,3 +263,14 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["users"][0]["email"], "admin@example.com")
         self.assertEqual(response.json()["access_requests"][0]["email"], "visitor@example.com")
+
+    def test_admin_can_access_audit_events(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/audit-events")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["events"][0]["action"], "admin.user.invite")

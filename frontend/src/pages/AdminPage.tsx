@@ -4,7 +4,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { AccessRequestSummary, AdminResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName } from "../lib/types";
+import type { AccessRequestSummary, AdminResponse, AuditEventSummary, AuditEventsResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName } from "../lib/types";
 
 const EMPTY_ADMIN_RESPONSE: AdminResponse = {
   excluded_tickers: [],
@@ -55,6 +55,13 @@ export function AdminPage() {
   const [inviteRole, setInviteRole] = useState<RoleName>("visitor");
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [accessRequests, setAccessRequests] = useState<AccessRequestSummary[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEventSummary[]>([]);
+  const [auditActorEmail, setAuditActorEmail] = useState("");
+  const [auditAction, setAuditAction] = useState("");
+  const [auditResourceType, setAuditResourceType] = useState("");
+  const [auditFromDate, setAuditFromDate] = useState("");
+  const [auditToDate, setAuditToDate] = useState("");
+  const [isLoadingAudit, setIsLoadingAudit] = useState(false);
 
   const loadAdmin = (start: string) => {
     setIsLoading(true);
@@ -73,6 +80,31 @@ export function AdminPage() {
       .finally(() => setIsLoading(false));
   };
 
+  const loadAudit = () => {
+    setIsLoadingAudit(true);
+    const query = new URLSearchParams();
+    if (auditActorEmail.trim()) {
+      query.set("actorEmail", auditActorEmail.trim());
+    }
+    if (auditAction.trim()) {
+      query.set("action", auditAction.trim());
+    }
+    if (auditResourceType.trim()) {
+      query.set("resourceType", auditResourceType.trim());
+    }
+    if (auditFromDate.trim()) {
+      query.set("from", auditFromDate.trim());
+    }
+    if (auditToDate.trim()) {
+      query.set("to", auditToDate.trim());
+    }
+    query.set("limit", "50");
+    void fetchJson<AuditEventsResponse>(`/api/admin/audit-events?${query.toString()}`)
+      .then((result) => setAuditEvents(result.events))
+      .catch(() => setAuditEvents([]))
+      .finally(() => setIsLoadingAudit(false));
+  };
+
   useEffect(() => {
     loadAdmin(coverageStart);
     void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
@@ -85,6 +117,10 @@ export function AdminPage() {
         setAccessRequests([]);
       });
   }, [coverageStart]);
+
+  useEffect(() => {
+    loadAudit();
+  }, []);
 
   const handleLaunchSync = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -112,6 +148,7 @@ export function AdminPage() {
         body: JSON.stringify(payloadBody),
       });
       setLaunchMessage(`Sync job launched: ${response.job_id}`);
+      loadAudit();
     } catch (error) {
       setLaunchMessage(error instanceof Error ? error.message : "Failed to launch sync job.");
     } finally {
@@ -148,6 +185,7 @@ export function AdminPage() {
       setNotice(`${selectedExclusion.ticker} removed from removable exclusions.`);
       setSelectedExclusion(null);
       loadAdmin(coverageStart);
+      loadAudit();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to remove exclusion.");
     } finally {
@@ -192,6 +230,7 @@ export function AdminPage() {
       setInviteRole("visitor");
       setNotice("User saved and sign-in email sent.");
       refreshUsers();
+      loadAudit();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to save user.");
     } finally {
@@ -209,6 +248,7 @@ export function AdminPage() {
       });
       setNotice("Role updated.");
       refreshUsers();
+      loadAudit();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to update role.");
     } finally {
@@ -225,6 +265,7 @@ export function AdminPage() {
       });
       setNotice(isActive ? "User deactivated." : "User reactivated.");
       refreshUsers();
+      loadAudit();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to update user.");
     } finally {
@@ -241,6 +282,7 @@ export function AdminPage() {
       });
       setNotice("Access request approved and sign-in email sent.");
       refreshUsers();
+      loadAudit();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to approve access request.");
     } finally {
@@ -258,11 +300,17 @@ export function AdminPage() {
       });
       setNotice("Access request denied.");
       refreshUsers();
+      loadAudit();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to deny access request.");
     } finally {
       setIsSavingUser(false);
     }
+  };
+
+  const handleAuditFilterSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    loadAudit();
   };
 
   return (
@@ -560,6 +608,68 @@ export function AdminPage() {
                         <span className="file-meta">{item.status === "approved" ? `Granted${item.invited_user_email ? ` · ${item.invited_user_email}` : ""}` : item.deny_reason || "Closed"}</span>
                       )}
                     </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      <Panel title="Audit Trail" aside={<span className="eyebrow">{auditEvents.length} events</span>}>
+        <form className="run-toolbar" onSubmit={handleAuditFilterSubmit}>
+          <div className="run-params-grid">
+            <label className="field">
+              <span>Actor Email</span>
+              <input type="text" value={auditActorEmail} onChange={(event) => setAuditActorEmail(event.target.value)} placeholder="admin@example.com" />
+            </label>
+            <label className="field">
+              <span>Action</span>
+              <input type="text" value={auditAction} onChange={(event) => setAuditAction(event.target.value)} placeholder="admin.user.invite" />
+            </label>
+            <label className="field">
+              <span>Resource Type</span>
+              <input type="text" value={auditResourceType} onChange={(event) => setAuditResourceType(event.target.value)} placeholder="user" />
+            </label>
+            <label className="field">
+              <span>From</span>
+              <input type="date" value={auditFromDate} onChange={(event) => setAuditFromDate(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>To</span>
+              <input type="date" value={auditToDate} onChange={(event) => setAuditToDate(event.target.value)} />
+            </label>
+          </div>
+          <div className="run-action-footer">
+            <button className="primary-button" type="submit" disabled={isLoadingAudit}>
+              {isLoadingAudit ? "Loading..." : "Refresh Audit"}
+            </button>
+          </div>
+        </form>
+        <div className="data-table-responsive">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Actor</th>
+                <th>Action</th>
+                <th>Target</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {auditEvents.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>{isLoadingAudit ? "Loading audit events..." : "No audit events found."}</td>
+                </tr>
+              ) : (
+                auditEvents.map((item) => (
+                  <tr key={item.id}>
+                    <td>{formatLocalDateTime(item.event_at)}</td>
+                    <td>{item.actor_email || item.actor_role || "-"}</td>
+                    <td>{item.action}</td>
+                    <td>{item.resource_label || item.resource_id || item.resource_type}</td>
+                    <td>{item.message}</td>
                   </tr>
                 ))
               )}

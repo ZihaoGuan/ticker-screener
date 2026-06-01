@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from src.webapp.access_control import Principal
 from src.webapp.services.admin_service import AdminService
+from src.webapp.services.audit_service import AuditService
 from src.webapp.services.backtest_service import BacktestService, DEFAULT_EXIT_RULES
 from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.dashboard_service import DashboardService
@@ -22,6 +23,7 @@ from web.dependencies import (
     get_admin_service,
     clear_auth_cookie,
     config,
+    get_audit_service,
     get_backtest_service,
     get_auth_service,
     get_current_principal,
@@ -42,6 +44,36 @@ from web.dependencies import (
 
 
 router = APIRouter(prefix="/api", tags=["api"])
+
+
+def _record_audit(
+    *,
+    audit_service: AuditService,
+    principal: Principal | None,
+    request: Request | None,
+    action: str,
+    resource_type: str,
+    resource_id: str = "",
+    resource_label: str = "",
+    message: str = "",
+    metadata: dict[str, object] | None = None,
+    actor_email_override: str = "",
+    actor_role_override: str = "",
+) -> None:
+    if not audit_service.is_configured():
+        return
+    audit_service.record_event(
+        principal=principal,
+        request=request,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        resource_label=resource_label,
+        message=message,
+        metadata=metadata or {},
+        actor_email_override=actor_email_override,
+        actor_role_override=actor_role_override,
+    )
 
 
 @router.get("/dashboard", response_class=JSONResponse)
@@ -74,14 +106,29 @@ def request_magic_link(
 
 @router.post("/auth/request-premium", response_class=JSONResponse)
 def request_premium_access(
+    request: Request,
     payload: dict[str, object] | None = Body(default=None),
     service: AuthService = Depends(get_auth_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
     try:
         result = service.request_premium_access(email=str(request_payload.get("email") or ""))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=None,
+        request=request,
+        action="auth.request_premium",
+        resource_type="access_request",
+        resource_id=str(result.get("email") or ""),
+        resource_label=str(result.get("email") or ""),
+        message=str(result.get("message") or "Premium access request submitted."),
+        metadata={"requested_role": "premium", "request_status": str(result.get("status") or "pending")},
+        actor_email_override=str(result.get("email") or ""),
+        actor_role_override="visitor",
+    )
     return JSONResponse(jsonable_encoder(result))
 
 
@@ -144,27 +191,58 @@ def job_detail(job_id: str, service: RunService = Depends(get_run_service), _: P
 
 
 @router.post("/jobs/{job_id}/cancel", response_class=JSONResponse)
-def cancel_job(job_id: str, service: RunService = Depends(get_run_service), _: Principal = Depends(require_run_screeners)) -> JSONResponse:
+def cancel_job(
+    request: Request,
+    job_id: str,
+    service: RunService = Depends(get_run_service),
+    principal: Principal = Depends(require_run_screeners),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
     try:
-        return JSONResponse({"ok": True, "job": service.cancel(job_id)})
+        job = service.cancel(job_id)
     except ValueError as exc:
         message = str(exc)
         status_code = 404 if message.startswith("Unknown job") else 400
         raise HTTPException(status_code=status_code, detail=message) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="runs.cancel",
+        resource_type="run_job",
+        resource_id=job_id,
+        resource_label=str(job.get("label") or job_id),
+        message=f"Requested cancellation for job {job_id}.",
+        metadata={"job_id": job_id, "action_id": job.get("action_id")},
+    )
+    return JSONResponse({"ok": True, "job": job})
 
 
 @router.post("/runs/{action_id}", response_class=JSONResponse)
 def run_action(
+    request: Request,
     action_id: str,
     payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
-    _: Principal = Depends(require_run_screeners),
+    principal: Principal = Depends(require_run_screeners),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     try:
         job_id = service.launch(action_id, options=payload or {})
     except ValueError as exc:
         status_code = 404 if str(exc).startswith("Unknown run action") else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="runs.launch",
+        resource_type="run_job",
+        resource_id=job_id,
+        resource_label=action_id,
+        message=f"Queued screener run {action_id}.",
+        metadata={"action_id": action_id, "job_id": job_id, "options": payload or {}},
+    )
     return JSONResponse({"ok": True, "job_id": job_id})
 
 
@@ -249,23 +327,38 @@ def screener_run_detail(
 
 @router.post("/screener-runs/{run_id}/delete", response_class=JSONResponse)
 def soft_delete_screener_run(
+    request: Request,
     run_id: int,
     payload: dict[str, object] | None = Body(default=None),
     service: ScreenerHistoryService = Depends(get_screener_history_service),
-    _: Principal = Depends(require_run_backtests),
+    principal: Principal = Depends(require_run_backtests),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
     deleted = service.soft_delete(run_id, reason=str(request_payload.get("reason") or ""))
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Unknown screener run: {run_id}")
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="screener_runs.soft_delete",
+        resource_type="screener_run",
+        resource_id=str(run_id),
+        resource_label=str(run_id),
+        message=f"Soft-deleted screener run {run_id}.",
+        metadata={"run_id": run_id, "reason": str(request_payload.get("reason") or "")},
+    )
     return JSONResponse({"ok": True})
 
 
 @router.post("/screener-runs/batch", response_class=JSONResponse)
 def launch_screener_history_batch(
+    request: Request,
     payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
-    _: Principal = Depends(require_run_backtests),
+    principal: Principal = Depends(require_run_backtests),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
     strategy_ids = request_payload.get("strategy_ids")
@@ -287,6 +380,17 @@ def launch_screener_history_batch(
         "scope": dict(scope or {}),
     }
     job_id = service.launch("screener_history_batch", options=options)
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="screener_runs.batch_launch",
+        resource_type="run_job",
+        resource_id=job_id,
+        resource_label="screener_history_batch",
+        message="Queued screener history batch.",
+        metadata={"job_id": job_id, **options},
+    )
     return JSONResponse({"ok": True, "job_id": job_id})
 
 
@@ -371,9 +475,11 @@ def backtests_data(
 
 @router.post("/backtests", response_class=JSONResponse)
 def launch_backtest(
+    request: Request,
     payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
-    _: Principal = Depends(require_run_backtests),
+    principal: Principal = Depends(require_run_backtests),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
     entry_rule = request_payload.get("entry_rule")
@@ -397,6 +503,17 @@ def launch_backtest(
         "market_data_mode": str(request_payload.get("market_data_mode") or "database_only"),
     }
     job_id = service.launch("backtest_v1", options=options)
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="backtests.launch",
+        resource_type="run_job",
+        resource_id=job_id,
+        resource_label="backtest_v1",
+        message="Queued backtest run.",
+        metadata={"job_id": job_id, **options},
+    )
     return JSONResponse({"ok": True, "job_id": job_id})
 
 
@@ -424,9 +541,11 @@ def partial_ticker_detail(
 
 @router.post("/admin/exclusions", response_class=JSONResponse)
 def add_exclusion(
+    request: Request,
     payload: dict[str, object] | None = Body(default=None),
     service: AdminService = Depends(get_admin_service),
-    _: Principal = Depends(require_manage_exclusions),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
     try:
@@ -436,15 +555,28 @@ def add_exclusion(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.exclusion.add",
+        resource_type="exclusion",
+        resource_id=str(entry.get("ticker") or ""),
+        resource_label=str(entry.get("ticker") or ""),
+        message=f"Added exclusion for {entry.get('ticker')}.",
+        metadata={"ticker": entry.get("ticker"), "reason": entry.get("reason")},
+    )
     return JSONResponse({"ok": True, "entry": entry})
 
 
 @router.post("/admin/exclusions/{ticker}/remove", response_class=JSONResponse)
 def remove_exclusion(
+    request: Request,
     ticker: str,
     payload: dict[str, object] | None = Body(default=None),
     service: AdminService = Depends(get_admin_service),
-    _: Principal = Depends(require_manage_exclusions),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
     try:
@@ -454,14 +586,27 @@ def remove_exclusion(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.exclusion.remove",
+        resource_type="exclusion",
+        resource_id=str(entry.get("ticker") or ticker),
+        resource_label=str(entry.get("ticker") or ticker),
+        message=f"Removed exclusion for {entry.get('ticker') or ticker}.",
+        metadata={"ticker": entry.get("ticker") or ticker, "reason": entry.get("reason"), "removed_from": entry.get("removed_from", [])},
+    )
     return JSONResponse({"ok": True, "entry": entry})
 
 
 @router.post("/admin/history-sync", response_class=JSONResponse)
 def launch_history_sync(
+    request: Request,
     payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
-    _: Principal = Depends(require_sync_history),
+    principal: Principal = Depends(require_sync_history),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
     options: dict[str, object] = {}
@@ -472,6 +617,17 @@ def launch_history_sync(
         job_id = service.launch("sync_postgres_market_data", options=options)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="history_sync.launch",
+        resource_type="run_job",
+        resource_id=job_id,
+        resource_label="sync_postgres_market_data",
+        message="Queued history sync.",
+        metadata={"job_id": job_id, **options},
+    )
     return JSONResponse({"ok": True, "job_id": job_id})
 
 
@@ -485,9 +641,11 @@ def admin_users(
 
 @router.post("/admin/users/invite", response_class=JSONResponse)
 def admin_invite_user(
+    request: Request,
     payload: dict[str, object] | None = Body(default=None),
     service: UserAdminService = Depends(get_user_admin_service),
-    _: Principal = Depends(require_manage_users),
+    principal: Principal = Depends(require_manage_users),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
     try:
@@ -497,47 +655,100 @@ def admin_invite_user(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.user.invite",
+        resource_type="user",
+        resource_id=str(user.get("id") or ""),
+        resource_label=str(user.get("email") or ""),
+        message=f"Invited or updated user {user.get('email')}.",
+        metadata={"user_id": user.get("id"), "email": user.get("email"), "role": user.get("role"), "is_active": user.get("is_active")},
+    )
     return JSONResponse(jsonable_encoder({"ok": True, "user": user}))
 
 
 @router.post("/admin/users/{user_id}/role", response_class=JSONResponse)
 def admin_update_user_role(
+    request: Request,
     user_id: int,
     payload: dict[str, object] | None = Body(default=None),
     service: UserAdminService = Depends(get_user_admin_service),
-    _: Principal = Depends(require_manage_users),
+    principal: Principal = Depends(require_manage_users),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
+    previous = service.get_user(user_id=user_id)
     try:
         user = service.update_role(user_id=user_id, role=str(request_payload.get("role") or "visitor"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.user.role_update",
+        resource_type="user",
+        resource_id=str(user_id),
+        resource_label=str(user.get("email") or user_id),
+        message=f"Updated role for {user.get('email')}.",
+        metadata={"user_id": user_id, "email": user.get("email"), "role_before": previous.get("role") if previous else None, "role_after": user.get("role")},
+    )
     return JSONResponse(jsonable_encoder({"ok": True, "user": user}))
 
 
 @router.post("/admin/users/{user_id}/deactivate", response_class=JSONResponse)
 def admin_deactivate_user(
+    request: Request,
     user_id: int,
     service: UserAdminService = Depends(get_user_admin_service),
-    _: Principal = Depends(require_manage_users),
+    principal: Principal = Depends(require_manage_users),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
+    previous = service.get_user(user_id=user_id)
     try:
         user = service.deactivate(user_id=user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.user.deactivate",
+        resource_type="user",
+        resource_id=str(user_id),
+        resource_label=str(user.get("email") or user_id),
+        message=f"Deactivated user {user.get('email')}.",
+        metadata={"user_id": user_id, "email": user.get("email"), "was_active": previous.get("is_active") if previous else None, "is_active": user.get("is_active")},
+    )
     return JSONResponse(jsonable_encoder({"ok": True, "user": user}))
 
 
 @router.post("/admin/users/{user_id}/reactivate", response_class=JSONResponse)
 def admin_reactivate_user(
+    request: Request,
     user_id: int,
     service: UserAdminService = Depends(get_user_admin_service),
-    _: Principal = Depends(require_manage_users),
+    principal: Principal = Depends(require_manage_users),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
+    previous = service.get_user(user_id=user_id)
     try:
         user = service.reactivate(user_id=user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.user.reactivate",
+        resource_type="user",
+        resource_id=str(user_id),
+        resource_label=str(user.get("email") or user_id),
+        message=f"Reactivated user {user.get('email')}.",
+        metadata={"user_id": user_id, "email": user.get("email"), "was_active": previous.get("is_active") if previous else None, "is_active": user.get("is_active")},
+    )
     return JSONResponse(jsonable_encoder({"ok": True, "user": user}))
 
 
@@ -551,31 +762,82 @@ def admin_access_requests(
     return JSONResponse(jsonable_encoder({"access_requests": service.list_access_requests(status=normalized_status)}))
 
 
+@router.get("/admin/audit-events", response_class=JSONResponse)
+def admin_audit_events(
+    actor_email: str = Query(default="", alias="actorEmail"),
+    action: str = Query(default=""),
+    resource_type: str = Query(default="", alias="resourceType"),
+    from_date: str = Query(default="", alias="from"),
+    to_date: str = Query(default="", alias="to"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    service: AuditService = Depends(get_audit_service),
+    _: Principal = Depends(require_manage_users),
+) -> JSONResponse:
+    try:
+        payload = service.list_events(
+            actor_email=actor_email,
+            action=action,
+            resource_type=resource_type,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder(payload))
+
+
 @router.post("/admin/access-requests/{request_id}/approve", response_class=JSONResponse)
 def admin_approve_access_request(
+    request: Request,
     request_id: int,
     principal: Principal = Depends(require_manage_users),
     service: UserAdminService = Depends(get_user_admin_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     if principal.user_id is None:
         raise HTTPException(status_code=400, detail="Authenticated admin user id is required.")
+    previous = service.get_access_request(request_id=request_id)
     try:
         access_request = service.approve_access_request(request_id=request_id, reviewed_by_user_id=int(principal.user_id))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.access_request.approve",
+        resource_type="access_request",
+        resource_id=str(request_id),
+        resource_label=str(access_request.get("email") or request_id),
+        message=f"Approved premium access for {access_request.get('email')}.",
+        metadata={
+            "request_id": request_id,
+            "email": access_request.get("email"),
+            "requested_role": previous.get("requested_role") if previous else access_request.get("requested_role"),
+            "status_before": previous.get("status") if previous else None,
+            "status_after": access_request.get("status"),
+            "invited_user_id": access_request.get("invited_user_id"),
+        },
+    )
     return JSONResponse(jsonable_encoder({"ok": True, "access_request": access_request}))
 
 
 @router.post("/admin/access-requests/{request_id}/deny", response_class=JSONResponse)
 def admin_deny_access_request(
+    request: Request,
     request_id: int,
     payload: dict[str, object] | None = Body(default=None),
     principal: Principal = Depends(require_manage_users),
     service: UserAdminService = Depends(get_user_admin_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     if principal.user_id is None:
         raise HTTPException(status_code=400, detail="Authenticated admin user id is required.")
     request_payload = payload or {}
+    previous = service.get_access_request(request_id=request_id)
     try:
         access_request = service.deny_access_request(
             request_id=request_id,
@@ -584,4 +846,22 @@ def admin_deny_access_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.access_request.deny",
+        resource_type="access_request",
+        resource_id=str(request_id),
+        resource_label=str(access_request.get("email") or request_id),
+        message=f"Denied premium access for {access_request.get('email')}.",
+        metadata={
+            "request_id": request_id,
+            "email": access_request.get("email"),
+            "requested_role": previous.get("requested_role") if previous else access_request.get("requested_role"),
+            "status_before": previous.get("status") if previous else None,
+            "status_after": access_request.get("status"),
+            "deny_reason": access_request.get("deny_reason"),
+        },
+    )
     return JSONResponse(jsonable_encoder({"ok": True, "access_request": access_request}))

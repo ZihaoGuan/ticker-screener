@@ -14,9 +14,11 @@ from src.webapp.access_control import (
 )
 from src.webapp.config import PROJECT_ROOT, load_webapp_config
 from src.webapp.repositories.auth_repository import AuthRepository
+from src.webapp.repositories.audit_repository import AuditRepository
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.admin_service import AdminService
 from src.webapp.services.auth_service import AuthService, UserAdminService
+from src.webapp.services.audit_service import AuditService
 from src.webapp.services.backtest_service import BacktestService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.overlap_service import OverlapService
@@ -29,8 +31,10 @@ from src.webapp.services.watchlist_service import WatchlistService
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "web" / "templates"))
 config = load_webapp_config()
 auth_repository = AuthRepository(database_url=config.database_url)
+audit_repository = AuditRepository(database_url=config.database_url)
 auth_service = AuthService(config=config, repository=auth_repository)
 user_admin_service = UserAdminService(repository=auth_repository, config=config)
+audit_service = AuditService(repository=audit_repository)
 
 
 def get_dashboard_service() -> DashboardService:
@@ -75,6 +79,10 @@ def get_auth_service() -> AuthService:
 
 def get_user_admin_service() -> UserAdminService:
     return user_admin_service
+
+
+def get_audit_service() -> AuditService:
+    return audit_service
 
 
 def get_current_principal(request: Request, service: AuthService = Depends(get_auth_service)) -> Principal:

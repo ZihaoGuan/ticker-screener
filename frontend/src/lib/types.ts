@@ -52,6 +52,39 @@ export type AccessRequestSummary = {
   created_at?: string | null;
 };
 
+export type AuditEventSummary = {
+  id: number;
+  event_at: string;
+  actor_user_id?: number | null;
+  actor_email?: string | null;
+  actor_role?: string | null;
+  request_ip?: string | null;
+  request_user_agent?: string | null;
+  action: string;
+  resource_type: string;
+  resource_id?: string | null;
+  resource_label?: string | null;
+  status: string;
+  message: string;
+  metadata_json: Record<string, unknown>;
+};
+
+export type AuditEventsResponse = {
+  events: AuditEventSummary[];
+  filters: {
+    actorEmail: string;
+    action: string;
+    resourceType: string;
+    from: string;
+    to: string;
+    limit: number;
+    offset: number;
+  };
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+
 export type ScreenerJob = {
   jobId: string;
   label: string;

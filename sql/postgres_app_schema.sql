@@ -220,6 +220,35 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_app_access_requests_pending_email
   ON app_access_requests(email)
   WHERE status = 'pending';
 
+CREATE TABLE IF NOT EXISTS app_audit_events (
+  id BIGSERIAL PRIMARY KEY,
+  event_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actor_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  actor_email TEXT,
+  actor_role TEXT,
+  request_ip TEXT,
+  request_user_agent TEXT,
+  action TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT,
+  resource_label TEXT,
+  status TEXT NOT NULL DEFAULT 'success',
+  message TEXT,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_audit_events_event_at
+  ON app_audit_events(event_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_app_audit_events_action_event_at
+  ON app_audit_events(action, event_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_app_audit_events_actor_user_event_at
+  ON app_audit_events(actor_user_id, event_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_app_audit_events_resource_event_at
+  ON app_audit_events(resource_type, resource_id, event_at DESC);
+
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS scope_json JSONB NOT NULL DEFAULT '{}'::jsonb;
