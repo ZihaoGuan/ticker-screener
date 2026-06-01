@@ -368,6 +368,36 @@ class HistoryRepository:
                 cursor.execute(sql, tuple(params))
                 return self._rows_to_dicts(cursor, cursor.fetchall())
 
+    def list_signal_cache_calendar(
+        self,
+        *,
+        strategy_ids: list[str] | None = None,
+        start_date: dt.date,
+        end_date: dt.date,
+        include_deleted: bool = False,
+    ) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        where = ["run_date >= %s", "run_date <= %s"]
+        params: list[Any] = [start_date, end_date]
+        if strategy_ids:
+            where.append("strategy_id = ANY(%s)")
+            params.append(strategy_ids)
+        if not include_deleted:
+            where.append("deleted_at IS NULL")
+        sql = f"""
+            SELECT id, strategy_id, run_date, market_data_mode, source_kind,
+                   hit_count, failure_count, deleted_at, deleted_reason, created_at
+            FROM screen_runs
+            WHERE {" AND ".join(where)}
+            ORDER BY run_date ASC, strategy_id ASC, created_at DESC, id DESC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, tuple(params))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
     def load_cached_signals(
         self,
         *,

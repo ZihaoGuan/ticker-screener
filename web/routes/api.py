@@ -311,6 +311,46 @@ def screener_runs_data(
     return JSONResponse(jsonable_encoder(payload))
 
 
+@router.get("/screener-runs/cache-calendar", response_class=JSONResponse)
+def screener_runs_cache_calendar(
+    from_date: str = Query(alias="from"),
+    to_date: str = Query(alias="to"),
+    strategy_ids_raw: list[str] | None = Query(default=None, alias="strategyIds"),
+    include_deleted: bool = Query(default=False, alias="includeDeleted"),
+    service: ScreenerHistoryService = Depends(get_screener_history_service),
+) -> JSONResponse:
+    try:
+        start_date = dt.date.fromisoformat(from_date)
+        end_date = dt.date.fromisoformat(to_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="from and to must be YYYY-MM-DD") from exc
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="to must be on or after from")
+    strategy_ids: list[str] = []
+    for item in strategy_ids_raw or []:
+        for part in str(item).split(","):
+            normalized = part.strip()
+            if normalized and normalized not in strategy_ids:
+                strategy_ids.append(normalized)
+    days = service.list_signal_cache_calendar(
+        strategy_ids=strategy_ids or None,
+        start_date=start_date,
+        end_date=end_date,
+        include_deleted=include_deleted,
+    )
+    return JSONResponse(
+        jsonable_encoder(
+            {
+                "from": start_date.isoformat(),
+                "to": end_date.isoformat(),
+                "strategy_ids": strategy_ids,
+                "include_deleted": include_deleted,
+                "days": days,
+            }
+        )
+    )
+
+
 @router.get("/screener-runs/{run_id}", response_class=JSONResponse)
 def screener_run_detail(
     run_id: int,

@@ -5,23 +5,30 @@ import { Panel } from "../components/Panel";
 import { StatusPill } from "../components/StatusPill";
 import { fetchJson } from "../lib/api";
 import { formatLocalDateTime } from "../lib/format";
-import type { BacktestsResponse, JobsResponse, ScreenerRunsResponse } from "../lib/types";
+import type { BacktestsResponse, JobsResponse, ScreenerRunDetail, ScreenerRunsResponse, SignalCacheCalendarDay, SignalCacheCalendarResponse } from "../lib/types";
 
 const today = new Date().toISOString().slice(0, 10);
 const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
 
 export function BacktestsPage() {
   const auth = useAuth();
   const [payload, setPayload] = useState<BacktestsResponse | null>(null);
   const [screenRuns, setScreenRuns] = useState<ScreenerRunsResponse | null>(null);
   const [jobs, setJobs] = useState<JobsResponse | null>(null);
+  const [calendarPayload, setCalendarPayload] = useState<SignalCacheCalendarResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
   const [isSubmittingCache, setIsSubmittingCache] = useState(false);
   const [isSubmittingBacktest, setIsSubmittingBacktest] = useState(false);
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [cacheStrategies, setCacheStrategies] = useState<string[]>([]);
   const [cacheStartDate, setCacheStartDate] = useState(ninetyDaysAgo);
   const [cacheEndDate, setCacheEndDate] = useState(today);
+  const [calendarMonth, setCalendarMonth] = useState(currentMonthStart);
+  const [selectedCacheDate, setSelectedCacheDate] = useState("");
+  const [selectedRunDetail, setSelectedRunDetail] = useState<ScreenerRunDetail | null>(null);
+  const [isLoadingRunDetail, setIsLoadingRunDetail] = useState(false);
   const [backtestStrategies, setBacktestStrategies] = useState<string[]>([]);
   const [backtestMinCount, setBacktestMinCount] = useState("2");
   const [backtestStartDate, setBacktestStartDate] = useState(ninetyDaysAgo);
@@ -41,6 +48,30 @@ export function BacktestsPage() {
     });
   };
 
+  const refreshCalendar = () => {
+    const monthStart = new Date(`${calendarMonth}T00:00:00`);
+    const from = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
+    const to = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+    const params = new URLSearchParams({
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      includeDeleted: includeDeleted ? "true" : "false",
+    });
+    for (const strategyId of cacheStrategies) {
+      params.append("strategyIds", strategyId);
+    }
+    setIsLoadingCalendar(true);
+    return fetchJson<SignalCacheCalendarResponse>(`/api/screener-runs/cache-calendar?${params.toString()}`)
+      .then((result) => {
+        setCalendarPayload(result);
+        if (!selectedCacheDate && result.days.length > 0) {
+          const firstInteresting = result.days.find((item) => item.cached_strategy_count > 0) ?? result.days[0];
+          setSelectedCacheDate(firstInteresting.date);
+        }
+      })
+      .finally(() => setIsLoadingCalendar(false));
+  };
+
   useEffect(() => {
     void refresh()
       .catch(() => {
@@ -53,6 +84,7 @@ export function BacktestsPage() {
         });
         setScreenRuns({ configured: false, runs: [], coverage: [], available_strategies: [] });
         setJobs({ actions: [], jobs: [] });
+        setCalendarPayload(null);
       })
       .finally(() => setIsLoading(false));
   }, [includeDeleted]);
@@ -69,6 +101,13 @@ export function BacktestsPage() {
     }
   }, [payload, cacheStrategies.length, backtestStrategies.length]);
 
+  useEffect(() => {
+    if (!payload?.available_strategies?.length) {
+      return;
+    }
+    void refreshCalendar();
+  }, [payload, calendarMonth, includeDeleted, cacheStrategies.join(",")]);
+
   const activeResearchJobs = useMemo(
     () =>
       (jobs?.jobs ?? []).filter(
@@ -79,6 +118,50 @@ export function BacktestsPage() {
 
   const toggleStrategy = (current: string[], strategyId: string) =>
     current.includes(strategyId) ? current.filter((item) => item !== strategyId) : [...current, strategyId];
+
+  const selectedCalendarDay = useMemo(
+    () => calendarPayload?.days.find((item) => item.date === selectedCacheDate) ?? null,
+    [calendarPayload, selectedCacheDate],
+  );
+
+  const monthGrid = useMemo(() => {
+    const monthStart = new Date(`${calendarMonth}T00:00:00`);
+    const start = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
+    const end = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+    const leading = (start.getDay() + 6) % 7;
+    const days: Array<{ date: string; inMonth: boolean; payload: SignalCacheCalendarDay | null }> = [];
+    for (let index = 0; index < leading; index += 1) {
+      days.push({ date: "", inMonth: false, payload: null });
+    }
+    for (let day = 1; day <= end.getDate(); day += 1) {
+      const date = new Date(start.getFullYear(), start.getMonth(), day).toISOString().slice(0, 10);
+      days.push({
+        date,
+        inMonth: true,
+        payload: calendarPayload?.days.find((item) => item.date === date) ?? null,
+      });
+    }
+    while (days.length % 7 !== 0) {
+      days.push({ date: "", inMonth: false, payload: null });
+    }
+    return days;
+  }, [calendarMonth, calendarPayload]);
+
+  const loadRunDetail = async (runId: number) => {
+    setIsLoadingRunDetail(true);
+    try {
+      const detail = await fetchJson<ScreenerRunDetail>(`/api/screener-runs/${runId}?includeHits=true&hitLimit=500`);
+      setSelectedRunDetail(detail);
+    } finally {
+      setIsLoadingRunDetail(false);
+    }
+  };
+
+  const shiftCalendarMonth = (delta: number) => {
+    const base = new Date(`${calendarMonth}T00:00:00`);
+    const next = new Date(base.getFullYear(), base.getMonth() + delta, 1);
+    setCalendarMonth(next.toISOString().slice(0, 10));
+  };
 
   const submitSignalCache = async () => {
     setIsSubmittingCache(true);
@@ -97,6 +180,7 @@ export function BacktestsPage() {
       });
       setStatusMessage(`Signal cache job queued: ${response.job_id}`);
       await refresh();
+      await refreshCalendar();
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Unable to queue signal cache job.");
     } finally {
@@ -200,6 +284,190 @@ export function BacktestsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="panel-head" style={{ marginTop: 24 }}>
+          <h3>Cache Calendar</h3>
+          <div className="button-row">
+            <button type="button" className="ghost-button" onClick={() => shiftCalendarMonth(-1)}>
+              Prev
+            </button>
+            <span className="eyebrow">{calendarMonth.slice(0, 7)}</span>
+            <button type="button" className="ghost-button" onClick={() => shiftCalendarMonth(1)}>
+              Next
+            </button>
+          </div>
+        </div>
+        {isLoadingCalendar ? <LoadingBlock label="Loading signal cache calendar…" compact /> : null}
+        <div className="calendar-legend">
+          <span className="file-meta"><span className="calendar-dot is-none" /> none</span>
+          <span className="file-meta"><span className="calendar-dot is-partial" /> partial</span>
+          <span className="file-meta"><span className="calendar-dot is-no-hits" /> cached no hits</span>
+          <span className="file-meta"><span className="calendar-dot is-hits" /> cached with hits</span>
+        </div>
+        <div className="cache-calendar-grid">
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => (
+            <div key={label} className="cache-calendar-head">
+              {label}
+            </div>
+          ))}
+          {monthGrid.map((item, index) =>
+            item.inMonth ? (
+              <button
+                key={`${item.date}-${index}`}
+                type="button"
+                className={`cache-calendar-cell is-${item.payload?.status ?? "none"}${selectedCacheDate === item.date ? " is-selected" : ""}`}
+                onClick={() => {
+                  setSelectedCacheDate(item.date);
+                  setSelectedRunDetail(null);
+                }}
+              >
+                <span className="cache-calendar-day">{Number(item.date.slice(-2))}</span>
+                <span className="cache-calendar-meta">{item.payload?.cached_strategy_count ?? 0}/{item.payload?.strategy_count ?? cacheStrategies.length}</span>
+                <span className="cache-calendar-meta">{item.payload?.total_hits ?? 0} hits</span>
+              </button>
+            ) : (
+              <div key={`blank-${index}`} className="cache-calendar-cell is-empty" />
+            ),
+          )}
+        </div>
+        <div className="split-grid" style={{ marginTop: 20 }}>
+          <div className="panel" style={{ padding: 0, background: "transparent", border: 0 }}>
+            <div className="panel-head">
+              <h3>{selectedCacheDate || "Select a date"}</h3>
+              <span className="eyebrow">{selectedCalendarDay?.status ?? "none"}</span>
+            </div>
+            <div className="data-table-responsive">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Strategy</th>
+                    <th>Hits</th>
+                    <th>Failures</th>
+                    <th>Mode</th>
+                    <th>State</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(selectedCalendarDay?.strategies ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>No cached screener runs for this date and strategy filter.</td>
+                    </tr>
+                  ) : (
+                    (selectedCalendarDay?.strategies ?? []).map((item) => (
+                      <tr key={item.run_id}>
+                        <td>{item.strategy_id}</td>
+                        <td>{item.hit_count}</td>
+                        <td>{item.failure_count}</td>
+                        <td>{item.market_data_mode || "-"}</td>
+                        <td>{item.deleted_at ? "soft-deleted" : "active"}</td>
+                        <td>
+                          <button type="button" className="table-action-button" onClick={() => void loadRunDetail(item.run_id)}>
+                            View Cached Result
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="panel" style={{ padding: 0, background: "transparent", border: 0 }}>
+            <div className="panel-head">
+              <h3>Cached Result Detail</h3>
+              {selectedRunDetail ? <span className="eyebrow">run {selectedRunDetail.id}</span> : null}
+            </div>
+            {isLoadingRunDetail ? <LoadingBlock label="Loading cached result detail…" compact /> : null}
+            {!selectedRunDetail && !isLoadingRunDetail ? <p className="panel-copy">Select a cached screener run to inspect its saved result detail.</p> : null}
+            {selectedRunDetail ? (
+              <div className="page-grid">
+                <div className="detail-card">
+                  <div className="detail-card-head">
+                    <div>
+                      <div className="ticker-symbol">{selectedRunDetail.strategy_id}</div>
+                      <div className="file-meta">
+                        {selectedRunDetail.run_date} · hits {selectedRunDetail.hit_count} · failures {selectedRunDetail.failure_count}
+                      </div>
+                    </div>
+                    <span className="eyebrow">{selectedRunDetail.deleted_at ? "soft-deleted" : "active"}</span>
+                  </div>
+                  <div className="detail-grid">
+                    <div>
+                      <div className="eyebrow">Config Hash</div>
+                      <div className="panel-copy">{selectedRunDetail.config_hash}</div>
+                    </div>
+                    <div>
+                      <div className="eyebrow">Scope Hash</div>
+                      <div className="panel-copy">{selectedRunDetail.scope_hash}</div>
+                    </div>
+                  </div>
+                  <div className="detail-grid">
+                    <div>
+                      <div className="eyebrow">Raw Artifact</div>
+                      <div className="panel-copy">{selectedRunDetail.raw_artifact_path || "-"}</div>
+                    </div>
+                    <div>
+                      <div className="eyebrow">Watchlist Artifact</div>
+                      <div className="panel-copy">{selectedRunDetail.watchlist_artifact_path || "-"}</div>
+                    </div>
+                  </div>
+                  <div className="detail-subsection">
+                    <div className="eyebrow">Result Summary</div>
+                    <pre className="panel-copy" style={{ whiteSpace: "pre-wrap" }}>
+                      {JSON.stringify(selectedRunDetail.result_summary_json ?? {}, null, 2)}
+                    </pre>
+                  </div>
+                  <div className="detail-subsection">
+                    <div className="eyebrow">Config Snapshot</div>
+                    <pre className="panel-copy" style={{ whiteSpace: "pre-wrap" }}>
+                      {JSON.stringify(selectedRunDetail.config_json ?? {}, null, 2)}
+                    </pre>
+                  </div>
+                  <div className="detail-subsection">
+                    <div className="eyebrow">Scope Snapshot</div>
+                    <pre className="panel-copy" style={{ whiteSpace: "pre-wrap" }}>
+                      {JSON.stringify(selectedRunDetail.scope_json ?? {}, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+                <div className="data-table-responsive">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Ticker</th>
+                        <th>Passed</th>
+                        <th>Rank</th>
+                        <th>Reasons</th>
+                        <th>Metrics</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedRunDetail.hits ?? []).length === 0 ? (
+                        <tr>
+                          <td colSpan={5}>No hit rows stored for this cached screener result.</td>
+                        </tr>
+                      ) : (
+                        (selectedRunDetail.hits ?? []).map((hit) => (
+                          <tr key={hit.id}>
+                            <td>{hit.ticker}</td>
+                            <td>{hit.passed ? "yes" : "no"}</td>
+                            <td>{hit.rank ?? "-"}</td>
+                            <td>{(hit.reasons_json ?? []).map((item) => String(item)).join(", ") || "-"}</td>
+                            <td>
+                              <pre className="panel-copy" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                                {JSON.stringify(hit.metrics_json ?? {}, null, 2)}
+                              </pre>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </Panel>
 

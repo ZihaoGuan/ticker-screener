@@ -304,6 +304,73 @@ export type SignalCacheCoverage = {
   last_run_date: string | null;
 };
 
+export type SignalCacheCalendarStrategy = {
+  run_id: number;
+  strategy_id: string;
+  hit_count: number;
+  failure_count: number;
+  market_data_mode: string;
+  source_kind: string;
+  deleted_at?: string | null;
+  deleted_reason?: string | null;
+  created_at?: string | null;
+};
+
+export type SignalCacheCalendarDay = {
+  date: string;
+  strategy_count: number;
+  cached_strategy_count: number;
+  hit_strategy_count: number;
+  total_hits: number;
+  status: "none" | "partial" | "cached_no_hits" | "cached_with_hits";
+  strategies: SignalCacheCalendarStrategy[];
+};
+
+export type SignalCacheCalendarResponse = {
+  from: string;
+  to: string;
+  strategy_ids: string[];
+  include_deleted: boolean;
+  days: SignalCacheCalendarDay[];
+};
+
+export type ScreenerRunHit = {
+  id: number;
+  strategy_id: string;
+  signal_date: string;
+  ticker: string;
+  passed: boolean;
+  rank?: number | null;
+  metrics_json: Record<string, unknown>;
+  reasons_json: unknown[];
+  hit_payload_json: Record<string, unknown>;
+  created_at?: string | null;
+};
+
+export type ScreenerRunDetail = {
+  id: number;
+  strategy_id: string;
+  run_date: string;
+  job_run_id?: number | null;
+  config_json: Record<string, unknown>;
+  config_hash: string;
+  scope_json: Record<string, unknown>;
+  scope_hash: string;
+  market_data_mode: string;
+  source_kind: string;
+  hit_count: number;
+  failure_count: number;
+  result_summary_json: Record<string, unknown>;
+  raw_artifact_path: string;
+  watchlist_artifact_path: string;
+  report_artifact_path: string;
+  notes?: string | null;
+  deleted_at?: string | null;
+  deleted_reason?: string | null;
+  created_at?: string | null;
+  hits?: ScreenerRunHit[];
+};
+
 export type ScreenerRunsResponse = {
   configured: boolean;
   runs: ScreenerRunSummary[];

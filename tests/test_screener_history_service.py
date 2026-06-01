@@ -12,6 +12,7 @@ class _FakeHistoryRepository:
         self.screen_run_payload: dict[str, object] | None = None
         self.hit_rows: list[dict[str, object]] | None = None
         self.deleted: tuple[int, str] | None = None
+        self.calendar_rows: list[dict[str, object]] = []
 
     def is_configured(self) -> bool:
         return True
@@ -28,6 +29,9 @@ class _FakeHistoryRepository:
 
     def list_signal_cache_summary(self, **_: object):
         return []
+
+    def list_signal_cache_calendar(self, **_: object):
+        return list(self.calendar_rows)
 
     def upsert_screen_run(self, **kwargs: object) -> int:
         self.screen_run_payload = dict(kwargs)
@@ -84,6 +88,35 @@ class ScreenerHistoryServiceTests(unittest.TestCase):
 
         self.assertTrue(deleted)
         self.assertEqual(self.repository.deleted, (42, "Deleted from webapp"))
+
+    def test_cache_calendar_groups_by_day_and_status(self) -> None:
+        self.repository.calendar_rows = [
+            {
+                "id": 11,
+                "strategy_id": "rs",
+                "run_date": dt.date(2026, 6, 1),
+                "market_data_mode": "database-first",
+                "source_kind": "exchange-universe",
+                "hit_count": 3,
+                "failure_count": 0,
+                "deleted_at": None,
+                "deleted_reason": None,
+                "created_at": "2026-06-01T10:00:00+00:00",
+            }
+        ]
+
+        days = self.service.list_signal_cache_calendar(
+            strategy_ids=["rs", "vcp"],
+            start_date=dt.date(2026, 6, 1),
+            end_date=dt.date(2026, 6, 2),
+            include_deleted=False,
+        )
+
+        self.assertEqual(days[0]["date"], "2026-06-01")
+        self.assertEqual(days[0]["status"], "partial")
+        self.assertEqual(days[0]["cached_strategy_count"], 1)
+        self.assertEqual(days[1]["date"], "2026-06-02")
+        self.assertEqual(days[1]["status"], "none")
 
 
 if __name__ == "__main__":

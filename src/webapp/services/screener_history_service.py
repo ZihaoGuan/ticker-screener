@@ -67,6 +67,76 @@ class ScreenerHistoryService:
     ) -> list[dict[str, Any]]:
         return self.repository.list_signal_cache_summary(strategy_ids=strategy_ids, start_date=start_date, end_date=end_date)
 
+    def list_signal_cache_calendar(
+        self,
+        *,
+        strategy_ids: list[str] | None = None,
+        start_date: dt.date,
+        end_date: dt.date,
+        include_deleted: bool = False,
+    ) -> list[dict[str, Any]]:
+        rows = self.repository.list_signal_cache_calendar(
+            strategy_ids=strategy_ids,
+            start_date=start_date,
+            end_date=end_date,
+            include_deleted=include_deleted,
+        )
+        selected_count = len(strategy_ids or [])
+        grouped: dict[dt.date, list[dict[str, Any]]] = {}
+        for row in rows:
+            run_date = row.get("run_date")
+            if not isinstance(run_date, dt.date):
+                continue
+            grouped.setdefault(run_date, []).append(row)
+
+        result: list[dict[str, Any]] = []
+        cursor = start_date
+        while cursor <= end_date:
+            day_rows = grouped.get(cursor, [])
+            strategy_map: dict[str, dict[str, Any]] = {}
+            for row in day_rows:
+                strategy_id = str(row.get("strategy_id") or "")
+                if not strategy_id or strategy_id in strategy_map:
+                    continue
+                strategy_map[strategy_id] = {
+                    "run_id": int(row["id"]),
+                    "strategy_id": strategy_id,
+                    "hit_count": int(row.get("hit_count") or 0),
+                    "failure_count": int(row.get("failure_count") or 0),
+                    "market_data_mode": str(row.get("market_data_mode") or ""),
+                    "source_kind": str(row.get("source_kind") or ""),
+                    "deleted_at": row.get("deleted_at"),
+                    "deleted_reason": row.get("deleted_reason"),
+                    "created_at": row.get("created_at"),
+                }
+            strategies = sorted(strategy_map.values(), key=lambda item: (item["strategy_id"], item["created_at"] or ""))
+            cached_strategy_count = len(strategies)
+            hit_strategy_count = sum(1 for item in strategies if int(item["hit_count"]) > 0)
+            total_hits = sum(int(item["hit_count"]) for item in strategies)
+            expected_strategy_count = selected_count if selected_count > 0 else cached_strategy_count
+            status = "none"
+            if cached_strategy_count == 0:
+                status = "none"
+            elif expected_strategy_count > 0 and cached_strategy_count < expected_strategy_count:
+                status = "partial"
+            elif hit_strategy_count > 0:
+                status = "cached_with_hits"
+            else:
+                status = "cached_no_hits"
+            result.append(
+                {
+                    "date": cursor.isoformat(),
+                    "strategy_count": expected_strategy_count,
+                    "cached_strategy_count": cached_strategy_count,
+                    "hit_strategy_count": hit_strategy_count,
+                    "total_hits": total_hits,
+                    "status": status,
+                    "strategies": strategies,
+                }
+            )
+            cursor += dt.timedelta(days=1)
+        return result
+
     def persist_screen_run(
         self,
         *,
