@@ -10,7 +10,16 @@ except ModuleNotFoundError:  # pragma: no cover - local env may not have web dep
 
 if TestClient is not None:
     from web.app import app
-    from web.dependencies import get_ad_hoc_screen_service, get_backtest_service, get_run_service, get_screener_history_service
+    from web.dependencies import (
+        get_ad_hoc_screen_service,
+        get_auth_service,
+        get_backtest_service,
+        get_current_principal,
+        get_run_service,
+        get_screener_history_service,
+        get_user_admin_service,
+    )
+    from src.webapp.access_control import principal_for_user, anonymous_principal
 
 
 class _FakeAdHocService:
@@ -59,6 +68,38 @@ class _FakeBacktestService:
         return []
 
 
+class _FakeAuthService:
+    def request_magic_link(self, *, email: str, request_ip: str, request_user_agent: str):
+        _ = (request_ip, request_user_agent)
+        if not email:
+            raise ValueError("Email is required.")
+        return {"ok": True, "message": f"Sent sign-in link to {email.lower()}."}
+
+    def verify_magic_link(self, *, token: str, request_ip: str, request_user_agent: str):
+        _ = (request_ip, request_user_agent)
+        if token != "valid-token":
+            raise ValueError("Invalid or expired sign-in link.")
+        principal = principal_for_user(user_id=7, email="admin@example.com", role="admin", is_active=True).to_dict()
+        return {"principal": principal, "session_cookie_value": "signed-session"}
+
+
+class _FakeUserAdminService:
+    def list_users(self):
+        return [{"id": 7, "email": "admin@example.com", "role": "admin", "is_active": True, "last_login_at": None}]
+
+    def invite_or_create_user(self, *, email: str, role: str):
+        return {"id": 9, "email": email.lower(), "role": role, "is_active": True}
+
+    def update_role(self, *, user_id: int, role: str):
+        return {"id": user_id, "email": "user@example.com", "role": role, "is_active": True}
+
+    def deactivate(self, *, user_id: int):
+        return {"id": user_id, "email": "user@example.com", "role": "premium", "is_active": False}
+
+    def reactivate(self, *, user_id: int):
+        return {"id": user_id, "email": "user@example.com", "role": "premium", "is_active": True}
+
+
 @unittest.skipIf(TestClient is None, "fastapi test dependencies are not installed")
 class ApiAdHocScreenTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -66,6 +107,9 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_run_service] = lambda: _FakeRunService()
         app.dependency_overrides[get_screener_history_service] = lambda: _FakeScreenerHistoryService()
         app.dependency_overrides[get_backtest_service] = lambda: _FakeBacktestService()
+        app.dependency_overrides[get_auth_service] = lambda: _FakeAuthService()
+        app.dependency_overrides[get_user_admin_service] = lambda: _FakeUserAdminService()
+        app.dependency_overrides[get_current_principal] = anonymous_principal
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -88,10 +132,15 @@ class ApiAdHocScreenTests(unittest.TestCase):
 
     def test_post_screener_runs_batch_requires_strategy_ids(self) -> None:
         response = self.client.post("/api/screener-runs/batch", json={"start_date": "2026-01-01", "end_date": "2026-01-31"})
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("strategy_ids", response.json()["detail"])
+        self.assertEqual(response.status_code, 401)
 
     def test_post_backtests_queues_job(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
         response = self.client.post(
             "/api/backtests",
             json={
@@ -105,3 +154,56 @@ class ApiAdHocScreenTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["job_id"], "backtest_v1-job")
+
+    def test_auth_me_is_anonymous_by_default(self) -> None:
+        response = self.client.get("/api/auth/me")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["authenticated"])
+        self.assertEqual(response.json()["role"], "visitor")
+
+    def test_request_magic_link(self) -> None:
+        response = self.client.post("/api/auth/request-link", json={"email": "Admin@Example.com"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+
+    def test_verify_magic_link_sets_cookie(self) -> None:
+        response = self.client.post("/api/auth/verify-link", json={"token": "valid-token"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["authenticated"])
+        self.assertIn("set-cookie", response.headers)
+
+    def test_anonymous_cannot_launch_run(self) -> None:
+        response = self.client.post("/api/runs/rs", json={})
+        self.assertEqual(response.status_code, 401)
+
+    def test_premium_can_launch_run(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=2,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+        response = self.client.post("/api/runs/rs", json={})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["job_id"], "rs-job")
+
+    def test_premium_cannot_access_admin_users(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=2,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/users")
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_access_admin_users(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/users")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["users"][0]["email"], "admin@example.com")

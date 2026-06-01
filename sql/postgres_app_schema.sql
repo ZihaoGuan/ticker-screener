@@ -157,6 +157,55 @@ CREATE TABLE IF NOT EXISTS report_artifacts (
 CREATE INDEX IF NOT EXISTS idx_report_artifacts_strategy_date
   ON report_artifacts(strategy_id, run_date DESC);
 
+CREATE TABLE IF NOT EXISTS app_users (
+  id BIGSERIAL PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL DEFAULT 'visitor',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_users_role_active
+  ON app_users(role, is_active);
+
+CREATE TABLE IF NOT EXISTS app_magic_links (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  request_ip TEXT,
+  request_user_agent TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_magic_links_user_id
+  ON app_magic_links(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_app_magic_links_token_hash
+  ON app_magic_links(token_hash);
+
+CREATE TABLE IF NOT EXISTS app_sessions (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
+  created_ip TEXT,
+  created_user_agent TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_sessions_session_id
+  ON app_sessions(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id
+  ON app_sessions(user_id, created_at DESC);
+
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS scope_json JSONB NOT NULL DEFAULT '{}'::jsonb;

@@ -1,24 +1,35 @@
 import { useEffect, useState, type PropsWithChildren } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import type { CapabilityName } from "../lib/types";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: "▦" },
   { to: "/guide", label: "Guide", icon: "◫" },
-  { to: "/runs", label: "Runs", icon: "◉" },
   { to: "/watchlists", label: "Watchlists", icon: "◌" },
   { to: "/rotation/sector", label: "Rotation", icon: "◎" },
   { to: "/overlap", label: "Overlap", icon: "◈" },
   { to: "/backtests", label: "Backtests", icon: "▥" },
-  { to: "/admin", label: "Admin", icon: "◔" },
+  { to: "/runs", label: "Runs", icon: "◉", capability: "run_screeners" as CapabilityName },
+  { to: "/admin", label: "Admin", icon: "◔", capability: "manage_exclusions" as CapabilityName },
 ];
 
 export function AppLayout({ children }: PropsWithChildren) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const auth = useAuth();
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   useEffect(() => {
     setIsMobileNavOpen(false);
   }, [location.pathname]);
+
+  const visibleNavItems = navItems.filter((item) => !item.capability || auth.hasCapability(item.capability));
+
+  const handleLogout = async () => {
+    await auth.logout();
+    navigate("/", { replace: true });
+  };
 
   return (
     <div className="app-shell">
@@ -28,7 +39,7 @@ export function AppLayout({ children }: PropsWithChildren) {
           <div className="brand-subtitle">Clinical Analytics</div>
         </div>
         <nav id="primary-navigation" className="sidebar-nav">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -43,12 +54,19 @@ export function AppLayout({ children }: PropsWithChildren) {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <a className="footer-link" href="#">
-            Settings
-          </a>
-          <a className="footer-link" href="#">
-            Support
-          </a>
+          {auth.authenticated ? (
+            <>
+              <span className="footer-link">{auth.user?.email}</span>
+              <span className="footer-link">{auth.role.toUpperCase()}</span>
+              <button className="footer-link button-link" type="button" onClick={() => void handleLogout()}>
+                Sign Out
+              </button>
+            </>
+          ) : (
+            <NavLink className="footer-link" to="/login">
+              Sign In
+            </NavLink>
+          )}
         </div>
       </aside>
       <div className="main-shell">
@@ -69,6 +87,7 @@ export function AppLayout({ children }: PropsWithChildren) {
             <span className="status-chip">WEB: HEALTHY</span>
             <span className="status-chip">DB: CONNECTED</span>
             <span className="status-chip">ARTIFACTS: REACHABLE</span>
+            <span className="status-chip">{auth.authenticated ? `ROLE: ${auth.role.toUpperCase()}` : "ROLE: VISITOR"}</span>
           </div>
         </header>
         <main className="page-shell">{children}</main>

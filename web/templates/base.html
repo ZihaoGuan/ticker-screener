@@ -7,15 +7,20 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  {% set principal = request.state.current_principal if request and request.state and request.state.current_principal else none %}
   <header class="topbar">
     <div class="shell topbar-inner">
       <a class="brand" href="/">Ticker Screener</a>
       <nav class="nav">
         <a href="/">Dashboard</a>
-        <a href="/runs">Runs</a>
         <a href="/watchlists">Watchlists</a>
         <a href="/backtests">Backtests</a>
+        {% if principal and principal.can("run_screeners") %}
+        <a href="/runs">Runs</a>
+        {% endif %}
+        {% if principal and principal.can("manage_exclusions") %}
         <a href="/admin/exclusions">Exclusions</a>
+        {% endif %}
       </nav>
     </div>
   </header>

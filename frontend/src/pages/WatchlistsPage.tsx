@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 import { ExclusionDialog } from "../components/ExclusionDialog";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
@@ -11,6 +12,7 @@ import type { CandlePoint, ChartAnnotations, WatchlistChartResponse, WatchlistDe
 const DEFAULT_VISIBLE_TICKERS = 80;
 
 export function WatchlistsPage() {
+  const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [watchlists, setWatchlists] = useState<WatchlistFile[]>([]);
   const [selectedStem, setSelectedStem] = useState("");
@@ -332,11 +334,13 @@ export function WatchlistsPage() {
               <strong>{score}</strong>
             </div>
           </div>
-          <div className="hero-actions">
-            <button className="primary-button" type="button" onClick={() => setIsExclusionDialogOpen(true)} disabled={ticker === "--"}>
-              Exclude Ticker
-            </button>
-          </div>
+          {auth.hasCapability("manage_exclusions") ? (
+            <div className="hero-actions">
+              <button className="primary-button" type="button" onClick={() => setIsExclusionDialogOpen(true)} disabled={ticker === "--"}>
+                Exclude Ticker
+              </button>
+            </div>
+          ) : null}
         </section>
 
         <Panel

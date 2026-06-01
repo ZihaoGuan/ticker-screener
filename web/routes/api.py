@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
+from src.webapp.access_control import Principal
 from src.webapp.services.admin_service import AdminService
 from src.webapp.services.backtest_service import BacktestService, DEFAULT_EXIT_RULES
+from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.rrg_service import RrgService
@@ -18,13 +20,24 @@ from src.webapp.services.watchlist_service import WatchlistService
 from web.dependencies import (
     get_ad_hoc_screen_service,
     get_admin_service,
+    clear_auth_cookie,
+    config,
     get_backtest_service,
+    get_auth_service,
+    get_current_principal,
     get_dashboard_service,
     get_overlap_service,
     get_rrg_service,
     get_run_service,
     get_screener_history_service,
+    get_user_admin_service,
     get_watchlist_service,
+    require_manage_exclusions,
+    require_manage_users,
+    require_run_backtests,
+    require_run_screeners,
+    require_sync_history,
+    set_auth_cookie,
 )
 
 
@@ -36,13 +49,81 @@ def dashboard_data(service: DashboardService = Depends(get_dashboard_service)) -
     return JSONResponse(service.get_dashboard_context())
 
 
+@router.get("/auth/me", response_class=JSONResponse)
+def auth_me(principal: Principal = Depends(get_current_principal)) -> JSONResponse:
+    return JSONResponse(jsonable_encoder({"authenticated": principal.authenticated, "user": principal.to_dict() if principal.authenticated else None, "role": principal.role, "capabilities": list(principal.capabilities)}))
+
+
+@router.post("/auth/request-link", response_class=JSONResponse)
+def request_magic_link(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: AuthService = Depends(get_auth_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        result = service.request_magic_link(
+            email=str(request_payload.get("email") or ""),
+            request_ip=request.client.host if request.client else "",
+            request_user_agent=request.headers.get("user-agent", ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder(result))
+
+
+@router.post("/auth/verify-link", response_class=JSONResponse)
+def verify_magic_link(
+    request: Request,
+    response: Response,
+    payload: dict[str, object] | None = Body(default=None),
+    service: AuthService = Depends(get_auth_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        result = service.verify_magic_link(
+            token=str(request_payload.get("token") or ""),
+            request_ip=request.client.host if request.client else "",
+            request_user_agent=request.headers.get("user-agent", ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    json_response = JSONResponse(
+        jsonable_encoder(
+            {
+                "ok": True,
+                "authenticated": True,
+                "user": result["principal"],
+                "role": result["principal"]["role"],
+                "capabilities": result["principal"]["capabilities"],
+            }
+        )
+    )
+    set_auth_cookie(json_response, str(result["session_cookie_value"]))
+    return json_response
+
+
+@router.post("/auth/logout", response_class=JSONResponse)
+def logout(
+    request: Request,
+    service: AuthService = Depends(get_auth_service),
+) -> JSONResponse:
+    service.logout(signed_session=request.cookies.get(config.auth_session_cookie_name))
+    response = JSONResponse({"ok": True})
+    clear_auth_cookie(response)
+    return response
+
+
 @router.get("/jobs", response_class=JSONResponse)
-def jobs_data(service: RunService = Depends(get_run_service)) -> JSONResponse:
+def jobs_data(
+    service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_run_screeners),
+) -> JSONResponse:
     return JSONResponse({"actions": service.list_actions(), "jobs": service.list_jobs()})
 
 
 @router.get("/jobs/{job_id}", response_class=JSONResponse)
-def job_detail(job_id: str, service: RunService = Depends(get_run_service)) -> JSONResponse:
+def job_detail(job_id: str, service: RunService = Depends(get_run_service), _: Principal = Depends(require_run_screeners)) -> JSONResponse:
     try:
         return JSONResponse(service.get_job(job_id))
     except ValueError as exc:
@@ -50,7 +131,7 @@ def job_detail(job_id: str, service: RunService = Depends(get_run_service)) -> J
 
 
 @router.post("/jobs/{job_id}/cancel", response_class=JSONResponse)
-def cancel_job(job_id: str, service: RunService = Depends(get_run_service)) -> JSONResponse:
+def cancel_job(job_id: str, service: RunService = Depends(get_run_service), _: Principal = Depends(require_run_screeners)) -> JSONResponse:
     try:
         return JSONResponse({"ok": True, "job": service.cancel(job_id)})
     except ValueError as exc:
@@ -64,6 +145,7 @@ def run_action(
     action_id: str,
     payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_run_screeners),
 ) -> JSONResponse:
     try:
         job_id = service.launch(action_id, options=payload or {})
@@ -157,6 +239,7 @@ def soft_delete_screener_run(
     run_id: int,
     payload: dict[str, object] | None = Body(default=None),
     service: ScreenerHistoryService = Depends(get_screener_history_service),
+    _: Principal = Depends(require_run_backtests),
 ) -> JSONResponse:
     request_payload = payload or {}
     deleted = service.soft_delete(run_id, reason=str(request_payload.get("reason") or ""))
@@ -169,6 +252,7 @@ def soft_delete_screener_run(
 def launch_screener_history_batch(
     payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_run_backtests),
 ) -> JSONResponse:
     request_payload = payload or {}
     strategy_ids = request_payload.get("strategy_ids")
@@ -276,6 +360,7 @@ def backtests_data(
 def launch_backtest(
     payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_run_backtests),
 ) -> JSONResponse:
     request_payload = payload or {}
     entry_rule = request_payload.get("entry_rule")
@@ -306,6 +391,7 @@ def launch_backtest(
 def exclusions_data(
     coverage_start: str = Query(default="2020-01-01", alias="coverageStart"),
     service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
 ) -> JSONResponse:
     return JSONResponse(service.get_context(coverage_start=coverage_start))
 
@@ -315,6 +401,7 @@ def partial_ticker_detail(
     ticker: str,
     coverage_start: str = Query(default="2020-01-01", alias="coverageStart"),
     service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
 ) -> JSONResponse:
     try:
         return JSONResponse(service.get_partial_ticker_detail(ticker=ticker, coverage_start=coverage_start))
@@ -326,6 +413,7 @@ def partial_ticker_detail(
 def add_exclusion(
     payload: dict[str, object] | None = Body(default=None),
     service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
 ) -> JSONResponse:
     request_payload = payload or {}
     try:
@@ -343,6 +431,7 @@ def remove_exclusion(
     ticker: str,
     payload: dict[str, object] | None = Body(default=None),
     service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
 ) -> JSONResponse:
     request_payload = payload or {}
     try:
@@ -359,6 +448,7 @@ def remove_exclusion(
 def launch_history_sync(
     payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_sync_history),
 ) -> JSONResponse:
     request_payload = payload or {}
     options: dict[str, object] = {}
@@ -370,3 +460,69 @@ def launch_history_sync(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({"ok": True, "job_id": job_id})
+
+
+@router.get("/admin/users", response_class=JSONResponse)
+def admin_users(
+    service: UserAdminService = Depends(get_user_admin_service),
+    _: Principal = Depends(require_manage_users),
+) -> JSONResponse:
+    return JSONResponse(jsonable_encoder({"users": service.list_users()}))
+
+
+@router.post("/admin/users/invite", response_class=JSONResponse)
+def admin_invite_user(
+    payload: dict[str, object] | None = Body(default=None),
+    service: UserAdminService = Depends(get_user_admin_service),
+    _: Principal = Depends(require_manage_users),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        user = service.invite_or_create_user(
+            email=str(request_payload.get("email") or ""),
+            role=str(request_payload.get("role") or "visitor"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder({"ok": True, "user": user}))
+
+
+@router.post("/admin/users/{user_id}/role", response_class=JSONResponse)
+def admin_update_user_role(
+    user_id: int,
+    payload: dict[str, object] | None = Body(default=None),
+    service: UserAdminService = Depends(get_user_admin_service),
+    _: Principal = Depends(require_manage_users),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        user = service.update_role(user_id=user_id, role=str(request_payload.get("role") or "visitor"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder({"ok": True, "user": user}))
+
+
+@router.post("/admin/users/{user_id}/deactivate", response_class=JSONResponse)
+def admin_deactivate_user(
+    user_id: int,
+    service: UserAdminService = Depends(get_user_admin_service),
+    _: Principal = Depends(require_manage_users),
+) -> JSONResponse:
+    try:
+        user = service.deactivate(user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder({"ok": True, "user": user}))
+
+
+@router.post("/admin/users/{user_id}/reactivate", response_class=JSONResponse)
+def admin_reactivate_user(
+    user_id: int,
+    service: UserAdminService = Depends(get_user_admin_service),
+    _: Principal = Depends(require_manage_users),
+) -> JSONResponse:
+    try:
+        user = service.reactivate(user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(jsonable_encoder({"ok": True, "user": user}))

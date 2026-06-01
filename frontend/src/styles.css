@@ -111,6 +111,18 @@ a {
   color: #a1a1aa;
 }
 
+.button-link {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.button-link:hover {
+  color: #f4f4f5;
+}
+
 .main-shell {
   display: flex;
   flex-direction: column;
@@ -187,6 +199,12 @@ a {
 .page-grid {
   display: grid;
   gap: 20px;
+}
+
+.button-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .split-grid {

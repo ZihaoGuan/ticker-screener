@@ -9,6 +9,32 @@ export type StrategyCard = {
 
 export type JobStatus = "running" | "success" | "failed" | "cancelled";
 
+export type RoleName = "visitor" | "premium" | "admin";
+
+export type CapabilityName =
+  | "view_results"
+  | "run_screeners"
+  | "run_backtests"
+  | "manage_exclusions"
+  | "sync_history"
+  | "manage_users";
+
+export type UserSummary = {
+  authenticated: boolean;
+  user_id?: number | null;
+  email?: string | null;
+  role: RoleName;
+  capabilities: CapabilityName[];
+  is_active: boolean;
+};
+
+export type AuthMeResponse = {
+  authenticated: boolean;
+  user: UserSummary | null;
+  role: RoleName;
+  capabilities: CapabilityName[];
+};
+
 export type ScreenerJob = {
   jobId: string;
   label: string;
@@ -271,6 +297,15 @@ export type BacktestsResponse = {
 export type AdminResponse = {
   excluded_tickers: ExclusionEntry[];
   excluded_count: number;
+  users?: Array<{
+    id: number;
+    email: string;
+    role: RoleName;
+    is_active: boolean;
+    created_at?: string | null;
+    updated_at?: string | null;
+    last_login_at?: string | null;
+  }>;
   database_status: {
     database_configured: boolean;
     coverage_start: string;

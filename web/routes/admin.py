@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from src.config import load_app_config
 from src.ticker_filters import load_excluded_tickers
-from web.dependencies import templates
+from web.dependencies import require_manage_exclusions, templates
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @router.get("/exclusions", response_class=HTMLResponse)
-def exclusions(request: Request) -> HTMLResponse:
+def exclusions(
+    request: Request,
+    _=Depends(require_manage_exclusions),
+) -> HTMLResponse:
     config = load_app_config()
     excluded = sorted(load_excluded_tickers(config))
     return templates.TemplateResponse(

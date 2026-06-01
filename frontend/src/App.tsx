@@ -1,9 +1,11 @@
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
+import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { AdminPage } from "./pages/AdminPage";
 import { BacktestsPage } from "./pages/BacktestsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { GuidePage } from "./pages/GuidePage";
+import { LoginPage } from "./pages/LoginPage";
 import { OverlapPage } from "./pages/OverlapPage";
 import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
@@ -14,8 +16,16 @@ export default function App() {
     <AppLayout>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/login" element={<LoginPage />} />
         <Route path="/guide" element={<GuidePage />} />
-        <Route path="/runs" element={<RunsPage />} />
+        <Route
+          path="/runs"
+          element={
+            <ProtectedRoute capability="run_screeners">
+              <RunsPage />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/watchlists" element={<WatchlistsPage />} />
         <Route path="/rotation" element={<Navigate to="/rotation/sector" replace />} />
         <Route path="/rotation/:universe" element={<RrgPage />} />
@@ -23,7 +33,14 @@ export default function App() {
         <Route path="/rrg/:universe" element={<LegacyRrgRedirect />} />
         <Route path="/overlap" element={<OverlapPage />} />
         <Route path="/backtests" element={<BacktestsPage />} />
-        <Route path="/admin" element={<AdminPage />} />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute capability="manage_exclusions">
+              <AdminPage />
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppLayout>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { StatusPill } from "../components/StatusPill";
@@ -10,6 +11,7 @@ const today = new Date().toISOString().slice(0, 10);
 const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 export function BacktestsPage() {
+  const auth = useAuth();
   const [payload, setPayload] = useState<BacktestsResponse | null>(null);
   const [screenRuns, setScreenRuns] = useState<ScreenerRunsResponse | null>(null);
   const [jobs, setJobs] = useState<JobsResponse | null>(null);
@@ -151,19 +153,23 @@ export function BacktestsPage() {
             </label>
           ))}
         </div>
-        <div className="button-row" style={{ flexWrap: "wrap", marginTop: 16 }}>
-          <label>
-            <span className="eyebrow">Start</span>
-            <input type="date" value={cacheStartDate} onChange={(event) => setCacheStartDate(event.target.value)} />
-          </label>
-          <label>
-            <span className="eyebrow">End</span>
-            <input type="date" value={cacheEndDate} onChange={(event) => setCacheEndDate(event.target.value)} />
-          </label>
-          <button type="button" className="screener-run-button" disabled={isSubmittingCache || cacheStrategies.length === 0} onClick={() => void submitSignalCache()}>
-            {isSubmittingCache ? "QUEUING..." : "QUEUE CACHE FILL"}
-          </button>
-        </div>
+        {auth.hasCapability("run_backtests") ? (
+          <div className="button-row" style={{ flexWrap: "wrap", marginTop: 16 }}>
+            <label>
+              <span className="eyebrow">Start</span>
+              <input type="date" value={cacheStartDate} onChange={(event) => setCacheStartDate(event.target.value)} />
+            </label>
+            <label>
+              <span className="eyebrow">End</span>
+              <input type="date" value={cacheEndDate} onChange={(event) => setCacheEndDate(event.target.value)} />
+            </label>
+            <button type="button" className="screener-run-button" disabled={isSubmittingCache || cacheStrategies.length === 0} onClick={() => void submitSignalCache()}>
+              {isSubmittingCache ? "QUEUING..." : "QUEUE CACHE FILL"}
+            </button>
+          </div>
+        ) : (
+          <p className="panel-copy">Signal cache fills are admin-only. Visitors can still inspect cache coverage.</p>
+        )}
         <div className="button-row" style={{ justifyContent: "space-between", marginTop: 16 }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
             <input type="checkbox" checked={includeDeleted} onChange={() => setIncludeDeleted((current) => !current)} />
@@ -211,35 +217,39 @@ export function BacktestsPage() {
             </label>
           ))}
         </div>
-        <div className="button-row" style={{ flexWrap: "wrap", marginTop: 16 }}>
-          <label>
-            <span className="eyebrow">Min Count</span>
-            <input type="number" min={1} value={backtestMinCount} onChange={(event) => setBacktestMinCount(event.target.value)} />
-          </label>
-          <label>
-            <span className="eyebrow">Start</span>
-            <input type="date" value={backtestStartDate} onChange={(event) => setBacktestStartDate(event.target.value)} />
-          </label>
-          <label>
-            <span className="eyebrow">End</span>
-            <input type="date" value={backtestEndDate} onChange={(event) => setBacktestEndDate(event.target.value)} />
-          </label>
-          <label>
-            <span className="eyebrow">Cache Policy</span>
-            <select value={signalCachePolicy} onChange={(event) => setSignalCachePolicy(event.target.value as "reuse_then_fill" | "reuse_only")}>
-              <option value="reuse_then_fill">reuse_then_fill</option>
-              <option value="reuse_only">reuse_only</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            className="screener-run-button"
-            disabled={isSubmittingBacktest || backtestStrategies.length === 0}
-            onClick={() => void submitBacktest()}
-          >
-            {isSubmittingBacktest ? "QUEUING..." : "QUEUE BACKTEST"}
-          </button>
-        </div>
+        {auth.hasCapability("run_backtests") ? (
+          <div className="button-row" style={{ flexWrap: "wrap", marginTop: 16 }}>
+            <label>
+              <span className="eyebrow">Min Count</span>
+              <input type="number" min={1} value={backtestMinCount} onChange={(event) => setBacktestMinCount(event.target.value)} />
+            </label>
+            <label>
+              <span className="eyebrow">Start</span>
+              <input type="date" value={backtestStartDate} onChange={(event) => setBacktestStartDate(event.target.value)} />
+            </label>
+            <label>
+              <span className="eyebrow">End</span>
+              <input type="date" value={backtestEndDate} onChange={(event) => setBacktestEndDate(event.target.value)} />
+            </label>
+            <label>
+              <span className="eyebrow">Cache Policy</span>
+              <select value={signalCachePolicy} onChange={(event) => setSignalCachePolicy(event.target.value as "reuse_then_fill" | "reuse_only")}>
+                <option value="reuse_then_fill">reuse_then_fill</option>
+                <option value="reuse_only">reuse_only</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              className="screener-run-button"
+              disabled={isSubmittingBacktest || backtestStrategies.length === 0}
+              onClick={() => void submitBacktest()}
+            >
+              {isSubmittingBacktest ? "QUEUING..." : "QUEUE BACKTEST"}
+            </button>
+          </div>
+        ) : (
+          <p className="panel-copy">Backtest launches are admin-only. Visitors can still review saved backtest results.</p>
+        )}
         <div className="template-list" style={{ marginTop: 16 }}>
           {(payload?.backtest_runs ?? []).map((item) => (
             <article key={item.id} className="metric-card">

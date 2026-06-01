@@ -4,7 +4,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { AdminResponse, ExclusionEntry, PartialTickerDetailResponse } from "../lib/types";
+import type { AdminResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName } from "../lib/types";
 
 const EMPTY_ADMIN_RESPONSE: AdminResponse = {
   excluded_tickers: [],
@@ -48,6 +48,12 @@ export function AdminPage() {
   const [selectedExclusion, setSelectedExclusion] = useState<ExclusionEntry | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
   const [notice, setNotice] = useState("");
+  const [users, setUsers] = useState<
+    Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>
+  >([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<RoleName>("visitor");
+  const [isSavingUser, setIsSavingUser] = useState(false);
 
   const loadAdmin = (start: string) => {
     setIsLoading(true);
@@ -68,6 +74,9 @@ export function AdminPage() {
 
   useEffect(() => {
     loadAdmin(coverageStart);
+    void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }> }>("/api/admin/users")
+      .then((result) => setUsers(result.users))
+      .catch(() => setUsers([]));
   }, [coverageStart]);
 
   const handleLaunchSync = async (event: FormEvent<HTMLFormElement>) => {
@@ -150,6 +159,65 @@ export function AdminPage() {
   }, [exclusionFilter, payload.excluded_tickers]);
 
   const db = payload.database_status;
+
+  const refreshUsers = () => {
+    void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }> }>("/api/admin/users")
+      .then((result) => setUsers(result.users))
+      .catch(() => setUsers([]));
+  };
+
+  const handleInviteUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSavingUser(true);
+    setNotice("");
+    try {
+      await fetchJson<{ ok: boolean }>("/api/admin/users/invite", {
+        method: "POST",
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+      });
+      setInviteEmail("");
+      setInviteRole("visitor");
+      setNotice("User saved.");
+      refreshUsers();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to save user.");
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const handleRoleChange = async (userId: number, role: RoleName) => {
+    setIsSavingUser(true);
+    setNotice("");
+    try {
+      await fetchJson<{ ok: boolean }>(`/api/admin/users/${userId}/role`, {
+        method: "POST",
+        body: JSON.stringify({ role }),
+      });
+      setNotice("Role updated.");
+      refreshUsers();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to update role.");
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const handleToggleUser = async (userId: number, isActive: boolean) => {
+    setIsSavingUser(true);
+    setNotice("");
+    try {
+      await fetchJson<{ ok: boolean }>(`/api/admin/users/${userId}/${isActive ? "deactivate" : "reactivate"}`, {
+        method: "POST",
+      });
+      setNotice(isActive ? "User deactivated." : "User reactivated.");
+      refreshUsers();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to update user.");
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
 
   return (
     <div className="page-grid">
@@ -345,6 +413,65 @@ export function AdminPage() {
           </div>
           {launchMessage ? <div className="panel-copy">{launchMessage}</div> : null}
         </form>
+      </Panel>
+
+      <Panel title="Users and Roles" aside={<span className="eyebrow">{users.length} accounts</span>}>
+        <form className="run-toolbar" onSubmit={(event) => void handleInviteUser(event)}>
+          <div className="run-params-grid">
+            <label className="field">
+              <span>Email</span>
+              <input type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="user@example.com" />
+            </label>
+            <label className="field">
+              <span>Role</span>
+              <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as RoleName)}>
+                <option value="visitor">visitor</option>
+                <option value="premium">premium</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+          </div>
+          <div className="run-action-footer">
+            <button className="primary-button" type="submit" disabled={isSavingUser}>
+              {isSavingUser ? "Saving..." : "Invite or Create User"}
+            </button>
+          </div>
+        </form>
+
+        <div className="data-table-responsive">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td>{user.email}</td>
+                  <td>
+                    <select value={user.role} onChange={(event) => void handleRoleChange(user.id, event.target.value as RoleName)} disabled={isSavingUser}>
+                      <option value="visitor">visitor</option>
+                      <option value="premium">premium</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </td>
+                  <td>{user.is_active ? "active" : "inactive"}</td>
+                  <td>{formatLocalDateTime(user.last_login_at)}</td>
+                  <td>
+                    <button className="table-action-button" type="button" disabled={isSavingUser} onClick={() => void handleToggleUser(user.id, user.is_active)}>
+                      {user.is_active ? "Deactivate" : "Reactivate"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Panel>
 
       <Panel title="Exclusions" aside={<span className="eyebrow">{payload.excluded_count} symbols</span>}>
