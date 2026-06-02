@@ -14,6 +14,7 @@ const CRITERIA_LABELS: Array<{ key: string; label: string; shortLabel: string }>
 ];
 
 const BUCKET_KEYS = ["before_market", "after_market", "during_market", "unknown"] as const;
+const EARNINGS_CALENDAR_SESSION_CACHE_KEY = "earnings-calendar-cache-v1";
 
 function toggleSelection(current: string[], value: string) {
   return current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
@@ -57,6 +58,38 @@ function countMatchedEntries(entries: EarningsCalendarEntry[]) {
 
 function hasAnyEntries(day: EarningsCalendarDay) {
   return countDayEntries(day) > 0;
+}
+
+function normalizeFilterValue(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function filterEntries(
+  entries: EarningsCalendarEntry[],
+  {
+    excludedSectors,
+    excludedIndustries,
+    onlyCriteria,
+  }: {
+    excludedSectors: string[];
+    excludedIndustries: string[];
+    onlyCriteria: boolean;
+  },
+) {
+  const excludedSectorKeys = new Set(excludedSectors.map((value) => normalizeFilterValue(value)).filter(Boolean));
+  const excludedIndustryKeys = new Set(excludedIndustries.map((value) => normalizeFilterValue(value)).filter(Boolean));
+  return entries.filter((entry) => {
+    if (excludedSectorKeys.has(normalizeFilterValue(entry.sector))) {
+      return false;
+    }
+    if (excludedIndustryKeys.has(normalizeFilterValue(entry.industry))) {
+      return false;
+    }
+    if (onlyCriteria && !entry.criteria?.passed) {
+      return false;
+    }
+    return true;
+  });
 }
 
 function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
@@ -124,30 +157,56 @@ export function EarningsPage() {
   const [excludedSectors, setExcludedSectors] = useState<string[]>([]);
   const [excludedIndustries, setExcludedIndustries] = useState<string[]>([]);
   const [onlyCriteria, setOnlyCriteria] = useState(false);
-
-  const queryString = useMemo(() => {
-    const params = new URLSearchParams();
-    for (const sector of excludedSectors) params.append("excludeSector", sector);
-    for (const industry of excludedIndustries) params.append("excludeIndustry", industry);
-    if (onlyCriteria) params.set("onlyCriteria", "true");
-    return params.toString();
-  }, [excludedIndustries, excludedSectors, onlyCriteria]);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   useEffect(() => {
     setIsLoading(true);
     setNotice("");
-    void fetchJson<EarningsCalendarResponse>(`/api/earnings-calendar${queryString ? `?${queryString}` : ""}`)
-      .then(setPayload)
+    if (refreshNonce === 0) {
+      try {
+        const cached = sessionStorage.getItem(EARNINGS_CALENDAR_SESSION_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached) as EarningsCalendarResponse;
+          setPayload(parsed);
+          setIsLoading(false);
+          return;
+        }
+      } catch {
+        sessionStorage.removeItem(EARNINGS_CALENDAR_SESSION_CACHE_KEY);
+      }
+    }
+    void fetchJson<EarningsCalendarResponse>("/api/earnings-calendar")
+      .then((response) => {
+        setPayload(response);
+        sessionStorage.setItem(EARNINGS_CALENDAR_SESSION_CACHE_KEY, JSON.stringify(response));
+      })
       .catch((error) => {
         setPayload(null);
         setNotice(error instanceof Error ? error.message : "Failed to load next-week earnings calendar.");
       })
       .finally(() => setIsLoading(false));
-  }, [queryString]);
+  }, [refreshNonce]);
 
-  const days = payload?.days ?? [];
+  const days = useMemo(() => {
+    if (!payload) {
+      return [];
+    }
+    return payload.days
+      .map((day) => ({
+        ...day,
+        before_market: filterEntries(day.before_market, { excludedSectors, excludedIndustries, onlyCriteria }),
+        after_market: filterEntries(day.after_market, { excludedSectors, excludedIndustries, onlyCriteria }),
+        during_market: filterEntries(day.during_market, { excludedSectors, excludedIndustries, onlyCriteria }),
+        unknown: filterEntries(day.unknown, { excludedSectors, excludedIndustries, onlyCriteria }),
+      }))
+      .filter((day) => hasAnyEntries(day));
+  }, [excludedIndustries, excludedSectors, onlyCriteria, payload]);
   const totalEntries = days.reduce((total, day) => total + countDayEntries(day), 0);
   const filteredExclusionCount = excludedSectors.length + excludedIndustries.length;
+  const matchedCount = days.reduce(
+    (total, day) => total + countMatchedEntries(BUCKET_KEYS.flatMap((key) => bucketEntries(day, key))),
+    0,
+  );
 
   return (
     <div className="page-grid earnings-board">
@@ -176,7 +235,7 @@ export function EarningsPage() {
           </div>
           <div className="earnings-metric earnings-metric-highlight">
             <span className="eyebrow">Criteria Match</span>
-            <strong>{payload?.criteria_filter.matched_count ?? "-"}</strong>
+            <strong>{payload ? matchedCount : "-"}</strong>
           </div>
         </div>
       </section>
@@ -192,6 +251,16 @@ export function EarningsPage() {
               </span>
               <span className="earnings-toggle-label">Only Criteria Matches</span>
             </label>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                sessionStorage.removeItem(EARNINGS_CALENDAR_SESSION_CACHE_KEY);
+                setRefreshNonce((current) => current + 1);
+              }}
+            >
+              Refresh
+            </button>
           </div>
           <div className="earnings-inline-filters">
             <div className="earnings-inline-filter-group">
@@ -244,10 +313,11 @@ export function EarningsPage() {
         {onlyCriteria ? (
           <p className="panel-copy earnings-console-note">
             {payload?.criteria_filter.available
-              ? `Using latest persisted criteria run ${payload.criteria_filter.run_date || ""}, including persisted IV > 7% near-earnings check. ${payload.criteria_filter.matched_count} current matches.`
+              ? `Using latest persisted criteria run ${payload.criteria_filter.run_date || ""}, including persisted IV > 7% near-earnings check. ${matchedCount} current matches.`
               : "Criteria filter is on, but no persisted criteria run is available yet."}
           </p>
         ) : null}
+        {payload ? <p className="panel-copy earnings-console-note">Filter toggles use session-cached calendar data on this device. Refresh to pull newest server data.</p> : null}
         {notice ? <p className="panel-copy earnings-console-note">{notice}</p> : null}
       </section>
 
