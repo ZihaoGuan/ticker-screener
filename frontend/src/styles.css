@@ -1893,6 +1893,37 @@ a {
   gap: 6px;
 }
 
+.earnings-criteria-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.earnings-criteria-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.earnings-criteria-pill {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.earnings-criteria-pill.is-match {
+  background: rgba(79, 209, 140, 0.16);
+  color: #8ef0b8;
+}
+
+.earnings-criteria-pill.is-miss {
+  background: rgba(245, 101, 101, 0.16);
+  color: #ff9d9d;
+}
+
 @media (max-width: 1400px) {
   .earnings-calendar-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));

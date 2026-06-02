@@ -5,6 +5,14 @@ import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
 import type { EarningsCalendarDay, EarningsCalendarEntry, EarningsCalendarResponse } from "../lib/types";
 
+const CRITERIA_LABELS: Array<{ key: string; label: string }> = [
+  { key: "institutional_ownership_ge_10", label: "Institutional ownership >= 10%" },
+  { key: "bullish_ma_stack", label: "MA20 > MA50 > MA200" },
+  { key: "revenue_yoy_ge_100", label: "Revenue YoY >= 100%" },
+  { key: "latest_eps_negative", label: "Latest EPS negative" },
+  { key: "eps_improving_last_4", label: "EPS improving last 4" },
+];
+
 function toggleSelection(current: string[], value: string) {
   return current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
 }
@@ -48,6 +56,19 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
                 Criteria {entry.criteria.passed ? "PASS" : "FAIL"}
                 {entry.criteria.pass_mode ? ` (${entry.criteria.pass_mode})` : ""}
               </p>
+              <div className="earnings-criteria-grid">
+                {CRITERIA_LABELS.map((item) => {
+                  const matched = entry.criteria?.criteria?.[item.key];
+                  return (
+                    <div key={item.key} className="earnings-criteria-row">
+                      <span>{item.label}</span>
+                      <span className={`earnings-criteria-pill${matched ? " is-match" : " is-miss"}`}>
+                        {matched ? "Match" : "No"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
               <p className="panel-copy">
                 Matched: {entry.criteria.matched_criteria.length > 0 ? entry.criteria.matched_criteria.join(", ") : "-"}
               </p>
