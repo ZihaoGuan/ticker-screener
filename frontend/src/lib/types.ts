@@ -672,6 +672,13 @@ export type EarningsCalendarEntry = {
   sector?: string | null;
   industry?: string | null;
   exchange?: string | null;
+  implied_move_signal?: {
+    threshold_pct: number;
+    near_earnings: boolean;
+    matched: boolean;
+    percent_move?: number | null;
+    status?: string | null;
+  } | null;
   criteria?: {
     passed: boolean;
     criteria: Record<string, boolean>;

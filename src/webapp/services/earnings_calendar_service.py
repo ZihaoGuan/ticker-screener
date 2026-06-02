@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,9 +11,15 @@ from ...cookstock_bridge import load_configured_cookstock
 from ...earnings_enrichment import _parse_session_from_summary
 from ...universe import UniverseTicker, load_universe
 from .screener_history_service import ScreenerHistoryService
+from .watchlist_service import _load_yahoo_implied_move_playwright
 
 
 CRITERIA_STRATEGY_ID = "earnings_weekly_criteria"
+IMPLIED_MOVE_CRITERIA_KEY = "implied_move_ge_7_near_earnings"
+IMPLIED_MOVE_THRESHOLD_PCT = 7.0
+IMPLIED_MOVE_CACHE_TTL_HOURS = 12
+
+logger = logging.getLogger(__name__)
 
 
 class EarningsCalendarService:
@@ -25,8 +33,10 @@ class EarningsCalendarService:
     ) -> None:
         self.project_root = project_root
         self.app_config = app_config or load_app_config()
-        self.history_service = ScreenerHistoryService(database_url=database_url, artifacts_dir=artifacts_dir)
+        self.artifacts_dir = artifacts_dir or (project_root / "artifacts")
+        self.history_service = ScreenerHistoryService(database_url=database_url, artifacts_dir=self.artifacts_dir)
         self._universe_index: dict[str, UniverseTicker] | None = None
+        self._implied_move_cache_path = self.artifacts_dir / "raw" / "earnings" / "implied_move_cache.json"
 
     def get_next_week_calendar(
         self,
@@ -41,7 +51,6 @@ class EarningsCalendarService:
         next_week_start = week_start + dt.timedelta(days=7)
         next_week_end = next_week_start + dt.timedelta(days=6)
         criteria_meta = self._load_latest_criteria_meta()
-        matched_tickers = {str(value).upper() for value in criteria_meta.get("matched_tickers", [])}
         criteria_by_ticker = criteria_meta.get("ticker_details", {})
 
         excluded_sector_keys = {_normalize_filter_value(value) for value in (exclude_sectors or []) if _normalize_filter_value(value)}
@@ -67,6 +76,8 @@ class EarningsCalendarService:
             }
             seen_by_day[date_key] = set()
 
+        pending_entries: list[dict[str, Any]] = []
+        tickers_to_enrich: set[str] = set()
         for item in raw_events:
             ticker = str(item.get("ticker") or "").strip().upper()
             event_date = item.get("event_date")
@@ -88,8 +99,6 @@ class EarningsCalendarService:
                 continue
             if _normalize_filter_value(industry) in excluded_industry_keys:
                 continue
-            if only_criteria and ticker not in matched_tickers:
-                continue
 
             date_key = event_date.isoformat()
             if ticker in seen_by_day[date_key]:
@@ -99,18 +108,41 @@ class EarningsCalendarService:
             summary = str(item.get("summary") or "").strip() or None
             session = _parse_session_from_summary(summary)
             bucket_key = session if session in {"before_market", "after_market", "during_market"} else "unknown"
-            grouped_days[date_key][bucket_key].append(
+            pending_entries.append(
                 {
-                    "ticker": ticker,
-                    "date": date_key,
-                    "session": session,
-                    "summary": summary,
-                    "sector": sector,
-                    "industry": industry,
-                    "exchange": exchange,
-                    "criteria": criteria_by_ticker.get(ticker),
+                    "bucket_key": bucket_key,
+                    "date_key": date_key,
+                    "entry": {
+                        "ticker": ticker,
+                        "date": date_key,
+                        "session": session,
+                        "summary": summary,
+                        "sector": sector,
+                        "industry": industry,
+                        "exchange": exchange,
+                    },
+                    "base_criteria": criteria_by_ticker.get(ticker),
                 }
             )
+            tickers_to_enrich.add(ticker)
+
+        implied_move_by_ticker = self._load_implied_move_signals(sorted(tickers_to_enrich))
+        matched_tickers: set[str] = set()
+        for item in pending_entries:
+            entry = dict(item["entry"])
+            ticker = str(entry.get("ticker") or "").upper()
+            implied_move_signal = implied_move_by_ticker.get(ticker)
+            combined_criteria = _merge_earnings_entry_criteria(
+                item.get("base_criteria"),
+                implied_move_signal=implied_move_signal,
+            )
+            entry["criteria"] = combined_criteria
+            entry["implied_move_signal"] = implied_move_signal
+            if only_criteria and not (combined_criteria and combined_criteria.get("passed")):
+                continue
+            if combined_criteria and combined_criteria.get("passed"):
+                matched_tickers.add(ticker)
+            grouped_days[str(item["date_key"])][str(item["bucket_key"])].append(entry)
 
         for day in grouped_days.values():
             for bucket_key in ("before_market", "after_market", "during_market", "unknown"):
@@ -197,6 +229,115 @@ class EarningsCalendarService:
         payload["ticker_details"] = ticker_details
         return payload
 
+    def _load_implied_move_signals(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
+        cache_payload = self._read_implied_move_cache()
+        cache_entries = cache_payload.get("entries", {}) if isinstance(cache_payload.get("entries"), dict) else {}
+        now = dt.datetime.now(dt.timezone.utc)
+        results: dict[str, dict[str, Any]] = {}
+        mutated = False
+        for raw_ticker in tickers:
+            ticker = str(raw_ticker or "").strip().upper()
+            if not ticker:
+                continue
+            cache_entry = cache_entries.get(ticker)
+            if isinstance(cache_entry, dict) and _is_implied_move_cache_fresh(cache_entry, now=now):
+                signal = _build_implied_move_signal(cache_entry)
+                if signal:
+                    results[ticker] = signal
+                    continue
+            implied_move, diagnostics = _load_yahoo_implied_move_playwright(ticker)
+            percent_move = implied_move.get("percent_move") if isinstance(implied_move, dict) else None
+            status = str(diagnostics.get("status") or "empty")
+            cache_entries[ticker] = {
+                "ticker": ticker,
+                "refreshed_at": now.replace(microsecond=0).isoformat(),
+                "percent_move": percent_move,
+                "status": status,
+            }
+            mutated = True
+            signal = _build_implied_move_signal(cache_entries[ticker])
+            if signal:
+                results[ticker] = signal
+            else:
+                results[ticker] = {
+                    "threshold_pct": IMPLIED_MOVE_THRESHOLD_PCT,
+                    "near_earnings": True,
+                    "matched": False,
+                    "percent_move": None,
+                    "status": status,
+                }
+        if mutated:
+            self._write_implied_move_cache({"entries": cache_entries})
+        return results
+
+    def _read_implied_move_cache(self) -> dict[str, Any]:
+        if not self._implied_move_cache_path.exists():
+            return {"entries": {}}
+        try:
+            payload = json.loads(self._implied_move_cache_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Unable to read implied move cache: %s", exc)
+            return {"entries": {}}
+        return payload if isinstance(payload, dict) else {"entries": {}}
+
+    def _write_implied_move_cache(self, payload: dict[str, Any]) -> None:
+        try:
+            self._implied_move_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self._implied_move_cache_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Unable to write implied move cache: %s", exc)
+
 
 def _normalize_filter_value(value: object) -> str:
     return str(value or "").strip().lower()
+
+
+def _merge_earnings_entry_criteria(
+    base_criteria: object,
+    *,
+    implied_move_signal: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(base_criteria, dict):
+        return None
+    criteria_values = dict(base_criteria.get("criteria", {})) if isinstance(base_criteria.get("criteria"), dict) else {}
+    implied_move_matched = bool(implied_move_signal and implied_move_signal.get("matched"))
+    criteria_values[IMPLIED_MOVE_CRITERIA_KEY] = implied_move_matched
+    matched = [key for key, value in criteria_values.items() if value]
+    not_matched = [key for key, value in criteria_values.items() if not value]
+    return {
+        "passed": bool(not not_matched),
+        "criteria": criteria_values,
+        "matched_criteria": matched,
+        "not_matched_criteria": not_matched,
+        "pass_mode": base_criteria.get("pass_mode") or "",
+        "error": base_criteria.get("error") or ("" if not not_matched else "criteria_not_met"),
+    }
+
+
+def _is_implied_move_cache_fresh(cache_entry: dict[str, Any], *, now: dt.datetime) -> bool:
+    refreshed_at = str(cache_entry.get("refreshed_at") or "").strip()
+    if not refreshed_at:
+        return False
+    try:
+        refreshed = dt.datetime.fromisoformat(refreshed_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if refreshed.tzinfo is None:
+        refreshed = refreshed.replace(tzinfo=dt.timezone.utc)
+    return now - refreshed.astimezone(dt.timezone.utc) <= dt.timedelta(hours=IMPLIED_MOVE_CACHE_TTL_HOURS)
+
+
+def _build_implied_move_signal(cache_entry: dict[str, Any]) -> dict[str, Any] | None:
+    percent_move_raw = cache_entry.get("percent_move")
+    try:
+        percent_move = float(percent_move_raw) if percent_move_raw is not None else None
+    except (TypeError, ValueError):
+        percent_move = None
+    status = str(cache_entry.get("status") or ("ok" if percent_move is not None else "empty"))
+    return {
+        "threshold_pct": IMPLIED_MOVE_THRESHOLD_PCT,
+        "near_earnings": True,
+        "matched": percent_move is not None and percent_move > IMPLIED_MOVE_THRESHOLD_PCT,
+        "percent_move": percent_move,
+        "status": status,
+    }

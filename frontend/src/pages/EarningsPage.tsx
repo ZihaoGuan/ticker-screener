@@ -10,6 +10,7 @@ const CRITERIA_LABELS: Array<{ key: string; label: string; shortLabel: string }>
   { key: "revenue_yoy_ge_100", label: "Revenue YoY >= 100%", shortLabel: "Rev +100%" },
   { key: "latest_eps_negative", label: "Latest EPS negative", shortLabel: "EPS Neg" },
   { key: "eps_improving_last_4", label: "EPS improving last 4", shortLabel: "EPS Trend" },
+  { key: "implied_move_ge_7_near_earnings", label: "Implied move > 7% near earnings", shortLabel: "IV > 7%" },
 ];
 
 const BUCKET_KEYS = ["before_market", "after_market", "during_market", "unknown"] as const;
@@ -74,6 +75,18 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
           </div>
           <p className="earnings-entry-meta">{[entry.sector, entry.industry].filter(Boolean).join(" / ") || "No sector or industry"}</p>
           {entry.summary ? <p className="earnings-entry-summary">"{entry.summary}"</p> : null}
+          {entry.implied_move_signal ? (
+            <div className="earnings-criteria-pill-row">
+              <span
+                className={`earnings-criteria-pill${entry.implied_move_signal.matched ? " is-match" : " is-miss"}`}
+                title={`Near earnings implied move threshold ${entry.implied_move_signal.threshold_pct.toFixed(0)}%`}
+              >
+                {entry.implied_move_signal.percent_move != null
+                  ? `IV ${entry.implied_move_signal.percent_move.toFixed(2)}%`
+                  : "IV --"}
+              </span>
+            </div>
+          ) : null}
           {entry.criteria ? (
             <div className="earnings-criteria-block">
               <div className="earnings-criteria-summary">
@@ -231,7 +244,7 @@ export function EarningsPage() {
         {onlyCriteria ? (
           <p className="panel-copy earnings-console-note">
             {payload?.criteria_filter.available
-              ? `Using latest persisted criteria run ${payload.criteria_filter.run_date || ""} with ${payload.criteria_filter.matched_count} matches.`
+              ? `Using latest persisted criteria run ${payload.criteria_filter.run_date || ""}, then adding live IV > 7% near-earnings check. ${payload.criteria_filter.matched_count} current matches.`
               : "Criteria filter is on, but no persisted criteria run is available yet."}
           </p>
         ) : null}
