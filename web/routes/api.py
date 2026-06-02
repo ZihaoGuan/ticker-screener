@@ -88,6 +88,7 @@ def earnings_calendar_data(
     reference_date: dt.date | None = Query(default=None, alias="referenceDate"),
     exclude_sectors: list[str] = Query(default=[], alias="excludeSector"),
     exclude_industries: list[str] = Query(default=[], alias="excludeIndustry"),
+    only_criteria: bool = Query(default=False, alias="onlyCriteria"),
     service: EarningsCalendarService = Depends(get_earnings_calendar_service),
 ) -> JSONResponse:
     return JSONResponse(
@@ -95,6 +96,7 @@ def earnings_calendar_data(
             reference_date=reference_date,
             exclude_sectors=exclude_sectors,
             exclude_industries=exclude_industries,
+            only_criteria=only_criteria,
         )
     )
 

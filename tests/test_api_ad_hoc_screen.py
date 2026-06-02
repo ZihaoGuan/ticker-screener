@@ -189,8 +189,9 @@ class _FakeEarningsCalendarService:
         reference_date: dt.date | None = None,
         exclude_sectors: list[str] | None = None,
         exclude_industries: list[str] | None = None,
+        only_criteria: bool = False,
     ):
-        _ = (reference_date, exclude_sectors, exclude_industries)
+        _ = (reference_date, exclude_sectors, exclude_industries, only_criteria)
         return {
             "week_start": "2026-06-07",
             "week_end": "2026-06-13",
@@ -211,9 +212,17 @@ class _FakeEarningsCalendarService:
                 {"date": "2026-06-12", "weekday": "Fri", "before_market": [], "after_market": [], "during_market": [], "unknown": []},
                 {"date": "2026-06-13", "weekday": "Sat", "before_market": [], "after_market": [], "during_market": [], "unknown": []},
             ],
-            "filters": {"exclude_sectors": [], "exclude_industries": []},
+            "filters": {"exclude_sectors": [], "exclude_industries": [], "only_criteria": only_criteria},
             "available_sectors": ["Health Care", "Tech"],
             "available_industries": ["Biotech", "Software"],
+            "criteria_filter": {
+                "enabled": only_criteria,
+                "available": True,
+                "strategy_id": "earnings_weekly_criteria",
+                "run_id": 11,
+                "run_date": "2026-06-01",
+                "matched_count": 2,
+            },
         }
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4):
@@ -301,13 +310,15 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["diagnostics"]["options"]["status"], "ok")
 
     def test_get_earnings_calendar(self) -> None:
-        response = self.client.get("/api/earnings-calendar?excludeSector=Energy")
+        response = self.client.get("/api/earnings-calendar?excludeSector=Energy&onlyCriteria=true")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["week_start"], "2026-06-07")
         self.assertEqual(len(payload["days"]), 7)
         self.assertEqual(payload["days"][1]["before_market"][0]["ticker"], "AAA")
         self.assertEqual(payload["days"][1]["after_market"][0]["ticker"], "BBB")
+        self.assertTrue(payload["filters"]["only_criteria"])
+        self.assertEqual(payload["criteria_filter"]["strategy_id"], "earnings_weekly_criteria")
 
     def test_post_screener_runs_batch_requires_strategy_ids(self) -> None:
         response = self.client.post("/api/screener-runs/batch", json={"start_date": "2026-01-01", "end_date": "2026-01-31"})

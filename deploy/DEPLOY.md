@@ -190,6 +190,7 @@ Example entries:
 10 6 * * 2-6 cd /opt/ticker-screener/app/deploy && docker-compose exec -T web python scripts/run_vcp_screen.py
 20 6 * * 2-6 cd /opt/ticker-screener/app/deploy && docker-compose exec -T web python scripts/run_cup_handle_screen.py
 35 6 * * 2-6 cd /opt/ticker-screener/app/deploy && docker-compose exec -T web python scripts/build_daily_overlap_summary.py --date-label $(date +\%F)
+15 8 * * 6 cd /opt/ticker-screener/app/deploy && docker-compose exec -T web python scripts/run_earnings_weekly_criteria_screen.py --reference-date $(date +\%F)
 ```
 
 ## Notes

@@ -655,7 +655,16 @@ export type EarningsCalendarResponse = {
   filters: {
     exclude_sectors: string[];
     exclude_industries: string[];
+    only_criteria: boolean;
   };
   available_sectors: string[];
   available_industries: string[];
+  criteria_filter: {
+    enabled: boolean;
+    available: boolean;
+    strategy_id: string;
+    run_id?: number | null;
+    run_date?: string | null;
+    matched_count: number;
+  };
 };

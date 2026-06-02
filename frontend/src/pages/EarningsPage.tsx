@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
@@ -32,7 +33,9 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
       {entries.map((entry) => (
         <article key={`${entry.date}-${entry.ticker}-${entry.session ?? "unknown"}`} className="earnings-entry-card">
           <div className="earnings-entry-head">
-            <strong>{entry.ticker}</strong>
+            <Link className="rrg-item-link" to={`/charts?ticker=${encodeURIComponent(entry.ticker)}`}>
+              {entry.ticker}
+            </Link>
             <span className="eyebrow">{entry.exchange ?? "-"}</span>
           </div>
           <p className="panel-copy">
@@ -51,13 +54,15 @@ export function EarningsPage() {
   const [notice, setNotice] = useState("");
   const [excludedSectors, setExcludedSectors] = useState<string[]>([]);
   const [excludedIndustries, setExcludedIndustries] = useState<string[]>([]);
+  const [onlyCriteria, setOnlyCriteria] = useState(false);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
     for (const sector of excludedSectors) params.append("excludeSector", sector);
     for (const industry of excludedIndustries) params.append("excludeIndustry", industry);
+    if (onlyCriteria) params.set("onlyCriteria", "true");
     return params.toString();
-  }, [excludedIndustries, excludedSectors]);
+  }, [excludedIndustries, excludedSectors, onlyCriteria]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -98,12 +103,20 @@ export function EarningsPage() {
             <span className="eyebrow">Industry Excludes</span>
             <strong>{excludedIndustries.length}</strong>
           </div>
+          <div>
+            <span className="eyebrow">Criteria Matches</span>
+            <strong>{payload?.criteria_filter.matched_count ?? "-"}</strong>
+          </div>
         </div>
       </section>
 
       <Panel title="Filters" aside={<span className="eyebrow">Exclude unwanted sectors or industries</span>}>
         {isLoading ? <LoadingBlock label="Loading earnings filters…" compact /> : null}
         <div className="earnings-filter-grid">
+          <label className="chart-toggle">
+            <input type="checkbox" checked={onlyCriteria} onChange={() => setOnlyCriteria((current) => !current)} />
+            <span>Only show persisted criteria matches</span>
+          </label>
           <div className="field">
             <span>Sectors</span>
             <div className="earnings-chip-grid">
@@ -135,6 +148,13 @@ export function EarningsPage() {
             </div>
           </div>
         </div>
+        {onlyCriteria ? (
+          <p className="panel-copy">
+            {payload?.criteria_filter.available
+              ? `Using latest persisted criteria run ${payload.criteria_filter.run_date || ""} with ${payload.criteria_filter.matched_count} matches.`
+              : "Criteria filter is on, but no persisted criteria run is available yet."}
+          </p>
+        ) : null}
         {notice ? <p className="panel-copy">{notice}</p> : null}
       </Panel>
 

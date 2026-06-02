@@ -43,7 +43,7 @@ def get_dashboard_service() -> DashboardService:
 
 
 def get_earnings_calendar_service() -> EarningsCalendarService:
-    return EarningsCalendarService(project_root=PROJECT_ROOT)
+    return EarningsCalendarService(project_root=PROJECT_ROOT, database_url=config.database_url, artifacts_dir=config.artifacts_dir)
 
 
 def get_admin_service() -> AdminService:
