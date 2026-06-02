@@ -156,7 +156,7 @@ class EarningsCalendarService:
         }
         if not self.history_service.is_configured():
             return payload
-        runs = self.history_service.list_runs(strategy_id=CRITERIA_STRATEGY_ID, has_hits=True, limit=1)
+        runs = self.history_service.list_runs(strategy_id=CRITERIA_STRATEGY_ID, limit=1)
         if not runs:
             return payload
         latest = runs[0]
