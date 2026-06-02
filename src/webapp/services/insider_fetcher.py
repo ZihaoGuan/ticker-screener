@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import html.parser
 import json
 from pathlib import Path
+import re
 from typing import Any
 import xml.etree.ElementTree as ET
 
@@ -126,13 +128,15 @@ def fetch_ticker_entries(
         primary_document = str(primary_documents[index]).strip()
         if not accession_number or not primary_document:
             continue
-        accession_path = accession_number.replace("-", "")
-        xml_url = f"{SEC_ARCHIVES_BASE}/{cik_numeric}/{accession_path}/{primary_document}"
-        xml_response = session.get(xml_url, timeout=REQUEST_TIMEOUT)
-        xml_response.raise_for_status()
+        xml_text, xml_url = fetch_form4_xml(
+            session=session,
+            cik_numeric=cik_numeric,
+            accession_number=accession_number,
+            primary_document=primary_document,
+        )
         raw_entries.extend(
             parse_form4(
-                xml_text=xml_response.text,
+                xml_text=xml_text,
                 ticker=ticker,
                 filing_date=filing_date_text,
                 source_url=xml_url,
@@ -201,6 +205,91 @@ def parse_form4(
                 }
             )
     return entries
+
+
+def fetch_form4_xml(
+    *,
+    session: requests.Session,
+    cik_numeric: str,
+    accession_number: str,
+    primary_document: str,
+) -> tuple[str, str]:
+    accession_path = accession_number.replace("-", "")
+    attempted: list[str] = []
+    for candidate_name in build_document_candidates(primary_document):
+        candidate_url = f"{SEC_ARCHIVES_BASE}/{cik_numeric}/{accession_path}/{candidate_name}"
+        attempted.append(candidate_url)
+        candidate_text = download_if_xmlish(session=session, url=candidate_url)
+        if candidate_text is not None:
+            return candidate_text, candidate_url
+
+    index_url = f"{SEC_ARCHIVES_BASE}/{cik_numeric}/{accession_path}/{accession_number}-index.htm"
+    attempted.append(index_url)
+    index_response = session.get(index_url, timeout=REQUEST_TIMEOUT)
+    index_response.raise_for_status()
+    for candidate_name in discover_xml_documents_from_index(index_response.text):
+        candidate_url = f"{SEC_ARCHIVES_BASE}/{cik_numeric}/{accession_path}/{candidate_name}"
+        if candidate_url in attempted:
+            continue
+        candidate_text = download_if_xmlish(session=session, url=candidate_url)
+        if candidate_text is not None:
+            return candidate_text, candidate_url
+
+    raise ET.ParseError(f"No parseable XML filing document found. Tried {len(attempted)} SEC document path(s).")
+
+
+def build_document_candidates(primary_document: str) -> list[str]:
+    primary = primary_document.strip()
+    if not primary:
+        return []
+    candidates = [primary]
+    lower = primary.lower()
+    if lower.endswith(".html"):
+        candidates.append(primary[:-5] + ".xml")
+    elif lower.endswith(".htm"):
+        candidates.append(primary[:-4] + ".xml")
+    elif "." in primary:
+        stem = primary.rsplit(".", 1)[0]
+        candidates.append(stem + ".xml")
+    deduped: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
+
+
+def download_if_xmlish(*, session: requests.Session, url: str) -> str | None:
+    response = session.get(url, timeout=REQUEST_TIMEOUT)
+    response.raise_for_status()
+    text = response.text
+    if not looks_like_xml(text):
+        return None
+    try:
+        ET.fromstring(text)
+    except ET.ParseError:
+        return None
+    return text
+
+
+def looks_like_xml(text: str) -> bool:
+    prefix = text.lstrip()[:128].lower()
+    if not prefix:
+        return False
+    return prefix.startswith("<?xml") or prefix.startswith("<ownershipdocument") or prefix.startswith("<edgarsubmission")
+
+
+def discover_xml_documents_from_index(index_html: str) -> list[str]:
+    parser = _IndexLinkParser()
+    parser.feed(index_html)
+    xml_links: list[str] = []
+    for href in parser.hrefs:
+        candidate = href.strip()
+        if candidate.lower().endswith(".xml") and "/" not in candidate and candidate not in xml_links:
+            xml_links.append(candidate)
+    if xml_links:
+        return xml_links
+    # Last fallback if SEC serves simple table markup in raw text.
+    return list(dict.fromkeys(re.findall(r'([A-Za-z0-9._-]+\.xml)\b', index_html, flags=re.IGNORECASE)))
 
 
 def iter_non_derivative_transactions(root: ET.Element) -> list[dict[str, ET.Element]]:
@@ -366,3 +455,16 @@ def parse_float(value: str) -> float:
         return float(value.replace(",", "").strip())
     except ValueError:
         return 0.0
+
+
+class _IndexLinkParser(html.parser.HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.hrefs: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "a":
+            return
+        for key, value in attrs:
+            if key.lower() == "href" and value:
+                self.hrefs.append(value)
