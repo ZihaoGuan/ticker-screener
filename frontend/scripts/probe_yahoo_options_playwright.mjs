@@ -98,15 +98,27 @@ result.tables = await page.evaluate(() => {
   });
 });
 
+function optionValue(row) {
+  if (row.bid != null && row.ask != null && (row.bid > 0 || row.ask > 0)) {
+    return (row.bid + row.ask) / 2;
+  }
+  if (row.lastPrice != null && row.lastPrice > 0) {
+    return row.lastPrice;
+  }
+  return null;
+}
+
 const firstTable = result.tables.find((table) => table.headers.includes("Strike"));
 if (firstTable) {
   const strikeIndex = firstTable.headers.indexOf("Strike");
+  const lastPriceIndex = firstTable.headers.indexOf("Last price");
   const bidIndex = firstTable.headers.indexOf("Bid");
   const askIndex = firstTable.headers.indexOf("Ask");
   const ivIndex = firstTable.headers.findIndex((header) => /Implied Volatility/i.test(header));
   const calls = firstTable.rows
     .map((row) => ({
       strike: toNumber(row[strikeIndex]),
+      lastPrice: toNumber(row[lastPriceIndex]),
       bid: toNumber(row[bidIndex]),
       ask: toNumber(row[askIndex]),
       iv: row[ivIndex] ?? null,
@@ -117,7 +129,7 @@ if (firstTable) {
   if (result.price != null) {
     let closest = null;
     for (const row of calls) {
-      const mid = row.bid != null && row.ask != null ? (row.bid + row.ask) / 2 : null;
+      const mid = optionValue(row);
       const distance = row.strike != null ? Math.abs(row.strike - result.price) : Infinity;
       if (!closest || distance < closest.distance) {
         closest = { ...row, mid, distance };
@@ -130,12 +142,14 @@ if (firstTable) {
 const secondTable = result.tables.filter((table) => table.headers.includes("Strike"))[1];
 if (secondTable) {
   const strikeIndex = secondTable.headers.indexOf("Strike");
+  const lastPriceIndex = secondTable.headers.indexOf("Last price");
   const bidIndex = secondTable.headers.indexOf("Bid");
   const askIndex = secondTable.headers.indexOf("Ask");
   const ivIndex = secondTable.headers.findIndex((header) => /Implied Volatility/i.test(header));
   const puts = secondTable.rows
     .map((row) => ({
       strike: toNumber(row[strikeIndex]),
+      lastPrice: toNumber(row[lastPriceIndex]),
       bid: toNumber(row[bidIndex]),
       ask: toNumber(row[askIndex]),
       iv: row[ivIndex] ?? null,
@@ -146,7 +160,7 @@ if (secondTable) {
   if (result.price != null) {
     let closest = null;
     for (const row of puts) {
-      const mid = row.bid != null && row.ask != null ? (row.bid + row.ask) / 2 : null;
+      const mid = optionValue(row);
       const distance = row.strike != null ? Math.abs(row.strike - result.price) : Infinity;
       if (!closest || distance < closest.distance) {
         closest = { ...row, mid, distance };

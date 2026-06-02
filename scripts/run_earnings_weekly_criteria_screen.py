@@ -50,6 +50,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reference-date", help="Reference date for next-week earnings watchlist (YYYY-MM-DD). Defaults to today.")
     parser.add_argument("--skip-persist", action="store_true", help="Skip persisting the screen run into the webapp DB.")
     parser.add_argument(
+        "--ignore-exclusions",
+        action="store_true",
+        help="Do not filter out tickers from the configured exclusion lists.",
+    )
+    parser.add_argument(
         "--pass-mode",
         choices=("strict", "loose"),
         default="loose",
@@ -63,7 +68,13 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _next_week_events(config_path: str, reference_date: dt.date | None, limit: int | None) -> list[PreEarningsEvent]:
+def _next_week_events(
+    config_path: str,
+    reference_date: dt.date | None,
+    limit: int | None,
+    *,
+    ignore_exclusions: bool = False,
+) -> list[PreEarningsEvent]:
     config = load_app_config(config_path)
     excluded = load_excluded_tickers(config)
     universe = load_universe(config)
@@ -88,7 +99,8 @@ def _next_week_events(config_path: str, reference_date: dt.date | None, limit: i
                 exchange=exchange,
             )
         )
-    events = filter_pre_earnings_events(events, excluded)
+    if not ignore_exclusions:
+        events = filter_pre_earnings_events(events, excluded)
     if limit is not None:
         return events[:limit]
     return events
@@ -176,7 +188,12 @@ def main() -> int:
     except Exception:
         akshare_client = None
 
-    events = _next_week_events(args.config, reference_date, args.limit)
+    events = _next_week_events(
+        args.config,
+        reference_date,
+        args.limit,
+        ignore_exclusions=args.ignore_exclusions,
+    )
     cookstock = load_configured_cookstock(config)
     hits: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -307,6 +324,7 @@ def main() -> int:
         "as_of_date": run_date.isoformat(),
         "source": "next-week-earnings",
         "reference_date": str(reference_date) if reference_date else None,
+        "ignore_exclusions": bool(args.ignore_exclusions),
         "earnings_provider": result.earnings_provider,
         "financials_provider": result.financials_provider,
         "total_tickers": result.total_tickers,
@@ -337,6 +355,7 @@ def main() -> int:
                     "source": "next-week-earnings",
                     "market_data_source": "internet",
                     "pass_mode": args.pass_mode,
+                    "ignore_exclusions": bool(args.ignore_exclusions),
                 },
                 summary_payload=summary_payload,
                 raw_payload=raw_payload,
