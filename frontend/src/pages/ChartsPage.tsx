@@ -92,7 +92,7 @@ export function ChartsPage() {
     }
     setIsFundamentalsLoading(true);
     setFundamentalsNotice("");
-    void fetchJson<ChartFundamentalsResponse>(`/api/chart-fundamentals/${requestedTicker}?earningsLimit=12`)
+    void fetchJson<ChartFundamentalsResponse>(`/api/chart-fundamentals/${requestedTicker}?earningsLimit=4`)
       .then((response) => {
         setFundamentalsPayload(response);
         const earningsStatus = response.diagnostics.earnings.status;

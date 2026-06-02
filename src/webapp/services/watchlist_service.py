@@ -229,7 +229,7 @@ class WatchlistService:
             "fearzone_panel": fearzone_panel,
         }
 
-    def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 12) -> dict[str, Any]:
+    def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
         earnings_rows, holders_pct, browser_diagnostics = _load_yahoo_earnings_and_holders_playwright(
             normalized_ticker,
@@ -401,7 +401,7 @@ def _download_history_frame(*, ticker: str, start_date: dt.date, end_date: dt.da
 def _load_yahoo_earnings_and_holders_playwright(
     ticker: str,
     *,
-    earnings_limit: int = 12,
+    earnings_limit: int = 4,
 ) -> tuple[list[dict[str, Any]], float | None, dict[str, dict[str, Any]]]:
     normalized_ticker = str(ticker or "").strip().upper()
     empty_result = (

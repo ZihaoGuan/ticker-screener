@@ -180,7 +180,7 @@ class _FakeWatchlistService:
             "fearzone_panel": {"rows": [], "signals": []},
         }
 
-    def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 12):
+    def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4):
         return {
             "ticker": ticker.upper(),
             "earnings_eps_history": [
