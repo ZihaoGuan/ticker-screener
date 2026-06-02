@@ -130,6 +130,7 @@ export function ChartsPage() {
       ? ((lastCandle.close - previousCandle.close) / previousCandle.close) * 100
       : null;
   const latestRsMarker = payload?.rs_markers?.[payload.rs_markers.length - 1] ?? null;
+  const earningsRows = payload?.earnings_eps_history ?? [];
   const setupAnnotations = useMemo<ChartAnnotations[]>(() => {
     return (setupPayload?.screeners ?? [])
       .filter((item) => item.passed && item.hit)
@@ -221,6 +222,10 @@ export function ChartsPage() {
             <strong>{chartData.length || "-"}</strong>
           </div>
           <div>
+            <span className="eyebrow">Inst Float</span>
+            <strong>{formatPercent(payload?.holders_float_held_by_institutions_pct)}</strong>
+          </div>
+          <div>
             <span className="eyebrow">Source</span>
             <strong>{payload?.data_source ?? "-"}</strong>
           </div>
@@ -275,6 +280,42 @@ export function ChartsPage() {
         </div>
         {isSetupLoading ? <LoadingBlock label="Loading setup overlays…" compact /> : null}
         {setupNotice ? <p className="panel-copy">{setupNotice}</p> : null}
+      </Panel>
+
+      <Panel title="EPS History" aside={<span className="eyebrow">Yahoo scrape experiment for estimate, reported, surprise</span>}>
+        {!requestedTicker ? <p className="panel-copy">Load ticker to inspect recent earnings EPS rows.</p> : null}
+        {requestedTicker ? (
+          <p className="panel-copy">
+            Float held by institutions: {formatPercent(payload?.holders_float_held_by_institutions_pct)}
+          </p>
+        ) : null}
+        {requestedTicker && !isLoading && earningsRows.length === 0 ? (
+          <p className="panel-copy">No EPS rows returned from Yahoo scrape for this ticker.</p>
+        ) : null}
+        {earningsRows.length > 0 ? (
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>EPS Estimate</th>
+                  <th>Reported EPS</th>
+                  <th>Surprise (%)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {earningsRows.map((row) => (
+                  <tr key={row.date}>
+                    <td>{row.date}</td>
+                    <td>{formatMetric(row.eps_estimate)}</td>
+                    <td>{formatMetric(row.reported_eps)}</td>
+                    <td>{formatPercent(row.surprise_pct)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </Panel>
 
       <Panel
@@ -353,6 +394,14 @@ export function ChartsPage() {
 
 function formatPrice(value: number | null) {
   return value == null ? "--" : `$${value.toFixed(2)}`;
+}
+
+function formatMetric(value: number | null | undefined) {
+  return value == null ? "--" : value.toFixed(2);
+}
+
+function formatPercent(value: number | null | undefined) {
+  return value == null ? "--" : `${value.toFixed(2)}%`;
 }
 
 function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAnnotations | null {

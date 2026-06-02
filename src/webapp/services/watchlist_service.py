@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import datetime as dt
+import html
+from io import StringIO
 from pathlib import Path
+import re
 from typing import Any
 import logging
 
 import numpy as np
 import pandas as pd
+import requests
 import yfinance as yf
 
 from ...config import AppConfig
@@ -20,6 +24,13 @@ from ..repositories.watchlist_repository import WatchlistRepository
 
 
 logger = logging.getLogger(__name__)
+_YAHOO_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 class WatchlistService:
@@ -99,6 +110,8 @@ class WatchlistService:
         weekly_ema8 = weekly_close.ewm(span=8, adjust=False).mean()
         frame["weekly_ema8"] = weekly_ema8.reindex(frame.index, method="ffill")
         frame["ipo_vwap"] = _compute_ipo_vwap(frame)
+        earnings_eps_history = _scrape_yahoo_earnings_eps_history(normalized_ticker, limit=12)
+        holders_float_held_by_institutions_pct = _scrape_yahoo_float_held_by_institutions_pct(normalized_ticker)
 
         rs_line: pd.Series | None = None
         rs_new_high: pd.Series | None = None
@@ -200,6 +213,8 @@ class WatchlistService:
             "ema21": ema21,
             "weekly_ema8": weekly_ema8_points,
             "ipo_vwap": ipo_vwap,
+            "earnings_eps_history": earnings_eps_history,
+            "holders_float_held_by_institutions_pct": holders_float_held_by_institutions_pct,
             "rs_line": rs_points,
             "rs_markers": rs_markers,
             "setup_markers": setup_markers,
@@ -322,6 +337,8 @@ def _empty_chart_payload(
         "ema21": [],
         "weekly_ema8": [],
         "ipo_vwap": [],
+        "earnings_eps_history": [],
+        "holders_float_held_by_institutions_pct": None,
         "rs_line": [],
         "rs_markers": [],
         "setup_markers": [],
@@ -354,6 +371,142 @@ def _download_history_frame(*, ticker: str, start_date: dt.date, end_date: dt.da
         threads=False,
     )
     return _normalize_download_frame(history)
+
+
+def _scrape_yahoo_earnings_eps_history(ticker: str, *, limit: int = 12) -> list[dict[str, Any]]:
+    normalized_ticker = str(ticker or "").strip().upper()
+    if not normalized_ticker or limit <= 0:
+        return []
+
+    session = requests.Session()
+    rows: list[dict[str, Any]] = []
+    page_size = min(limit, 100)
+    page_offset = 0
+
+    while len(rows) < limit:
+        url = (
+            "https://finance.yahoo.com/calendar/earnings"
+            f"?symbol={normalized_ticker}&offset={page_offset}&size={page_size}"
+        )
+        try:
+            response = session.get(url, headers=_YAHOO_BROWSER_HEADERS, timeout=10)
+            response.raise_for_status()
+            tables = pd.read_html(StringIO(response.text))
+        except Exception as exc:
+            logger.warning("Unable to scrape Yahoo earnings EPS history for %s: %s", normalized_ticker, exc)
+            break
+
+        if not tables:
+            break
+        table = tables[0]
+        if table.empty:
+            break
+
+        for _, raw_row in table.iterrows():
+            earnings_date = _parse_yahoo_earnings_date(raw_row.get("Earnings Date"))
+            if earnings_date is None:
+                continue
+            rows.append(
+                {
+                    "date": earnings_date.isoformat(),
+                    "eps_estimate": _coerce_optional_float(raw_row.get("EPS Estimate")),
+                    "reported_eps": _coerce_optional_float(raw_row.get("Reported EPS")),
+                    "surprise_pct": _coerce_optional_float(raw_row.get("Surprise(%)")),
+                }
+            )
+            if len(rows) >= limit:
+                break
+
+        if len(table) < page_size:
+            break
+        page_offset += page_size
+        page_size = min(limit - len(rows), 100)
+        if page_size <= 0:
+            break
+
+    deduped_rows: list[dict[str, Any]] = []
+    seen_dates: set[str] = set()
+    for row in rows:
+        date_value = row["date"]
+        if date_value in seen_dates:
+            continue
+        seen_dates.add(date_value)
+        deduped_rows.append(row)
+    return deduped_rows
+
+
+def _scrape_yahoo_float_held_by_institutions_pct(ticker: str) -> float | None:
+    normalized_ticker = str(ticker or "").strip().upper()
+    if not normalized_ticker:
+        return None
+
+    urls = [
+        f"https://finance.yahoo.com/quote/{normalized_ticker}/holders",
+        f"https://uk.finance.yahoo.com/quote/{normalized_ticker}/holders",
+        f"https://au.finance.yahoo.com/quote/{normalized_ticker}/holders",
+    ]
+    patterns = [
+        r"([0-9][0-9,]*\.?[0-9]*)%\s*\|\s*%\s+of\s+float\s+held\s+by\s+institutions",
+        r"%\s+of\s+float\s+held\s+by\s+institutions[^0-9]{0,40}([0-9][0-9,]*\.?[0-9]*)%",
+    ]
+
+    session = requests.Session()
+    for url in urls:
+        try:
+            response = session.get(url, headers=_YAHOO_BROWSER_HEADERS, timeout=10)
+            response.raise_for_status()
+        except Exception as exc:
+            logger.warning("Unable to scrape Yahoo holders page for %s at %s: %s", normalized_ticker, url, exc)
+            continue
+
+        normalized_text = _normalize_html_text(response.text)
+        for pattern in patterns:
+            match = re.search(pattern, normalized_text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            return _coerce_optional_float(match.group(1))
+    return None
+
+
+def _parse_yahoo_earnings_date(value: object) -> dt.date | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text == "-":
+        return None
+    cleaned = text.replace("AM", "").replace("PM", "")
+    for separator in (" EDT", " EST", " UTC", " GMT", " NZDT", " NZST"):
+        if separator in cleaned:
+            cleaned = cleaned.split(separator, 1)[0]
+    primary = cleaned.split(",", 2)
+    if len(primary) >= 2:
+        candidate = ",".join(primary[:2]).strip()
+    else:
+        candidate = cleaned
+    try:
+        return dt.datetime.strptime(candidate, "%b %d, %Y").date()
+    except ValueError:
+        return None
+
+
+def _normalize_html_text(value: str) -> str:
+    stripped = re.sub(r"<[^>]+>", " ", value or "")
+    stripped = html.unescape(stripped)
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def _coerce_optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text == "-" or text.lower() == "nan":
+        return None
+    if text.endswith("%"):
+        text = text[:-1].strip()
+    try:
+        return float(text.replace(",", ""))
+    except ValueError:
+        return None
 
 
 class _ChartRequest:
