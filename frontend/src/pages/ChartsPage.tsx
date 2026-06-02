@@ -17,6 +17,8 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   rsLine: true,
   rsSignals: true,
 };
+const CHART_CACHE_PREFIX = "chart-screen-cache-v1";
+const CHART_CACHE_TTL_MS = 60 * 60 * 1000;
 
 export function ChartsPage() {
   const setupOptions = [
@@ -43,6 +45,7 @@ export function ChartsPage() {
   const [insiderNotice, setInsiderNotice] = useState("");
   const [setupNotice, setSetupNotice] = useState("");
   const [chartVisibility, setChartVisibility] = useState<ChartVisibility>(DEFAULT_CHART_VISIBILITY);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const [selectedSetups, setSelectedSetups] = useState<Record<string, boolean>>({
     ftd_sweep: false,
     weekly_htf_pullback: false,
@@ -72,8 +75,22 @@ export function ChartsPage() {
     if (requestedDate) {
       query.set("asOfDate", requestedDate);
     }
+    const cacheKey = buildChartCacheKey("payload", requestedTicker, requestedDate || "latest");
+    const cached = refreshNonce === 0 ? readChartCache<WatchlistChartResponse>(cacheKey) : null;
+    if (cached) {
+      setPayload(cached);
+      if (!requestedDate && cached.resolved_as_of_date) {
+        setDateInput(cached.resolved_as_of_date);
+      }
+      if (requestedDate && cached.resolved_as_of_date && cached.resolved_as_of_date !== requestedDate) {
+        setNotice(`Requested ${requestedDate}. Used last trading day ${cached.resolved_as_of_date}.`);
+      }
+      setIsLoading(false);
+      return;
+    }
     void fetchJson<WatchlistChartResponse>(`/api/charts/${requestedTicker}?${query.toString()}`)
       .then((response) => {
+        writeChartCache(cacheKey, response);
         setPayload(response);
         if (!requestedDate && response.resolved_as_of_date) {
           setDateInput(response.resolved_as_of_date);
@@ -87,7 +104,7 @@ export function ChartsPage() {
         setNotice(error instanceof Error ? error.message : "Failed to load chart.");
       })
       .finally(() => setIsLoading(false));
-  }, [requestedDate, requestedTicker]);
+  }, [refreshNonce, requestedDate, requestedTicker]);
 
   useEffect(() => {
     if (!requestedTicker) {
@@ -103,8 +120,17 @@ export function ChartsPage() {
     } else if (requestedDate) {
       query.set("asOfDate", requestedDate);
     }
+    const insiderAsOfDate = payload?.resolved_as_of_date || requestedDate || "latest";
+    const cacheKey = buildChartCacheKey("insider", requestedTicker, insiderAsOfDate);
+    const cached = refreshNonce === 0 ? readChartCache<ChartInsiderResponse>(cacheKey) : null;
+    if (cached) {
+      setInsiderPayload(cached);
+      setIsInsiderLoading(false);
+      return;
+    }
     void fetchJson<ChartInsiderResponse>(`/api/chart-insider/${requestedTicker}?${query.toString()}`)
       .then((response) => {
+        writeChartCache(cacheKey, response);
         setInsiderPayload(response);
       })
       .catch((error) => {
@@ -112,7 +138,7 @@ export function ChartsPage() {
         setInsiderNotice(error instanceof Error ? error.message : "Failed to load insider trades.");
       })
       .finally(() => setIsInsiderLoading(false));
-  }, [payload?.resolved_as_of_date, requestedDate, requestedTicker]);
+  }, [payload?.resolved_as_of_date, refreshNonce, requestedDate, requestedTicker]);
 
   useEffect(() => {
     if (!requestedTicker) {
@@ -122,8 +148,23 @@ export function ChartsPage() {
     }
     setIsFundamentalsLoading(true);
     setFundamentalsNotice("");
+    const cacheKey = buildChartCacheKey("fundamentals", requestedTicker, "latest");
+    const cached = refreshNonce === 0 ? readChartCache<ChartFundamentalsResponse>(cacheKey) : null;
+    if (cached) {
+      setFundamentalsPayload(cached);
+      const earningsStatus = cached.diagnostics.earnings.status;
+      const holdersStatus = cached.diagnostics.holders.status;
+      const statisticsStatus = cached.diagnostics.statistics.status;
+      const optionsStatus = cached.diagnostics.options.status;
+      if (earningsStatus !== "ok" || holdersStatus !== "ok" || statisticsStatus !== "ok" || optionsStatus !== "ok") {
+        setFundamentalsNotice(`Diagnostics: earnings=${earningsStatus}, holders=${holdersStatus}, statistics=${statisticsStatus}, options=${optionsStatus}`);
+      }
+      setIsFundamentalsLoading(false);
+      return;
+    }
     void fetchJson<ChartFundamentalsResponse>(`/api/chart-fundamentals/${requestedTicker}?earningsLimit=4`)
       .then((response) => {
+        writeChartCache(cacheKey, response);
         setFundamentalsPayload(response);
         const earningsStatus = response.diagnostics.earnings.status;
         const holdersStatus = response.diagnostics.holders.status;
@@ -138,7 +179,7 @@ export function ChartsPage() {
         setFundamentalsNotice(error instanceof Error ? error.message : "Failed to load chart fundamentals.");
       })
       .finally(() => setIsFundamentalsLoading(false));
-  }, [requestedTicker]);
+  }, [refreshNonce, requestedTicker]);
 
   const selectedSetupIds = useMemo(
     () => setupOptions.filter((option) => selectedSetups[option.id]).map((option) => option.id),
@@ -248,6 +289,11 @@ export function ChartsPage() {
     setSearchParams(new URLSearchParams({ ticker: nextTicker }), { replace: true });
   };
 
+  const handleRefresh = () => {
+    clearChartCacheForTicker(requestedTicker);
+    setRefreshNonce((current) => current + 1);
+  };
+
   return (
     <div className="page-grid charts-page">
       <section className="hero-strip">
@@ -325,8 +371,12 @@ export function ChartsPage() {
             <button className="ghost-button" type="button" onClick={handleUseLatestTradingDay}>
               Use Latest Trading Day
             </button>
+            <button className="ghost-button" type="button" onClick={handleRefresh} disabled={!requestedTicker}>
+              Refresh
+            </button>
           </div>
         </form>
+        {requestedTicker ? <p className="panel-copy">Browser cache lasts 1 hour for chart, fundamentals, and insider data. Refresh to bypass cache.</p> : null}
       </Panel>
 
       <Panel title="Setup Overlays" aside={<span className="eyebrow">Optional screener overlays for this ticker/date</span>}>
@@ -553,6 +603,53 @@ export function ChartsPage() {
 
 function formatPrice(value: number | null) {
   return value == null ? "--" : `$${value.toFixed(2)}`;
+}
+
+function buildChartCacheKey(kind: "payload" | "fundamentals" | "insider", ticker: string, scope: string) {
+  return `${CHART_CACHE_PREFIX}:${kind}:${ticker}:${scope}`;
+}
+
+function readChartCache<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as { value?: T; expiresAt?: number };
+    if (!parsed || typeof parsed !== "object" || typeof parsed.expiresAt !== "number" || parsed.expiresAt <= Date.now()) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return (parsed.value ?? null) as T | null;
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
+}
+
+function writeChartCache<T>(key: string, value: T) {
+  localStorage.setItem(
+    key,
+    JSON.stringify({
+      value,
+      expiresAt: Date.now() + CHART_CACHE_TTL_MS,
+    }),
+  );
+}
+
+function clearChartCacheForTicker(ticker: string) {
+  if (!ticker) {
+    return;
+  }
+  const prefix = `${CHART_CACHE_PREFIX}:`;
+  const tickerFragment = `:${ticker}:`;
+  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+    const key = localStorage.key(index);
+    if (!key || !key.startsWith(prefix) || !key.includes(tickerFragment)) {
+      continue;
+    }
+    localStorage.removeItem(key);
+  }
 }
 
 function formatCurrency(value: number | null | undefined) {
