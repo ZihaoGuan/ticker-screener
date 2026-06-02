@@ -97,8 +97,9 @@ export function ChartsPage() {
         setFundamentalsPayload(response);
         const earningsStatus = response.diagnostics.earnings.status;
         const holdersStatus = response.diagnostics.holders.status;
-        if (earningsStatus !== "ok" || holdersStatus !== "ok") {
-          setFundamentalsNotice(`Diagnostics: earnings=${earningsStatus}, holders=${holdersStatus}`);
+        const optionsStatus = response.diagnostics.options.status;
+        if (earningsStatus !== "ok" || holdersStatus !== "ok" || optionsStatus !== "ok") {
+          setFundamentalsNotice(`Diagnostics: earnings=${earningsStatus}, holders=${holdersStatus}, options=${optionsStatus}`);
         }
       })
       .catch((error) => {
@@ -255,6 +256,10 @@ export function ChartsPage() {
             <strong>{formatPercent(fundamentalsPayload?.holders_float_held_by_institutions_pct)}</strong>
           </div>
           <div>
+            <span className="eyebrow">Imp Move</span>
+            <strong>{formatPercent(fundamentalsPayload?.implied_move?.percent_move)}</strong>
+          </div>
+          <div>
             <span className="eyebrow">Source</span>
             <strong>{payload?.data_source ?? "-"}</strong>
           </div>
@@ -317,6 +322,13 @@ export function ChartsPage() {
         {requestedTicker ? (
           <p className="panel-copy">
             Float held by institutions: {formatPercent(fundamentalsPayload?.holders_float_held_by_institutions_pct)}
+          </p>
+        ) : null}
+        {requestedTicker ? (
+          <p className="panel-copy">
+            ATM-ish implied move: {formatPercent(fundamentalsPayload?.implied_move?.percent_move)}
+            {fundamentalsPayload?.implied_move?.dollar_move != null ? ` (${formatPrice(fundamentalsPayload.implied_move.dollar_move)})` : ""}
+            {fundamentalsPayload?.implied_move?.strike != null ? ` at strike ${fundamentalsPayload.implied_move.strike.toFixed(2)}` : ""}
           </p>
         ) : null}
         {fundamentalsNotice ? <p className="panel-copy">{fundamentalsNotice}</p> : null}

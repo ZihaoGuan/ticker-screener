@@ -3,8 +3,10 @@ from __future__ import annotations
 import datetime as dt
 import html
 from io import StringIO
+import json
 from pathlib import Path
 import re
+import subprocess
 from typing import Any
 import logging
 
@@ -31,6 +33,16 @@ _YAHOO_BROWSER_HEADERS = {
     ),
     "Accept-Language": "en-US,en;q=0.9",
 }
+_YAHOO_SCRAPE_TIMEOUT = (3.05, 4.0)
+_YAHOO_PLAYWRIGHT_TIMEOUT_SECONDS = 40
+_YAHOO_BLOCK_MARKERS = (
+    "Too Many Requests",
+    "Edge: Too Many Requests",
+    "Will be right back",
+)
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_playwright.mjs"
+_YAHOO_OPTIONS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_options_playwright.mjs"
 
 
 class WatchlistService:
@@ -219,15 +231,20 @@ class WatchlistService:
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 12) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
-        earnings_rows, earnings_diagnostics = _scrape_yahoo_earnings_eps_history(normalized_ticker, limit=earnings_limit)
-        holders_pct, holders_diagnostics = _scrape_yahoo_float_held_by_institutions_pct(normalized_ticker)
+        earnings_rows, holders_pct, browser_diagnostics = _load_yahoo_earnings_and_holders_playwright(
+            normalized_ticker,
+            earnings_limit=earnings_limit,
+        )
+        implied_move, options_diagnostics = _load_yahoo_implied_move_playwright(normalized_ticker)
         return {
             "ticker": normalized_ticker,
             "earnings_eps_history": earnings_rows,
             "holders_float_held_by_institutions_pct": holders_pct,
+            "implied_move": implied_move,
             "diagnostics": {
-                "earnings": earnings_diagnostics,
-                "holders": holders_diagnostics,
+                "earnings": browser_diagnostics["earnings"],
+                "holders": browser_diagnostics["holders"],
+                "options": options_diagnostics,
             },
         }
 
@@ -381,6 +398,149 @@ def _download_history_frame(*, ticker: str, start_date: dt.date, end_date: dt.da
     return _normalize_download_frame(history)
 
 
+def _load_yahoo_earnings_and_holders_playwright(
+    ticker: str,
+    *,
+    earnings_limit: int = 12,
+) -> tuple[list[dict[str, Any]], float | None, dict[str, dict[str, Any]]]:
+    normalized_ticker = str(ticker or "").strip().upper()
+    empty_result = (
+        [],
+        None,
+        {
+            "earnings": {"status": "skipped", "reason": "missing_ticker", "attempts": []},
+            "holders": {"status": "skipped", "reason": "missing_ticker", "attempts": []},
+        },
+    )
+    if not normalized_ticker:
+        return empty_result
+    if not _YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT.exists():
+        diagnostics = {
+            "earnings": {
+                "status": "error",
+                "reason": "missing_probe_script",
+                "attempts": [{"script": str(_YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT)}],
+            },
+            "holders": {
+                "status": "error",
+                "reason": "missing_probe_script",
+                "attempts": [{"script": str(_YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT)}],
+            },
+        }
+        return [], None, diagnostics
+
+    command = ["node", str(_YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT), normalized_ticker]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=_YAHOO_PLAYWRIGHT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        diagnostics = {
+            "earnings": {"status": "error", "reason": "timeout", "attempts": [{"command": command, "error": str(exc)}]},
+            "holders": {"status": "error", "reason": "timeout", "attempts": [{"command": command, "error": str(exc)}]},
+        }
+        return [], None, diagnostics
+    except Exception as exc:
+        diagnostics = {
+            "earnings": {"status": "error", "reason": "launch_failed", "attempts": [{"command": command, "error": str(exc)}]},
+            "holders": {"status": "error", "reason": "launch_failed", "attempts": [{"command": command, "error": str(exc)}]},
+        }
+        return [], None, diagnostics
+
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+    if result.returncode != 0:
+        diagnostics = {
+            "earnings": {
+                "status": "error",
+                "reason": "nonzero_exit",
+                "attempts": [{"command": command, "returncode": result.returncode, "stderr": stderr[-1000:], "stdout": stdout[-1000:]}],
+            },
+            "holders": {
+                "status": "error",
+                "reason": "nonzero_exit",
+                "attempts": [{"command": command, "returncode": result.returncode, "stderr": stderr[-1000:], "stdout": stdout[-1000:]}],
+            },
+        }
+        return [], None, diagnostics
+
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        diagnostics = {
+            "earnings": {
+                "status": "error",
+                "reason": "invalid_json",
+                "attempts": [{"command": command, "error": str(exc), "stdout": stdout[-1000:], "stderr": stderr[-1000:]}],
+            },
+            "holders": {
+                "status": "error",
+                "reason": "invalid_json",
+                "attempts": [{"command": command, "error": str(exc), "stdout": stdout[-1000:], "stderr": stderr[-1000:]}],
+            },
+        }
+        return [], None, diagnostics
+
+    earnings_rows_raw = payload.get("earnings_eps_history")
+    earnings_rows: list[dict[str, Any]] = []
+    if isinstance(earnings_rows_raw, list):
+        for row in earnings_rows_raw[: max(1, earnings_limit)]:
+            if not isinstance(row, dict):
+                continue
+            date_value = str(row.get("date") or "").strip()
+            if not date_value:
+                continue
+            earnings_rows.append(
+                {
+                    "date": date_value,
+                    "eps_estimate": _coerce_optional_float(row.get("eps_estimate")),
+                    "reported_eps": _coerce_optional_float(row.get("reported_eps")),
+                    "surprise_pct": _coerce_optional_float(row.get("surprise_pct")),
+                }
+            )
+
+    holders_pct = _coerce_optional_float(payload.get("holders_float_held_by_institutions_pct"))
+    analysis_payload = payload.get("analysis_nz") if isinstance(payload.get("analysis_nz"), dict) else payload.get("analysis")
+    holders_payload = payload.get("holders") if isinstance(payload.get("holders"), dict) else {}
+
+    earnings_status = "ok" if earnings_rows else "empty"
+    holders_status = "ok" if holders_pct is not None else "empty"
+    diagnostics = {
+        "earnings": {
+            "status": earnings_status,
+            "attempts": [
+                {
+                    "command": command,
+                    "final_url": analysis_payload.get("final_url") if isinstance(analysis_payload, dict) else "",
+                    "status_code": analysis_payload.get("status") if isinstance(analysis_payload, dict) else None,
+                    "title": analysis_payload.get("title") if isinstance(analysis_payload, dict) else "",
+                    "row_count": len(earnings_rows),
+                    "stderr": stderr[-400:] if stderr else "",
+                }
+            ],
+        },
+        "holders": {
+            "status": holders_status,
+            "attempts": [
+                {
+                    "command": command,
+                    "final_url": holders_payload.get("final_url") if isinstance(holders_payload, dict) else "",
+                    "status_code": holders_payload.get("status") if isinstance(holders_payload, dict) else None,
+                    "title": holders_payload.get("title") if isinstance(holders_payload, dict) else "",
+                    "value": holders_pct,
+                    "stderr": stderr[-400:] if stderr else "",
+                }
+            ],
+        },
+    }
+    return earnings_rows, holders_pct, diagnostics
+
+
 def _scrape_yahoo_earnings_eps_history(ticker: str, *, limit: int = 12) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     normalized_ticker = str(ticker or "").strip().upper()
     if not normalized_ticker or limit <= 0:
@@ -389,52 +549,65 @@ def _scrape_yahoo_earnings_eps_history(ticker: str, *, limit: int = 12) -> tuple
     session = requests.Session()
     rows: list[dict[str, Any]] = []
     attempts: list[dict[str, Any]] = []
-    page_size = min(limit, 100)
+    page_size = min(limit, 12)
     page_offset = 0
-
-    while len(rows) < limit:
-        url = (
-            "https://finance.yahoo.com/calendar/earnings"
-            f"?symbol={normalized_ticker}&offset={page_offset}&size={page_size}"
-        )
-        try:
-            response = session.get(url, headers=_YAHOO_BROWSER_HEADERS, timeout=10)
+    url = (
+        "https://finance.yahoo.com/calendar/earnings"
+        f"?symbol={normalized_ticker}&offset={page_offset}&size={page_size}"
+    )
+    try:
+        response = session.get(url, headers=_YAHOO_BROWSER_HEADERS, timeout=_YAHOO_SCRAPE_TIMEOUT)
+        blocked_reason = _detect_yahoo_block_reason(response)
+        if blocked_reason is not None:
+            attempts.append({"url": url, "offset": page_offset, "size": page_size, "status_code": response.status_code, "blocked": blocked_reason})
+        else:
             response.raise_for_status()
             tables = pd.read_html(StringIO(response.text))
-        except Exception as exc:
-            logger.warning("Unable to scrape Yahoo earnings EPS history for %s: %s", normalized_ticker, exc)
-            attempts.append({"url": url, "offset": page_offset, "size": page_size, "error": str(exc)})
-            break
-
-        if not tables:
-            attempts.append({"url": url, "offset": page_offset, "size": page_size, "status_code": response.status_code, "table_count": 0})
-            break
-        table = tables[0]
-        attempts.append({"url": url, "offset": page_offset, "size": page_size, "status_code": response.status_code, "table_count": len(tables), "row_count": int(len(table))})
-        if table.empty:
-            break
-
-        for _, raw_row in table.iterrows():
-            earnings_date = _parse_yahoo_earnings_date(raw_row.get("Earnings Date"))
-            if earnings_date is None:
-                continue
-            rows.append(
-                {
-                    "date": earnings_date.isoformat(),
-                    "eps_estimate": _coerce_optional_float(raw_row.get("EPS Estimate")),
-                    "reported_eps": _coerce_optional_float(raw_row.get("Reported EPS")),
-                    "surprise_pct": _coerce_optional_float(raw_row.get("Surprise(%)")),
+            if not tables:
+                attempts.append({"url": url, "offset": page_offset, "size": page_size, "status_code": response.status_code, "table_count": 0})
+            else:
+                table = tables[0]
+                column_names = [str(column) for column in table.columns]
+                required_columns = {"EPS Estimate", "Reported EPS"}
+                if "Surprise(%)" in column_names:
+                    surprise_column = "Surprise(%)"
+                elif "Surprise (%)" in column_names:
+                    surprise_column = "Surprise (%)"
+                else:
+                    surprise_column = None
+                has_date_column = "Earnings Date" in column_names
+                schema_ok = has_date_column and required_columns.issubset(set(column_names)) and surprise_column is not None
+                attempt_payload: dict[str, Any] = {
+                    "url": url,
+                    "offset": page_offset,
+                    "size": page_size,
+                    "status_code": response.status_code,
+                    "table_count": len(tables),
+                    "row_count": int(len(table)),
+                    "columns": column_names,
                 }
-            )
-            if len(rows) >= limit:
-                break
-
-        if len(table) < page_size:
-            break
-        page_offset += page_size
-        page_size = min(limit - len(rows), 100)
-        if page_size <= 0:
-            break
+                if not schema_ok:
+                    attempt_payload["schema_mismatch"] = True
+                    attempt_payload["reason"] = "missing_expected_earnings_columns"
+                attempts.append(attempt_payload)
+                if schema_ok and not table.empty:
+                    for _, raw_row in table.iterrows():
+                        earnings_date = _parse_yahoo_earnings_date(raw_row.get("Earnings Date"))
+                        if earnings_date is None:
+                            continue
+                        rows.append(
+                            {
+                                "date": earnings_date.isoformat(),
+                                "eps_estimate": _coerce_optional_float(raw_row.get("EPS Estimate")),
+                                "reported_eps": _coerce_optional_float(raw_row.get("Reported EPS")),
+                                "surprise_pct": _coerce_optional_float(raw_row.get(surprise_column)),
+                            }
+                        )
+                        if len(rows) >= limit:
+                            break
+    except Exception as exc:
+        logger.warning("Unable to scrape Yahoo earnings EPS history for %s: %s", normalized_ticker, exc)
+        attempts.append({"url": url, "offset": page_offset, "size": page_size, "error": str(exc)})
 
     deduped_rows: list[dict[str, Any]] = []
     seen_dates: set[str] = set()
@@ -444,7 +617,14 @@ def _scrape_yahoo_earnings_eps_history(ticker: str, *, limit: int = 12) -> tuple
             continue
         seen_dates.add(date_value)
         deduped_rows.append(row)
-    status = "ok" if deduped_rows else ("error" if any("error" in attempt for attempt in attempts) else "empty")
+    if deduped_rows:
+        status = "ok"
+    elif any("schema_mismatch" in attempt for attempt in attempts):
+        status = "schema_mismatch"
+    elif any("error" in attempt for attempt in attempts):
+        status = "error"
+    else:
+        status = "empty"
     return deduped_rows, {"status": status, "attempts": attempts}
 
 
@@ -467,7 +647,11 @@ def _scrape_yahoo_float_held_by_institutions_pct(ticker: str) -> tuple[float | N
     attempts: list[dict[str, Any]] = []
     for url in urls:
         try:
-            response = session.get(url, headers=_YAHOO_BROWSER_HEADERS, timeout=10)
+            response = session.get(url, headers=_YAHOO_BROWSER_HEADERS, timeout=_YAHOO_SCRAPE_TIMEOUT)
+            blocked_reason = _detect_yahoo_block_reason(response)
+            if blocked_reason is not None:
+                attempts.append({"url": url, "status_code": response.status_code, "blocked": blocked_reason})
+                break
             response.raise_for_status()
         except Exception as exc:
             logger.warning("Unable to scrape Yahoo holders page for %s at %s: %s", normalized_ticker, url, exc)
@@ -485,6 +669,73 @@ def _scrape_yahoo_float_held_by_institutions_pct(ticker: str) -> tuple[float | N
         attempts.append({"url": url, "status_code": response.status_code, "matched": False})
     status = "error" if any("error" in attempt for attempt in attempts) else "empty"
     return None, {"status": status, "attempts": attempts}
+
+
+def _load_yahoo_implied_move_playwright(ticker: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    normalized_ticker = str(ticker or "").strip().upper()
+    if not normalized_ticker:
+        return None, {"status": "skipped", "reason": "missing_ticker", "attempts": []}
+    if not _YAHOO_OPTIONS_PROBE_SCRIPT.exists():
+        return None, {"status": "error", "reason": "missing_probe_script", "attempts": [{"script": str(_YAHOO_OPTIONS_PROBE_SCRIPT)}]}
+
+    command = ["node", str(_YAHOO_OPTIONS_PROBE_SCRIPT), normalized_ticker]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=_YAHOO_PLAYWRIGHT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return None, {"status": "error", "reason": "timeout", "attempts": [{"command": command, "error": str(exc)}]}
+    except Exception as exc:
+        return None, {"status": "error", "reason": "launch_failed", "attempts": [{"command": command, "error": str(exc)}]}
+
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+    if result.returncode != 0:
+        return None, {
+            "status": "error",
+            "reason": "nonzero_exit",
+            "attempts": [{"command": command, "returncode": result.returncode, "stderr": stderr[-1000:], "stdout": stdout[-1000:]}],
+        }
+
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        return None, {
+            "status": "error",
+            "reason": "invalid_json",
+            "attempts": [{"command": command, "error": str(exc), "stdout": stdout[-1000:], "stderr": stderr[-1000:]}],
+        }
+
+    implied_move_raw = payload.get("implied_move")
+    implied_move: dict[str, Any] | None = None
+    if isinstance(implied_move_raw, dict):
+        implied_move = {
+            "strike": _coerce_optional_float(implied_move_raw.get("strike")),
+            "straddle_mid": _coerce_optional_float(implied_move_raw.get("straddle_mid")),
+            "dollar_move": _coerce_optional_float(implied_move_raw.get("dollar_move")),
+            "percent_move": _coerce_optional_float(implied_move_raw.get("percent_move")),
+        }
+
+    options_diagnostics = {
+        "status": "ok" if implied_move is not None else "empty",
+        "attempts": [
+            {
+                "command": command,
+                "status_code": payload.get("status"),
+                "final_url": payload.get("final_url"),
+                "price": payload.get("price"),
+                "closest_call": payload.get("closest_call"),
+                "closest_put": payload.get("closest_put"),
+                "stderr": stderr[-400:] if stderr else "",
+            }
+        ],
+    }
+    return implied_move, options_diagnostics
 
 
 def _parse_yahoo_earnings_date(value: object) -> dt.date | None:
@@ -506,6 +757,18 @@ def _parse_yahoo_earnings_date(value: object) -> dt.date | None:
         return dt.datetime.strptime(candidate, "%b %d, %Y").date()
     except ValueError:
         return None
+
+
+def _detect_yahoo_block_reason(response: requests.Response) -> str | None:
+    if response.status_code == 429:
+        return "http_429"
+    text = (response.text or "")[:512]
+    for marker in _YAHOO_BLOCK_MARKERS:
+        if marker.lower() in text.lower():
+            return marker
+    if len(response.text or "") < 128:
+        return "short_block_page"
+    return None
 
 
 def _normalize_html_text(value: str) -> str:

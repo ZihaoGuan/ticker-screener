@@ -192,9 +192,16 @@ class _FakeWatchlistService:
                 }
             ][:earnings_limit],
             "holders_float_held_by_institutions_pct": 79.25,
+            "implied_move": {
+                "strike": 225.0,
+                "straddle_mid": 6.70,
+                "dollar_move": 6.70,
+                "percent_move": 2.99,
+            },
             "diagnostics": {
                 "earnings": {"status": "ok", "attempts": [{"url": "https://finance.yahoo.com/calendar/earnings?symbol=NVDA"}]},
                 "holders": {"status": "ok", "attempts": [{"url": "https://finance.yahoo.com/quote/NVDA/holders"}]},
+                "options": {"status": "ok", "attempts": [{"url": "https://nz.finance.yahoo.com/quote/NVDA/options/"}]},
             },
         }
 
@@ -247,6 +254,8 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(len(payload["earnings_eps_history"]), 1)
         self.assertEqual(payload["holders_float_held_by_institutions_pct"], 79.25)
         self.assertEqual(payload["diagnostics"]["earnings"]["status"], "ok")
+        self.assertEqual(payload["implied_move"]["percent_move"], 2.99)
+        self.assertEqual(payload["diagnostics"]["options"]["status"], "ok")
 
     def test_post_screener_runs_batch_requires_strategy_ids(self) -> None:
         response = self.client.post("/api/screener-runs/batch", json={"start_date": "2026-01-01", "end_date": "2026-01-31"})

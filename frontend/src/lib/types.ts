@@ -320,6 +320,12 @@ export type ChartFundamentalsResponse = {
     surprise_pct: number | null;
   }>;
   holders_float_held_by_institutions_pct?: number | null;
+  implied_move?: {
+    strike: number | null;
+    straddle_mid: number | null;
+    dollar_move: number | null;
+    percent_move: number | null;
+  } | null;
   diagnostics: {
     earnings: {
       status: string;
@@ -327,6 +333,11 @@ export type ChartFundamentalsResponse = {
       attempts: Array<Record<string, unknown>>;
     };
     holders: {
+      status: string;
+      reason?: string;
+      attempts: Array<Record<string, unknown>>;
+    };
+    options: {
       status: string;
       reason?: string;
       attempts: Array<Record<string, unknown>>;
