@@ -85,12 +85,33 @@ function buildHoldersPctFromTables(tables) {
   return null;
 }
 
+function buildKeyStatisticsYoyFromTables(tables) {
+  const result = {
+    revenue_yoy_pct: null,
+    earnings_yoy_pct: null,
+  };
+  for (const table of tables) {
+    for (const row of table.rows) {
+      if (row.length < 2) continue;
+      const labelText = String(row[0] || "").trim().toLowerCase();
+      const value = toNumber(row[1]);
+      if (labelText.includes("quarterly revenue growth") && labelText.includes("(yoy)")) {
+        result.revenue_yoy_pct = value;
+      }
+      if (labelText.includes("quarterly earnings growth") && labelText.includes("(yoy)")) {
+        result.earnings_yoy_pct = value;
+      }
+    }
+  }
+  return result;
+}
+
 async function extractTableSummaries(page) {
   return await page.evaluate(() => {
     return Array.from(document.querySelectorAll("table")).slice(0, 6).map((table, index) => {
       const headers = Array.from(table.querySelectorAll("th")).map((node) => node.textContent?.trim() || "").filter(Boolean);
       const rows = Array.from(table.querySelectorAll("tr"))
-        .slice(1, 4)
+        .slice(1, 8)
         .map((row) =>
           Array.from(row.querySelectorAll("td"))
             .map((node) => node.textContent?.trim() || "")
@@ -162,6 +183,7 @@ const payload = {
   analysis: await probePage(page, `https://finance.yahoo.com/quote/${ticker}/analysis/`),
   analysis_nz: await probePage(page, `https://nz.finance.yahoo.com/quote/${ticker}/analysis/`),
   holders: await probePage(page, `https://finance.yahoo.com/quote/${ticker}/holders/`),
+  key_statistics_nz: await probePage(page, `https://nz.finance.yahoo.com/quote/${ticker}/key-statistics/`),
 };
 
 const nzEarningsHistory = buildEarningsHistoryFromTables(payload.analysis_nz.tables ?? []);
@@ -172,6 +194,9 @@ payload.holders_float_held_by_institutions_pct =
   payload.analysis_nz?.holders_float_held_by_institutions_pct ??
   payload.analysis?.holders_float_held_by_institutions_pct ??
   null;
+const keyStatisticsYoy = buildKeyStatisticsYoyFromTables(payload.key_statistics_nz?.tables ?? []);
+payload.revenue_yoy_pct = keyStatisticsYoy.revenue_yoy_pct;
+payload.earnings_yoy_pct = keyStatisticsYoy.earnings_yoy_pct;
 
 console.log(JSON.stringify(payload, null, 2));
 

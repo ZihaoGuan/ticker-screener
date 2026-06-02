@@ -231,7 +231,7 @@ class WatchlistService:
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
-        earnings_rows, holders_pct, browser_diagnostics = _load_yahoo_earnings_and_holders_playwright(
+        earnings_rows, holders_pct, revenue_yoy_pct, earnings_yoy_pct, browser_diagnostics = _load_yahoo_earnings_and_holders_playwright(
             normalized_ticker,
             earnings_limit=earnings_limit,
         )
@@ -240,10 +240,13 @@ class WatchlistService:
             "ticker": normalized_ticker,
             "earnings_eps_history": earnings_rows,
             "holders_float_held_by_institutions_pct": holders_pct,
+            "revenue_yoy_pct": revenue_yoy_pct,
+            "earnings_yoy_pct": earnings_yoy_pct,
             "implied_move": implied_move,
             "diagnostics": {
                 "earnings": browser_diagnostics["earnings"],
                 "holders": browser_diagnostics["holders"],
+                "statistics": browser_diagnostics["statistics"],
                 "options": options_diagnostics,
             },
         }
@@ -402,14 +405,17 @@ def _load_yahoo_earnings_and_holders_playwright(
     ticker: str,
     *,
     earnings_limit: int = 4,
-) -> tuple[list[dict[str, Any]], float | None, dict[str, dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], float | None, float | None, float | None, dict[str, dict[str, Any]]]:
     normalized_ticker = str(ticker or "").strip().upper()
     empty_result = (
         [],
         None,
+        None,
+        None,
         {
             "earnings": {"status": "skipped", "reason": "missing_ticker", "attempts": []},
             "holders": {"status": "skipped", "reason": "missing_ticker", "attempts": []},
+            "statistics": {"status": "skipped", "reason": "missing_ticker", "attempts": []},
         },
     )
     if not normalized_ticker:
@@ -426,8 +432,13 @@ def _load_yahoo_earnings_and_holders_playwright(
                 "reason": "missing_probe_script",
                 "attempts": [{"script": str(_YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT)}],
             },
+            "statistics": {
+                "status": "error",
+                "reason": "missing_probe_script",
+                "attempts": [{"script": str(_YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT)}],
+            },
         }
-        return [], None, diagnostics
+        return [], None, None, None, diagnostics
 
     command = ["node", str(_YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT), normalized_ticker]
     try:
@@ -443,14 +454,16 @@ def _load_yahoo_earnings_and_holders_playwright(
         diagnostics = {
             "earnings": {"status": "error", "reason": "timeout", "attempts": [{"command": command, "error": str(exc)}]},
             "holders": {"status": "error", "reason": "timeout", "attempts": [{"command": command, "error": str(exc)}]},
+            "statistics": {"status": "error", "reason": "timeout", "attempts": [{"command": command, "error": str(exc)}]},
         }
-        return [], None, diagnostics
+        return [], None, None, None, diagnostics
     except Exception as exc:
         diagnostics = {
             "earnings": {"status": "error", "reason": "launch_failed", "attempts": [{"command": command, "error": str(exc)}]},
             "holders": {"status": "error", "reason": "launch_failed", "attempts": [{"command": command, "error": str(exc)}]},
+            "statistics": {"status": "error", "reason": "launch_failed", "attempts": [{"command": command, "error": str(exc)}]},
         }
-        return [], None, diagnostics
+        return [], None, None, None, diagnostics
 
     stdout = (result.stdout or "").strip()
     stderr = (result.stderr or "").strip()
@@ -466,8 +479,13 @@ def _load_yahoo_earnings_and_holders_playwright(
                 "reason": "nonzero_exit",
                 "attempts": [{"command": command, "returncode": result.returncode, "stderr": stderr[-1000:], "stdout": stdout[-1000:]}],
             },
+            "statistics": {
+                "status": "error",
+                "reason": "nonzero_exit",
+                "attempts": [{"command": command, "returncode": result.returncode, "stderr": stderr[-1000:], "stdout": stdout[-1000:]}],
+            },
         }
-        return [], None, diagnostics
+        return [], None, None, None, diagnostics
 
     try:
         payload = json.loads(stdout)
@@ -483,8 +501,13 @@ def _load_yahoo_earnings_and_holders_playwright(
                 "reason": "invalid_json",
                 "attempts": [{"command": command, "error": str(exc), "stdout": stdout[-1000:], "stderr": stderr[-1000:]}],
             },
+            "statistics": {
+                "status": "error",
+                "reason": "invalid_json",
+                "attempts": [{"command": command, "error": str(exc), "stdout": stdout[-1000:], "stderr": stderr[-1000:]}],
+            },
         }
-        return [], None, diagnostics
+        return [], None, None, None, diagnostics
 
     earnings_rows_raw = payload.get("earnings_eps_history")
     earnings_rows: list[dict[str, Any]] = []
@@ -505,11 +528,15 @@ def _load_yahoo_earnings_and_holders_playwright(
             )
 
     holders_pct = _coerce_optional_float(payload.get("holders_float_held_by_institutions_pct"))
+    revenue_yoy_pct = _coerce_optional_float(payload.get("revenue_yoy_pct"))
+    earnings_yoy_pct = _coerce_optional_float(payload.get("earnings_yoy_pct"))
     analysis_payload = payload.get("analysis_nz") if isinstance(payload.get("analysis_nz"), dict) else payload.get("analysis")
     holders_payload = payload.get("holders") if isinstance(payload.get("holders"), dict) else {}
+    statistics_payload = payload.get("key_statistics_nz") if isinstance(payload.get("key_statistics_nz"), dict) else {}
 
     earnings_status = "ok" if earnings_rows else "empty"
     holders_status = "ok" if holders_pct is not None else "empty"
+    statistics_status = "ok" if revenue_yoy_pct is not None or earnings_yoy_pct is not None else "empty"
     diagnostics = {
         "earnings": {
             "status": earnings_status,
@@ -537,8 +564,22 @@ def _load_yahoo_earnings_and_holders_playwright(
                 }
             ],
         },
+        "statistics": {
+            "status": statistics_status,
+            "attempts": [
+                {
+                    "command": command,
+                    "final_url": statistics_payload.get("final_url") if isinstance(statistics_payload, dict) else "",
+                    "status_code": statistics_payload.get("status") if isinstance(statistics_payload, dict) else None,
+                    "title": statistics_payload.get("title") if isinstance(statistics_payload, dict) else "",
+                    "revenue_yoy_pct": revenue_yoy_pct,
+                    "earnings_yoy_pct": earnings_yoy_pct,
+                    "stderr": stderr[-400:] if stderr else "",
+                }
+            ],
+        },
     }
-    return earnings_rows, holders_pct, diagnostics
+    return earnings_rows, holders_pct, revenue_yoy_pct, earnings_yoy_pct, diagnostics
 
 
 def _scrape_yahoo_earnings_eps_history(ticker: str, *, limit: int = 12) -> tuple[list[dict[str, Any]], dict[str, Any]]:

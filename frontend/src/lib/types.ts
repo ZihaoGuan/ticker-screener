@@ -320,6 +320,8 @@ export type ChartFundamentalsResponse = {
     surprise_pct: number | null;
   }>;
   holders_float_held_by_institutions_pct?: number | null;
+  revenue_yoy_pct?: number | null;
+  earnings_yoy_pct?: number | null;
   implied_move?: {
     strike: number | null;
     straddle_mid: number | null;
@@ -333,6 +335,11 @@ export type ChartFundamentalsResponse = {
       attempts: Array<Record<string, unknown>>;
     };
     holders: {
+      status: string;
+      reason?: string;
+      attempts: Array<Record<string, unknown>>;
+    };
+    statistics: {
       status: string;
       reason?: string;
       attempts: Array<Record<string, unknown>>;
@@ -619,4 +626,36 @@ export type RrgResponse = {
     failed_tickers?: string[];
   };
   static_report_url?: string;
+};
+
+export type EarningsCalendarEntry = {
+  ticker: string;
+  date: string;
+  session?: string | null;
+  summary?: string | null;
+  sector?: string | null;
+  industry?: string | null;
+  exchange?: string | null;
+};
+
+export type EarningsCalendarDay = {
+  date: string;
+  weekday: string;
+  before_market: EarningsCalendarEntry[];
+  after_market: EarningsCalendarEntry[];
+  during_market: EarningsCalendarEntry[];
+  unknown: EarningsCalendarEntry[];
+};
+
+export type EarningsCalendarResponse = {
+  week_start: string;
+  week_end: string;
+  reference_date: string;
+  days: EarningsCalendarDay[];
+  filters: {
+    exclude_sectors: string[];
+    exclude_industries: string[];
+  };
+  available_sectors: string[];
+  available_industries: string[];
 };

@@ -7,6 +7,7 @@ const navItems = [
   { to: "/", label: "Dashboard", icon: "▦" },
   { to: "/guide", label: "Guide", icon: "◫" },
   { to: "/charts", label: "Charts", icon: "◍" },
+  { to: "/earnings", label: "Earnings", icon: "◒" },
   { to: "/watchlists", label: "Watchlists", icon: "◌" },
   { to: "/rotation/sector", label: "Rotation", icon: "◎" },
   { to: "/overlap", label: "Overlap", icon: "◈" },

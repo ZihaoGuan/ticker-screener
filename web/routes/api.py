@@ -12,6 +12,7 @@ from src.webapp.services.audit_service import AuditService
 from src.webapp.services.backtest_service import BacktestService, DEFAULT_EXIT_RULES
 from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.dashboard_service import DashboardService
+from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
@@ -28,6 +29,7 @@ from web.dependencies import (
     get_auth_service,
     get_current_principal,
     get_dashboard_service,
+    get_earnings_calendar_service,
     get_overlap_service,
     get_rrg_service,
     get_run_service,
@@ -79,6 +81,22 @@ def _record_audit(
 @router.get("/dashboard", response_class=JSONResponse)
 def dashboard_data(service: DashboardService = Depends(get_dashboard_service)) -> JSONResponse:
     return JSONResponse(service.get_dashboard_context())
+
+
+@router.get("/earnings-calendar", response_class=JSONResponse)
+def earnings_calendar_data(
+    reference_date: dt.date | None = Query(default=None, alias="referenceDate"),
+    exclude_sectors: list[str] = Query(default=[], alias="excludeSector"),
+    exclude_industries: list[str] = Query(default=[], alias="excludeIndustry"),
+    service: EarningsCalendarService = Depends(get_earnings_calendar_service),
+) -> JSONResponse:
+    return JSONResponse(
+        service.get_next_week_calendar(
+            reference_date=reference_date,
+            exclude_sectors=exclude_sectors,
+            exclude_industries=exclude_industries,
+        )
+    )
 
 
 @router.get("/auth/me", response_class=JSONResponse)

@@ -16,6 +16,7 @@ if TestClient is not None:
         get_audit_service,
         get_backtest_service,
         get_current_principal,
+        get_earnings_calendar_service,
         get_run_service,
         get_screener_history_service,
         get_user_admin_service,
@@ -180,6 +181,41 @@ class _FakeWatchlistService:
             "fearzone_panel": {"rows": [], "signals": []},
         }
 
+
+class _FakeEarningsCalendarService:
+    def get_next_week_calendar(
+        self,
+        *,
+        reference_date: dt.date | None = None,
+        exclude_sectors: list[str] | None = None,
+        exclude_industries: list[str] | None = None,
+    ):
+        _ = (reference_date, exclude_sectors, exclude_industries)
+        return {
+            "week_start": "2026-06-07",
+            "week_end": "2026-06-13",
+            "reference_date": "2026-06-02",
+            "days": [
+                {"date": "2026-06-07", "weekday": "Sun", "before_market": [], "after_market": [], "during_market": [], "unknown": []},
+                {
+                    "date": "2026-06-08",
+                    "weekday": "Mon",
+                    "before_market": [{"ticker": "AAA", "date": "2026-06-08", "session": "before_market", "summary": "Before market open", "sector": "Tech", "industry": "Software", "exchange": "NASDAQ"}],
+                    "after_market": [{"ticker": "BBB", "date": "2026-06-08", "session": "after_market", "summary": "After market close", "sector": "Health Care", "industry": "Biotech", "exchange": "NASDAQ"}],
+                    "during_market": [],
+                    "unknown": [],
+                },
+                {"date": "2026-06-09", "weekday": "Tue", "before_market": [], "after_market": [], "during_market": [], "unknown": []},
+                {"date": "2026-06-10", "weekday": "Wed", "before_market": [], "after_market": [], "during_market": [], "unknown": []},
+                {"date": "2026-06-11", "weekday": "Thu", "before_market": [], "after_market": [], "during_market": [], "unknown": []},
+                {"date": "2026-06-12", "weekday": "Fri", "before_market": [], "after_market": [], "during_market": [], "unknown": []},
+                {"date": "2026-06-13", "weekday": "Sat", "before_market": [], "after_market": [], "during_market": [], "unknown": []},
+            ],
+            "filters": {"exclude_sectors": [], "exclude_industries": []},
+            "available_sectors": ["Health Care", "Tech"],
+            "available_industries": ["Biotech", "Software"],
+        }
+
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4):
         return {
             "ticker": ticker.upper(),
@@ -192,6 +228,8 @@ class _FakeWatchlistService:
                 }
             ][:earnings_limit],
             "holders_float_held_by_institutions_pct": 79.25,
+            "revenue_yoy_pct": 85.2,
+            "earnings_yoy_pct": 210.6,
             "implied_move": {
                 "strike": 225.0,
                 "straddle_mid": 6.70,
@@ -201,6 +239,7 @@ class _FakeWatchlistService:
             "diagnostics": {
                 "earnings": {"status": "ok", "attempts": [{"url": "https://finance.yahoo.com/calendar/earnings?symbol=NVDA"}]},
                 "holders": {"status": "ok", "attempts": [{"url": "https://finance.yahoo.com/quote/NVDA/holders"}]},
+                "statistics": {"status": "ok", "attempts": [{"url": "https://nz.finance.yahoo.com/quote/NVDA/key-statistics/"}]},
                 "options": {"status": "ok", "attempts": [{"url": "https://nz.finance.yahoo.com/quote/NVDA/options/"}]},
             },
         }
@@ -217,6 +256,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_audit_service] = lambda: _FakeAuditService()
         app.dependency_overrides[get_user_admin_service] = lambda: _FakeUserAdminService()
         app.dependency_overrides[get_watchlist_service] = lambda: _FakeWatchlistService()
+        app.dependency_overrides[get_earnings_calendar_service] = lambda: _FakeEarningsCalendarService()
         app.dependency_overrides[get_current_principal] = anonymous_principal
         self.client = TestClient(app)
 
@@ -253,9 +293,21 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["ticker"], "NVDA")
         self.assertEqual(len(payload["earnings_eps_history"]), 1)
         self.assertEqual(payload["holders_float_held_by_institutions_pct"], 79.25)
+        self.assertEqual(payload["revenue_yoy_pct"], 85.2)
+        self.assertEqual(payload["earnings_yoy_pct"], 210.6)
         self.assertEqual(payload["diagnostics"]["earnings"]["status"], "ok")
+        self.assertEqual(payload["diagnostics"]["statistics"]["status"], "ok")
         self.assertEqual(payload["implied_move"]["percent_move"], 2.99)
         self.assertEqual(payload["diagnostics"]["options"]["status"], "ok")
+
+    def test_get_earnings_calendar(self) -> None:
+        response = self.client.get("/api/earnings-calendar?excludeSector=Energy")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["week_start"], "2026-06-07")
+        self.assertEqual(len(payload["days"]), 7)
+        self.assertEqual(payload["days"][1]["before_market"][0]["ticker"], "AAA")
+        self.assertEqual(payload["days"][1]["after_market"][0]["ticker"], "BBB")
 
     def test_post_screener_runs_batch_requires_strategy_ids(self) -> None:
         response = self.client.post("/api/screener-runs/batch", json={"start_date": "2026-01-01", "end_date": "2026-01-31"})

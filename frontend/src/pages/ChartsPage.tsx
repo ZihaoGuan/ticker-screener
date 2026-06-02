@@ -97,9 +97,10 @@ export function ChartsPage() {
         setFundamentalsPayload(response);
         const earningsStatus = response.diagnostics.earnings.status;
         const holdersStatus = response.diagnostics.holders.status;
+        const statisticsStatus = response.diagnostics.statistics.status;
         const optionsStatus = response.diagnostics.options.status;
-        if (earningsStatus !== "ok" || holdersStatus !== "ok" || optionsStatus !== "ok") {
-          setFundamentalsNotice(`Diagnostics: earnings=${earningsStatus}, holders=${holdersStatus}, options=${optionsStatus}`);
+        if (earningsStatus !== "ok" || holdersStatus !== "ok" || statisticsStatus !== "ok" || optionsStatus !== "ok") {
+          setFundamentalsNotice(`Diagnostics: earnings=${earningsStatus}, holders=${holdersStatus}, statistics=${statisticsStatus}, options=${optionsStatus}`);
         }
       })
       .catch((error) => {
@@ -256,6 +257,10 @@ export function ChartsPage() {
             <strong>{formatPercent(fundamentalsPayload?.holders_float_held_by_institutions_pct)}</strong>
           </div>
           <div>
+            <span className="eyebrow">Rev YoY</span>
+            <strong>{formatPercent(fundamentalsPayload?.revenue_yoy_pct)}</strong>
+          </div>
+          <div>
             <span className="eyebrow">Imp Move</span>
             <strong>{formatPercent(fundamentalsPayload?.implied_move?.percent_move)}</strong>
           </div>
@@ -322,6 +327,13 @@ export function ChartsPage() {
         {requestedTicker ? (
           <p className="panel-copy">
             Float held by institutions: {formatPercent(fundamentalsPayload?.holders_float_held_by_institutions_pct)}
+          </p>
+        ) : null}
+        {requestedTicker ? (
+          <p className="panel-copy">
+            Revenue YoY: {formatPercent(fundamentalsPayload?.revenue_yoy_pct)}
+            {" · "}
+            Earnings YoY: {formatPercent(fundamentalsPayload?.earnings_yoy_pct)}
           </p>
         ) : null}
         {requestedTicker ? (
