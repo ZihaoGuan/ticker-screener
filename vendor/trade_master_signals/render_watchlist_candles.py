@@ -13,6 +13,7 @@ import sys
 from textwrap import wrap
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 import requests
 
