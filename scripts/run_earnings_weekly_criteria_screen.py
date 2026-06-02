@@ -80,12 +80,21 @@ def _next_week_events(
     universe = load_universe(config)
     sector_map = {item.symbol: (item.sector, item.exchange) for item in universe}
     cookstock = load_configured_cookstock(config)
-    raw_events = cookstock.fetch_next_week_earnings_watchlist(reference_date=reference_date)
+    anchor_date = reference_date or dt.date.today()
+    week_start = anchor_date - dt.timedelta(days=anchor_date.weekday() + 1) if anchor_date.weekday() != 6 else anchor_date
+    next_week_start = week_start + dt.timedelta(days=7)
+    next_week_end = next_week_start + dt.timedelta(days=6)
+    raw_events = cookstock.fetch_earnings_calendar_watchlist(next_week_start, next_week_end)
 
     events: list[PreEarningsEvent] = []
     seen: set[str] = set()
     for item in raw_events:
         ticker = str(item["ticker"]).upper()
+        event_date = item.get("event_date")
+        if not isinstance(event_date, dt.date):
+            continue
+        if event_date < next_week_start or event_date > next_week_end:
+            continue
         if ticker in seen:
             continue
         seen.add(ticker)
@@ -93,7 +102,7 @@ def _next_week_events(
         events.append(
             PreEarningsEvent(
                 ticker=ticker,
-                earnings_date=str(item.get("event_date")) if item.get("event_date") else None,
+                earnings_date=event_date.isoformat(),
                 summary=str(item.get("summary")) if item.get("summary") else None,
                 sector=sector,
                 exchange=exchange,
