@@ -4,7 +4,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
-import type { AdHocScreenResponse, CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
+import type { AdHocScreenResponse, CandlePoint, ChartAnnotations, ChartFundamentalsResponse, WatchlistChartResponse } from "../lib/types";
 
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
@@ -31,10 +31,13 @@ export function ChartsPage() {
   const [tickerInput, setTickerInput] = useState(requestedTicker);
   const [dateInput, setDateInput] = useState(requestedDate);
   const [payload, setPayload] = useState<WatchlistChartResponse | null>(null);
+  const [fundamentalsPayload, setFundamentalsPayload] = useState<ChartFundamentalsResponse | null>(null);
   const [setupPayload, setSetupPayload] = useState<AdHocScreenResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFundamentalsLoading, setIsFundamentalsLoading] = useState(false);
   const [isSetupLoading, setIsSetupLoading] = useState(false);
   const [notice, setNotice] = useState("");
+  const [fundamentalsNotice, setFundamentalsNotice] = useState("");
   const [setupNotice, setSetupNotice] = useState("");
   const [chartVisibility, setChartVisibility] = useState<ChartVisibility>(DEFAULT_CHART_VISIBILITY);
   const [selectedSetups, setSelectedSetups] = useState<Record<string, boolean>>({
@@ -52,8 +55,10 @@ export function ChartsPage() {
   useEffect(() => {
     if (!requestedTicker) {
       setPayload(null);
+      setFundamentalsPayload(null);
       setSetupPayload(null);
       setNotice("");
+      setFundamentalsNotice("");
       return;
     }
     setIsLoading(true);
@@ -78,6 +83,30 @@ export function ChartsPage() {
       })
       .finally(() => setIsLoading(false));
   }, [requestedDate, requestedTicker]);
+
+  useEffect(() => {
+    if (!requestedTicker) {
+      setFundamentalsPayload(null);
+      setFundamentalsNotice("");
+      return;
+    }
+    setIsFundamentalsLoading(true);
+    setFundamentalsNotice("");
+    void fetchJson<ChartFundamentalsResponse>(`/api/chart-fundamentals/${requestedTicker}?earningsLimit=12`)
+      .then((response) => {
+        setFundamentalsPayload(response);
+        const earningsStatus = response.diagnostics.earnings.status;
+        const holdersStatus = response.diagnostics.holders.status;
+        if (earningsStatus !== "ok" || holdersStatus !== "ok") {
+          setFundamentalsNotice(`Diagnostics: earnings=${earningsStatus}, holders=${holdersStatus}`);
+        }
+      })
+      .catch((error) => {
+        setFundamentalsPayload(null);
+        setFundamentalsNotice(error instanceof Error ? error.message : "Failed to load chart fundamentals.");
+      })
+      .finally(() => setIsFundamentalsLoading(false));
+  }, [requestedTicker]);
 
   const selectedSetupIds = useMemo(
     () => setupOptions.filter((option) => selectedSetups[option.id]).map((option) => option.id),
@@ -130,7 +159,7 @@ export function ChartsPage() {
       ? ((lastCandle.close - previousCandle.close) / previousCandle.close) * 100
       : null;
   const latestRsMarker = payload?.rs_markers?.[payload.rs_markers.length - 1] ?? null;
-  const earningsRows = payload?.earnings_eps_history ?? [];
+  const earningsRows = fundamentalsPayload?.earnings_eps_history ?? [];
   const setupAnnotations = useMemo<ChartAnnotations[]>(() => {
     return (setupPayload?.screeners ?? [])
       .filter((item) => item.passed && item.hit)
@@ -223,7 +252,7 @@ export function ChartsPage() {
           </div>
           <div>
             <span className="eyebrow">Inst Float</span>
-            <strong>{formatPercent(payload?.holders_float_held_by_institutions_pct)}</strong>
+            <strong>{formatPercent(fundamentalsPayload?.holders_float_held_by_institutions_pct)}</strong>
           </div>
           <div>
             <span className="eyebrow">Source</span>
@@ -284,12 +313,14 @@ export function ChartsPage() {
 
       <Panel title="EPS History" aside={<span className="eyebrow">Yahoo scrape experiment for estimate, reported, surprise</span>}>
         {!requestedTicker ? <p className="panel-copy">Load ticker to inspect recent earnings EPS rows.</p> : null}
+        {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading chart fundamentals…" compact /> : null}
         {requestedTicker ? (
           <p className="panel-copy">
-            Float held by institutions: {formatPercent(payload?.holders_float_held_by_institutions_pct)}
+            Float held by institutions: {formatPercent(fundamentalsPayload?.holders_float_held_by_institutions_pct)}
           </p>
         ) : null}
-        {requestedTicker && !isLoading && earningsRows.length === 0 ? (
+        {fundamentalsNotice ? <p className="panel-copy">{fundamentalsNotice}</p> : null}
+        {requestedTicker && !isFundamentalsLoading && earningsRows.length === 0 ? (
           <p className="panel-copy">No EPS rows returned from Yahoo scrape for this ticker.</p>
         ) : null}
         {earningsRows.length > 0 ? (
@@ -315,6 +346,14 @@ export function ChartsPage() {
               </tbody>
             </table>
           </div>
+        ) : null}
+        {fundamentalsPayload ? (
+          <details>
+            <summary className="panel-copy">Scrape diagnostics</summary>
+            <pre className="panel-copy" style={{ whiteSpace: "pre-wrap" }}>
+              {JSON.stringify(fundamentalsPayload.diagnostics, null, 2)}
+            </pre>
+          </details>
         ) : null}
       </Panel>
 

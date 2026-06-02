@@ -180,6 +180,24 @@ class _FakeWatchlistService:
             "fearzone_panel": {"rows": [], "signals": []},
         }
 
+    def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 12):
+        return {
+            "ticker": ticker.upper(),
+            "earnings_eps_history": [
+                {
+                    "date": "2026-05-28",
+                    "eps_estimate": 1.23,
+                    "reported_eps": 1.45,
+                    "surprise_pct": 17.89,
+                }
+            ][:earnings_limit],
+            "holders_float_held_by_institutions_pct": 79.25,
+            "diagnostics": {
+                "earnings": {"status": "ok", "attempts": [{"url": "https://finance.yahoo.com/calendar/earnings?symbol=NVDA"}]},
+                "holders": {"status": "ok", "attempts": [{"url": "https://finance.yahoo.com/quote/NVDA/holders"}]},
+            },
+        }
+
 
 @unittest.skipIf(TestClient is None, "fastapi test dependencies are not installed")
 class ApiAdHocScreenTests(unittest.TestCase):
@@ -220,6 +238,15 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["ticker"], "NVDA")
         self.assertEqual(payload["requested_as_of_date"], "2026-05-31")
         self.assertEqual(payload["resolved_as_of_date"], "2026-05-30")
+
+    def test_get_chart_fundamentals(self) -> None:
+        response = self.client.get("/api/chart-fundamentals/nvda?earningsLimit=1")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["ticker"], "NVDA")
+        self.assertEqual(len(payload["earnings_eps_history"]), 1)
+        self.assertEqual(payload["holders_float_held_by_institutions_pct"], 79.25)
+        self.assertEqual(payload["diagnostics"]["earnings"]["status"], "ok")
 
     def test_post_screener_runs_batch_requires_strategy_ids(self) -> None:
         response = self.client.post("/api/screener-runs/batch", json={"start_date": "2026-01-01", "end_date": "2026-01-31"})

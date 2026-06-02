@@ -481,6 +481,15 @@ def ticker_chart_data(
     return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period, as_of_date=as_of_date))
 
 
+@router.get("/chart-fundamentals/{ticker}", response_class=JSONResponse)
+def chart_fundamentals_data(
+    ticker: str,
+    earnings_limit: int = Query(default=12, alias="earningsLimit", ge=1, le=24),
+    service: WatchlistService = Depends(get_watchlist_service),
+) -> JSONResponse:
+    return JSONResponse(service.get_chart_fundamentals_payload(ticker=ticker.upper(), earnings_limit=earnings_limit))
+
+
 @router.get("/overlap/latest", response_class=JSONResponse)
 def overlap_latest(service: OverlapService = Depends(get_overlap_service)) -> JSONResponse:
     return JSONResponse(service.get_latest_summary())

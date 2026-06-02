@@ -110,8 +110,6 @@ class WatchlistService:
         weekly_ema8 = weekly_close.ewm(span=8, adjust=False).mean()
         frame["weekly_ema8"] = weekly_ema8.reindex(frame.index, method="ffill")
         frame["ipo_vwap"] = _compute_ipo_vwap(frame)
-        earnings_eps_history = _scrape_yahoo_earnings_eps_history(normalized_ticker, limit=12)
-        holders_float_held_by_institutions_pct = _scrape_yahoo_float_held_by_institutions_pct(normalized_ticker)
 
         rs_line: pd.Series | None = None
         rs_new_high: pd.Series | None = None
@@ -213,12 +211,24 @@ class WatchlistService:
             "ema21": ema21,
             "weekly_ema8": weekly_ema8_points,
             "ipo_vwap": ipo_vwap,
-            "earnings_eps_history": earnings_eps_history,
-            "holders_float_held_by_institutions_pct": holders_float_held_by_institutions_pct,
             "rs_line": rs_points,
             "rs_markers": rs_markers,
             "setup_markers": setup_markers,
             "fearzone_panel": fearzone_panel,
+        }
+
+    def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 12) -> dict[str, Any]:
+        normalized_ticker = str(ticker or "").strip().upper()
+        earnings_rows, earnings_diagnostics = _scrape_yahoo_earnings_eps_history(normalized_ticker, limit=earnings_limit)
+        holders_pct, holders_diagnostics = _scrape_yahoo_float_held_by_institutions_pct(normalized_ticker)
+        return {
+            "ticker": normalized_ticker,
+            "earnings_eps_history": earnings_rows,
+            "holders_float_held_by_institutions_pct": holders_pct,
+            "diagnostics": {
+                "earnings": earnings_diagnostics,
+                "holders": holders_diagnostics,
+            },
         }
 
     def _load_chart_frames(
@@ -337,8 +347,6 @@ def _empty_chart_payload(
         "ema21": [],
         "weekly_ema8": [],
         "ipo_vwap": [],
-        "earnings_eps_history": [],
-        "holders_float_held_by_institutions_pct": None,
         "rs_line": [],
         "rs_markers": [],
         "setup_markers": [],
@@ -373,13 +381,14 @@ def _download_history_frame(*, ticker: str, start_date: dt.date, end_date: dt.da
     return _normalize_download_frame(history)
 
 
-def _scrape_yahoo_earnings_eps_history(ticker: str, *, limit: int = 12) -> list[dict[str, Any]]:
+def _scrape_yahoo_earnings_eps_history(ticker: str, *, limit: int = 12) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     normalized_ticker = str(ticker or "").strip().upper()
     if not normalized_ticker or limit <= 0:
-        return []
+        return [], {"status": "skipped", "reason": "missing_ticker_or_limit", "attempts": []}
 
     session = requests.Session()
     rows: list[dict[str, Any]] = []
+    attempts: list[dict[str, Any]] = []
     page_size = min(limit, 100)
     page_offset = 0
 
@@ -394,11 +403,14 @@ def _scrape_yahoo_earnings_eps_history(ticker: str, *, limit: int = 12) -> list[
             tables = pd.read_html(StringIO(response.text))
         except Exception as exc:
             logger.warning("Unable to scrape Yahoo earnings EPS history for %s: %s", normalized_ticker, exc)
+            attempts.append({"url": url, "offset": page_offset, "size": page_size, "error": str(exc)})
             break
 
         if not tables:
+            attempts.append({"url": url, "offset": page_offset, "size": page_size, "status_code": response.status_code, "table_count": 0})
             break
         table = tables[0]
+        attempts.append({"url": url, "offset": page_offset, "size": page_size, "status_code": response.status_code, "table_count": len(tables), "row_count": int(len(table))})
         if table.empty:
             break
 
@@ -432,13 +444,14 @@ def _scrape_yahoo_earnings_eps_history(ticker: str, *, limit: int = 12) -> list[
             continue
         seen_dates.add(date_value)
         deduped_rows.append(row)
-    return deduped_rows
+    status = "ok" if deduped_rows else ("error" if any("error" in attempt for attempt in attempts) else "empty")
+    return deduped_rows, {"status": status, "attempts": attempts}
 
 
-def _scrape_yahoo_float_held_by_institutions_pct(ticker: str) -> float | None:
+def _scrape_yahoo_float_held_by_institutions_pct(ticker: str) -> tuple[float | None, dict[str, Any]]:
     normalized_ticker = str(ticker or "").strip().upper()
     if not normalized_ticker:
-        return None
+        return None, {"status": "skipped", "reason": "missing_ticker", "attempts": []}
 
     urls = [
         f"https://finance.yahoo.com/quote/{normalized_ticker}/holders",
@@ -451,12 +464,14 @@ def _scrape_yahoo_float_held_by_institutions_pct(ticker: str) -> float | None:
     ]
 
     session = requests.Session()
+    attempts: list[dict[str, Any]] = []
     for url in urls:
         try:
             response = session.get(url, headers=_YAHOO_BROWSER_HEADERS, timeout=10)
             response.raise_for_status()
         except Exception as exc:
             logger.warning("Unable to scrape Yahoo holders page for %s at %s: %s", normalized_ticker, url, exc)
+            attempts.append({"url": url, "error": str(exc)})
             continue
 
         normalized_text = _normalize_html_text(response.text)
@@ -464,8 +479,12 @@ def _scrape_yahoo_float_held_by_institutions_pct(ticker: str) -> float | None:
             match = re.search(pattern, normalized_text, flags=re.IGNORECASE)
             if not match:
                 continue
-            return _coerce_optional_float(match.group(1))
-    return None
+            value = _coerce_optional_float(match.group(1))
+            attempts.append({"url": url, "status_code": response.status_code, "matched": True, "value": value})
+            return value, {"status": "ok" if value is not None else "empty", "attempts": attempts}
+        attempts.append({"url": url, "status_code": response.status_code, "matched": False})
+    status = "error" if any("error" in attempt for attempt in attempts) else "empty"
+    return None, {"status": status, "attempts": attempts}
 
 
 def _parse_yahoo_earnings_date(value: object) -> dt.date | None:

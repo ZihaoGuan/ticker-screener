@@ -296,13 +296,6 @@ export type WatchlistChartResponse = {
   ema21: Array<{ time: string; value: number }>;
   weekly_ema8: Array<{ time: string; value: number }>;
   ipo_vwap: Array<{ time: string; value: number }>;
-  earnings_eps_history?: Array<{
-    date: string;
-    eps_estimate: number | null;
-    reported_eps: number | null;
-    surprise_pct: number | null;
-  }>;
-  holders_float_held_by_institutions_pct?: number | null;
   rs_line: Array<{ time: string; value: number }>;
   rs_markers: Array<{ time: string; kind: "daily_new_high" | "daily_new_high_before_price" }>;
   setup_markers?: Array<{ time: string; kind: string; label?: string }>;
@@ -315,6 +308,29 @@ export type WatchlistChartResponse = {
       points: Array<{ time: string; active: boolean }>;
     }>;
     signals: Array<{ time: string }>;
+  };
+};
+
+export type ChartFundamentalsResponse = {
+  ticker: string;
+  earnings_eps_history: Array<{
+    date: string;
+    eps_estimate: number | null;
+    reported_eps: number | null;
+    surprise_pct: number | null;
+  }>;
+  holders_float_held_by_institutions_pct?: number | null;
+  diagnostics: {
+    earnings: {
+      status: string;
+      reason?: string;
+      attempts: Array<Record<string, unknown>>;
+    };
+    holders: {
+      status: string;
+      reason?: string;
+      attempts: Array<Record<string, unknown>>;
+    };
   };
 };
 
