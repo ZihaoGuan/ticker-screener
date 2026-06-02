@@ -51,6 +51,7 @@ jobs:
             cd "${APP_DIR}"
             git fetch --all --prune
             git checkout "${GIT_REF}"
+            git restore --source=HEAD --worktree --staged -- frontend/package-lock.json || true
             git clean -fd -- \
               frontend/package-lock.json \
               frontend/dist \
@@ -66,7 +67,7 @@ jobs:
               -v "${APP_DIR}:/app" \
               -w /app/frontend \
               node:20 \
-              sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm install && npm run build"
+              sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
             cd deploy
             docker-compose down || true
             docker rm -f deploy_db_1 deploy_web_1 deploy_caddy_1 2>/dev/null || true
