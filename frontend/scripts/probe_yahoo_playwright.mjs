@@ -1,7 +1,22 @@
 import { chromium } from "playwright";
+import fs from "node:fs";
 
 const ticker = (process.argv[2] || "NVDA").trim().toUpperCase();
-const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const browserCandidates = [
+  process.env.PLAYWRIGHT_EXECUTABLE_PATH,
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+].filter(Boolean);
+
+function resolveExecutablePath() {
+  for (const candidate of browserCandidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
 
 function toNumber(text) {
   if (!text) return null;
@@ -126,9 +141,11 @@ async function probePage(page, url) {
   return result;
 }
 
+const executablePath = resolveExecutablePath();
 const browser = await chromium.launch({
-  executablePath: chromePath,
+  executablePath,
   headless: true,
+  args: process.platform === "linux" ? ["--no-sandbox", "--disable-setuid-sandbox"] : [],
 });
 
 const context = await browser.newContext({
