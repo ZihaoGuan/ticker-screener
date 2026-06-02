@@ -22,7 +22,9 @@ from ...market_data_access import load_many_ticker_windows_for_range, resolve_da
 from ...ticker_filters import normalize_ticker_symbol
 from ...universe import UniverseTicker, load_universe
 from ...config import load_app_config
+from ..repositories.insider_repository import InsiderRepository
 from ..repositories.watchlist_repository import WatchlistRepository
+from .insider_fetcher import fetch_insider_trades_window
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,7 @@ _YAHOO_BLOCK_MARKERS = (
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_playwright.mjs"
 _YAHOO_OPTIONS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_options_playwright.mjs"
+_INSIDER_CACHE_TTL_HOURS = 12
 
 
 class WatchlistService:
@@ -55,6 +58,7 @@ class WatchlistService:
         benchmark_ticker: str = "SPY",
     ) -> None:
         self.repository = WatchlistRepository(artifacts_dir=artifacts_dir)
+        self.insider_repository = InsiderRepository(artifacts_dir=artifacts_dir)
         self._universe_index: dict[str, UniverseTicker] | None = None
         self._theme_catalog: list[dict[str, object]] | None = None
         self.database_url = resolve_database_url(database_url)
@@ -248,6 +252,104 @@ class WatchlistService:
                 "holders": browser_diagnostics["holders"],
                 "statistics": browser_diagnostics["statistics"],
                 "options": options_diagnostics,
+            },
+        }
+
+    def get_chart_insider_payload(
+        self,
+        ticker: str,
+        *,
+        lookback_days: int = 14,
+        as_of_date: dt.date | None = None,
+    ) -> dict[str, Any]:
+        normalized_ticker = str(ticker or "").strip().upper()
+        resolved_as_of_date = as_of_date or dt.date.today()
+        normalized_lookback_days = max(1, int(lookback_days))
+        window_start_date = resolved_as_of_date - dt.timedelta(days=normalized_lookback_days)
+        resolved_as_of_iso = resolved_as_of_date.isoformat()
+        cache_window = self.insider_repository.load_cache_window(
+            ticker=normalized_ticker,
+            as_of_date=resolved_as_of_iso,
+            lookback_days=normalized_lookback_days,
+        )
+        cache_status = "hit" if cache_window else "miss"
+        fetch_status = "skipped"
+        notice: str | None = None
+
+        if not self.insider_repository.is_cache_window_fresh(cache_window, ttl_hours=_INSIDER_CACHE_TTL_HOURS):
+            cache_status = "stale" if cache_window else "miss"
+            try:
+                fetched = fetch_insider_trades_window(
+                    tickers=[normalized_ticker],
+                    as_of_date=resolved_as_of_date,
+                    lookback_days=normalized_lookback_days,
+                )
+                cache_window = {
+                    "ticker": normalized_ticker,
+                    "requested_tickers": fetched.get("requested_tickers", [normalized_ticker]),
+                    "as_of_date": resolved_as_of_iso,
+                    "lookback_days": normalized_lookback_days,
+                    "refreshed_at": str(fetched.get("generated_at") or ""),
+                    "entries": fetched.get("entries", []),
+                }
+                self.insider_repository.save_cache_window(
+                    ticker=normalized_ticker,
+                    as_of_date=resolved_as_of_iso,
+                    lookback_days=normalized_lookback_days,
+                    refreshed_at=cache_window["refreshed_at"],
+                    entries=list(cache_window.get("entries", [])) if isinstance(cache_window.get("entries"), list) else [],
+                    requested_tickers=list(cache_window.get("requested_tickers", [normalized_ticker])),
+                    source=str(fetched.get("source") or "sec_form4_submissions"),
+                )
+                fetch_status = "fetched"
+            except Exception as exc:
+                logger.warning("Insider fetch failed for %s: %s", normalized_ticker, exc)
+                fetch_status = "failed"
+                notice = f"Live insider refresh failed: {exc}"
+
+        entries = _normalize_insider_entries(
+            cache_window.get("entries") if isinstance(cache_window, dict) else [],
+            ticker=normalized_ticker,
+            window_start_date=window_start_date,
+            resolved_as_of_date=resolved_as_of_date,
+        )
+
+        entries.sort(
+            key=lambda item: (
+                item.get("transaction_date") or "",
+                item.get("filing_date") or "",
+                item.get("gross_amount") or 0.0,
+            ),
+            reverse=True,
+        )
+
+        total_buy_amount = round(
+            sum(float(item.get("gross_amount") or 0.0) for item in entries if item.get("type") == "BUY"),
+            2,
+        )
+        total_sell_amount = round(
+            sum(float(item.get("gross_amount") or 0.0) for item in entries if item.get("type") == "SELL"),
+            2,
+        )
+        return {
+            "ticker": normalized_ticker,
+            "requested_as_of_date": as_of_date.isoformat() if as_of_date else None,
+            "resolved_as_of_date": resolved_as_of_date.isoformat(),
+            "lookback_days": normalized_lookback_days,
+            "window_start_date": window_start_date.isoformat(),
+            "window_end_date": resolved_as_of_date.isoformat(),
+            "generated_at": _coerce_iso_datetime(cache_window.get("refreshed_at")) if isinstance(cache_window, dict) else None,
+            "cache_status": cache_status,
+            "fetch_status": fetch_status,
+            "notice": notice,
+            "entries": entries,
+            "summary": {
+                "total_count": len(entries),
+                "buy_count": sum(1 for item in entries if item.get("type") == "BUY"),
+                "sell_count": sum(1 for item in entries if item.get("type") == "SELL"),
+                "total_buy_amount": total_buy_amount,
+                "total_sell_amount": total_sell_amount,
+                "net_amount": round(total_buy_amount - total_sell_amount, 2),
             },
         }
 
@@ -1039,6 +1141,95 @@ def _coalesce_text(*values: object) -> str | None:
         if text:
             return text
     return None
+
+
+def _normalize_insider_entries(
+    raw_entries: object,
+    *,
+    ticker: str,
+    window_start_date: dt.date,
+    resolved_as_of_date: dt.date,
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    if not isinstance(raw_entries, list):
+        return entries
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        entry_ticker = str(raw_entry.get("ticker") or "").strip().upper()
+        if entry_ticker != ticker:
+            continue
+        event_date = _coerce_insider_event_date(raw_entry)
+        if event_date is None:
+            continue
+        if event_date < window_start_date or event_date > resolved_as_of_date:
+            continue
+        entries.append(
+            {
+                "ticker": entry_ticker,
+                "filing_date": _coerce_iso_date(raw_entry.get("filing_date")),
+                "transaction_date": _coerce_iso_date(raw_entry.get("transaction_date")),
+                "owner_name": str(raw_entry.get("owner_name") or "").strip(),
+                "position": str(raw_entry.get("position") or "").strip(),
+                "type": str(raw_entry.get("type") or "").strip().upper(),
+                "shares": int(round(_coerce_float(raw_entry.get("shares")))),
+                "price": _coerce_optional_float(raw_entry.get("price")),
+                "gross_amount": _coerce_optional_float(raw_entry.get("gross_amount")),
+                "net_amount": _coerce_optional_float(raw_entry.get("net_amount")),
+                "shares_owned_after": int(round(_coerce_float(raw_entry.get("shares_owned_after")))),
+                "is_10b5_1": bool(raw_entry.get("is_10b5_1")),
+                "source_url": str(raw_entry.get("source_url") or "").strip(),
+            }
+        )
+    return entries
+
+
+def _coerce_insider_event_date(payload: dict[str, Any]) -> dt.date | None:
+    transaction_date = _coerce_iso_date(payload.get("transaction_date"))
+    if transaction_date:
+        return dt.date.fromisoformat(transaction_date)
+    filing_date = _coerce_iso_date(payload.get("filing_date"))
+    if filing_date:
+        return dt.date.fromisoformat(filing_date)
+    return None
+
+
+def _coerce_iso_date(value: object) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return dt.date.fromisoformat(text[:10]).isoformat()
+    except ValueError:
+        return None
+
+
+def _coerce_iso_datetime(value: object) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return dt.datetime.fromisoformat(text.replace("Z", "+00:00")).isoformat()
+    except ValueError:
+        return None
+
+
+def _coerce_float(value: object) -> float:
+    if value is None or value == "":
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _coerce_optional_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_theme_tags(value: object) -> list[str]:

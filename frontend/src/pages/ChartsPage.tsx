@@ -4,7 +4,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
-import type { AdHocScreenResponse, CandlePoint, ChartAnnotations, ChartFundamentalsResponse, WatchlistChartResponse } from "../lib/types";
+import type { AdHocScreenResponse, CandlePoint, ChartAnnotations, ChartFundamentalsResponse, ChartInsiderResponse, WatchlistChartResponse } from "../lib/types";
 
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
@@ -32,12 +32,15 @@ export function ChartsPage() {
   const [dateInput, setDateInput] = useState(requestedDate);
   const [payload, setPayload] = useState<WatchlistChartResponse | null>(null);
   const [fundamentalsPayload, setFundamentalsPayload] = useState<ChartFundamentalsResponse | null>(null);
+  const [insiderPayload, setInsiderPayload] = useState<ChartInsiderResponse | null>(null);
   const [setupPayload, setSetupPayload] = useState<AdHocScreenResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFundamentalsLoading, setIsFundamentalsLoading] = useState(false);
+  const [isInsiderLoading, setIsInsiderLoading] = useState(false);
   const [isSetupLoading, setIsSetupLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [fundamentalsNotice, setFundamentalsNotice] = useState("");
+  const [insiderNotice, setInsiderNotice] = useState("");
   const [setupNotice, setSetupNotice] = useState("");
   const [chartVisibility, setChartVisibility] = useState<ChartVisibility>(DEFAULT_CHART_VISIBILITY);
   const [selectedSetups, setSelectedSetups] = useState<Record<string, boolean>>({
@@ -56,9 +59,11 @@ export function ChartsPage() {
     if (!requestedTicker) {
       setPayload(null);
       setFundamentalsPayload(null);
+      setInsiderPayload(null);
       setSetupPayload(null);
       setNotice("");
       setFundamentalsNotice("");
+      setInsiderNotice("");
       return;
     }
     setIsLoading(true);
@@ -83,6 +88,31 @@ export function ChartsPage() {
       })
       .finally(() => setIsLoading(false));
   }, [requestedDate, requestedTicker]);
+
+  useEffect(() => {
+    if (!requestedTicker) {
+      setInsiderPayload(null);
+      setInsiderNotice("");
+      return;
+    }
+    setIsInsiderLoading(true);
+    setInsiderNotice("");
+    const query = new URLSearchParams({ lookbackDays: "14" });
+    if (payload?.resolved_as_of_date) {
+      query.set("asOfDate", payload.resolved_as_of_date);
+    } else if (requestedDate) {
+      query.set("asOfDate", requestedDate);
+    }
+    void fetchJson<ChartInsiderResponse>(`/api/chart-insider/${requestedTicker}?${query.toString()}`)
+      .then((response) => {
+        setInsiderPayload(response);
+      })
+      .catch((error) => {
+        setInsiderPayload(null);
+        setInsiderNotice(error instanceof Error ? error.message : "Failed to load insider trades.");
+      })
+      .finally(() => setIsInsiderLoading(false));
+  }, [payload?.resolved_as_of_date, requestedDate, requestedTicker]);
 
   useEffect(() => {
     if (!requestedTicker) {
@@ -381,6 +411,72 @@ export function ChartsPage() {
         ) : null}
       </Panel>
 
+      <Panel title="Recent Insider Trades" aside={<span className="eyebrow">SEC Form 4 cache, default last 14 days</span>}>
+        {!requestedTicker ? <p className="panel-copy">Load ticker to inspect recent insider activity.</p> : null}
+        {requestedTicker && isInsiderLoading ? <LoadingBlock label="Loading insider trades…" compact /> : null}
+        {requestedTicker ? (
+          <p className="panel-copy">
+            Window: {insiderPayload?.window_start_date ?? "--"} to {insiderPayload?.window_end_date ?? "--"}
+            {" · "}
+            Net: {formatSignedCurrency(insiderPayload?.summary.net_amount)}
+            {" · "}
+            Rows: {insiderPayload?.summary.total_count ?? 0}
+            {insiderPayload?.cache_status ? ` · Cache ${insiderPayload.cache_status}` : ""}
+            {insiderPayload?.fetch_status ? ` · Fetch ${insiderPayload.fetch_status}` : ""}
+          </p>
+        ) : null}
+        {requestedTicker && insiderPayload?.generated_at ? (
+          <p className="panel-copy">Cache generated: {formatDateTime(insiderPayload.generated_at)}</p>
+        ) : null}
+        {insiderPayload?.notice ? <p className="panel-copy">{insiderPayload.notice}</p> : null}
+        {insiderNotice ? <p className="panel-copy">{insiderNotice}</p> : null}
+        {requestedTicker && !isInsiderLoading && (insiderPayload?.entries.length ?? 0) === 0 ? (
+          <p className="panel-copy">No cached insider buys or sells in this window.</p>
+        ) : null}
+        {(insiderPayload?.entries.length ?? 0) > 0 ? (
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Trade Date</th>
+                  <th>Owner</th>
+                  <th>Role</th>
+                  <th>Type</th>
+                  <th>Gross</th>
+                  <th>Shares</th>
+                  <th>Price</th>
+                  <th>Plan</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {insiderPayload?.entries.map((row, index) => (
+                  <tr key={`${row.owner_name}-${row.transaction_date}-${row.type}-${index}`}>
+                    <td>{row.transaction_date ?? row.filing_date ?? "--"}</td>
+                    <td>{row.owner_name || "--"}</td>
+                    <td>{row.position || "--"}</td>
+                    <td className={row.type === "BUY" ? "metric-positive" : row.type === "SELL" ? "metric-negative" : ""}>{row.type}</td>
+                    <td>{formatCurrency(row.gross_amount)}</td>
+                    <td>{formatInteger(row.shares)}</td>
+                    <td>{formatPrice(row.price ?? null)}</td>
+                    <td>{row.is_10b5_1 ? "10b5-1" : "Open"}</td>
+                    <td>
+                      {row.source_url ? (
+                        <a href={row.source_url} target="_blank" rel="noreferrer">
+                          SEC
+                        </a>
+                      ) : (
+                        "--"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </Panel>
+
       <Panel
         title="Candles"
         aside={
@@ -457,6 +553,30 @@ export function ChartsPage() {
 
 function formatPrice(value: number | null) {
   return value == null ? "--" : `$${value.toFixed(2)}`;
+}
+
+function formatCurrency(value: number | null | undefined) {
+  return value == null ? "--" : `$${value.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
+}
+
+function formatSignedCurrency(value: number | null | undefined) {
+  if (value == null) {
+    return "--";
+  }
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatCurrency(Math.abs(value)).replace("$", value < 0 ? "-$" : "$")}`;
+}
+
+function formatInteger(value: number | null | undefined) {
+  return value == null ? "--" : Math.round(value).toLocaleString();
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "--";
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
 function formatMetric(value: number | null | undefined) {

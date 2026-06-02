@@ -352,6 +352,42 @@ export type ChartFundamentalsResponse = {
   };
 };
 
+export type ChartInsiderResponse = {
+  ticker: string;
+  requested_as_of_date?: string | null;
+  resolved_as_of_date?: string | null;
+  lookback_days: number;
+  window_start_date?: string | null;
+  window_end_date?: string | null;
+  generated_at?: string | null;
+  cache_status?: "hit" | "miss" | "stale" | string;
+  fetch_status?: "skipped" | "fetched" | "failed" | string;
+  notice?: string | null;
+  entries: Array<{
+    ticker: string;
+    filing_date?: string | null;
+    transaction_date?: string | null;
+    owner_name: string;
+    position?: string | null;
+    type: "BUY" | "SELL" | string;
+    shares: number;
+    price?: number | null;
+    gross_amount?: number | null;
+    net_amount?: number | null;
+    shares_owned_after?: number | null;
+    is_10b5_1: boolean;
+    source_url?: string | null;
+  }>;
+  summary: {
+    total_count: number;
+    buy_count: number;
+    sell_count: number;
+    total_buy_amount: number;
+    total_sell_amount: number;
+    net_amount: number;
+  };
+};
+
 export type ChartAnnotations = {
   setupLabel?: string;
   eventDate?: string | null;

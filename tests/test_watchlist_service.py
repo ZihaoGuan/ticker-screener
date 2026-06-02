@@ -128,6 +128,170 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["data_source"], "database+ticker/internet+benchmark")
         self.assertTrue(len(payload["rs_line"]) > 0)
 
+    def test_get_chart_insider_payload_filters_recent_rows(self) -> None:
+        insider_dir = Path(self.temp_dir.name) / "raw" / "insider"
+        insider_dir.mkdir(parents=True, exist_ok=True)
+        (insider_dir / "insider_trades_latest.json").write_text(
+            """
+            {
+              "generated_at": "2026-06-02T00:00:00+00:00",
+              "caches": {
+                "NVDA|2026-05-31|14": {
+                  "ticker": "NVDA",
+                  "requested_tickers": ["NVDA"],
+                  "as_of_date": "2026-05-31",
+                  "lookback_days": 14,
+                  "refreshed_at": "2026-06-02T00:00:00+00:00",
+                  "entries": [
+                    {
+                      "ticker": "NVDA",
+                      "filing_date": "2026-05-31",
+                      "transaction_date": "2026-05-30",
+                      "owner_name": "Jane Insider",
+                      "position": "Officer, CEO",
+                      "type": "BUY",
+                      "shares": 1000,
+                      "price": 10.25,
+                      "gross_amount": 10250.0,
+                      "net_amount": 10250.0,
+                      "shares_owned_after": 15000,
+                      "is_10b5_1": false,
+                      "source_url": "https://www.sec.gov/Archives/example-buy.xml"
+                    },
+                    {
+                      "ticker": "NVDA",
+                      "filing_date": "2026-05-26",
+                      "transaction_date": "2026-05-25",
+                      "owner_name": "Jane Insider",
+                      "position": "Officer, CEO",
+                      "type": "SELL",
+                      "shares": 500,
+                      "price": 12.0,
+                      "gross_amount": 6000.0,
+                      "net_amount": -6000.0,
+                      "shares_owned_after": 14500,
+                      "is_10b5_1": true,
+                      "source_url": "https://www.sec.gov/Archives/example-sell.xml"
+                    },
+                    {
+                      "ticker": "NVDA",
+                      "filing_date": "2026-05-01",
+                      "transaction_date": "2026-05-01",
+                      "owner_name": "Old Insider",
+                      "position": "Director",
+                      "type": "BUY",
+                      "shares": 50,
+                      "price": 1.0,
+                      "gross_amount": 50.0,
+                      "net_amount": 50.0,
+                      "shares_owned_after": 15050,
+                      "is_10b5_1": false,
+                      "source_url": "https://www.sec.gov/Archives/example-old.xml"
+                    }
+                  ]
+                }
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        payload = self.service.get_chart_insider_payload("NVDA", as_of_date=dt.date(2026, 5, 31), lookback_days=14)
+
+        self.assertEqual(payload["ticker"], "NVDA")
+        self.assertEqual(payload["resolved_as_of_date"], "2026-05-31")
+        self.assertEqual(payload["window_start_date"], "2026-05-17")
+        self.assertEqual(payload["summary"]["total_count"], 2)
+        self.assertEqual(payload["summary"]["buy_count"], 1)
+        self.assertEqual(payload["summary"]["sell_count"], 1)
+        self.assertEqual(payload["summary"]["net_amount"], 4250.0)
+        self.assertEqual(payload["cache_status"], "hit")
+        self.assertEqual(payload["fetch_status"], "skipped")
+        self.assertEqual(payload["entries"][0]["owner_name"], "Jane Insider")
+        self.assertEqual(payload["entries"][1]["is_10b5_1"], True)
+
+    def test_get_chart_insider_payload_fetches_on_cache_miss(self) -> None:
+        fetched_payload = {
+            "generated_at": "2026-06-02T12:00:00+00:00",
+            "source": "sec_form4_submissions",
+            "requested_tickers": ["NVDA"],
+            "lookback_days": 14,
+            "as_of_date": "2026-05-31",
+            "entries": [
+                {
+                    "ticker": "NVDA",
+                    "filing_date": "2026-05-31",
+                    "transaction_date": "2026-05-30",
+                    "owner_name": "Fresh Insider",
+                    "position": "Director",
+                    "type": "BUY",
+                    "shares": 200,
+                    "price": 20.0,
+                    "gross_amount": 4000.0,
+                    "net_amount": 4000.0,
+                    "shares_owned_after": 1000,
+                    "is_10b5_1": False,
+                    "source_url": "https://www.sec.gov/Archives/fresh.xml",
+                }
+            ],
+        }
+
+        with patch("src.webapp.services.watchlist_service.fetch_insider_trades_window", return_value=fetched_payload):
+            payload = self.service.get_chart_insider_payload("NVDA", as_of_date=dt.date(2026, 5, 31), lookback_days=14)
+
+        self.assertEqual(payload["cache_status"], "miss")
+        self.assertEqual(payload["fetch_status"], "fetched")
+        self.assertEqual(payload["entries"][0]["owner_name"], "Fresh Insider")
+        saved = self.service.insider_repository.load_cache_window(ticker="NVDA", as_of_date="2026-05-31", lookback_days=14)
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved["entries"][0]["owner_name"], "Fresh Insider")
+
+    def test_get_chart_insider_payload_returns_stale_cache_when_refresh_fails(self) -> None:
+        insider_dir = Path(self.temp_dir.name) / "raw" / "insider"
+        insider_dir.mkdir(parents=True, exist_ok=True)
+        (insider_dir / "insider_trades_latest.json").write_text(
+            """
+            {
+              "generated_at": "2026-05-01T00:00:00+00:00",
+              "caches": {
+                "NVDA|2026-05-31|14": {
+                  "ticker": "NVDA",
+                  "requested_tickers": ["NVDA"],
+                  "as_of_date": "2026-05-31",
+                  "lookback_days": 14,
+                  "refreshed_at": "2026-05-01T00:00:00+00:00",
+                  "entries": [
+                    {
+                      "ticker": "NVDA",
+                      "filing_date": "2026-05-31",
+                      "transaction_date": "2026-05-30",
+                      "owner_name": "Stale Insider",
+                      "position": "Officer",
+                      "type": "SELL",
+                      "shares": 100,
+                      "price": 15.0,
+                      "gross_amount": 1500.0,
+                      "net_amount": -1500.0,
+                      "shares_owned_after": 900,
+                      "is_10b5_1": true,
+                      "source_url": "https://www.sec.gov/Archives/stale.xml"
+                    }
+                  ]
+                }
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        with patch("src.webapp.services.watchlist_service.fetch_insider_trades_window", side_effect=RuntimeError("sec down")):
+            payload = self.service.get_chart_insider_payload("NVDA", as_of_date=dt.date(2026, 5, 31), lookback_days=14)
+
+        self.assertEqual(payload["cache_status"], "stale")
+        self.assertEqual(payload["fetch_status"], "failed")
+        self.assertIn("sec down", payload["notice"])
+        self.assertEqual(payload["entries"][0]["owner_name"], "Stale Insider")
+
 
 if __name__ == "__main__":
     unittest.main()

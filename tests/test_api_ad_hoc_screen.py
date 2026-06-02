@@ -181,6 +181,45 @@ class _FakeWatchlistService:
             "fearzone_panel": {"rows": [], "signals": []},
         }
 
+    def get_chart_insider_payload(self, ticker: str, *, lookback_days: int = 14, as_of_date: dt.date | None = None):
+        return {
+            "ticker": ticker.upper(),
+            "requested_as_of_date": as_of_date.isoformat() if as_of_date else None,
+            "resolved_as_of_date": (as_of_date or dt.date(2026, 5, 30)).isoformat(),
+            "lookback_days": lookback_days,
+            "window_start_date": "2026-05-16",
+            "window_end_date": (as_of_date or dt.date(2026, 5, 30)).isoformat(),
+            "generated_at": "2026-06-02T00:00:00+00:00",
+            "cache_status": "miss",
+            "fetch_status": "fetched",
+            "notice": None,
+            "entries": [
+                {
+                    "ticker": ticker.upper(),
+                    "filing_date": "2026-05-29",
+                    "transaction_date": "2026-05-28",
+                    "owner_name": "Jane Insider",
+                    "position": "Officer, CEO",
+                    "type": "BUY",
+                    "shares": 1000,
+                    "price": 10.25,
+                    "gross_amount": 10250.0,
+                    "net_amount": 10250.0,
+                    "shares_owned_after": 15000,
+                    "is_10b5_1": False,
+                    "source_url": "https://www.sec.gov/Archives/example.xml",
+                }
+            ],
+            "summary": {
+                "total_count": 1,
+                "buy_count": 1,
+                "sell_count": 0,
+                "total_buy_amount": 10250.0,
+                "total_sell_amount": 0.0,
+                "net_amount": 10250.0,
+            },
+        }
+
 
 class _FakeEarningsCalendarService:
     def get_next_week_calendar(
@@ -340,6 +379,16 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["diagnostics"]["statistics"]["status"], "ok")
         self.assertEqual(payload["implied_move"]["percent_move"], 2.99)
         self.assertEqual(payload["diagnostics"]["options"]["status"], "ok")
+
+    def test_get_chart_insider(self) -> None:
+        response = self.client.get("/api/chart-insider/nvda?lookbackDays=14&asOfDate=2026-05-30")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["ticker"], "NVDA")
+        self.assertEqual(payload["lookback_days"], 14)
+        self.assertEqual(payload["requested_as_of_date"], "2026-05-30")
+        self.assertEqual(payload["entries"][0]["owner_name"], "Jane Insider")
+        self.assertEqual(payload["summary"]["net_amount"], 10250.0)
 
     def test_get_earnings_calendar(self) -> None:
         response = self.client.get("/api/earnings-calendar?excludeSector=Energy&onlyCriteria=true")
