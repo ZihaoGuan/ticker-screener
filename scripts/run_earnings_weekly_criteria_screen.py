@@ -40,6 +40,11 @@ from src.universe import load_universe
 from src.webapp.config import load_webapp_config
 from src.webapp.services.earnings_calendar_service import CRITERIA_STRATEGY_ID
 from src.webapp.services.screener_history_service import ScreenerHistoryService
+from src.webapp.services.watchlist_service import _load_yahoo_implied_move_playwright
+
+
+IMPLIED_MOVE_CRITERIA_KEY = "implied_move_ge_7_near_earnings"
+IMPLIED_MOVE_THRESHOLD_PCT = 7.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -123,6 +128,7 @@ def _build_criteria_map(
     revenue_yoy_pct: float | None,
     latest_eps_actual: float | None,
     eps_improving: bool,
+    implied_move_pct: float | None,
 ) -> dict[str, bool]:
     return {
         "institutional_ownership_ge_10": institutional_ownership_pct is not None
@@ -131,6 +137,7 @@ def _build_criteria_map(
         "revenue_yoy_ge_100": revenue_yoy_pct is not None and revenue_yoy_pct >= config.earnings_growth_min_revenue_yoy_pct,
         "latest_eps_negative": latest_eps_actual is not None and latest_eps_actual < 0,
         "eps_improving_last_4": bool(eps_improving),
+        IMPLIED_MOVE_CRITERIA_KEY: implied_move_pct is not None and implied_move_pct > IMPLIED_MOVE_THRESHOLD_PCT,
     }
 
 
@@ -142,6 +149,7 @@ def _passes(criteria: dict[str, bool], pass_mode: str) -> bool:
                 "bullish_ma_stack",
                 "revenue_yoy_ge_100",
                 "eps_improving_last_4",
+                IMPLIED_MOVE_CRITERIA_KEY,
             )
         )
     return all(criteria.values())
@@ -249,6 +257,8 @@ def main() -> int:
             )
 
             institutional_ownership_pct = financial_client.get_latest_institutional_ownership_pct(event.ticker)
+            implied_move, implied_move_diagnostics = _load_yahoo_implied_move_playwright(event.ticker)
+            implied_move_pct = implied_move.get("percent_move") if isinstance(implied_move, dict) else None
             price_context = _build_price_context(cookstock, config, event.ticker)
             current_price, ma_short, ma_medium, ma_long, price_rows = price_context
             ma_stack_bullish = bool(current_price > ma_short > ma_medium > ma_long)
@@ -259,6 +269,7 @@ def main() -> int:
                 revenue_yoy_pct=revenue_yoy_pct,
                 latest_eps_actual=latest_eps_actual,
                 eps_improving=eps_improving,
+                implied_move_pct=implied_move_pct,
             )
             _print_screening_log(event.ticker, criteria, pass_mode=args.pass_mode)
 
@@ -295,6 +306,13 @@ def main() -> int:
             ).to_dict()
             hit["criteria"] = criteria
             hit["pass_mode"] = args.pass_mode
+            hit["implied_move_signal"] = {
+                "threshold_pct": IMPLIED_MOVE_THRESHOLD_PCT,
+                "near_earnings": True,
+                "matched": bool(criteria.get(IMPLIED_MOVE_CRITERIA_KEY)),
+                "percent_move": implied_move_pct,
+                "status": implied_move_diagnostics.get("status"),
+            }
             hits.append(hit)
         except Exception as exc:
             failures.append({"ticker": event.ticker, "error": str(exc), "pass_mode": args.pass_mode})

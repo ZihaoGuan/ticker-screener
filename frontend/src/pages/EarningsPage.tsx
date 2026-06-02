@@ -244,7 +244,7 @@ export function EarningsPage() {
         {onlyCriteria ? (
           <p className="panel-copy earnings-console-note">
             {payload?.criteria_filter.available
-              ? `Using latest persisted criteria run ${payload.criteria_filter.run_date || ""}, then adding live IV > 7% near-earnings check. ${payload.criteria_filter.matched_count} current matches.`
+              ? `Using latest persisted criteria run ${payload.criteria_filter.run_date || ""}, including persisted IV > 7% near-earnings check. ${payload.criteria_filter.matched_count} current matches.`
               : "Criteria filter is on, but no persisted criteria run is available yet."}
           </p>
         ) : null}

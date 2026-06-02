@@ -6,7 +6,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.webapp.services.earnings_calendar_service import EarningsCalendarService, IMPLIED_MOVE_CRITERIA_KEY
+from src.webapp.services.earnings_calendar_service import EarningsCalendarService
+
+
+IMPLIED_MOVE_CRITERIA_KEY = "implied_move_ge_7_near_earnings"
 
 
 class _FakeCookstock:
@@ -43,16 +46,24 @@ class EarningsCalendarServiceTests(unittest.TestCase):
                         "revenue_yoy_ge_100": True,
                         "latest_eps_negative": True,
                         "eps_improving_last_4": True,
+                        IMPLIED_MOVE_CRITERIA_KEY: True,
                     },
                     "matched_criteria": [],
                     "not_matched_criteria": [],
                     "pass_mode": "strict",
                     "error": "",
+                    "implied_move_signal": {
+                        "threshold_pct": 7.0,
+                        "near_earnings": True,
+                        "matched": True,
+                        "percent_move": 8.4,
+                        "status": "ok",
+                    },
                 }
             },
         }
 
-    def test_next_week_calendar_adds_iv_criterion_and_badge(self) -> None:
+    def test_next_week_calendar_uses_persisted_iv_criterion_and_badge(self) -> None:
         fake_events = [
             {
                 "ticker": "AAA",
@@ -60,15 +71,6 @@ class EarningsCalendarServiceTests(unittest.TestCase):
                 "summary": "Before market open",
             }
         ]
-        self.service._load_implied_move_signals = lambda tickers: {  # type: ignore[method-assign]
-            "AAA": {
-                "threshold_pct": 7.0,
-                "near_earnings": True,
-                "matched": True,
-                "percent_move": 8.4,
-                "status": "ok",
-            }
-        }
 
         with patch("src.webapp.services.earnings_calendar_service.load_configured_cookstock", return_value=_FakeCookstock(fake_events)):
             payload = self.service.get_next_week_calendar(reference_date=dt.date(2026, 6, 2))
@@ -80,7 +82,7 @@ class EarningsCalendarServiceTests(unittest.TestCase):
         self.assertTrue(entry["criteria"]["passed"])
         self.assertEqual(payload["criteria_filter"]["matched_count"], 1)
 
-    def test_only_criteria_filters_out_entry_when_iv_rule_fails(self) -> None:
+    def test_only_criteria_filters_out_entry_when_persisted_iv_rule_fails(self) -> None:
         fake_events = [
             {
                 "ticker": "AAA",
@@ -88,14 +90,36 @@ class EarningsCalendarServiceTests(unittest.TestCase):
                 "summary": "Before market open",
             }
         ]
-        self.service._load_implied_move_signals = lambda tickers: {  # type: ignore[method-assign]
-            "AAA": {
-                "threshold_pct": 7.0,
-                "near_earnings": True,
-                "matched": False,
-                "percent_move": 5.2,
-                "status": "ok",
-            }
+        self.service._load_latest_criteria_meta = lambda: {  # type: ignore[method-assign]
+            "available": True,
+            "strategy_id": "earnings_weekly_criteria",
+            "run_id": 7,
+            "run_date": "2026-06-01",
+            "matched_tickers": [],
+            "ticker_details": {
+                "AAA": {
+                    "passed": False,
+                    "criteria": {
+                        "institutional_ownership_ge_10": True,
+                        "bullish_ma_stack": True,
+                        "revenue_yoy_ge_100": True,
+                        "latest_eps_negative": True,
+                        "eps_improving_last_4": True,
+                        IMPLIED_MOVE_CRITERIA_KEY: False,
+                    },
+                    "matched_criteria": [],
+                    "not_matched_criteria": [IMPLIED_MOVE_CRITERIA_KEY],
+                    "pass_mode": "strict",
+                    "error": "criteria_not_met",
+                    "implied_move_signal": {
+                        "threshold_pct": 7.0,
+                        "near_earnings": True,
+                        "matched": False,
+                        "percent_move": 5.2,
+                        "status": "ok",
+                    },
+                }
+            },
         }
 
         with patch("src.webapp.services.earnings_calendar_service.load_configured_cookstock", return_value=_FakeCookstock(fake_events)):
