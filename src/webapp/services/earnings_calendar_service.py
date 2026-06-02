@@ -40,15 +40,9 @@ class EarningsCalendarService:
         week_start = anchor_date - dt.timedelta(days=anchor_date.weekday() + 1) if anchor_date.weekday() != 6 else anchor_date
         next_week_start = week_start + dt.timedelta(days=7)
         next_week_end = next_week_start + dt.timedelta(days=6)
-        criteria_meta = self._load_latest_criteria_meta() if only_criteria else {
-            "enabled": False,
-            "available": False,
-            "strategy_id": CRITERIA_STRATEGY_ID,
-            "run_id": None,
-            "run_date": None,
-            "matched_tickers": [],
-        }
+        criteria_meta = self._load_latest_criteria_meta()
         matched_tickers = {str(value).upper() for value in criteria_meta.get("matched_tickers", [])}
+        criteria_by_ticker = criteria_meta.get("ticker_details", {})
 
         excluded_sector_keys = {_normalize_filter_value(value) for value in (exclude_sectors or []) if _normalize_filter_value(value)}
         excluded_industry_keys = {_normalize_filter_value(value) for value in (exclude_industries or []) if _normalize_filter_value(value)}
@@ -114,6 +108,7 @@ class EarningsCalendarService:
                     "sector": sector,
                     "industry": industry,
                     "exchange": exchange,
+                    "criteria": criteria_by_ticker.get(ticker),
                 }
             )
 
@@ -134,7 +129,7 @@ class EarningsCalendarService:
             "available_sectors": sorted(available_sector_labels),
             "available_industries": sorted(available_industry_labels),
             "criteria_filter": {
-                "enabled": bool(criteria_meta.get("enabled")),
+                "enabled": True,
                 "available": bool(criteria_meta.get("available")),
                 "strategy_id": criteria_meta.get("strategy_id"),
                 "run_id": criteria_meta.get("run_id"),
@@ -152,12 +147,12 @@ class EarningsCalendarService:
 
     def _load_latest_criteria_meta(self) -> dict[str, Any]:
         payload = {
-            "enabled": True,
             "available": False,
             "strategy_id": CRITERIA_STRATEGY_ID,
             "run_id": None,
             "run_date": None,
             "matched_tickers": [],
+            "ticker_details": {},
         }
         if not self.history_service.is_configured():
             return payload
@@ -172,17 +167,34 @@ class EarningsCalendarService:
         if not isinstance(detail, dict):
             return payload
         tickers: list[str] = []
+        ticker_details: dict[str, dict[str, Any]] = {}
         for hit in detail.get("hits", []):
             if not isinstance(hit, dict):
                 continue
             ticker = str(hit.get("ticker") or "").strip().upper()
             if ticker:
-                tickers.append(ticker)
-        payload["available"] = bool(tickers)
+                raw_payload = hit.get("hit_payload_json")
+                payload_json = raw_payload if isinstance(raw_payload, dict) else {}
+                criteria = payload_json.get("criteria") if isinstance(payload_json.get("criteria"), dict) else {}
+                passed = bool(hit.get("passed"))
+                matched = [key for key, value in criteria.items() if value]
+                not_matched = [key for key, value in criteria.items() if not value]
+                ticker_details[ticker] = {
+                    "passed": passed,
+                    "criteria": criteria,
+                    "matched_criteria": matched,
+                    "not_matched_criteria": not_matched,
+                    "pass_mode": payload_json.get("pass_mode") or "",
+                    "error": payload_json.get("error") or "",
+                }
+                if passed:
+                    tickers.append(ticker)
+        payload["available"] = bool(ticker_details)
         payload["run_id"] = run_id
         run_date = latest.get("run_date")
         payload["run_date"] = run_date.isoformat() if hasattr(run_date, "isoformat") else str(run_date or "")
         payload["matched_tickers"] = sorted(set(tickers))
+        payload["ticker_details"] = ticker_details
         return payload
 
 

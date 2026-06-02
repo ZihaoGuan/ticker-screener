@@ -42,6 +42,20 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
             {[entry.sector, entry.industry].filter(Boolean).join(" · ") || "No sector/industry"}
           </p>
           {entry.summary ? <p className="panel-copy">{entry.summary}</p> : null}
+          {entry.criteria ? (
+            <>
+              <p className="panel-copy">
+                Criteria {entry.criteria.passed ? "PASS" : "FAIL"}
+                {entry.criteria.pass_mode ? ` (${entry.criteria.pass_mode})` : ""}
+              </p>
+              <p className="panel-copy">
+                Matched: {entry.criteria.matched_criteria.length > 0 ? entry.criteria.matched_criteria.join(", ") : "-"}
+              </p>
+              <p className="panel-copy">
+                Not pass: {entry.criteria.not_matched_criteria.length > 0 ? entry.criteria.not_matched_criteria.join(", ") : "-"}
+              </p>
+            </>
+          ) : null}
         </article>
       ))}
     </div>

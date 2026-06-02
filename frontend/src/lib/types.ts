@@ -636,6 +636,14 @@ export type EarningsCalendarEntry = {
   sector?: string | null;
   industry?: string | null;
   exchange?: string | null;
+  criteria?: {
+    passed: boolean;
+    criteria: Record<string, boolean>;
+    matched_criteria: string[];
+    not_matched_criteria: string[];
+    pass_mode?: string | null;
+    error?: string | null;
+  } | null;
 };
 
 export type EarningsCalendarDay = {
