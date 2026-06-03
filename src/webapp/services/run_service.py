@@ -569,57 +569,7 @@ class RunService:
             normalized["job_run_id"] = job_run_id
         job_id = uuid.uuid4().hex[:12]
         started_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
-        command = [sys.executable, action.script_path]
-        command.extend(action.extra_args)
-        if action.supports_limit and normalized.get("limit") is not None:
-            command.extend(["--limit", str(normalized["limit"])])
-        if normalized.get("tickers"):
-            command.append("--tickers")
-            command.extend(normalized["tickers"])
-        if normalized.get("date_label"):
-            command.extend(["--date-label", str(normalized["date_label"])])
-        if normalized.get("as_of_date"):
-            command.extend(["--as-of-date", str(normalized["as_of_date"])])
-        if normalized.get("source"):
-            command.extend(["--source", str(normalized["source"])])
-        if normalized.get("reference_date"):
-            command.extend(["--reference-date", str(normalized["reference_date"])])
-        if normalized.get("start_date"):
-            command.extend(["--start-date", str(normalized["start_date"])])
-        if normalized.get("end_date"):
-            command.extend(["--end-date", str(normalized["end_date"])])
-        if normalized.get("chunk_size") is not None:
-            command.extend(["--chunk-size", str(normalized["chunk_size"])])
-        if normalized.get("strategy_ids_json"):
-            command.extend(["--strategy-ids-json", str(normalized["strategy_ids_json"])])
-        if normalized.get("overwrite_policy"):
-            command.extend(["--overwrite-policy", str(normalized["overwrite_policy"])])
-        if normalized.get("scope_json"):
-            command.extend(["--scope-json", str(normalized["scope_json"])])
-        if normalized.get("entry_rule_json"):
-            command.extend(["--entry-rule-json", str(normalized["entry_rule_json"])])
-        if normalized.get("date_range_json"):
-            command.extend(["--date-range-json", str(normalized["date_range_json"])])
-        if normalized.get("exit_rules_json"):
-            command.extend(["--exit-rules-json", str(normalized["exit_rules_json"])])
-        if normalized.get("position_rules_json"):
-            command.extend(["--position-rules-json", str(normalized["position_rules_json"])])
-        if normalized.get("signal_cache_policy"):
-            command.extend(["--signal-cache-policy", str(normalized["signal_cache_policy"])])
-        if normalized.get("market_data_mode"):
-            command.extend(["--market-data-mode", str(normalized["market_data_mode"])])
-        if action_id == "screener_history_batch" and normalized.get("market_data_source"):
-            command.extend(["--market-data-source", str(normalized["market_data_source"])])
-        if action_id in {"screener_history_batch", "backtest_v1"} and normalized.get("job_run_id") is not None:
-            command.extend(["--job-run-id", str(normalized["job_run_id"])])
-        if normalized.get("filter_precedence"):
-            command.extend(["--filter-precedence", str(normalized["filter_precedence"])])
-        self._append_multi_args(command, "--include-sectors", normalized.get("include_sectors"))
-        self._append_multi_args(command, "--exclude-sectors", normalized.get("exclude_sectors"))
-        self._append_multi_args(command, "--include-industries", normalized.get("include_industries"))
-        self._append_multi_args(command, "--exclude-industries", normalized.get("exclude_industries"))
-        self._append_multi_args(command, "--include-themes", normalized.get("include_themes"))
-        self._append_multi_args(command, "--exclude-themes", normalized.get("exclude_themes"))
+        command = self.build_command(action_id, normalized, normalized=True)
 
         job = {
             "job_id": job_id,
@@ -657,6 +607,65 @@ class RunService:
         thread = threading.Thread(target=self._run_job, args=(job_id, command, env), daemon=True)
         thread.start()
         return job_id
+
+    def build_command(self, action_id: str, options: dict[str, Any] | None = None, *, normalized: bool = False) -> list[str]:
+        action = self._actions.get(action_id)
+        if action is None:
+            raise ValueError(f"Unknown run action: {action_id}")
+
+        normalized_options = dict(options or {}) if normalized else self._normalize_options(action, options or {})
+        command = [sys.executable, action.script_path]
+        command.extend(action.extra_args)
+        if action.supports_limit and normalized_options.get("limit") is not None:
+            command.extend(["--limit", str(normalized_options["limit"])])
+        if normalized_options.get("tickers"):
+            command.append("--tickers")
+            command.extend(normalized_options["tickers"])
+        if normalized_options.get("date_label"):
+            command.extend(["--date-label", str(normalized_options["date_label"])])
+        if normalized_options.get("as_of_date"):
+            command.extend(["--as-of-date", str(normalized_options["as_of_date"])])
+        if normalized_options.get("source"):
+            command.extend(["--source", str(normalized_options["source"])])
+        if normalized_options.get("reference_date"):
+            command.extend(["--reference-date", str(normalized_options["reference_date"])])
+        if normalized_options.get("start_date"):
+            command.extend(["--start-date", str(normalized_options["start_date"])])
+        if normalized_options.get("end_date"):
+            command.extend(["--end-date", str(normalized_options["end_date"])])
+        if normalized_options.get("chunk_size") is not None:
+            command.extend(["--chunk-size", str(normalized_options["chunk_size"])])
+        if normalized_options.get("strategy_ids_json"):
+            command.extend(["--strategy-ids-json", str(normalized_options["strategy_ids_json"])])
+        if normalized_options.get("overwrite_policy"):
+            command.extend(["--overwrite-policy", str(normalized_options["overwrite_policy"])])
+        if normalized_options.get("scope_json"):
+            command.extend(["--scope-json", str(normalized_options["scope_json"])])
+        if normalized_options.get("entry_rule_json"):
+            command.extend(["--entry-rule-json", str(normalized_options["entry_rule_json"])])
+        if normalized_options.get("date_range_json"):
+            command.extend(["--date-range-json", str(normalized_options["date_range_json"])])
+        if normalized_options.get("exit_rules_json"):
+            command.extend(["--exit-rules-json", str(normalized_options["exit_rules_json"])])
+        if normalized_options.get("position_rules_json"):
+            command.extend(["--position-rules-json", str(normalized_options["position_rules_json"])])
+        if normalized_options.get("signal_cache_policy"):
+            command.extend(["--signal-cache-policy", str(normalized_options["signal_cache_policy"])])
+        if normalized_options.get("market_data_mode"):
+            command.extend(["--market-data-mode", str(normalized_options["market_data_mode"])])
+        if action_id == "screener_history_batch" and normalized_options.get("market_data_source"):
+            command.extend(["--market-data-source", str(normalized_options["market_data_source"])])
+        if action_id in {"screener_history_batch", "backtest_v1"} and normalized_options.get("job_run_id") is not None:
+            command.extend(["--job-run-id", str(normalized_options["job_run_id"])])
+        if normalized_options.get("filter_precedence"):
+            command.extend(["--filter-precedence", str(normalized_options["filter_precedence"])])
+        self._append_multi_args(command, "--include-sectors", normalized_options.get("include_sectors"))
+        self._append_multi_args(command, "--exclude-sectors", normalized_options.get("exclude_sectors"))
+        self._append_multi_args(command, "--include-industries", normalized_options.get("include_industries"))
+        self._append_multi_args(command, "--exclude-industries", normalized_options.get("exclude_industries"))
+        self._append_multi_args(command, "--include-themes", normalized_options.get("include_themes"))
+        self._append_multi_args(command, "--exclude-themes", normalized_options.get("exclude_themes"))
+        return command
 
     def _normalize_options(self, action: RunAction, options: dict[str, Any]) -> dict[str, Any]:
         normalized: dict[str, Any] = {}

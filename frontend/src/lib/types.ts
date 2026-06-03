@@ -621,11 +621,23 @@ export type ScheduledJobConfig = {
   cron_expr: string;
   cron_tz: string;
   enabled: boolean;
+  options: Record<string, unknown>;
 };
 
 export type ScheduledJobConfigResponse = {
   jobs: ScheduledJobConfig[];
-  available_actions: Array<{ id: string; label: string }>;
+  available_actions: Array<{
+    id: string;
+    label: string;
+    fields: Array<{
+      id: string;
+      label: string;
+      type: "text" | "number" | "date" | "select" | "multiselect";
+      placeholder?: string | null;
+      help_text?: string | null;
+      options: Array<{ value: string; label: string }>;
+    }>;
+  }>;
   common_timezones: string[];
   scheduler_command: string;
 };

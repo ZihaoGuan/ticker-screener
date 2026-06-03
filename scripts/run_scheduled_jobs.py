@@ -92,6 +92,24 @@ def _artifact_path_for_job(job: dict[str, object], *, local_now: dt.datetime) ->
     return ""
 
 
+def _resolve_template_value(value: object, *, local_now: dt.datetime) -> object:
+    if isinstance(value, str):
+        replacements = {
+            "{{local_date}}": local_now.date().isoformat(),
+            "{{local_date_plus_7}}": (local_now.date() + dt.timedelta(days=7)).isoformat(),
+            "{{local_date_plus_14}}": (local_now.date() + dt.timedelta(days=14)).isoformat(),
+        }
+        resolved = value
+        for token, replacement in replacements.items():
+            resolved = resolved.replace(token, replacement)
+        return resolved
+    if isinstance(value, list):
+        return [_resolve_template_value(item, local_now=local_now) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _resolve_template_value(item, local_now=local_now) for key, item in value.items()}
+    return value
+
+
 def main() -> int:
     run_service = RunService(project_root=PROJECT_ROOT)
     schedule_service = ScheduledJobService(project_root=PROJECT_ROOT, run_service=run_service)
@@ -122,6 +140,8 @@ def main() -> int:
         artifact_path = _artifact_path_for_job(job, local_now=local_now)
         if artifact_path:
             env["TICKER_SCREENER_STATUS_ARTIFACT"] = artifact_path
+        resolved_options = _resolve_template_value(job.get("options") or {}, local_now=local_now)
+        command_tail = run_service.build_command(action_id, resolved_options if isinstance(resolved_options, dict) else {})
         command = [
             str(WRAPPER_SCRIPT),
             str(job["job_id"]),
@@ -132,7 +152,7 @@ def main() -> int:
             "-T",
             "web",
             "python",
-            action.script_path,
+            *command_tail[1:],
         ]
         print(f"running scheduled job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")
         subprocess.run(command, cwd=DEPLOY_DIR, env=env, check=False)

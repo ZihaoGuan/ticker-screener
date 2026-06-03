@@ -47,6 +47,7 @@ class ScheduledJobService:
                     "cron_expr": str(item.get("cron_expr") or "").strip(),
                     "cron_tz": str(item.get("cron_tz") or "America/New_York").strip() or "America/New_York",
                     "enabled": bool(item.get("enabled", True)),
+                    "options": item.get("options") if isinstance(item.get("options"), dict) else {},
                 }
             )
         return [item for item in normalized if item["job_id"] and item["action_id"] and item["cron_expr"]]
@@ -60,6 +61,7 @@ class ScheduledJobService:
         cron_expr: str,
         cron_tz: str,
         enabled: bool,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         clean_job_id = _normalize_job_id(job_id)
         clean_job_label = str(job_label or "").strip()
@@ -73,6 +75,11 @@ class ScheduledJobService:
         if clean_action_id not in {item["id"] for item in self._available_actions()}:
             raise ValueError(f"Unknown action_id: {clean_action_id}")
         _validate_cron_expr(clean_cron_expr)
+        clean_options = dict(options or {})
+        action = self.run_service._actions.get(clean_action_id)
+        if action is None:
+            raise ValueError(f"Unknown action_id: {clean_action_id}")
+        self.run_service._normalize_options(action, clean_options)
 
         payload = self._load_jobs()
         jobs = [item for item in payload.get("jobs", []) if isinstance(item, dict)]
@@ -83,6 +90,7 @@ class ScheduledJobService:
             "cron_expr": clean_cron_expr,
             "cron_tz": clean_cron_tz,
             "enabled": bool(enabled),
+            "options": clean_options,
         }
         replaced = False
         next_jobs: list[dict[str, Any]] = []
@@ -108,9 +116,9 @@ class ScheduledJobService:
         payload["jobs"] = next_jobs
         self._write_jobs(payload)
 
-    def _available_actions(self) -> list[dict[str, str]]:
+    def _available_actions(self) -> list[dict[str, Any]]:
         return [
-            {"id": item["id"], "label": item["label"]}
+            {"id": item["id"], "label": item["label"], "fields": item.get("fields", [])}
             for item in self.run_service.list_actions()
             if str(item.get("id") or "") not in {"sync_postgres_market_data"}
         ]

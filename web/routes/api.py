@@ -723,6 +723,7 @@ def upsert_schedule_config(
             cron_expr=str(request_payload.get("cron_expr") or ""),
             cron_tz=str(request_payload.get("cron_tz") or ""),
             enabled=bool(request_payload.get("enabled", True)),
+            options=request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {},
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

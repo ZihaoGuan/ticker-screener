@@ -66,7 +66,20 @@ export function AdminPage() {
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJobSummary[]>([]);
   const [isLoadingScheduledJobs, setIsLoadingScheduledJobs] = useState(true);
   const [scheduledConfigs, setScheduledConfigs] = useState<ScheduledJobConfig[]>([]);
-  const [availableScheduledActions, setAvailableScheduledActions] = useState<Array<{ id: string; label: string }>>([]);
+  const [availableScheduledActions, setAvailableScheduledActions] = useState<
+    Array<{
+      id: string;
+      label: string;
+      fields: Array<{
+        id: string;
+        label: string;
+        type: "text" | "number" | "date" | "select" | "multiselect";
+        placeholder?: string | null;
+        help_text?: string | null;
+        options: Array<{ value: string; label: string }>;
+      }>;
+    }>
+  >([]);
   const [commonTimezones, setCommonTimezones] = useState<string[]>([]);
   const [schedulerCommand, setSchedulerCommand] = useState("");
   const [isLoadingScheduleConfig, setIsLoadingScheduleConfig] = useState(true);
@@ -76,6 +89,7 @@ export function AdminPage() {
   const [scheduleCronExpr, setScheduleCronExpr] = useState("30 16 * * 1-5");
   const [scheduleCronTz, setScheduleCronTz] = useState("America/New_York");
   const [scheduleEnabled, setScheduleEnabled] = useState(true);
+  const [scheduleOptionsJson, setScheduleOptionsJson] = useState("{}");
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
 
   const loadAdmin = (start: string) => {
@@ -372,6 +386,7 @@ export function AdminPage() {
     setScheduleCronExpr("30 16 * * 1-5");
     setScheduleCronTz(commonTimezones[0] ?? "America/New_York");
     setScheduleEnabled(true);
+    setScheduleOptionsJson("{}");
   };
 
   const handleSaveSchedule = async (event: FormEvent<HTMLFormElement>) => {
@@ -379,6 +394,7 @@ export function AdminPage() {
     setIsSavingSchedule(true);
     setNotice("");
     try {
+      const parsedOptions = JSON.parse(scheduleOptionsJson || "{}") as Record<string, unknown>;
       await fetchJson<{ ok: boolean }>("/api/admin/schedules", {
         method: "POST",
         body: JSON.stringify({
@@ -388,6 +404,7 @@ export function AdminPage() {
           cron_expr: scheduleCronExpr,
           cron_tz: scheduleCronTz,
           enabled: scheduleEnabled,
+          options: parsedOptions,
         }),
       });
       setNotice("Scheduled job saved.");
@@ -407,6 +424,7 @@ export function AdminPage() {
     setScheduleCronExpr(job.cron_expr);
     setScheduleCronTz(job.cron_tz);
     setScheduleEnabled(job.enabled);
+    setScheduleOptionsJson(JSON.stringify(job.options ?? {}, null, 2));
   };
 
   const handleDeleteSchedule = async (jobId: string) => {
@@ -432,6 +450,11 @@ export function AdminPage() {
     }
     return <span className="status-pill status-unknown">{status || "unknown"}</span>;
   };
+
+  const selectedScheduledAction = useMemo(
+    () => availableScheduledActions.find((item) => item.id === scheduleActionId) ?? null,
+    [availableScheduledActions, scheduleActionId],
+  );
 
   return (
     <div className="page-grid">
@@ -724,6 +747,15 @@ export function AdminPage() {
                   <option value="false">disabled</option>
                 </select>
               </label>
+              <label className="field" style={{ gridColumn: "1 / -1" }}>
+                <span>Action Options JSON</span>
+                <textarea
+                  value={scheduleOptionsJson}
+                  onChange={(event) => setScheduleOptionsJson(event.target.value)}
+                  rows={8}
+                  placeholder='{"reference_date":"{{local_date}}"}'
+                />
+              </label>
             </div>
             <div className="run-action-footer">
               <button className="primary-button" type="submit" disabled={isSavingSchedule || isLoadingScheduleConfig}>
@@ -734,6 +766,14 @@ export function AdminPage() {
               </button>
               <span className="panel-copy">Host cron should run scheduler command every 5 minutes: {schedulerCommand || "-"}</span>
             </div>
+            <p className="panel-copy">
+              Supported schedule date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
+            </p>
+            {selectedScheduledAction?.fields?.length ? (
+              <p className="panel-copy">
+                Action fields: {selectedScheduledAction.fields.map((field) => field.id).join(", ")}
+              </p>
+            ) : null}
           </form>
           {isLoadingScheduleConfig ? <LoadingBlock label="Loading scheduler config…" compact /> : null}
           <div className="data-table-responsive">
@@ -744,6 +784,7 @@ export function AdminPage() {
                   <th>Screener</th>
                   <th>Cron</th>
                   <th>TZ</th>
+                  <th>Options</th>
                   <th>Enabled</th>
                   <th>Actions</th>
                 </tr>
@@ -751,7 +792,7 @@ export function AdminPage() {
               <tbody>
                 {scheduledConfigs.length === 0 ? (
                   <tr>
-                    <td colSpan={6}>{isLoadingScheduleConfig ? "Loading schedules..." : "No scheduled jobs configured yet."}</td>
+                    <td colSpan={7}>{isLoadingScheduleConfig ? "Loading schedules..." : "No scheduled jobs configured yet."}</td>
                   </tr>
                 ) : (
                   scheduledConfigs.map((job) => (
@@ -765,6 +806,9 @@ export function AdminPage() {
                       <td data-label="Screener">{job.action_id}</td>
                       <td data-label="Cron">{job.cron_expr}</td>
                       <td data-label="TZ">{job.cron_tz}</td>
+                      <td data-label="Options">
+                        <code>{JSON.stringify(job.options ?? {})}</code>
+                      </td>
                       <td data-label="Enabled">{job.enabled ? "Yes" : "No"}</td>
                       <td data-label="Actions">
                         <div className="button-row">
