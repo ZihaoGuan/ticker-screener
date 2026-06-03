@@ -10,6 +10,9 @@ from src.webapp.access_control import (
     CAP_RUN_SCREENERS,
     CAP_SYNC_HISTORY,
     Principal,
+    ROLE_ADMIN,
+    ROLE_PREMIUM,
+    RoleName,
     anonymous_principal,
 )
 from src.webapp.config import PROJECT_ROOT, load_webapp_config
@@ -147,7 +150,24 @@ def require_capability(capability: str):
     return dependency
 
 
+def require_roles(*roles: RoleName):
+    allowed_roles = set(roles)
+
+    def dependency(principal: Principal = Depends(get_current_principal)) -> Principal:
+        if not principal.authenticated:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+        if principal.role not in allowed_roles:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to perform this action.")
+        return principal
+
+    return dependency
+
+
 def require_run_screeners(principal: Principal = Depends(require_capability(CAP_RUN_SCREENERS))) -> Principal:
+    return principal
+
+
+def require_member_access(principal: Principal = Depends(require_roles(ROLE_PREMIUM, ROLE_ADMIN))) -> Principal:
     return principal
 
 

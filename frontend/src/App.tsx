@@ -1,6 +1,9 @@
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { RoleRoute } from "./auth/RoleRoute";
+import { useAuth } from "./auth/AuthContext";
+import { LoadingBlock } from "./components/LoadingBlock";
 import { AdminPage } from "./pages/AdminPage";
 import { BacktestsPage } from "./pages/BacktestsPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -18,9 +21,16 @@ export default function App() {
   return (
     <AppLayout>
       <Routes>
-        <Route path="/" element={<DashboardPage />} />
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/guide" element={<GuidePage />} />
+        <Route
+          path="/guide"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <GuidePage />
+            </RoleRoute>
+          }
+        />
         <Route path="/charts" element={<ChartsPage />} />
         <Route path="/earnings" element={<EarningsPage />} />
         <Route
@@ -31,14 +41,56 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="/watchlists/weekly" element={<WeeklyWatchlistPage />} />
-        <Route path="/watchlists" element={<WatchlistsPage />} />
-        <Route path="/rotation" element={<Navigate to="/rotation/sector" replace />} />
-        <Route path="/rotation/:universe" element={<RrgPage />} />
+        <Route
+          path="/watchlists/weekly"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <WeeklyWatchlistPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/watchlists"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <WatchlistsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/rotation"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <Navigate to="/rotation/sector" replace />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/rotation/:universe"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <RrgPage />
+            </RoleRoute>
+          }
+        />
         <Route path="/rrg" element={<Navigate to="/rotation/sector" replace />} />
         <Route path="/rrg/:universe" element={<LegacyRrgRedirect />} />
-        <Route path="/overlap" element={<OverlapPage />} />
-        <Route path="/backtests" element={<BacktestsPage />} />
+        <Route
+          path="/overlap"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <OverlapPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/backtests"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <BacktestsPage />
+            </RoleRoute>
+          }
+        />
         <Route
           path="/admin"
           element={
@@ -51,6 +103,18 @@ export default function App() {
       </Routes>
     </AppLayout>
   );
+}
+
+function HomeRoute() {
+  const auth = useAuth();
+
+  if (auth.isLoading) {
+    return <LoadingBlock label="Checking access…" />;
+  }
+  if (auth.role === "visitor") {
+    return <Navigate to="/charts" replace />;
+  }
+  return <DashboardPage />;
 }
 
 function LegacyRrgRedirect() {

@@ -1,17 +1,17 @@
 import { useEffect, useState, type PropsWithChildren } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import type { CapabilityName } from "../lib/types";
+import type { CapabilityName, RoleName } from "../lib/types";
 
 const navItems = [
-  { to: "/", label: "Dashboard", icon: "▦" },
-  { to: "/guide", label: "Guide", icon: "◫" },
+  { to: "/", label: "Dashboard", icon: "▦", roles: ["premium", "admin"] as RoleName[] },
+  { to: "/guide", label: "Guide", icon: "◫", roles: ["premium", "admin"] as RoleName[] },
   { to: "/charts", label: "Charts", icon: "◍" },
   { to: "/earnings", label: "Earnings", icon: "◒" },
-  { to: "/watchlists", label: "Watchlists", icon: "◌" },
-  { to: "/rotation/sector", label: "Rotation", icon: "◎" },
-  { to: "/overlap", label: "Overlap", icon: "◈" },
-  { to: "/backtests", label: "Backtests", icon: "▥" },
+  { to: "/watchlists", label: "Watchlists", icon: "◌", roles: ["premium", "admin"] as RoleName[] },
+  { to: "/rotation/sector", label: "Rotation", icon: "◎", roles: ["premium", "admin"] as RoleName[] },
+  { to: "/overlap", label: "Overlap", icon: "◈", roles: ["premium", "admin"] as RoleName[] },
+  { to: "/backtests", label: "Backtests", icon: "▥", roles: ["premium", "admin"] as RoleName[] },
   { to: "/runs", label: "Runs", icon: "◉", capability: "run_screeners" as CapabilityName },
   { to: "/admin", label: "Admin", icon: "◔", capability: "manage_exclusions" as CapabilityName },
 ];
@@ -26,7 +26,9 @@ export function AppLayout({ children }: PropsWithChildren) {
     setIsMobileNavOpen(false);
   }, [location.pathname]);
 
-  const visibleNavItems = navItems.filter((item) => !item.capability || auth.hasCapability(item.capability));
+  const visibleNavItems = navItems.filter(
+    (item) => (!item.roles || item.roles.includes(auth.role)) && (!item.capability || auth.hasCapability(item.capability)),
+  );
 
   const handleLogout = async () => {
     await auth.logout();

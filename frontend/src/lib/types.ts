@@ -759,6 +759,7 @@ export type EarningsCalendarResponse = {
   week_start: string;
   week_end: string;
   reference_date: string;
+  week_offset: number;
   days: EarningsCalendarDay[];
   filters: {
     exclude_sectors: string[];

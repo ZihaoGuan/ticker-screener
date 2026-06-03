@@ -73,7 +73,7 @@ class EarningsCalendarServiceTests(unittest.TestCase):
         ]
 
         with patch("src.webapp.services.earnings_calendar_service.load_configured_cookstock", return_value=_FakeCookstock(fake_events)):
-            payload = self.service.get_next_week_calendar(reference_date=dt.date(2026, 6, 2))
+            payload = self.service.get_next_week_calendar(reference_date=dt.date(2026, 6, 2), week_offset=1)
 
         entry = payload["days"][1]["before_market"][0]
         self.assertEqual(entry["ticker"], "AAA")
@@ -81,6 +81,25 @@ class EarningsCalendarServiceTests(unittest.TestCase):
         self.assertTrue(entry["criteria"]["criteria"][IMPLIED_MOVE_CRITERIA_KEY])
         self.assertTrue(entry["criteria"]["passed"])
         self.assertEqual(payload["criteria_filter"]["matched_count"], 1)
+
+    def test_week_offset_zero_defaults_to_current_week_and_after_hours_maps_to_after_market(self) -> None:
+        fake_events = [
+            {
+                "ticker": "AAA",
+                "event_date": dt.date(2026, 6, 1),
+                "summary": "AAA Example Corp. (After-hours) earnings",
+            }
+        ]
+
+        with patch("src.webapp.services.earnings_calendar_service.load_configured_cookstock", return_value=_FakeCookstock(fake_events)):
+            payload = self.service.get_next_week_calendar(reference_date=dt.date(2026, 6, 3), week_offset=0)
+
+        self.assertEqual(payload["week_start"], "2026-05-31")
+        self.assertEqual(payload["week_end"], "2026-06-06")
+        self.assertEqual(payload["week_offset"], 0)
+        entry = payload["days"][1]["after_market"][0]
+        self.assertEqual(entry["ticker"], "AAA")
+        self.assertEqual(entry["session"], "after_market")
 
     def test_only_criteria_filters_out_entry_when_persisted_iv_rule_fails(self) -> None:
         fake_events = [
@@ -123,7 +142,7 @@ class EarningsCalendarServiceTests(unittest.TestCase):
         }
 
         with patch("src.webapp.services.earnings_calendar_service.load_configured_cookstock", return_value=_FakeCookstock(fake_events)):
-            payload = self.service.get_next_week_calendar(reference_date=dt.date(2026, 6, 2), only_criteria=True)
+            payload = self.service.get_next_week_calendar(reference_date=dt.date(2026, 6, 2), week_offset=1, only_criteria=True)
 
         self.assertEqual(payload["days"][1]["before_market"], [])
         self.assertEqual(payload["criteria_filter"]["matched_count"], 0)

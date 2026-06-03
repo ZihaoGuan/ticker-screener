@@ -98,9 +98,9 @@ def _parse_session_from_summary(summary: str | None) -> str | None:
     if not summary:
         return None
     normalized = summary.strip().lower()
-    if any(token in normalized for token in ("after close", "after market", "post-market", "amc", "盘后")):
+    if any(token in normalized for token in ("after close", "after market", "after-hours", "after hours", "post-market", "post market", "amc", "盘后")):
         return "after_market"
-    if any(token in normalized for token in ("before open", "before market", "pre-market", "bmo", "盘前")):
+    if any(token in normalized for token in ("before open", "before market", "pre-market", "pre market", "bmo", "盘前")):
         return "before_market"
     if any(token in normalized for token in ("during market", "盘中")):
         return "during_market"

@@ -14,14 +14,19 @@ const CRITERIA_LABELS: Array<{ key: string; label: string; shortLabel: string }>
 ];
 
 const BUCKET_KEYS = ["before_market", "after_market", "during_market", "unknown"] as const;
-const EARNINGS_CALENDAR_SESSION_CACHE_KEY = "earnings-calendar-cache-v1";
+const EARNINGS_CALENDAR_SESSION_CACHE_KEY_PREFIX = "earnings-calendar-cache-v2";
+const WEEK_OPTIONS = [
+  { value: 0, label: "This Week" },
+  { value: 1, label: "Next Week" },
+  { value: 2, label: "Week After" },
+] as const;
 
 function toggleSelection(current: string[], value: string) {
   return current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
 }
 
 function formatRange(start: string | undefined, end: string | undefined) {
-  if (!start || !end) return "Next week";
+  if (!start || !end) return "Selected week";
   return `${formatMonthDay(start)} - ${formatMonthDay(end)}`;
 }
 
@@ -154,6 +159,7 @@ export function EarningsPage() {
   const [payload, setPayload] = useState<EarningsCalendarResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [weekOffset, setWeekOffset] = useState(0);
   const [excludedSectors, setExcludedSectors] = useState<string[]>([]);
   const [excludedIndustries, setExcludedIndustries] = useState<string[]>([]);
   const [onlyCriteria, setOnlyCriteria] = useState(false);
@@ -162,9 +168,10 @@ export function EarningsPage() {
   useEffect(() => {
     setIsLoading(true);
     setNotice("");
+    const cacheKey = buildEarningsCalendarCacheKey(weekOffset);
     if (refreshNonce === 0) {
       try {
-        const cached = sessionStorage.getItem(EARNINGS_CALENDAR_SESSION_CACHE_KEY);
+        const cached = sessionStorage.getItem(cacheKey);
         if (cached) {
           const parsed = JSON.parse(cached) as EarningsCalendarResponse;
           setPayload(parsed);
@@ -172,20 +179,20 @@ export function EarningsPage() {
           return;
         }
       } catch {
-        sessionStorage.removeItem(EARNINGS_CALENDAR_SESSION_CACHE_KEY);
+        sessionStorage.removeItem(cacheKey);
       }
     }
-    void fetchJson<EarningsCalendarResponse>("/api/earnings-calendar")
+    void fetchJson<EarningsCalendarResponse>(`/api/earnings-calendar?weekOffset=${weekOffset}`)
       .then((response) => {
         setPayload(response);
-        sessionStorage.setItem(EARNINGS_CALENDAR_SESSION_CACHE_KEY, JSON.stringify(response));
+        sessionStorage.setItem(cacheKey, JSON.stringify(response));
       })
       .catch((error) => {
         setPayload(null);
-        setNotice(error instanceof Error ? error.message : "Failed to load next-week earnings calendar.");
+        setNotice(error instanceof Error ? error.message : "Failed to load earnings calendar.");
       })
       .finally(() => setIsLoading(false));
-  }, [refreshNonce]);
+  }, [refreshNonce, weekOffset]);
 
   const days = useMemo(() => {
     if (!payload) {
@@ -213,8 +220,8 @@ export function EarningsPage() {
       <section className="earnings-board-hero">
         <div className="earnings-board-hero-copy">
           <span className="earnings-board-kicker">Operational Mode</span>
-          <h1>Next Week&apos;s Earnings Calendar</h1>
-          <p className="panel-copy">Command-board view for next week&apos;s earnings, grouped by trading session and tuned for fast weekly scanning.</p>
+          <h1>Earnings Calendar</h1>
+          <p className="panel-copy">Command-board view for this week, next week, or the week after, grouped by trading session and tuned for fast weekly scanning.</p>
         </div>
         <div className="earnings-board-metrics">
           <div className="earnings-metric">
@@ -244,6 +251,16 @@ export function EarningsPage() {
         <div className="earnings-filter-console-row">
           <div className="earnings-filter-toggle-group">
             <span className="eyebrow">Filters</span>
+            <label className="field earnings-filter-field">
+              <span>Active Week</span>
+              <select value={weekOffset} onChange={(event) => setWeekOffset(Number.parseInt(event.target.value, 10) || 0)}>
+                {WEEK_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="earnings-toggle">
               <input type="checkbox" checked={onlyCriteria} onChange={() => setOnlyCriteria((current) => !current)} />
               <span className="earnings-toggle-track" aria-hidden="true">
@@ -255,7 +272,7 @@ export function EarningsPage() {
               type="button"
               className="ghost-button"
               onClick={() => {
-                sessionStorage.removeItem(EARNINGS_CALENDAR_SESSION_CACHE_KEY);
+                sessionStorage.removeItem(buildEarningsCalendarCacheKey(weekOffset));
                 setRefreshNonce((current) => current + 1);
               }}
             >
@@ -317,7 +334,7 @@ export function EarningsPage() {
               : "Criteria filter is on, but no persisted criteria run is available yet."}
           </p>
         ) : null}
-        {payload ? <p className="panel-copy earnings-console-note">Filter toggles use session-cached calendar data on this device. Refresh to pull newest server data.</p> : null}
+        {payload ? <p className="panel-copy earnings-console-note">Filter toggles use session-cached calendar data on this device per selected week. Refresh to pull newest server data.</p> : null}
         {notice ? <p className="panel-copy earnings-console-note">{notice}</p> : null}
       </section>
 
@@ -326,8 +343,8 @@ export function EarningsPage() {
           <h2>Calendar</h2>
           <span className="eyebrow">Grouped by earnings session</span>
         </div>
-        {isLoading ? <LoadingBlock label="Loading next-week earnings calendar…" /> : null}
-        {!isLoading && days.length === 0 ? <p className="panel-copy">No earnings events returned for next week.</p> : null}
+        {isLoading ? <LoadingBlock label="Loading earnings calendar…" /> : null}
+        {!isLoading && days.length === 0 ? <p className="panel-copy">No earnings events returned for selected week.</p> : null}
         {!isLoading && days.length > 0 ? (
           <div className="earnings-calendar-grid earnings-command-grid">
             {days.map((day) => (
@@ -361,4 +378,8 @@ export function EarningsPage() {
       </section>
     </div>
   );
+}
+
+function buildEarningsCalendarCacheKey(weekOffset: number) {
+  return `${EARNINGS_CALENDAR_SESSION_CACHE_KEY_PREFIX}:${weekOffset}`;
 }

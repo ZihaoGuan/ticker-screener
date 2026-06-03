@@ -38,6 +38,7 @@ from web.dependencies import (
     get_screener_history_service,
     get_user_admin_service,
     get_watchlist_service,
+    require_member_access,
     require_manage_exclusions,
     require_manage_users,
     require_run_backtests,
@@ -81,13 +82,17 @@ def _record_audit(
 
 
 @router.get("/dashboard", response_class=JSONResponse)
-def dashboard_data(service: DashboardService = Depends(get_dashboard_service)) -> JSONResponse:
+def dashboard_data(
+    service: DashboardService = Depends(get_dashboard_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
     return JSONResponse(service.get_dashboard_context())
 
 
 @router.get("/earnings-calendar", response_class=JSONResponse)
 def earnings_calendar_data(
     reference_date: dt.date | None = Query(default=None, alias="referenceDate"),
+    week_offset: int = Query(default=0, alias="weekOffset", ge=0, le=2),
     exclude_sectors: list[str] = Query(default=[], alias="excludeSector"),
     exclude_industries: list[str] = Query(default=[], alias="excludeIndustry"),
     only_criteria: bool = Query(default=False, alias="onlyCriteria"),
@@ -96,6 +101,7 @@ def earnings_calendar_data(
     return JSONResponse(
         service.get_next_week_calendar(
             reference_date=reference_date,
+            week_offset=week_offset,
             exclude_sectors=exclude_sectors,
             exclude_industries=exclude_industries,
             only_criteria=only_criteria,
@@ -322,6 +328,7 @@ def screener_runs_data(
     offset: int = Query(default=0, ge=0),
     service: ScreenerHistoryService = Depends(get_screener_history_service),
     run_service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     start_date = dt.date.fromisoformat(from_date) if from_date else None
     end_date = dt.date.fromisoformat(to_date) if to_date else None
@@ -355,6 +362,7 @@ def screener_runs_cache_calendar(
     strategy_ids_raw: list[str] | None = Query(default=None, alias="strategyIds"),
     include_deleted: bool = Query(default=False, alias="includeDeleted"),
     service: ScreenerHistoryService = Depends(get_screener_history_service),
+    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     try:
         start_date = dt.date.fromisoformat(from_date)
@@ -395,6 +403,7 @@ def screener_run_detail(
     hit_limit: int = Query(default=200, alias="hitLimit", ge=1, le=1000),
     hit_offset: int = Query(default=0, alias="hitOffset", ge=0),
     service: ScreenerHistoryService = Depends(get_screener_history_service),
+    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     payload = service.get_run(run_id, include_hits=include_hits, hit_limit=hit_limit, hit_offset=hit_offset)
     if payload is None:
@@ -472,7 +481,10 @@ def launch_screener_history_batch(
 
 
 @router.get("/watchlists", response_class=JSONResponse)
-def watchlists_data(service: WatchlistService = Depends(get_watchlist_service)) -> JSONResponse:
+def watchlists_data(
+    service: WatchlistService = Depends(get_watchlist_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
     return JSONResponse({"watchlists": service.list_recent()})
 
 
@@ -480,12 +492,17 @@ def watchlists_data(service: WatchlistService = Depends(get_watchlist_service)) 
 def weekly_watchlist_data(
     stem: str | None = Query(default=None),
     service: WatchlistService = Depends(get_watchlist_service),
+    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     return JSONResponse(service.get_weekly_watchlist_board(stem=stem))
 
 
 @router.get("/watchlists/{stem}", response_class=JSONResponse)
-def watchlist_detail_data(stem: str, service: WatchlistService = Depends(get_watchlist_service)) -> JSONResponse:
+def watchlist_detail_data(
+    stem: str,
+    service: WatchlistService = Depends(get_watchlist_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
     return JSONResponse(service.get_watchlist_detail(stem))
 
 
@@ -496,6 +513,7 @@ def watchlist_chart_data(
     period: str = Query(default="18mo"),
     as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
     service: WatchlistService = Depends(get_watchlist_service),
+    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     _ = stem
     return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period, as_of_date=as_of_date))
@@ -537,12 +555,18 @@ def chart_insider_data(
 
 
 @router.get("/overlap/latest", response_class=JSONResponse)
-def overlap_latest(service: OverlapService = Depends(get_overlap_service)) -> JSONResponse:
+def overlap_latest(
+    service: OverlapService = Depends(get_overlap_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
     return JSONResponse(service.get_latest_summary())
 
 
 @router.get("/rrg/latest", response_class=JSONResponse)
-def rrg_latest(service: RrgService = Depends(get_rrg_service)) -> JSONResponse:
+def rrg_latest(
+    service: RrgService = Depends(get_rrg_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
     return JSONResponse(service.get_latest_report())
 
 
@@ -554,6 +578,7 @@ def rrg_universe_data(
     trail_weeks: int = Query(default=12, alias="trailWeeks", ge=4, le=52),
     cadence: str = Query(default="weekly"),
     service: RrgService = Depends(get_rrg_service),
+    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     if universe not in {"sector", "industry", "theme"}:
         raise HTTPException(status_code=404, detail=f"Unsupported RRG universe: {universe}")
@@ -571,7 +596,11 @@ def rrg_universe_data(
 
 
 @router.get("/overlap/{date_label}", response_class=JSONResponse)
-def overlap_by_date(date_label: str, service: OverlapService = Depends(get_overlap_service)) -> JSONResponse:
+def overlap_by_date(
+    date_label: str,
+    service: OverlapService = Depends(get_overlap_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
     return JSONResponse(service.get_summary(date_label))
 
 
@@ -580,6 +609,7 @@ def backtests_data(
     service: BacktestService = Depends(get_backtest_service),
     history_service: ScreenerHistoryService = Depends(get_screener_history_service),
     run_service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     return JSONResponse(
         jsonable_encoder(

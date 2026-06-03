@@ -32,14 +32,16 @@ class EarningsCalendarService:
         self,
         *,
         reference_date: dt.date | None = None,
+        week_offset: int = 0,
         exclude_sectors: list[str] | None = None,
         exclude_industries: list[str] | None = None,
         only_criteria: bool = False,
     ) -> dict[str, Any]:
         anchor_date = reference_date or dt.date.today()
+        normalized_week_offset = max(0, min(2, int(week_offset)))
         week_start = anchor_date - dt.timedelta(days=anchor_date.weekday() + 1) if anchor_date.weekday() != 6 else anchor_date
-        next_week_start = week_start + dt.timedelta(days=7)
-        next_week_end = next_week_start + dt.timedelta(days=6)
+        selected_week_start = week_start + dt.timedelta(days=normalized_week_offset * 7)
+        selected_week_end = selected_week_start + dt.timedelta(days=6)
         criteria_meta = self._load_latest_criteria_meta()
         matched_tickers = {str(value).upper() for value in criteria_meta.get("matched_tickers", [])}
         criteria_by_ticker = criteria_meta.get("ticker_details", {})
@@ -48,14 +50,14 @@ class EarningsCalendarService:
         excluded_industry_keys = {_normalize_filter_value(value) for value in (exclude_industries or []) if _normalize_filter_value(value)}
         universe_index = self._get_universe_index()
         cookstock = load_configured_cookstock(self.app_config)
-        raw_events = cookstock.fetch_earnings_calendar_watchlist(next_week_start, next_week_end)
+        raw_events = cookstock.fetch_earnings_calendar_watchlist(selected_week_start, selected_week_end)
 
         grouped_days: dict[str, dict[str, Any]] = {}
         available_sector_labels: set[str] = set()
         available_industry_labels: set[str] = set()
         seen_by_day: dict[str, set[str]] = {}
         for offset in range(7):
-            current_date = next_week_start + dt.timedelta(days=offset)
+            current_date = selected_week_start + dt.timedelta(days=offset)
             date_key = current_date.isoformat()
             grouped_days[date_key] = {
                 "date": date_key,
@@ -72,7 +74,7 @@ class EarningsCalendarService:
             event_date = item.get("event_date")
             if not ticker or not isinstance(event_date, dt.date):
                 continue
-            if event_date < next_week_start or event_date > next_week_end:
+            if event_date < selected_week_start or event_date > selected_week_end:
                 continue
 
             metadata = universe_index.get(ticker)
@@ -120,10 +122,11 @@ class EarningsCalendarService:
                 day[bucket_key].sort(key=lambda entry: str(entry.get("ticker") or ""))
 
         return {
-            "week_start": next_week_start.isoformat(),
-            "week_end": next_week_end.isoformat(),
+            "week_start": selected_week_start.isoformat(),
+            "week_end": selected_week_end.isoformat(),
             "reference_date": anchor_date.isoformat(),
-            "days": [grouped_days[(next_week_start + dt.timedelta(days=offset)).isoformat()] for offset in range(7)],
+            "week_offset": normalized_week_offset,
+            "days": [grouped_days[(selected_week_start + dt.timedelta(days=offset)).isoformat()] for offset in range(7)],
             "filters": {
                 "exclude_sectors": sorted(value for value in (exclude_sectors or []) if value),
                 "exclude_industries": sorted(value for value in (exclude_industries or []) if value),
