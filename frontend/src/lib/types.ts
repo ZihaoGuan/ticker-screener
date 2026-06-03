@@ -254,6 +254,32 @@ export type WatchlistDetailResponse = {
   entries: Record<string, unknown>[];
 };
 
+export type WeeklyWatchlistEntry = Record<string, unknown> & {
+  ticker: string;
+  setup_label?: string;
+  summary?: string;
+  master_note?: string;
+  sector?: string;
+  industry?: string;
+  exchange?: string;
+  theme_tags?: string[];
+  signal_badges?: string[];
+  rs_rank?: number;
+  score?: number;
+  trigger_price?: number;
+};
+
+export type WeeklyWatchlistResponse = {
+  source_stem: string;
+  source_name: string;
+  captured_at: string;
+  sort_date?: string | null;
+  group_label: string;
+  entry_count: number;
+  entries: WeeklyWatchlistEntry[];
+  available_files: WatchlistFile[];
+};
+
 export type ExclusionEntry = {
   ticker: string;
   reason: string;

@@ -474,6 +474,14 @@ def watchlists_data(service: WatchlistService = Depends(get_watchlist_service)) 
     return JSONResponse({"watchlists": service.list_recent()})
 
 
+@router.get("/watchlists/weekly", response_class=JSONResponse)
+def weekly_watchlist_data(
+    stem: str | None = Query(default=None),
+    service: WatchlistService = Depends(get_watchlist_service),
+) -> JSONResponse:
+    return JSONResponse(service.get_weekly_watchlist_board(stem=stem))
+
+
 @router.get("/watchlists/{stem}", response_class=JSONResponse)
 def watchlist_detail_data(stem: str, service: WatchlistService = Depends(get_watchlist_service)) -> JSONResponse:
     return JSONResponse(service.get_watchlist_detail(stem))

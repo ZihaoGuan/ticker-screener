@@ -1076,6 +1076,10 @@ a {
   max-height: 100%;
 }
 
+.watchlist-pane-actions {
+  padding: 0 18px 12px;
+}
+
 .watchlist-group-list {
   display: grid;
   gap: 16px;
@@ -2271,6 +2275,70 @@ a {
   text-transform: uppercase;
 }
 
+.weekly-watchlist-board {
+  gap: 18px;
+}
+
+.weekly-watchlist-console-row {
+  grid-template-columns: minmax(220px, 320px) minmax(220px, 1fr) auto;
+}
+
+.weekly-watchlist-actions {
+  align-self: end;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.weekly-watchlist-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.weekly-watchlist-card {
+  align-content: start;
+}
+
+.weekly-watchlist-setup {
+  color: #f4f4f5;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.weekly-watchlist-note {
+  color: #a1a1aa;
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.weekly-watchlist-theme-pill {
+  background: rgba(63, 63, 70, 0.24);
+  border-color: rgba(113, 113, 122, 0.3);
+  color: #d4d4d8;
+}
+
+.weekly-watchlist-footer {
+  align-items: center;
+  border-top: 1px solid rgba(63, 63, 70, 0.45);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 2px;
+  padding-top: 10px;
+}
+
+.weekly-watchlist-metric {
+  color: #a1a1aa;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 1400px) {
   .earnings-board-hero {
     grid-template-columns: 1fr;
@@ -2286,6 +2354,10 @@ a {
     grid-template-columns: 1fr;
   }
 
+  .weekly-watchlist-console-row {
+    grid-template-columns: 1fr;
+  }
+
   .earnings-inline-filters {
     grid-template-columns: 1fr;
   }
@@ -2295,6 +2367,10 @@ a {
     border-top: 1px solid #27272a;
     padding-left: 0;
     padding-top: 14px;
+  }
+
+  .weekly-watchlist-actions {
+    justify-content: flex-start;
   }
 }
 

@@ -11,6 +11,7 @@ import { OverlapPage } from "./pages/OverlapPage";
 import { ChartsPage } from "./pages/ChartsPage";
 import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
+import { WeeklyWatchlistPage } from "./pages/WeeklyWatchlistPage";
 import { WatchlistsPage } from "./pages/WatchlistsPage";
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        <Route path="/watchlists/weekly" element={<WeeklyWatchlistPage />} />
         <Route path="/watchlists" element={<WatchlistsPage />} />
         <Route path="/rotation" element={<Navigate to="/rotation/sector" replace />} />
         <Route path="/rotation/:universe" element={<RrgPage />} />

@@ -218,6 +218,11 @@ export function WatchlistsPage() {
           <h2>Watchlists</h2>
           <span className="eyebrow">{watchlists.length} files</span>
         </div>
+        <div className="watchlist-pane-actions">
+          <Link className="ghost-button" to="/watchlists/weekly">
+            Open Weekly Board
+          </Link>
+        </div>
         {isFilesLoading ? <LoadingBlock label="Loading watchlist files…" compact /> : null}
         <div className="watchlist-group-list">
           {groupedWatchlists.map((group) => (

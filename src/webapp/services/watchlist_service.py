@@ -68,6 +68,34 @@ class WatchlistService:
     def list_recent(self) -> list[dict[str, Any]]:
         return self.repository.list_recent_watchlists(limit=50)
 
+    def get_weekly_watchlist_board(self, stem: str | None = None) -> dict[str, Any]:
+        weekly_files = [item for item in self.repository.list_recent_watchlists(limit=200) if item.get("group_key") == "weekly_rs"]
+        selected_meta = None
+        normalized_stem = str(stem or "").strip()
+        if normalized_stem:
+            selected_meta = next((item for item in weekly_files if str(item.get("stem") or "") == normalized_stem), None)
+        if selected_meta is None and weekly_files:
+            selected_meta = weekly_files[0]
+        selected_stem = str(selected_meta.get("stem") or "") if isinstance(selected_meta, dict) else ""
+        entries = self._enrich_entries(self.repository.load_watchlist(selected_stem)) if selected_stem else []
+        board_entries: list[dict[str, Any]] = []
+        for raw_entry in entries:
+            entry = dict(raw_entry)
+            signal_badges = _build_weekly_signal_badges(entry)
+            if signal_badges:
+                entry["signal_badges"] = signal_badges
+            board_entries.append(entry)
+        return {
+            "source_stem": selected_stem,
+            "source_name": str(selected_meta.get("name") or "") if isinstance(selected_meta, dict) else "",
+            "captured_at": str(selected_meta.get("captured_at") or "") if isinstance(selected_meta, dict) else "",
+            "sort_date": str(selected_meta.get("sort_date") or "") if isinstance(selected_meta, dict) else "",
+            "group_label": "Weekly RS",
+            "entry_count": len(board_entries),
+            "entries": board_entries,
+            "available_files": weekly_files[:24],
+        }
+
     def get_watchlist_detail(self, stem: str) -> dict[str, Any]:
         entries = self._enrich_entries(self.repository.load_watchlist(stem))
         return {
@@ -912,6 +940,38 @@ def _detect_yahoo_block_reason(response: requests.Response) -> str | None:
     if len(response.text or "") < 128:
         return "short_block_page"
     return None
+
+
+def _build_weekly_signal_badges(entry: dict[str, Any]) -> list[str]:
+    setup_label = str(entry.get("setup_label") or "").strip().lower()
+    summary = str(entry.get("summary") or "").strip().lower()
+    master_note = str(entry.get("master_note") or "").strip().lower()
+    badges: list[str] = []
+
+    def add_badge(label: str) -> None:
+        if label not in badges:
+            badges.append(label)
+
+    if "weekly rs new high" in setup_label or "weekly rs new high" in master_note:
+        add_badge("Weekly RS")
+    if "weekly rs nh before price: true" in summary or "weekly_rs_new_high_before_price" in summary:
+        add_badge("Before Price")
+    if "daily rs new high" in master_note or "daily rs nh before price: true" in summary:
+        add_badge("Daily RS")
+    if "strong rs window performance" in master_note:
+        add_badge("Strong RS")
+    if "sector etf  strong" in master_note or "sector etf strong" in master_note:
+        add_badge("Sector Strong")
+
+    distance_match = re.search(r"distance from year high:\s*([0-9.]+)%", summary)
+    if distance_match:
+        try:
+            if float(distance_match.group(1)) <= 3.0:
+                add_badge("Near 52W High")
+        except ValueError:
+            pass
+
+    return badges
 
 
 def _normalize_html_text(value: str) -> str:
