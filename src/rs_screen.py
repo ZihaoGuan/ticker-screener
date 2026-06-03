@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import datetime as dt
 
+import numpy as np
+
 from .config import AppConfig
 from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
 from .universe import UniverseTicker
@@ -29,6 +31,10 @@ class ScreenHit:
     weekly_rs_new_high_recent: bool
     weekly_signal_weeks_ago: int | None
     weekly_recent_signal_weeks: int
+    recent_golden_cross: bool
+    recent_golden_cross_days: int
+    recent_inside_day: bool
+    recent_inside_day_days: int
     require_before_price: bool
     is_near_year_high: bool
     year_high: float
@@ -69,6 +75,46 @@ class ScreenResult:
         }
 
 
+def _has_recent_golden_cross(closes: list[float], *, window_days: int = 2) -> bool:
+    if len(closes) < 201:
+        return False
+    close_series = np.asarray(closes, dtype=float)
+    sma50 = np.convolve(close_series, np.ones(50, dtype=float) / 50.0, mode="valid")
+    sma200 = np.convolve(close_series, np.ones(200, dtype=float) / 200.0, mode="valid")
+    offset = 200 - 50
+    sma50_aligned = sma50[offset:]
+    if sma50_aligned.size == 0 or sma200.size == 0:
+        return False
+    lookback = min(max(1, int(window_days)), sma200.size - 1)
+    start_index = sma200.size - lookback
+    for idx in range(start_index, sma200.size):
+        previous_idx = idx - 1
+        if previous_idx < 0:
+            continue
+        if sma50_aligned[previous_idx] <= sma200[previous_idx] and sma50_aligned[idx] > sma200[idx]:
+            return True
+    return False
+
+
+def _has_recent_inside_day(price_data: list[dict[str, object]], *, window_days: int = 2) -> bool:
+    if len(price_data) < 2:
+        return False
+    recent_checks = min(max(1, int(window_days)), len(price_data) - 1)
+    start_index = len(price_data) - recent_checks
+    for idx in range(start_index, len(price_data)):
+        latest_bar = price_data[idx]
+        previous_bar = price_data[idx - 1]
+        latest_high = latest_bar.get("high")
+        latest_low = latest_bar.get("low")
+        previous_high = previous_bar.get("high")
+        previous_low = previous_bar.get("low")
+        if None in (latest_high, latest_low, previous_high, previous_low):
+            continue
+        if float(latest_high) < float(previous_high) and float(latest_low) > float(previous_low):
+            return True
+    return False
+
+
 def _to_hit(ticker: UniverseTicker, summary: dict[str, object]) -> ScreenHit:
     return ScreenHit(
         ticker=ticker.symbol,
@@ -90,6 +136,10 @@ def _to_hit(ticker: UniverseTicker, summary: dict[str, object]) -> ScreenHit:
         weekly_rs_new_high_recent=bool(summary["weekly_rs_new_high_recent"]),
         weekly_signal_weeks_ago=int(summary["weekly_signal_weeks_ago"]) if summary.get("weekly_signal_weeks_ago") is not None else None,
         weekly_recent_signal_weeks=int(summary["weekly_recent_signal_weeks"]),
+        recent_golden_cross=bool(summary.get("recent_golden_cross", False)),
+        recent_golden_cross_days=int(summary.get("recent_golden_cross_days", 2)),
+        recent_inside_day=bool(summary.get("recent_inside_day", False)),
+        recent_inside_day_days=int(summary.get("recent_inside_day_days", 2)),
         require_before_price=bool(summary["require_before_price"]),
         is_near_year_high=bool(summary["is_near_year_high"]),
         year_high=float(summary["year_high"]),
@@ -145,6 +195,20 @@ def run_rs_screen(
                         signalProfile=signal_profile,
                     )
                     if summary:
+                        price_data = [
+                            item
+                            for item in financials.priceData.get("priceData", [])
+                            if isinstance(item, dict)
+                        ]
+                        closes = [
+                            float(item["close"])
+                            for item in price_data
+                            if item.get("close") is not None
+                        ]
+                        summary["recent_golden_cross_days"] = 2
+                        summary["recent_golden_cross"] = _has_recent_golden_cross(closes, window_days=2)
+                        summary["recent_inside_day_days"] = 2
+                        summary["recent_inside_day"] = _has_recent_inside_day(price_data, window_days=2)
                         hits.append(_to_hit(ticker, summary))
                 except Exception as exc:
                     failures.append({"ticker": ticker.symbol, "error": str(exc)})

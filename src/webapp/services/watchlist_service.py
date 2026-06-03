@@ -962,6 +962,12 @@ def _build_weekly_signal_badges(entry: dict[str, Any]) -> list[str]:
         add_badge("Strong RS")
     if "sector etf  strong" in master_note or "sector etf strong" in master_note:
         add_badge("Sector Strong")
+    signal_tags = entry.get("signal_tags")
+    if isinstance(signal_tags, list):
+        for tag in signal_tags:
+            normalized_tag = str(tag or "").strip()
+            if normalized_tag:
+                add_badge(normalized_tag)
 
     distance_match = re.search(r"distance from year high:\s*([0-9.]+)%", summary)
     if distance_match:
