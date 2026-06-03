@@ -79,13 +79,14 @@ function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds
     const color = PALETTE[index % PALETTE.length];
     const displayName = `${entry.ticker} · ${entry.label}`;
     const lineData = entry.points.map((point) => ({
-      value: [point.x, point.y],
+      value: [point.x, point.y] as [number, number],
       date: point.date,
       ticker: entry.ticker,
       label: entry.label,
       latest: entry.latest,
       quadrant: entry.quadrant,
     }));
+    const trailSegments = buildTrailSegments(lineData, color);
 
     return [
       {
@@ -97,7 +98,7 @@ function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds
         lineStyle: {
           color,
           width: 2,
-          opacity: 0.7,
+          opacity: 0.18,
         },
         emphasis: {
           focus: "series",
@@ -105,6 +106,7 @@ function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds
         animation: false,
         z: 3,
       },
+      ...trailSegments,
       {
         name: displayName,
         type: "scatter",
@@ -248,6 +250,62 @@ function buildOption(series: RrgSeries[], benchmark: string, bounds: ChartBounds
     },
     series: chartSeries,
   };
+}
+
+function buildTrailSegments(
+  lineData: Array<{
+    value: [number, number];
+    date: string;
+    ticker: string;
+    label: string;
+    latest: { x: number; y: number; date: string };
+    quadrant: string;
+  }>,
+  color: string,
+) {
+  if (lineData.length < 2) {
+    return [];
+  }
+
+  return lineData.slice(1).map((point, index, allPoints) => {
+    const segmentRatio = allPoints.length <= 1 ? 1 : index / (allPoints.length - 1);
+    const opacity = 0.22 + segmentRatio * 0.73;
+
+    return {
+      type: "line",
+      data: [lineData[index], point],
+      showSymbol: false,
+      smooth: false,
+      silent: true,
+      tooltip: {
+        show: false,
+      },
+      lineStyle: {
+        color: withAlpha(color, opacity),
+        width: 3,
+      },
+      animation: false,
+      z: 4,
+    };
+  });
+}
+
+function withAlpha(color: string, opacity: number): string {
+  const normalized = color.trim();
+  if (!normalized.startsWith("#")) {
+    return color;
+  }
+
+  const hex = normalized.slice(1);
+  const expanded = hex.length === 3 ? hex.split("").map((char) => `${char}${char}`).join("") : hex;
+  if (expanded.length !== 6) {
+    return color;
+  }
+
+  const red = Number.parseInt(expanded.slice(0, 2), 16);
+  const green = Number.parseInt(expanded.slice(2, 4), 16);
+  const blue = Number.parseInt(expanded.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${opacity.toFixed(3)})`;
 }
 
 function applyQuadrantGraphics(chart: EChartsType, bounds: ChartBounds) {

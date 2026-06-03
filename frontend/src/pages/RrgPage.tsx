@@ -6,6 +6,9 @@ import { RrgValueChart } from "../components/RrgValueChart";
 import { fetchJson } from "../lib/api";
 import type { RrgCadence, RrgResponse, RrgSeries, RrgUniverse } from "../lib/types";
 
+const RRG_CACHE_PREFIX = "rrg-page-cache-v1";
+const RRG_CACHE_TTL_MS = 60 * 60 * 1000;
+
 const DEFAULT_RESPONSE: RrgResponse = {
   universe: "sector",
   benchmark: "SPY",
@@ -44,23 +47,43 @@ export function RrgPage() {
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState("");
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [cacheNotice, setCacheNotice] = useState("");
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setHasError(false);
-    void fetchJson<RrgResponse>(`/api/rrg/${universe}?benchmark=SPY&period=3y&trailWeeks=12&cadence=${cadence}`)
+    setCacheNotice("");
+    const cacheKey = buildRrgCacheKey(universe, cadence);
+    const cached = refreshNonce === 0 ? readRrgCache(cacheKey) : null;
+    if (cached) {
+      setPayload(cached);
+      setActiveGroupId(cached.groups?.[0]?.id ?? "");
+      setLoading(false);
+      setCacheNotice("Showing device-cached rotation data. Refresh to pull newest server data.");
+      return () => controller.abort();
+    }
+    void fetchJson<RrgResponse>(`/api/rrg/${universe}?benchmark=SPY&period=3y&trailWeeks=12&cadence=${cadence}`, {
+      signal: controller.signal,
+    })
       .then((response) => {
+        writeRrgCache(cacheKey, response);
         setPayload(response);
         setActiveGroupId(response.groups?.[0]?.id ?? "");
         setLoading(false);
       })
-      .catch(() => {
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
         setPayload({ ...DEFAULT_RESPONSE, universe, cadence });
         setActiveGroupId("");
         setHasError(true);
         setLoading(false);
       });
-  }, [cadence, universe]);
+    return () => controller.abort();
+  }, [cadence, refreshNonce, universe]);
 
   const activeGroup = useMemo(() => {
     if (!payload.groups?.length) {
@@ -137,6 +160,18 @@ export function RrgPage() {
       </Panel>
 
       <Panel title="RRG Mode">
+        <div className="rrg-panel-aside">
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => {
+              clearRrgCache(universe, cadence);
+              setRefreshNonce((current) => current + 1);
+            }}
+          >
+            Refresh
+          </button>
+        </div>
         <div className="rrg-group-row">
           {cadenceTabs.map((option) => (
             <button
@@ -149,6 +184,8 @@ export function RrgPage() {
             </button>
           ))}
         </div>
+        <p className="panel-copy">Rotation payload cached in browser for 1 hour per universe and cadence.</p>
+        {cacheNotice ? <p className="panel-copy">{cacheNotice}</p> : null}
       </Panel>
 
       {payload.universe === "theme" && payload.groups?.length ? (
@@ -364,4 +401,40 @@ function badgeClass(quadrant: string): "success" | "running" | "failed" {
 
 function holdingsUrl(ticker: string): string {
   return `https://nz.finance.yahoo.com/quote/${encodeURIComponent(ticker)}/holdings/`;
+}
+
+function buildRrgCacheKey(universe: RrgUniverse, cadence: RrgCadence): string {
+  return `${RRG_CACHE_PREFIX}:${universe}:${cadence}`;
+}
+
+function readRrgCache(key: string): RrgResponse | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as { savedAt?: number; value?: RrgResponse };
+    if (!parsed.savedAt || !parsed.value || Date.now() - parsed.savedAt > RRG_CACHE_TTL_MS) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return parsed.value;
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
+}
+
+function writeRrgCache(key: string, value: RrgResponse) {
+  localStorage.setItem(
+    key,
+    JSON.stringify({
+      savedAt: Date.now(),
+      value,
+    }),
+  );
+}
+
+function clearRrgCache(universe: RrgUniverse, cadence: RrgCadence) {
+  localStorage.removeItem(buildRrgCacheKey(universe, cadence));
 }
