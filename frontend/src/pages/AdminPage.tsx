@@ -90,6 +90,7 @@ export function AdminPage() {
   const [scheduleCronTz, setScheduleCronTz] = useState("America/New_York");
   const [scheduleEnabled, setScheduleEnabled] = useState(true);
   const [scheduleOptionsJson, setScheduleOptionsJson] = useState("{}");
+  const [lastSuggestedOptionsJson, setLastSuggestedOptionsJson] = useState("{}");
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
 
   const loadAdmin = (start: string) => {
@@ -380,13 +381,16 @@ export function AdminPage() {
   };
 
   const resetScheduleForm = () => {
+    const nextActionId = availableScheduledActions[0]?.id ?? "weekly_rs";
     setScheduleJobId("");
     setScheduleJobLabel("");
-    setScheduleActionId(availableScheduledActions[0]?.id ?? "weekly_rs");
+    setScheduleActionId(nextActionId);
     setScheduleCronExpr("30 16 * * 1-5");
     setScheduleCronTz(commonTimezones[0] ?? "America/New_York");
     setScheduleEnabled(true);
-    setScheduleOptionsJson("{}");
+    const nextSuggested = buildScheduleOptionsTemplate(nextActionId);
+    setScheduleOptionsJson(nextSuggested);
+    setLastSuggestedOptionsJson(nextSuggested);
   };
 
   const handleSaveSchedule = async (event: FormEvent<HTMLFormElement>) => {
@@ -424,7 +428,9 @@ export function AdminPage() {
     setScheduleCronExpr(job.cron_expr);
     setScheduleCronTz(job.cron_tz);
     setScheduleEnabled(job.enabled);
-    setScheduleOptionsJson(JSON.stringify(job.options ?? {}, null, 2));
+    const serialized = JSON.stringify(job.options ?? {}, null, 2);
+    setScheduleOptionsJson(serialized);
+    setLastSuggestedOptionsJson(serialized);
   };
 
   const handleDeleteSchedule = async (jobId: string) => {
@@ -455,6 +461,19 @@ export function AdminPage() {
     () => availableScheduledActions.find((item) => item.id === scheduleActionId) ?? null,
     [availableScheduledActions, scheduleActionId],
   );
+
+  const suggestedScheduleOptionsJson = useMemo(
+    () => buildScheduleOptionsTemplate(scheduleActionId),
+    [scheduleActionId],
+  );
+
+  useEffect(() => {
+    const trimmed = scheduleOptionsJson.trim();
+    if (trimmed === "" || trimmed === "{}" || trimmed === lastSuggestedOptionsJson.trim()) {
+      setScheduleOptionsJson(suggestedScheduleOptionsJson);
+    }
+    setLastSuggestedOptionsJson(suggestedScheduleOptionsJson);
+  }, [lastSuggestedOptionsJson, scheduleActionId, scheduleOptionsJson, suggestedScheduleOptionsJson]);
 
   return (
     <div className="page-grid">
@@ -769,6 +788,10 @@ export function AdminPage() {
             <p className="panel-copy">
               Supported schedule date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
             </p>
+            <p className="panel-copy">
+              Suggested options for this action:
+            </p>
+            <pre className="panel-copy"><code>{suggestedScheduleOptionsJson}</code></pre>
             {selectedScheduledAction?.fields?.length ? (
               <p className="panel-copy">
                 Action fields: {selectedScheduledAction.fields.map((field) => field.id).join(", ")}
@@ -1055,4 +1078,62 @@ export function AdminPage() {
       />
     </div>
   );
+}
+
+function buildScheduleOptionsTemplate(actionId: string): string {
+  const sharedUniverseTemplate = {
+    market_data_source: "database-first",
+    filter_precedence: "exclude",
+  };
+
+  if (actionId === "earnings_weekly_criteria") {
+    return JSON.stringify({ reference_date: "{{local_date}}" }, null, 2);
+  }
+  if (actionId === "legacy_peg" || actionId === "sean_peg") {
+    return JSON.stringify(
+      {
+        source: "earnings-watchlist",
+        reference_date: "{{local_date}}",
+        market_data_source: "database-first",
+      },
+      null,
+      2,
+    );
+  }
+  if (actionId === "screener_history_batch") {
+    return JSON.stringify(
+      {
+        strategy_ids: ["rs", "vcp"],
+        start_date: "{{local_date_plus_14}}",
+        end_date: "{{local_date}}",
+        market_data_source: "database-first",
+        overwrite_policy: "skip_existing",
+        scope: {},
+      },
+      null,
+      2,
+    );
+  }
+  if (actionId === "backtest_v1") {
+    return JSON.stringify(
+      {
+        entry_rule: {
+          mode: "min_count_same_day",
+          screener_ids: ["rs", "vcp"],
+          min_count: 2,
+        },
+        date_range: {
+          start_date: "2026-01-01",
+          end_date: "{{local_date}}",
+        },
+        exit_rules: [],
+        position_rules: {},
+        signal_cache_policy: "reuse_then_fill",
+        market_data_mode: "database_only",
+      },
+      null,
+      2,
+    );
+  }
+  return JSON.stringify(sharedUniverseTemplate, null, 2);
 }
