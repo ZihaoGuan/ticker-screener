@@ -134,6 +134,16 @@ class RunService:
             ),
             visible_in_runs=False,
         ),
+        "earnings_weekly_criteria": RunAction(
+            "earnings_weekly_criteria",
+            "Run Earnings Weekly Criteria",
+            "scripts/run_earnings_weekly_criteria_screen.py",
+            fields=(
+                _limit_field,
+                _date_label_field,
+                _reference_date_field,
+            ),
+        ),
         "rs": RunAction(
             "rs",
             "Run RS",

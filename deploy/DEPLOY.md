@@ -135,6 +135,8 @@ The web service installs Python dependencies at container start and then launche
 uvicorn web.app:app --host 0.0.0.0 --port 8000
 ```
 
+Because the `web` container entrypoint runs `pip install -r requirements.txt -r requirements-web.txt` on every container start, `docker-compose exec -T web python ...` jobs reuse an environment that already has the repo Python requirements installed. If requirements change, restart or recreate the `web` container before running scheduled jobs.
+
 ## 9. Smoke checks
 
 Check health:
@@ -164,6 +166,7 @@ Until the `/runs` page launches real jobs, use `docker compose exec`:
 docker-compose exec web python scripts/run_rs_screen.py --limit 25
 docker-compose exec web python scripts/run_vcp_screen.py --limit 25
 docker-compose exec web python scripts/run_cup_handle_screen.py --limit 25
+docker-compose exec -T web python scripts/run_earnings_weekly_criteria_screen.py --reference-date 2026-06-06
 docker-compose exec web python scripts/build_overlap_backtest_report.py --start-date 2024-01-01 --end-date 2026-05-01
 ```
 
@@ -203,6 +206,12 @@ If you want to manage screener schedules from the Admin page instead of editing 
 ```
 
 The Admin page writes app-owned schedule config to `config/scheduled_jobs.json`. The scheduler script reads that file, matches cron expressions in the configured timezone, and launches the corresponding screener command through Docker Compose with the same status-file tracking used above.
+
+`Run Earnings Weekly Criteria` is available as a schedulable Admin action. Its scheduled run uses the scheduler day as the script reference date, equivalent to running:
+
+```bash
+docker-compose exec -T web python scripts/run_earnings_weekly_criteria_screen.py --reference-date $(date +%F)
+```
 
 ## Notes
 

@@ -152,6 +152,34 @@ class RunServiceTests(unittest.TestCase):
     def test_list_actions_includes_fearzone(self) -> None:
         action_ids = {item["id"] for item in self.service.list_actions()}
         self.assertIn("fearzone", action_ids)
+        self.assertIn("earnings_weekly_criteria", action_ids)
+
+    def test_launch_earnings_weekly_criteria_includes_reference_date(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "earnings_weekly_criteria",
+            options={
+                "reference_date": "2026-06-06",
+                "date_label": "2026-06-06",
+                "limit": "25",
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        self.assertIn("scripts/run_earnings_weekly_criteria_screen.py", command)
+        self.assertIn("--reference-date", command)
+        self.assertIn("2026-06-06", command)
+        self.assertIn("--date-label", command)
+        self.assertIn("--limit", command)
 
     def test_list_jobs_attaches_batch_child_job_logs(self) -> None:
         RunService._jobs = [

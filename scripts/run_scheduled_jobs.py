@@ -95,7 +95,11 @@ def _artifact_path_for_job(job: dict[str, object], *, local_now: dt.datetime) ->
 def main() -> int:
     run_service = RunService(project_root=PROJECT_ROOT)
     schedule_service = ScheduledJobService(project_root=PROJECT_ROOT, run_service=run_service)
-    actions = {action.action_id: action for action in run_service._actions.values() if action.visible_in_runs}
+    actions = {
+        action.action_id: action
+        for action in run_service._actions.values()
+        if action.action_id != "sync_postgres_market_data"
+    }
     state = _load_state()
     any_run = False
 
