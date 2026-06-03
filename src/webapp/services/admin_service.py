@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+from pathlib import Path
 from typing import Any
 
 from src.config import load_app_config, today_label
@@ -11,8 +13,9 @@ from src.universe import load_universe
 
 
 class AdminService:
-    def __init__(self, database_url: str = "") -> None:
+    def __init__(self, database_url: str = "", *, artifacts_dir: Path | None = None) -> None:
         self.database_url = resolve_database_url(database_url)
+        self.artifacts_dir = artifacts_dir or (Path(__file__).resolve().parents[3] / "artifacts")
 
     def get_context(self, *, coverage_start: str = "2020-01-01") -> dict[str, Any]:
         excluded = self._load_exclusions()
@@ -56,6 +59,36 @@ class AdminService:
             )
         except Exception as exc:
             raise ValueError(f"Database query failed: {exc}") from exc
+
+    def list_scheduled_jobs(self) -> list[dict[str, Any]]:
+        status_dir = self.artifacts_dir / "status"
+        if not status_dir.exists():
+            return []
+        jobs: list[dict[str, Any]] = []
+        for path in sorted(status_dir.glob("*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            job_id = str(payload.get("job_id") or path.stem).strip() or path.stem
+            jobs.append(
+                {
+                    "job_id": job_id,
+                    "job_label": str(payload.get("job_label") or job_id),
+                    "status": str(payload.get("status") or "unknown"),
+                    "last_started_at": self._to_iso(payload.get("last_started_at")),
+                    "last_finished_at": self._to_iso(payload.get("last_finished_at")),
+                    "exit_code": _coerce_int(payload.get("exit_code")),
+                    "log_file": str(payload.get("log_file") or ""),
+                    "artifact_file": str(payload.get("artifact_file") or ""),
+                    "message": str(payload.get("message") or ""),
+                    "status_file": str(path),
+                }
+            )
+        jobs.sort(key=lambda item: (str(item.get("job_label") or item.get("job_id") or "")))
+        return jobs
 
     def _load_exclusions(self) -> list[dict[str, Any]]:
         config = load_app_config()
@@ -333,3 +366,12 @@ def _collapse_dates_to_ranges(dates: list[dt.date]) -> list[tuple[dt.date, dt.da
         previous = current
     ranges.append((start, previous))
     return ranges
+
+
+def _coerce_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

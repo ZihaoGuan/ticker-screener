@@ -658,6 +658,14 @@ def partial_ticker_detail(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/admin/scheduled-jobs", response_class=JSONResponse)
+def scheduled_jobs_data(
+    service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    return JSONResponse({"jobs": service.list_scheduled_jobs()})
+
+
 @router.post("/admin/exclusions", response_class=JSONResponse)
 def add_exclusion(
     request: Request,

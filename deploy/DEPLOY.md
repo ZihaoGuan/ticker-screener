@@ -186,12 +186,15 @@ crontab -e
 Example entries:
 
 ```cron
-0 6 * * 2-6 cd /opt/ticker-screener/app/deploy && docker-compose exec -T web python scripts/run_rs_screen.py
-10 6 * * 2-6 cd /opt/ticker-screener/app/deploy && docker-compose exec -T web python scripts/run_vcp_screen.py
-20 6 * * 2-6 cd /opt/ticker-screener/app/deploy && docker-compose exec -T web python scripts/run_cup_handle_screen.py
-35 6 * * 2-6 cd /opt/ticker-screener/app/deploy && docker-compose exec -T web python scripts/build_daily_overlap_summary.py --date-label $(date +\%F)
-15 8 * * 6 cd /opt/ticker-screener/app/deploy && docker-compose exec -T web python scripts/run_earnings_weekly_criteria_screen.py --reference-date $(date +\%F)
+0 6 * * 2-6 cd /opt/ticker-screener/app/deploy && /opt/ticker-screener/app/scripts/run_with_status.sh rs_daily "Daily RS Screen" -- docker-compose exec -T web python scripts/run_rs_screen.py
+10 6 * * 2-6 cd /opt/ticker-screener/app/deploy && /opt/ticker-screener/app/scripts/run_with_status.sh vcp "VCP Screen" -- docker-compose exec -T web python scripts/run_vcp_screen.py
+20 6 * * 2-6 cd /opt/ticker-screener/app/deploy && /opt/ticker-screener/app/scripts/run_with_status.sh cup_handle "Cup Handle Screen" -- docker-compose exec -T web python scripts/run_cup_handle_screen.py
+35 6 * * 2-6 cd /opt/ticker-screener/app/deploy && TICKER_SCREENER_STATUS_ARTIFACT=/opt/ticker-screener/app/artifacts/output/daily_overlap_$(date +\%F).html /opt/ticker-screener/app/scripts/run_with_status.sh overlap_daily "Daily Overlap Summary" -- docker-compose exec -T web python scripts/build_daily_overlap_summary.py --date-label $(date +\%F)
+0 8 * * 6 cd /opt/ticker-screener/app/deploy && TICKER_SCREENER_STATUS_ARTIFACT=/opt/ticker-screener/app/artifacts/watchlists/weekly_rs_new_high_$(date +\%F).json /opt/ticker-screener/app/scripts/run_with_status.sh weekly_rs "Weekly RS Watchlist" -- docker-compose exec -T web python scripts/run_weekly_rs_screen.py
+15 8 * * 6 cd /opt/ticker-screener/app/deploy && /opt/ticker-screener/app/scripts/run_with_status.sh earnings_weekly_criteria "Earnings Weekly Criteria" -- docker-compose exec -T web python scripts/run_earnings_weekly_criteria_screen.py --reference-date $(date +\%F)
 ```
+
+The wrapper script writes status JSON files under `artifacts/status/`. The Admin page reads those files and shows the latest status, timestamps, exit code, log path, and optional artifact path for each tracked cron job.
 
 ## Notes
 

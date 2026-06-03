@@ -540,6 +540,11 @@ a {
   color: #fbbf24;
 }
 
+.status-unknown {
+  background: rgba(113, 113, 122, 0.18);
+  color: #d4d4d8;
+}
+
 .run-progress-panel {
   display: grid;
   gap: 12px;
@@ -1510,6 +1515,11 @@ a {
   display: grid;
   gap: 6px;
   justify-items: end;
+}
+
+.admin-job-cell {
+  display: grid;
+  gap: 4px;
 }
 
 .detail-subsection {

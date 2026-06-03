@@ -47,7 +47,7 @@ def get_earnings_calendar_service() -> EarningsCalendarService:
 
 
 def get_admin_service() -> AdminService:
-    return AdminService(database_url=config.database_url)
+    return AdminService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
 
 
 def get_watchlist_service() -> WatchlistService:

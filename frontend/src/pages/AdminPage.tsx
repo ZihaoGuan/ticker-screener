@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ExclusionDialog } from "../components/ExclusionDialog";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
+import { StatusPill } from "../components/StatusPill";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { AccessRequestSummary, AdminResponse, AuditEventSummary, AuditEventsResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName } from "../lib/types";
+import type { AccessRequestSummary, AdminResponse, AuditEventSummary, AuditEventsResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName, ScheduledJobSummary } from "../lib/types";
 
 const EMPTY_ADMIN_RESPONSE: AdminResponse = {
   excluded_tickers: [],
@@ -62,6 +63,8 @@ export function AdminPage() {
   const [auditFromDate, setAuditFromDate] = useState("");
   const [auditToDate, setAuditToDate] = useState("");
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
+  const [scheduledJobs, setScheduledJobs] = useState<ScheduledJobSummary[]>([]);
+  const [isLoadingScheduledJobs, setIsLoadingScheduledJobs] = useState(true);
 
   const loadAdmin = (start: string) => {
     setIsLoading(true);
@@ -105,6 +108,14 @@ export function AdminPage() {
       .finally(() => setIsLoadingAudit(false));
   };
 
+  const loadScheduledJobs = () => {
+    setIsLoadingScheduledJobs(true);
+    void fetchJson<{ jobs: ScheduledJobSummary[] }>("/api/admin/scheduled-jobs")
+      .then((result) => setScheduledJobs(result.jobs))
+      .catch(() => setScheduledJobs([]))
+      .finally(() => setIsLoadingScheduledJobs(false));
+  };
+
   useEffect(() => {
     loadAdmin(coverageStart);
     void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
@@ -120,6 +131,10 @@ export function AdminPage() {
 
   useEffect(() => {
     loadAudit();
+  }, []);
+
+  useEffect(() => {
+    loadScheduledJobs();
   }, []);
 
   const handleLaunchSync = async (event: FormEvent<HTMLFormElement>) => {
@@ -311,6 +326,13 @@ export function AdminPage() {
   const handleAuditFilterSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     loadAudit();
+  };
+
+  const renderScheduledJobStatus = (status: string) => {
+    if (status === "running" || status === "success" || status === "failed") {
+      return <StatusPill status={status} />;
+    }
+    return <span className="status-pill status-unknown">{status || "unknown"}</span>;
   };
 
   return (
@@ -507,6 +529,58 @@ export function AdminPage() {
           </div>
           {launchMessage ? <div className="panel-copy">{launchMessage}</div> : null}
         </form>
+      </Panel>
+
+      <Panel title="Scheduled Jobs" aside={<span className="eyebrow">{scheduledJobs.length} tracked</span>}>
+        <div className="run-toolbar">
+          <div className="run-action-footer">
+            <button className="primary-button" type="button" onClick={loadScheduledJobs} disabled={isLoadingScheduledJobs}>
+              {isLoadingScheduledJobs ? "Loading..." : "Refresh Scheduled Status"}
+            </button>
+            <span className="panel-copy">Reads JSON status files under the app artifacts directory. Host cron remains source of truth.</span>
+          </div>
+          {isLoadingScheduledJobs ? <LoadingBlock label="Loading scheduled job status…" compact /> : null}
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Job</th>
+                  <th>Status</th>
+                  <th>Last Start</th>
+                  <th>Last Finish</th>
+                  <th>Exit</th>
+                  <th>Log</th>
+                  <th>Artifact</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scheduledJobs.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>{isLoadingScheduledJobs ? "Loading scheduled jobs..." : "No scheduled job status files found."}</td>
+                  </tr>
+                ) : (
+                  scheduledJobs.map((job) => (
+                    <tr key={job.job_id}>
+                      <td data-label="Job">
+                        <div className="admin-job-cell">
+                          <strong>{job.job_label}</strong>
+                          <span className="file-meta">{job.job_id}</span>
+                          {job.message ? <span className="panel-copy">{job.message}</span> : null}
+                        </div>
+                      </td>
+                      <td data-label="Status">{renderScheduledJobStatus(job.status)}</td>
+                      <td data-label="Last Start">{formatLocalDateTime(job.last_started_at)}</td>
+                      <td data-label="Last Finish">{formatLocalDateTime(job.last_finished_at)}</td>
+                      <td data-label="Exit">{job.exit_code ?? "-"}</td>
+                      <td data-label="Log">{job.log_file || "-"}</td>
+                      <td data-label="Artifact">{job.artifact_file || "-"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </Panel>
 
       <Panel title="Users and Roles" aside={<span className="eyebrow">{users.length} accounts</span>}>

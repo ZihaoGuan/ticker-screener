@@ -599,6 +599,21 @@ export type BacktestsResponse = {
   default_exit_rules: Array<Record<string, unknown>>;
 };
 
+export type ScheduledJobStatus = "running" | "success" | "failed" | "unknown";
+
+export type ScheduledJobSummary = {
+  job_id: string;
+  job_label: string;
+  status: ScheduledJobStatus | string;
+  last_started_at: string | null;
+  last_finished_at: string | null;
+  exit_code: number | null;
+  log_file: string;
+  artifact_file: string;
+  message: string;
+  status_file: string;
+};
+
 export type AdminResponse = {
   excluded_tickers: ExclusionEntry[];
   excluded_count: number;
