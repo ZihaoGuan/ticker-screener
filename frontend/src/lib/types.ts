@@ -614,6 +614,22 @@ export type ScheduledJobSummary = {
   status_file: string;
 };
 
+export type ScheduledJobConfig = {
+  job_id: string;
+  job_label: string;
+  action_id: string;
+  cron_expr: string;
+  cron_tz: string;
+  enabled: boolean;
+};
+
+export type ScheduledJobConfigResponse = {
+  jobs: ScheduledJobConfig[];
+  available_actions: Array<{ id: string; label: string }>;
+  common_timezones: string[];
+  scheduler_command: string;
+};
+
 export type AdminResponse = {
   excluded_tickers: ExclusionEntry[];
   excluded_count: number;

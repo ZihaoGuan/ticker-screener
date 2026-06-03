@@ -17,6 +17,7 @@ from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.run_service import RunService
+from src.webapp.services.scheduled_job_service import ScheduledJobService
 from src.webapp.services.screener_history_service import ScreenerHistoryService
 from src.webapp.services.watchlist_service import WatchlistService
 from web.dependencies import (
@@ -33,6 +34,7 @@ from web.dependencies import (
     get_overlap_service,
     get_rrg_service,
     get_run_service,
+    get_scheduled_job_service,
     get_screener_history_service,
     get_user_admin_service,
     get_watchlist_service,
@@ -664,6 +666,74 @@ def scheduled_jobs_data(
     _: Principal = Depends(require_manage_exclusions),
 ) -> JSONResponse:
     return JSONResponse({"jobs": service.list_scheduled_jobs()})
+
+
+@router.get("/admin/schedules", response_class=JSONResponse)
+def schedule_config_data(
+    service: ScheduledJobService = Depends(get_scheduled_job_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    return JSONResponse(service.get_context())
+
+
+@router.post("/admin/schedules", response_class=JSONResponse)
+def upsert_schedule_config(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: ScheduledJobService = Depends(get_scheduled_job_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        job = service.upsert_job(
+            job_id=str(request_payload.get("job_id") or ""),
+            job_label=str(request_payload.get("job_label") or ""),
+            action_id=str(request_payload.get("action_id") or ""),
+            cron_expr=str(request_payload.get("cron_expr") or ""),
+            cron_tz=str(request_payload.get("cron_tz") or ""),
+            enabled=bool(request_payload.get("enabled", True)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.schedule.upsert",
+        resource_type="scheduled_job",
+        resource_id=job["job_id"],
+        resource_label=job["job_label"],
+        message=f"Saved scheduled job {job['job_id']}.",
+        metadata=job,
+    )
+    return JSONResponse({"ok": True, "job": job})
+
+
+@router.post("/admin/schedules/{job_id}/delete", response_class=JSONResponse)
+def delete_schedule_config(
+    request: Request,
+    job_id: str,
+    service: ScheduledJobService = Depends(get_scheduled_job_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    try:
+        service.delete_job(job_id=job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.schedule.delete",
+        resource_type="scheduled_job",
+        resource_id=job_id,
+        resource_label=job_id,
+        message=f"Deleted scheduled job {job_id}.",
+        metadata={"job_id": job_id},
+    )
+    return JSONResponse({"ok": True})
 
 
 @router.post("/admin/exclusions", response_class=JSONResponse)

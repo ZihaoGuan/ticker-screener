@@ -196,6 +196,14 @@ Example entries:
 
 The wrapper script writes status JSON files under `artifacts/status/`. The Admin page reads those files and shows the latest status, timestamps, exit code, log path, and optional artifact path for each tracked cron job.
 
+If you want to manage screener schedules from the Admin page instead of editing every cron entry by hand, use one fixed host cron that runs the scheduler every 5 minutes:
+
+```cron
+*/5 * * * * cd /opt/ticker-screener/app/deploy && /opt/ticker-screener/app/scripts/run_scheduled_jobs.py
+```
+
+The Admin page writes app-owned schedule config to `config/scheduled_jobs.json`. The scheduler script reads that file, matches cron expressions in the configured timezone, and launches the corresponding screener command through Docker Compose with the same status-file tracking used above.
+
 ## Notes
 
 - This setup is intentionally not optimized for fast image builds yet.

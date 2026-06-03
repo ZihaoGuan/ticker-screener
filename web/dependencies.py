@@ -25,6 +25,7 @@ from src.webapp.services.earnings_calendar_service import EarningsCalendarServic
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.run_service import RunService
+from src.webapp.services.scheduled_job_service import ScheduledJobService
 from src.webapp.services.screener_history_service import ScreenerHistoryService
 from src.webapp.services.watchlist_service import WatchlistService
 
@@ -60,6 +61,10 @@ def get_watchlist_service() -> WatchlistService:
 
 def get_run_service() -> RunService:
     return RunService(project_root=PROJECT_ROOT, database_url=config.database_url, artifacts_dir=config.artifacts_dir)
+
+
+def get_scheduled_job_service() -> ScheduledJobService:
+    return ScheduledJobService(project_root=PROJECT_ROOT, run_service=get_run_service())
 
 
 def get_screener_history_service() -> ScreenerHistoryService:

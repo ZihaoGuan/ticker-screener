@@ -5,7 +5,7 @@ import { Panel } from "../components/Panel";
 import { StatusPill } from "../components/StatusPill";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { AccessRequestSummary, AdminResponse, AuditEventSummary, AuditEventsResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName, ScheduledJobSummary } from "../lib/types";
+import type { AccessRequestSummary, AdminResponse, AuditEventSummary, AuditEventsResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName, ScheduledJobConfig, ScheduledJobConfigResponse, ScheduledJobSummary } from "../lib/types";
 
 const EMPTY_ADMIN_RESPONSE: AdminResponse = {
   excluded_tickers: [],
@@ -65,6 +65,18 @@ export function AdminPage() {
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJobSummary[]>([]);
   const [isLoadingScheduledJobs, setIsLoadingScheduledJobs] = useState(true);
+  const [scheduledConfigs, setScheduledConfigs] = useState<ScheduledJobConfig[]>([]);
+  const [availableScheduledActions, setAvailableScheduledActions] = useState<Array<{ id: string; label: string }>>([]);
+  const [commonTimezones, setCommonTimezones] = useState<string[]>([]);
+  const [schedulerCommand, setSchedulerCommand] = useState("");
+  const [isLoadingScheduleConfig, setIsLoadingScheduleConfig] = useState(true);
+  const [scheduleJobId, setScheduleJobId] = useState("");
+  const [scheduleJobLabel, setScheduleJobLabel] = useState("");
+  const [scheduleActionId, setScheduleActionId] = useState("weekly_rs");
+  const [scheduleCronExpr, setScheduleCronExpr] = useState("30 16 * * 1-5");
+  const [scheduleCronTz, setScheduleCronTz] = useState("America/New_York");
+  const [scheduleEnabled, setScheduleEnabled] = useState(true);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
 
   const loadAdmin = (start: string) => {
     setIsLoading(true);
@@ -116,6 +128,27 @@ export function AdminPage() {
       .finally(() => setIsLoadingScheduledJobs(false));
   };
 
+  const loadScheduleConfig = () => {
+    setIsLoadingScheduleConfig(true);
+    void fetchJson<ScheduledJobConfigResponse>("/api/admin/schedules")
+      .then((result) => {
+        setScheduledConfigs(result.jobs);
+        setAvailableScheduledActions(result.available_actions);
+        setCommonTimezones(result.common_timezones);
+        setSchedulerCommand(result.scheduler_command);
+        if (!result.available_actions.find((item) => item.id === scheduleActionId) && result.available_actions[0]) {
+          setScheduleActionId(result.available_actions[0].id);
+        }
+      })
+      .catch(() => {
+        setScheduledConfigs([]);
+        setAvailableScheduledActions([]);
+        setCommonTimezones([]);
+        setSchedulerCommand("");
+      })
+      .finally(() => setIsLoadingScheduleConfig(false));
+  };
+
   useEffect(() => {
     loadAdmin(coverageStart);
     void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
@@ -135,6 +168,10 @@ export function AdminPage() {
 
   useEffect(() => {
     loadScheduledJobs();
+  }, []);
+
+  useEffect(() => {
+    loadScheduleConfig();
   }, []);
 
   const handleLaunchSync = async (event: FormEvent<HTMLFormElement>) => {
@@ -326,6 +363,67 @@ export function AdminPage() {
   const handleAuditFilterSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     loadAudit();
+  };
+
+  const resetScheduleForm = () => {
+    setScheduleJobId("");
+    setScheduleJobLabel("");
+    setScheduleActionId(availableScheduledActions[0]?.id ?? "weekly_rs");
+    setScheduleCronExpr("30 16 * * 1-5");
+    setScheduleCronTz(commonTimezones[0] ?? "America/New_York");
+    setScheduleEnabled(true);
+  };
+
+  const handleSaveSchedule = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSavingSchedule(true);
+    setNotice("");
+    try {
+      await fetchJson<{ ok: boolean }>("/api/admin/schedules", {
+        method: "POST",
+        body: JSON.stringify({
+          job_id: scheduleJobId,
+          job_label: scheduleJobLabel,
+          action_id: scheduleActionId,
+          cron_expr: scheduleCronExpr,
+          cron_tz: scheduleCronTz,
+          enabled: scheduleEnabled,
+        }),
+      });
+      setNotice("Scheduled job saved.");
+      loadScheduleConfig();
+      resetScheduleForm();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to save scheduled job.");
+    } finally {
+      setIsSavingSchedule(false);
+    }
+  };
+
+  const handleEditSchedule = (job: ScheduledJobConfig) => {
+    setScheduleJobId(job.job_id);
+    setScheduleJobLabel(job.job_label);
+    setScheduleActionId(job.action_id);
+    setScheduleCronExpr(job.cron_expr);
+    setScheduleCronTz(job.cron_tz);
+    setScheduleEnabled(job.enabled);
+  };
+
+  const handleDeleteSchedule = async (jobId: string) => {
+    setIsSavingSchedule(true);
+    setNotice("");
+    try {
+      await fetchJson<{ ok: boolean }>(`/api/admin/schedules/${jobId}/delete`, { method: "POST" });
+      setNotice("Scheduled job deleted.");
+      loadScheduleConfig();
+      if (scheduleJobId === jobId) {
+        resetScheduleForm();
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to delete scheduled job.");
+    } finally {
+      setIsSavingSchedule(false);
+    }
   };
 
   const renderScheduledJobStatus = (status: string) => {
@@ -574,6 +672,110 @@ export function AdminPage() {
                       <td data-label="Exit">{job.exit_code ?? "-"}</td>
                       <td data-label="Log">{job.log_file || "-"}</td>
                       <td data-label="Artifact">{job.artifact_file || "-"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title="Scheduler Config" aside={<span className="eyebrow">{scheduledConfigs.length} schedules</span>}>
+        <div className="run-toolbar">
+          <form className="run-toolbar" onSubmit={(event) => void handleSaveSchedule(event)}>
+            <div className="run-params-grid">
+              <label className="field">
+                <span>Job ID</span>
+                <input type="text" value={scheduleJobId} onChange={(event) => setScheduleJobId(event.target.value)} placeholder="weekly_rs_close" required />
+              </label>
+              <label className="field">
+                <span>Job Label</span>
+                <input type="text" value={scheduleJobLabel} onChange={(event) => setScheduleJobLabel(event.target.value)} placeholder="Weekly RS After Close" required />
+              </label>
+              <label className="field">
+                <span>Screener</span>
+                <select value={scheduleActionId} onChange={(event) => setScheduleActionId(event.target.value)}>
+                  {availableScheduledActions.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Cron Expr</span>
+                <input type="text" value={scheduleCronExpr} onChange={(event) => setScheduleCronExpr(event.target.value)} placeholder="30 16 * * 1-5" required />
+              </label>
+              <label className="field">
+                <span>Timezone</span>
+                <select value={scheduleCronTz} onChange={(event) => setScheduleCronTz(event.target.value)}>
+                  {commonTimezones.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Enabled</span>
+                <select value={scheduleEnabled ? "true" : "false"} onChange={(event) => setScheduleEnabled(event.target.value === "true")}>
+                  <option value="true">enabled</option>
+                  <option value="false">disabled</option>
+                </select>
+              </label>
+            </div>
+            <div className="run-action-footer">
+              <button className="primary-button" type="submit" disabled={isSavingSchedule || isLoadingScheduleConfig}>
+                {isSavingSchedule ? "Saving..." : "Save Schedule"}
+              </button>
+              <button className="ghost-button" type="button" onClick={resetScheduleForm} disabled={isSavingSchedule}>
+                Clear
+              </button>
+              <span className="panel-copy">Host cron should run scheduler command every 5 minutes: {schedulerCommand || "-"}</span>
+            </div>
+          </form>
+          {isLoadingScheduleConfig ? <LoadingBlock label="Loading scheduler config…" compact /> : null}
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Job</th>
+                  <th>Screener</th>
+                  <th>Cron</th>
+                  <th>TZ</th>
+                  <th>Enabled</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scheduledConfigs.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>{isLoadingScheduleConfig ? "Loading schedules..." : "No scheduled jobs configured yet."}</td>
+                  </tr>
+                ) : (
+                  scheduledConfigs.map((job) => (
+                    <tr key={job.job_id}>
+                      <td data-label="Job">
+                        <div className="admin-job-cell">
+                          <strong>{job.job_label}</strong>
+                          <span className="file-meta">{job.job_id}</span>
+                        </div>
+                      </td>
+                      <td data-label="Screener">{job.action_id}</td>
+                      <td data-label="Cron">{job.cron_expr}</td>
+                      <td data-label="TZ">{job.cron_tz}</td>
+                      <td data-label="Enabled">{job.enabled ? "Yes" : "No"}</td>
+                      <td data-label="Actions">
+                        <div className="button-row">
+                          <button className="table-action-button" type="button" disabled={isSavingSchedule} onClick={() => handleEditSchedule(job)}>
+                            Edit
+                          </button>
+                          <button className="table-action-button" type="button" disabled={isSavingSchedule} onClick={() => void handleDeleteSchedule(job.job_id)}>
+                            Delete
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
