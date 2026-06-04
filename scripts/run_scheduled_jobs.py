@@ -120,6 +120,7 @@ def main() -> int:
     }
     state = _load_state()
     any_run = False
+    time_snapshots: dict[str, dt.datetime] = {}
 
     for job in schedule_service.list_jobs():
         if not job.get("enabled"):
@@ -129,7 +130,10 @@ def main() -> int:
         if action is None:
             continue
         cron_tz = str(job.get("cron_tz") or "America/New_York")
-        local_now = dt.datetime.now(ZoneInfo(cron_tz)).replace(second=0, microsecond=0)
+        local_now = time_snapshots.get(cron_tz)
+        if local_now is None:
+            local_now = dt.datetime.now(ZoneInfo(cron_tz)).replace(second=0, microsecond=0)
+            time_snapshots[cron_tz] = local_now
         if not _cron_matches(str(job.get("cron_expr") or ""), local_now):
             continue
         slot_key = f"{job['job_id']}@{local_now.isoformat()}"
