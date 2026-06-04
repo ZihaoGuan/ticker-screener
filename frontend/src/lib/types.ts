@@ -7,7 +7,7 @@ export type StrategyCard = {
   accent?: "up" | "neutral";
 };
 
-export type JobStatus = "running" | "success" | "failed" | "cancelled";
+export type JobStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 
 export type RoleName = "visitor" | "premium" | "admin";
 
@@ -640,6 +640,7 @@ export type ScheduledJobConfigResponse = {
   }>;
   common_timezones: string[];
   scheduler_command: string;
+  max_parallel_jobs: number;
 };
 
 export type AdminResponse = {

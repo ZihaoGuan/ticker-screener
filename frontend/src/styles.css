@@ -525,6 +525,11 @@ a {
   color: #34d399;
 }
 
+.status-queued {
+  background: rgba(59, 130, 246, 0.14);
+  color: #93c5fd;
+}
+
 .status-success {
   background: rgba(16, 185, 129, 0.12);
   color: #34d399;

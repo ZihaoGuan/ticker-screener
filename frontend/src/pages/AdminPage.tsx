@@ -2,10 +2,9 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ExclusionDialog } from "../components/ExclusionDialog";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
-import { StatusPill } from "../components/StatusPill";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { AccessRequestSummary, AdminResponse, AuditEventSummary, AuditEventsResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName, ScheduledJobConfig, ScheduledJobConfigResponse, ScheduledJobSummary } from "../lib/types";
+import type { AccessRequestSummary, AdminResponse, AuditEventSummary, AuditEventsResponse, ExclusionEntry, PartialTickerDetailResponse, RoleName } from "../lib/types";
 
 const EMPTY_ADMIN_RESPONSE: AdminResponse = {
   excluded_tickers: [],
@@ -63,35 +62,6 @@ export function AdminPage() {
   const [auditFromDate, setAuditFromDate] = useState("");
   const [auditToDate, setAuditToDate] = useState("");
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
-  const [scheduledJobs, setScheduledJobs] = useState<ScheduledJobSummary[]>([]);
-  const [isLoadingScheduledJobs, setIsLoadingScheduledJobs] = useState(true);
-  const [scheduledConfigs, setScheduledConfigs] = useState<ScheduledJobConfig[]>([]);
-  const [availableScheduledActions, setAvailableScheduledActions] = useState<
-    Array<{
-      id: string;
-      label: string;
-      fields: Array<{
-        id: string;
-        label: string;
-        type: "text" | "number" | "date" | "select" | "multiselect";
-        placeholder?: string | null;
-        help_text?: string | null;
-        options: Array<{ value: string; label: string }>;
-      }>;
-    }>
-  >([]);
-  const [commonTimezones, setCommonTimezones] = useState<string[]>([]);
-  const [schedulerCommand, setSchedulerCommand] = useState("");
-  const [isLoadingScheduleConfig, setIsLoadingScheduleConfig] = useState(true);
-  const [scheduleJobId, setScheduleJobId] = useState("");
-  const [scheduleJobLabel, setScheduleJobLabel] = useState("");
-  const [scheduleActionId, setScheduleActionId] = useState("weekly_rs");
-  const [scheduleCronExpr, setScheduleCronExpr] = useState("30 16 * * 1-5");
-  const [scheduleCronTz, setScheduleCronTz] = useState("America/New_York");
-  const [scheduleEnabled, setScheduleEnabled] = useState(true);
-  const [scheduleOptionsJson, setScheduleOptionsJson] = useState("{}");
-  const [lastSuggestedOptionsJson, setLastSuggestedOptionsJson] = useState("{}");
-  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
 
   const loadAdmin = (start: string) => {
     setIsLoading(true);
@@ -135,35 +105,6 @@ export function AdminPage() {
       .finally(() => setIsLoadingAudit(false));
   };
 
-  const loadScheduledJobs = () => {
-    setIsLoadingScheduledJobs(true);
-    void fetchJson<{ jobs: ScheduledJobSummary[] }>("/api/admin/scheduled-jobs")
-      .then((result) => setScheduledJobs(result.jobs))
-      .catch(() => setScheduledJobs([]))
-      .finally(() => setIsLoadingScheduledJobs(false));
-  };
-
-  const loadScheduleConfig = () => {
-    setIsLoadingScheduleConfig(true);
-    void fetchJson<ScheduledJobConfigResponse>("/api/admin/schedules")
-      .then((result) => {
-        setScheduledConfigs(result.jobs);
-        setAvailableScheduledActions(result.available_actions);
-        setCommonTimezones(result.common_timezones);
-        setSchedulerCommand(result.scheduler_command);
-        if (!result.available_actions.find((item) => item.id === scheduleActionId) && result.available_actions[0]) {
-          setScheduleActionId(result.available_actions[0].id);
-        }
-      })
-      .catch(() => {
-        setScheduledConfigs([]);
-        setAvailableScheduledActions([]);
-        setCommonTimezones([]);
-        setSchedulerCommand("");
-      })
-      .finally(() => setIsLoadingScheduleConfig(false));
-  };
-
   useEffect(() => {
     loadAdmin(coverageStart);
     void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
@@ -179,14 +120,6 @@ export function AdminPage() {
 
   useEffect(() => {
     loadAudit();
-  }, []);
-
-  useEffect(() => {
-    loadScheduledJobs();
-  }, []);
-
-  useEffect(() => {
-    loadScheduleConfig();
   }, []);
 
   const handleLaunchSync = async (event: FormEvent<HTMLFormElement>) => {
@@ -379,101 +312,6 @@ export function AdminPage() {
     event.preventDefault();
     loadAudit();
   };
-
-  const resetScheduleForm = () => {
-    const nextActionId = availableScheduledActions[0]?.id ?? "weekly_rs";
-    setScheduleJobId("");
-    setScheduleJobLabel("");
-    setScheduleActionId(nextActionId);
-    setScheduleCronExpr("30 16 * * 1-5");
-    setScheduleCronTz(commonTimezones[0] ?? "America/New_York");
-    setScheduleEnabled(true);
-    const nextSuggested = buildScheduleOptionsTemplate(nextActionId);
-    setScheduleOptionsJson(nextSuggested);
-    setLastSuggestedOptionsJson(nextSuggested);
-  };
-
-  const handleSaveSchedule = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsSavingSchedule(true);
-    setNotice("");
-    try {
-      const parsedOptions = JSON.parse(scheduleOptionsJson || "{}") as Record<string, unknown>;
-      await fetchJson<{ ok: boolean }>("/api/admin/schedules", {
-        method: "POST",
-        body: JSON.stringify({
-          job_id: scheduleJobId,
-          job_label: scheduleJobLabel,
-          action_id: scheduleActionId,
-          cron_expr: scheduleCronExpr,
-          cron_tz: scheduleCronTz,
-          enabled: scheduleEnabled,
-          options: parsedOptions,
-        }),
-      });
-      setNotice("Scheduled job saved.");
-      loadScheduleConfig();
-      resetScheduleForm();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to save scheduled job.");
-    } finally {
-      setIsSavingSchedule(false);
-    }
-  };
-
-  const handleEditSchedule = (job: ScheduledJobConfig) => {
-    setScheduleJobId(job.job_id);
-    setScheduleJobLabel(job.job_label);
-    setScheduleActionId(job.action_id);
-    setScheduleCronExpr(job.cron_expr);
-    setScheduleCronTz(job.cron_tz);
-    setScheduleEnabled(job.enabled);
-    const serialized = JSON.stringify(job.options ?? {}, null, 2);
-    setScheduleOptionsJson(serialized);
-    setLastSuggestedOptionsJson(serialized);
-  };
-
-  const handleDeleteSchedule = async (jobId: string) => {
-    setIsSavingSchedule(true);
-    setNotice("");
-    try {
-      await fetchJson<{ ok: boolean }>(`/api/admin/schedules/${jobId}/delete`, { method: "POST" });
-      setNotice("Scheduled job deleted.");
-      loadScheduleConfig();
-      if (scheduleJobId === jobId) {
-        resetScheduleForm();
-      }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to delete scheduled job.");
-    } finally {
-      setIsSavingSchedule(false);
-    }
-  };
-
-  const renderScheduledJobStatus = (status: string) => {
-    if (status === "running" || status === "success" || status === "failed") {
-      return <StatusPill status={status} />;
-    }
-    return <span className="status-pill status-unknown">{status || "unknown"}</span>;
-  };
-
-  const selectedScheduledAction = useMemo(
-    () => availableScheduledActions.find((item) => item.id === scheduleActionId) ?? null,
-    [availableScheduledActions, scheduleActionId],
-  );
-
-  const suggestedScheduleOptionsJson = useMemo(
-    () => buildScheduleOptionsTemplate(scheduleActionId),
-    [scheduleActionId],
-  );
-
-  useEffect(() => {
-    const trimmed = scheduleOptionsJson.trim();
-    if (trimmed === "" || trimmed === "{}" || trimmed === lastSuggestedOptionsJson.trim()) {
-      setScheduleOptionsJson(suggestedScheduleOptionsJson);
-    }
-    setLastSuggestedOptionsJson(suggestedScheduleOptionsJson);
-  }, [lastSuggestedOptionsJson, scheduleActionId, scheduleOptionsJson, suggestedScheduleOptionsJson]);
 
   return (
     <div className="page-grid">
@@ -669,187 +507,6 @@ export function AdminPage() {
           </div>
           {launchMessage ? <div className="panel-copy">{launchMessage}</div> : null}
         </form>
-      </Panel>
-
-      <Panel title="Scheduled Jobs" aside={<span className="eyebrow">{scheduledJobs.length} tracked</span>}>
-        <div className="run-toolbar">
-          <div className="run-action-footer">
-            <button className="primary-button" type="button" onClick={loadScheduledJobs} disabled={isLoadingScheduledJobs}>
-              {isLoadingScheduledJobs ? "Loading..." : "Refresh Scheduled Status"}
-            </button>
-            <span className="panel-copy">Reads JSON status files under the app artifacts directory. Host cron remains source of truth.</span>
-          </div>
-          {isLoadingScheduledJobs ? <LoadingBlock label="Loading scheduled job status…" compact /> : null}
-          <div className="data-table-responsive">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Job</th>
-                  <th>Status</th>
-                  <th>Last Start</th>
-                  <th>Last Finish</th>
-                  <th>Exit</th>
-                  <th>Log</th>
-                  <th>Artifact</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scheduledJobs.length === 0 ? (
-                  <tr>
-                    <td colSpan={7}>{isLoadingScheduledJobs ? "Loading scheduled jobs..." : "No scheduled job status files found."}</td>
-                  </tr>
-                ) : (
-                  scheduledJobs.map((job) => (
-                    <tr key={job.job_id}>
-                      <td data-label="Job">
-                        <div className="admin-job-cell">
-                          <strong>{job.job_label}</strong>
-                          <span className="file-meta">{job.job_id}</span>
-                          {job.message ? <span className="panel-copy">{job.message}</span> : null}
-                        </div>
-                      </td>
-                      <td data-label="Status">{renderScheduledJobStatus(job.status)}</td>
-                      <td data-label="Last Start">{formatLocalDateTime(job.last_started_at)}</td>
-                      <td data-label="Last Finish">{formatLocalDateTime(job.last_finished_at)}</td>
-                      <td data-label="Exit">{job.exit_code ?? "-"}</td>
-                      <td data-label="Log">{job.log_file || "-"}</td>
-                      <td data-label="Artifact">{job.artifact_file || "-"}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </Panel>
-
-      <Panel title="Scheduler Config" aside={<span className="eyebrow">{scheduledConfigs.length} schedules</span>}>
-        <div className="run-toolbar">
-          <form className="run-toolbar" onSubmit={(event) => void handleSaveSchedule(event)}>
-            <div className="run-params-grid">
-              <label className="field">
-                <span>Job ID</span>
-                <input type="text" value={scheduleJobId} onChange={(event) => setScheduleJobId(event.target.value)} placeholder="weekly_rs_close" required />
-              </label>
-              <label className="field">
-                <span>Job Label</span>
-                <input type="text" value={scheduleJobLabel} onChange={(event) => setScheduleJobLabel(event.target.value)} placeholder="Weekly RS After Close" required />
-              </label>
-              <label className="field">
-                <span>Screener</span>
-                <select value={scheduleActionId} onChange={(event) => setScheduleActionId(event.target.value)}>
-                  {availableScheduledActions.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Cron Expr</span>
-                <input type="text" value={scheduleCronExpr} onChange={(event) => setScheduleCronExpr(event.target.value)} placeholder="30 16 * * 1-5" required />
-              </label>
-              <label className="field">
-                <span>Timezone</span>
-                <select value={scheduleCronTz} onChange={(event) => setScheduleCronTz(event.target.value)}>
-                  {commonTimezones.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Enabled</span>
-                <select value={scheduleEnabled ? "true" : "false"} onChange={(event) => setScheduleEnabled(event.target.value === "true")}>
-                  <option value="true">enabled</option>
-                  <option value="false">disabled</option>
-                </select>
-              </label>
-              <label className="field" style={{ gridColumn: "1 / -1" }}>
-                <span>Action Options JSON</span>
-                <textarea
-                  value={scheduleOptionsJson}
-                  onChange={(event) => setScheduleOptionsJson(event.target.value)}
-                  rows={8}
-                  placeholder='{"reference_date":"{{local_date}}"}'
-                />
-              </label>
-            </div>
-            <div className="run-action-footer">
-              <button className="primary-button" type="submit" disabled={isSavingSchedule || isLoadingScheduleConfig}>
-                {isSavingSchedule ? "Saving..." : "Save Schedule"}
-              </button>
-              <button className="ghost-button" type="button" onClick={resetScheduleForm} disabled={isSavingSchedule}>
-                Clear
-              </button>
-              <span className="panel-copy">Host cron should run scheduler command every 5 minutes: {schedulerCommand || "-"}</span>
-            </div>
-            <p className="panel-copy">
-              Supported schedule date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
-            </p>
-            <p className="panel-copy">
-              Suggested options for this action:
-            </p>
-            <pre className="panel-copy"><code>{suggestedScheduleOptionsJson}</code></pre>
-            {selectedScheduledAction?.fields?.length ? (
-              <p className="panel-copy">
-                Action fields: {selectedScheduledAction.fields.map((field) => field.id).join(", ")}
-              </p>
-            ) : null}
-          </form>
-          {isLoadingScheduleConfig ? <LoadingBlock label="Loading scheduler config…" compact /> : null}
-          <div className="data-table-responsive">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Job</th>
-                  <th>Screener</th>
-                  <th>Cron</th>
-                  <th>TZ</th>
-                  <th>Options</th>
-                  <th>Enabled</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scheduledConfigs.length === 0 ? (
-                  <tr>
-                    <td colSpan={7}>{isLoadingScheduleConfig ? "Loading schedules..." : "No scheduled jobs configured yet."}</td>
-                  </tr>
-                ) : (
-                  scheduledConfigs.map((job) => (
-                    <tr key={job.job_id}>
-                      <td data-label="Job">
-                        <div className="admin-job-cell">
-                          <strong>{job.job_label}</strong>
-                          <span className="file-meta">{job.job_id}</span>
-                        </div>
-                      </td>
-                      <td data-label="Screener">{job.action_id}</td>
-                      <td data-label="Cron">{job.cron_expr}</td>
-                      <td data-label="TZ">{job.cron_tz}</td>
-                      <td data-label="Options">
-                        <code>{JSON.stringify(job.options ?? {})}</code>
-                      </td>
-                      <td data-label="Enabled">{job.enabled ? "Yes" : "No"}</td>
-                      <td data-label="Actions">
-                        <div className="button-row">
-                          <button className="table-action-button" type="button" disabled={isSavingSchedule} onClick={() => handleEditSchedule(job)}>
-                            Edit
-                          </button>
-                          <button className="table-action-button" type="button" disabled={isSavingSchedule} onClick={() => void handleDeleteSchedule(job.job_id)}>
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
       </Panel>
 
       <Panel title="Users and Roles" aside={<span className="eyebrow">{users.length} accounts</span>}>
@@ -1078,62 +735,4 @@ export function AdminPage() {
       />
     </div>
   );
-}
-
-function buildScheduleOptionsTemplate(actionId: string): string {
-  const sharedUniverseTemplate = {
-    market_data_source: "database-first",
-    filter_precedence: "exclude",
-  };
-
-  if (actionId === "earnings_weekly_criteria") {
-    return JSON.stringify({ reference_date: "{{local_date}}" }, null, 2);
-  }
-  if (actionId === "legacy_peg" || actionId === "sean_peg") {
-    return JSON.stringify(
-      {
-        source: "earnings-watchlist",
-        reference_date: "{{local_date}}",
-        market_data_source: "database-first",
-      },
-      null,
-      2,
-    );
-  }
-  if (actionId === "screener_history_batch") {
-    return JSON.stringify(
-      {
-        strategy_ids: ["rs", "vcp"],
-        start_date: "{{local_date_plus_14}}",
-        end_date: "{{local_date}}",
-        market_data_source: "database-first",
-        overwrite_policy: "skip_existing",
-        scope: {},
-      },
-      null,
-      2,
-    );
-  }
-  if (actionId === "backtest_v1") {
-    return JSON.stringify(
-      {
-        entry_rule: {
-          mode: "min_count_same_day",
-          screener_ids: ["rs", "vcp"],
-          min_count: 2,
-        },
-        date_range: {
-          start_date: "2026-01-01",
-          end_date: "{{local_date}}",
-        },
-        exit_rules: [],
-        position_rules: {},
-        signal_cache_policy: "reuse_then_fill",
-        market_data_mode: "database_only",
-      },
-      null,
-      2,
-    );
-  }
-  return JSON.stringify(sharedUniverseTemplate, null, 2);
 }

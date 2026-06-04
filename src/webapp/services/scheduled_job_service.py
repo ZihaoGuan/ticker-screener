@@ -14,6 +14,7 @@ _COMMON_TIMEZONES = (
     "Pacific/Auckland",
     "UTC",
 )
+_DEFAULT_MAX_PARALLEL_JOBS = 5
 
 
 class ScheduledJobService:
@@ -28,6 +29,7 @@ class ScheduledJobService:
             "available_actions": self._available_actions(),
             "common_timezones": list(_COMMON_TIMEZONES),
             "scheduler_command": f"cd {self.project_root / 'deploy'} && {self.project_root / 'scripts' / 'run_scheduled_jobs.py'}",
+            "max_parallel_jobs": self.get_max_parallel_jobs(),
         }
 
     def list_jobs(self) -> list[dict[str, Any]]:
@@ -117,6 +119,24 @@ class ScheduledJobService:
         next_jobs = [item for item in jobs if str(item.get("job_id") or "").strip() != clean_job_id]
         payload["jobs"] = next_jobs
         self._write_jobs(payload)
+
+    def get_max_parallel_jobs(self) -> int:
+        payload = self._load_jobs()
+        value = payload.get("max_parallel_jobs")
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return _DEFAULT_MAX_PARALLEL_JOBS
+        return max(1, min(20, parsed))
+
+    def update_max_parallel_jobs(self, value: int) -> int:
+        parsed = int(value)
+        if parsed < 1 or parsed > 20:
+            raise ValueError("max_parallel_jobs must be between 1 and 20.")
+        payload = self._load_jobs()
+        payload["max_parallel_jobs"] = parsed
+        self._write_jobs(payload)
+        return parsed
 
     def _available_actions(self) -> list[dict[str, Any]]:
         return [

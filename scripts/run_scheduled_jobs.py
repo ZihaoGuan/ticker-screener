@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from zoneinfo import ZoneInfo
 
 
@@ -38,6 +39,32 @@ def _load_state() -> dict[str, str]:
 def _save_state(payload: dict[str, str]) -> None:
     STATUS_DIR.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_scheduler_status(
+    *,
+    job_id: str,
+    job_label: str,
+    status: str,
+    message: str,
+    artifact_file: str = "",
+) -> None:
+    STATUS_DIR.mkdir(parents=True, exist_ok=True)
+    status_path = STATUS_DIR / f"{job_id}.json"
+    payload = {
+        "job_id": job_id,
+        "job_label": job_label,
+        "status": status,
+        "last_started_at": None,
+        "last_finished_at": None,
+        "exit_code": None,
+        "log_file": "",
+        "artifact_file": artifact_file or None,
+        "message": message,
+    }
+    tmp_path = status_path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(status_path)
 
 
 def _matches_field(field: str, value: int, *, minimum: int, maximum: int) -> bool:
@@ -113,6 +140,7 @@ def _resolve_template_value(value: object, *, local_now: dt.datetime) -> object:
 def main() -> int:
     run_service = RunService(project_root=PROJECT_ROOT)
     schedule_service = ScheduledJobService(project_root=PROJECT_ROOT, run_service=run_service)
+    max_parallel_jobs = schedule_service.get_max_parallel_jobs()
     actions = {
         action.action_id: action
         for action in run_service._actions.values()
@@ -121,6 +149,7 @@ def main() -> int:
     state = _load_state()
     any_run = False
     time_snapshots: dict[str, dt.datetime] = {}
+    due_runs: list[tuple[dict[str, object], str, dt.datetime, dict[str, str], list[str], Path]] = []
 
     for job in schedule_service.list_jobs():
         if not job.get("enabled"):
@@ -169,13 +198,48 @@ def main() -> int:
                 *command_tail[1:],
             ]
             run_cwd = DEPLOY_DIR
-        print(f"running scheduled job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")
-        subprocess.run(command, cwd=run_cwd, env=env, check=False)
+        due_runs.append((job, slot_key, local_now, env, command, run_cwd))
         state[str(job["job_id"])] = slot_key
         any_run = True
 
     if any_run:
         _save_state(state)
+        pending_runs = list(due_runs)
+        running_processes: list[tuple[dict[str, object], subprocess.Popen[bytes]]] = []
+        exit_code = 0
+
+        for index, (job, _, _, env, _, _) in enumerate(pending_runs):
+            if index >= max_parallel_jobs:
+                _write_scheduler_status(
+                    job_id=str(job["job_id"]),
+                    job_label=str(job["job_label"]),
+                    status="queued",
+                    message="Queued behind other scheduled jobs for this time slot.",
+                    artifact_file=str(env.get("TICKER_SCREENER_STATUS_ARTIFACT") or ""),
+                )
+
+        while pending_runs or running_processes:
+            while pending_runs and len(running_processes) < max_parallel_jobs:
+                job, _, local_now, env, command, run_cwd = pending_runs.pop(0)
+                action_id = str(job.get("action_id") or "")
+                cron_tz = str(job.get("cron_tz") or "America/New_York")
+                print(f"running scheduled job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")
+                process = subprocess.Popen(command, cwd=run_cwd, env=env)
+                running_processes.append((job, process))
+
+            next_running: list[tuple[dict[str, object], subprocess.Popen[bytes]]] = []
+            for job, process in running_processes:
+                return_code = process.poll()
+                if return_code is None:
+                    next_running.append((job, process))
+                    continue
+                if return_code != 0:
+                    print(f"scheduled job {job['job_id']} exited with {return_code}")
+                    exit_code = return_code if exit_code == 0 else exit_code
+            running_processes = next_running
+            if running_processes:
+                time.sleep(1)
+        return exit_code
     return 0
 
 

@@ -2,7 +2,7 @@
 
 {% block content %}
 <section class="band">
-  <h1>Run Controls</h1>
+  <h1>Screeners</h1>
   <p class="lede">Launch the core screeners directly from the web app.</p>
   {% if launched %}
   <div class="callout success">Started {{ launched }} run.</div>
@@ -12,7 +12,7 @@
     <article class="card">
       <h3>{{ item.label }}</h3>
       <pre>{{ item.command }}</pre>
-      <form method="post" action="/runs/{{ item.id }}" class="run-form">
+      <form method="post" action="/screeners/{{ item.id }}" class="run-form">
         {% if item.supports_limit %}
         <label class="field">
           <span>Limit</span>

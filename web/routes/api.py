@@ -767,6 +767,33 @@ def delete_schedule_config(
     return JSONResponse({"ok": True})
 
 
+@router.post("/admin/schedules/settings", response_class=JSONResponse)
+def update_schedule_settings(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: ScheduledJobService = Depends(get_scheduled_job_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        max_parallel_jobs = service.update_max_parallel_jobs(int(request_payload.get("max_parallel_jobs") or 0))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.schedule.settings",
+        resource_type="scheduled_job_settings",
+        resource_id="max_parallel_jobs",
+        resource_label="max_parallel_jobs",
+        message=f"Updated scheduler max parallel jobs to {max_parallel_jobs}.",
+        metadata={"max_parallel_jobs": max_parallel_jobs},
+    )
+    return JSONResponse({"ok": True, "max_parallel_jobs": max_parallel_jobs})
+
+
 @router.post("/admin/exclusions", response_class=JSONResponse)
 def add_exclusion(
     request: Request,

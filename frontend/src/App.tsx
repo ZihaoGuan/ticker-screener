@@ -34,13 +34,14 @@ export default function App() {
         <Route path="/charts" element={<ChartsPage />} />
         <Route path="/earnings" element={<EarningsPage />} />
         <Route
-          path="/runs"
+          path="/screeners"
           element={
             <ProtectedRoute capability="run_screeners">
               <RunsPage />
             </ProtectedRoute>
           }
         />
+        <Route path="/runs" element={<Navigate to="/screeners" replace />} />
         <Route
           path="/watchlists/weekly"
           element={

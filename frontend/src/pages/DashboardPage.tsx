@@ -43,7 +43,7 @@ export function DashboardPage() {
       </Panel>
 
       <div className="split-grid">
-        <Panel title="Recent Screening Activity" aside={<Link className="ghost-button" to="/runs">View all runs</Link>}>
+        <Panel title="Recent Screening Activity" aside={<Link className="ghost-button" to="/screeners">View all screeners</Link>}>
           <div className="data-table-responsive">
             <table className="data-table">
               <thead>
