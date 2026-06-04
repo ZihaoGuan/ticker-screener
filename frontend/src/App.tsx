@@ -77,13 +77,14 @@ export default function App() {
         <Route path="/rrg" element={<Navigate to="/rotation/sector" replace />} />
         <Route path="/rrg/:universe" element={<LegacyRrgRedirect />} />
         <Route
-          path="/overlap"
+          path="/report"
           element={
             <RoleRoute allowedRoles={["premium", "admin"]}>
               <OverlapPage />
             </RoleRoute>
           }
         />
+        <Route path="/overlap" element={<Navigate to="/report" replace />} />
         <Route
           path="/backtests"
           element={

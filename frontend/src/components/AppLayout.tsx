@@ -10,7 +10,7 @@ const navItems = [
   { to: "/earnings", label: "Earnings", icon: "◒" },
   { to: "/watchlists", label: "Watchlists", icon: "◌", roles: ["premium", "admin"] as RoleName[] },
   { to: "/rotation/sector", label: "Rotation", icon: "◎", roles: ["premium", "admin"] as RoleName[] },
-  { to: "/overlap", label: "Overlap", icon: "◈", roles: ["premium", "admin"] as RoleName[] },
+  { to: "/report", label: "Report", icon: "◈", roles: ["premium", "admin"] as RoleName[] },
   { to: "/backtests", label: "Backtests", icon: "▥", roles: ["premium", "admin"] as RoleName[] },
   { to: "/screeners", label: "Screeners", icon: "◉", capability: "run_screeners" as CapabilityName },
   { to: "/admin", label: "Admin", icon: "◔", capability: "manage_exclusions" as CapabilityName },

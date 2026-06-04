@@ -23,6 +23,6 @@ class DashboardService:
                 {"id": "vcp", "label": "VCP", "description": "Volatility contraction pattern scan."},
                 {"id": "cup_handle", "label": "Cup and Handle", "description": "Breakout candidate scan."},
                 {"id": "ftd_sweep", "label": "FTD Sweep", "description": "Recent FTD sweep breakout within the lookback window."},
-                {"id": "overlap", "label": "Overlap", "description": "Cross-strategy overlap summary."},
+                {"id": "overlap", "label": "Report", "description": "Daily cross-strategy overlap report."},
             ],
         }
