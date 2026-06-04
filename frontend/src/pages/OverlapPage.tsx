@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
-import type { OverlapResponse } from "../lib/types";
+import type { OverlapPipelineStatus, OverlapResponse } from "../lib/types";
 
 export function OverlapPage() {
   const [searchParams] = useSearchParams();
@@ -11,6 +11,7 @@ export function OverlapPage() {
   const [payload, setPayload] = useState<OverlapResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [selectedPipelineId, setSelectedPipelineId] = useState("");
 
   const requestPath = useMemo(() => {
     return requestedDate ? `/api/overlap/${encodeURIComponent(requestedDate)}` : "/api/overlap/latest";
@@ -22,6 +23,12 @@ export function OverlapPage() {
     void fetchJson<OverlapResponse>(requestPath)
       .then((response) => {
         setPayload(response);
+        setSelectedPipelineId((current) => {
+          if (current && response.pipeline_tickers[current]) {
+            return current;
+          }
+          return response.pipeline_status[0]?.id ?? "";
+        });
         if (requestedDate && response.date_label && response.date_label !== requestedDate) {
           setNotice(`Requested ${requestedDate}. Loaded ${response.date_label} instead.`);
         }
@@ -37,6 +44,10 @@ export function OverlapPage() {
   const chartDate = payload?.date_label || requestedDate;
   const candidates = payload?.overlap_two_plus ?? [];
   const pipelineStatus = payload?.pipeline_status ?? [];
+  const pipelineTickers = payload?.pipeline_tickers ?? {};
+  const selectedTickers = selectedPipelineId ? pipelineTickers[selectedPipelineId] ?? [] : [];
+  const selectedPipeline = pipelineStatus.find((item) => item.id === selectedPipelineId) ?? null;
+  const fearzoneTickers = payload?.fearzone_tickers ?? [];
 
   return (
     <div className="page-grid">
@@ -76,13 +87,58 @@ export function OverlapPage() {
         {isLoading ? <LoadingBlock label="Loading pipeline status…" compact /> : null}
         <div className="card-grid overlap-cards">
           {pipelineStatus.map((item) => (
-            <article key={item.label} className="metric-card">
+            <button
+              key={item.id}
+              type="button"
+              className={`metric-card overlap-status-tile${selectedPipelineId === item.id ? " is-active" : ""}`}
+              onClick={() => setSelectedPipelineId(item.id)}
+            >
               <h3>{item.label}</h3>
               <div className="metric-value">{item.count}</div>
               <p className="card-meta">{item.file_present ? "Artifact present" : "Artifact missing"}</p>
-            </article>
+            </button>
           ))}
         </div>
+      </Panel>
+
+      <Panel
+        title={selectedPipeline ? `${selectedPipeline.label} Tickers` : "Screener Tickers"}
+        aside={<span className="eyebrow">{selectedTickers.length} names</span>}
+      >
+        {selectedPipeline == null ? <p className="panel-copy">Select screener tile to inspect ticker list.</p> : null}
+        {selectedPipeline != null && selectedTickers.length === 0 ? (
+          <p className="panel-copy">{selectedPipeline.file_present ? "No tickers in this screener artifact." : "Screener artifact missing for this date."}</p>
+        ) : null}
+        {selectedTickers.length > 0 ? (
+          <div className="ticker-chip-grid">
+            {selectedTickers.map((ticker) => (
+              <Link
+                key={`${selectedPipelineId}-${ticker}`}
+                className="table-action-button table-link-button"
+                to={chartDate ? `/charts?ticker=${encodeURIComponent(ticker)}&date=${encodeURIComponent(chartDate)}` : `/charts?ticker=${encodeURIComponent(ticker)}`}
+              >
+                {ticker}
+              </Link>
+            ))}
+          </div>
+        ) : null}
+      </Panel>
+
+      <Panel title="Fearzone Signals" aside={<span className="eyebrow">{fearzoneTickers.length} names</span>}>
+        {!isLoading && fearzoneTickers.length === 0 ? <p className="panel-copy">No fearzone signals for this date.</p> : null}
+        {fearzoneTickers.length > 0 ? (
+          <div className="ticker-chip-grid">
+            {fearzoneTickers.map((ticker) => (
+              <Link
+                key={`fearzone-${ticker}`}
+                className="table-action-button table-link-button"
+                to={chartDate ? `/charts?ticker=${encodeURIComponent(ticker)}&date=${encodeURIComponent(chartDate)}` : `/charts?ticker=${encodeURIComponent(ticker)}`}
+              >
+                {ticker}
+              </Link>
+            ))}
+          </div>
+        ) : null}
       </Panel>
 
       <Panel title="Candidates">

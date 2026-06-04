@@ -52,6 +52,11 @@ PIPELINES = (
         "label": "Gap Fill",
         "filename": "gap_fill_{date}.json",
     },
+    {
+        "id": "ftd_sweep",
+        "label": "Sweep Success",
+        "filename": "ftd_sweep_{date}.json",
+    },
 )
 
 DRUG_THEME_TAGS = {
@@ -219,6 +224,8 @@ def build_overlap_payload(date_label: str, watchlist_dir: Path) -> dict[str, obj
     ]
     overlap_two_plus.sort(key=lambda item: (-int(item["pipeline_count"]), str(item["ticker"])))
     overlap_three_plus = [item for item in overlap_two_plus if int(item["pipeline_count"]) >= 3]
+    fearzone_entries = load_watchlist(watchlist_dir / f"fearzone_{date_label}.json")
+    fearzone_tickers = extract_tickers(fearzone_entries)
 
     return {
         "date_label": date_label,
@@ -230,6 +237,7 @@ def build_overlap_payload(date_label: str, watchlist_dir: Path) -> dict[str, obj
         "unique_ticker_count": len(ticker_to_pipelines),
         "overlap_two_plus": overlap_two_plus,
         "overlap_three_plus": overlap_three_plus,
+        "fearzone_tickers": fearzone_tickers,
     }
 
 

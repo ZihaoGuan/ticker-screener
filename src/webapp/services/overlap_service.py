@@ -42,6 +42,8 @@ class OverlapService:
             "overlap_three_plus_count": len(overlap_three_plus),
             "overlap_two_plus": overlap_two_plus,
             "pipeline_status": pipeline_status,
+            "pipeline_tickers": payload.get("pipeline_tickers", {}),
+            "fearzone_tickers": payload.get("fearzone_tickers", []),
         }
 
     def _latest_watchlist_date(self) -> str:
@@ -56,4 +58,6 @@ class OverlapService:
             "overlap_three_plus_count": 0,
             "overlap_two_plus": [],
             "pipeline_status": [],
+            "pipeline_tickers": {},
+            "fearzone_tickers": [],
         }

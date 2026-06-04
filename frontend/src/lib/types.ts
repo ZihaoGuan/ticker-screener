@@ -135,6 +135,13 @@ export type OverlapEntry = {
   theme_tags?: string[];
 };
 
+export type OverlapPipelineStatus = {
+  id: string;
+  label: string;
+  count: number;
+  file_present: boolean;
+};
+
 export type DashboardResponse = {
   overview: {
     database_configured: boolean;
@@ -463,7 +470,9 @@ export type OverlapResponse = {
   overlap_two_plus_count: number;
   overlap_three_plus_count: number;
   overlap_two_plus: OverlapEntry[];
-  pipeline_status: Array<{ label: string; count: number; file_present: boolean }>;
+  pipeline_status: OverlapPipelineStatus[];
+  pipeline_tickers: Record<string, string[]>;
+  fearzone_tickers: string[];
 };
 
 export type ScreenerRunSummary = {
