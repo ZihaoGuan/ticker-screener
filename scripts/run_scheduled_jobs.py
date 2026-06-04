@@ -142,20 +142,31 @@ def main() -> int:
             env["TICKER_SCREENER_STATUS_ARTIFACT"] = artifact_path
         resolved_options = _resolve_template_value(job.get("options") or {}, local_now=local_now)
         command_tail = run_service.build_command(action_id, resolved_options if isinstance(resolved_options, dict) else {})
-        command = [
-            str(WRAPPER_SCRIPT),
-            str(job["job_id"]),
-            str(job["job_label"]),
-            "--",
-            "docker-compose",
-            "exec",
-            "-T",
-            "web",
-            "python",
-            *command_tail[1:],
-        ]
+        if os.path.exists("/.dockerenv"):
+            command = [
+                str(WRAPPER_SCRIPT),
+                str(job["job_id"]),
+                str(job["job_label"]),
+                "--",
+                *command_tail,
+            ]
+            run_cwd = PROJECT_ROOT
+        else:
+            command = [
+                str(WRAPPER_SCRIPT),
+                str(job["job_id"]),
+                str(job["job_label"]),
+                "--",
+                "docker-compose",
+                "exec",
+                "-T",
+                "web",
+                "python",
+                *command_tail[1:],
+            ]
+            run_cwd = DEPLOY_DIR
         print(f"running scheduled job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")
-        subprocess.run(command, cwd=DEPLOY_DIR, env=env, check=False)
+        subprocess.run(command, cwd=run_cwd, env=env, check=False)
         state[str(job["job_id"])] = slot_key
         any_run = True
 

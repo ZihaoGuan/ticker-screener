@@ -96,6 +96,8 @@ class ScheduledJobService:
         next_jobs: list[dict[str, Any]] = []
         for item in jobs:
             if str(item.get("job_id") or "").strip() == clean_job_id:
+                if not next_job["options"] and isinstance(item.get("options"), dict):
+                    next_job["options"] = dict(item.get("options") or {})
                 next_jobs.append(next_job)
                 replaced = True
             else:
