@@ -131,6 +131,32 @@ def _fearzone_frame() -> pd.DataFrame:
     )
 
 
+def _hve_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-02", periods=320, freq="B")
+    open_values = [100.0 + (idx * 0.2) for idx in range(320)]
+    close = [100.4 + (idx * 0.2) for idx in range(320)]
+    high = [max(op, cl) + 0.8 for op, cl in zip(open_values, close, strict=False)]
+    low = [min(op, cl) - 0.7 for op, cl in zip(open_values, close, strict=False)]
+    volume = [1_000_000.0 + (idx * 2_500.0) for idx in range(320)]
+    signal_index = len(index) - 1
+    open_values[signal_index] = 163.0
+    close[signal_index] = 170.0
+    high[signal_index] = 171.2
+    low[signal_index] = 162.1
+    volume[signal_index] = 4_800_000.0
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": volume,
+        },
+        index=index,
+    )
+
+
 class AdHocScreenServiceTests(unittest.TestCase):
     def test_run_prefetches_once_and_evaluates_selected_screeners(self) -> None:
         ticker_frame = _frame("2026-01-01", 40)
@@ -236,6 +262,28 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "fearzone")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_hve_catalog_entry(self) -> None:
+        ticker_frame = _hve_frame()
+        benchmark_frame = _frame("2025-01-02", 320)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2026, 3, 25),
+                screener_ids=["hve"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "hve")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_falls_back_to_internet_when_benchmark_missing_in_db(self) -> None:

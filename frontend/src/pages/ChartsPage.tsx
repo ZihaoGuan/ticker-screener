@@ -26,6 +26,7 @@ const CHART_CACHE_TTL_MS = 60 * 60 * 1000;
 export function ChartsPage() {
   const auth = useAuth();
   const setupOptions = [
+    { id: "hve", label: "HVE 52W" },
     { id: "ftd_sweep", label: "FTD Sweep" },
     { id: "weekly_htf_pullback", label: "Weekly HTF Pullback" },
     { id: "htf_8w_runup", label: "HTF 8W Runup" },
@@ -51,6 +52,7 @@ export function ChartsPage() {
   const [chartVisibility, setChartVisibility] = useState<ChartVisibility>(DEFAULT_CHART_VISIBILITY);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [selectedSetups, setSelectedSetups] = useState<Record<string, boolean>>({
+    hve: false,
     ftd_sweep: false,
     weekly_htf_pullback: false,
     htf_8w_runup: false,
@@ -86,7 +88,7 @@ export function ChartsPage() {
     }
     const cacheKey = buildChartCacheKey("payload", requestedTicker, requestedDate || "latest");
     const cached = refreshNonce === 0 ? readChartCache<WatchlistChartResponse>(cacheKey) : null;
-    if (cached) {
+    if (cached && hasUsableChartData(cached)) {
       setPayload(cached);
       if (!requestedDate && cached.resolved_as_of_date) {
         setDateInput(cached.resolved_as_of_date);
@@ -99,7 +101,11 @@ export function ChartsPage() {
     }
     void fetchJson<WatchlistChartResponse>(`/api/charts/${requestedTicker}?${query.toString()}`)
       .then((response) => {
-        writeChartCache(cacheKey, response);
+        if (hasUsableChartData(response)) {
+          writeChartCache(cacheKey, response);
+        } else {
+          localStorage.removeItem(cacheKey);
+        }
         setPayload(response);
         if (!requestedDate && response.resolved_as_of_date) {
           setDateInput(response.resolved_as_of_date);
@@ -776,6 +782,10 @@ function writeChartCache<T>(key: string, value: T) {
   );
 }
 
+function hasUsableChartData(payload: WatchlistChartResponse | null | undefined): boolean {
+  return Boolean(payload && Array.isArray(payload.candles) && payload.candles.length > 0);
+}
+
 function clearChartCacheForTicker(ticker: string) {
   if (!ticker) {
     return;
@@ -910,6 +920,20 @@ function buildAtrExtensionMarkers(
 
 function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAnnotations | null {
   switch (id) {
+    case "hve":
+      return {
+        setupLabel: "HVE 52W",
+        eventDate: readString(hit.signal_date),
+        eventLabel: "HVE signal",
+        triggerPrice: readNumber(hit.high_price),
+        triggerLabel: "Signal high",
+        entryPrice: readNumber(hit.current_price),
+        entryLabel: "Signal close",
+        secondaryEntryPrice: readNumber(hit.ma50),
+        secondaryEntryLabel: "50D MA",
+        stopPrice: readNumber(hit.low_price),
+        stopLabel: "Signal low",
+      };
     case "ftd_sweep":
       return {
         setupLabel: "FTD Sweep Breakout",

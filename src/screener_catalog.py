@@ -9,6 +9,7 @@ from .cup_handle_screen import run_cup_handle_screen
 from .fearzone_screen import find_recent_fearzone_hit
 from .ftd_sweep_screen import find_recent_ftd_sweep_hit
 from .gap_fill_screen import run_gap_fill_screen
+from .hve_screen import find_recent_hve_hit
 from .htf_runup_screen import run_htf_runup_screen
 from .lost_21ema_screen import run_lost_21ema_screen
 from .near_200ma_screen import run_near_200ma_screen
@@ -80,6 +81,23 @@ def _run_cup_handle(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
 def _run_gap_fill(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     return _single_ticker_result(bundle, run_gap_fill_screen, config)
+
+
+def _run_hve(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_hve_hit(bundle.bars, ticker=_ticker_from_bundle(bundle))
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "volume_buzz_pct": payload["volume_buzz_pct"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
 
 
 def _run_ftd_sweep(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
@@ -204,6 +222,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=max(int(config.gap_fill_history_days), int(config.gap_fill_lookback_days) + 30, 120),
             warmup_trading_days=20,
             evaluator=_run_gap_fill,
+        ),
+        "hve": ScreenerSpec(
+            id="hve",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=320,
+            warmup_trading_days=5,
+            evaluator=_run_hve,
         ),
         "ftd_sweep": ScreenerSpec(
             id="ftd_sweep",
