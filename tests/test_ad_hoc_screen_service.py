@@ -157,6 +157,60 @@ def _hve_frame() -> pd.DataFrame:
     )
 
 
+def _inside_dryup_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-02", periods=260, freq="B")
+    open_values: list[float] = []
+    high: list[float] = []
+    low: list[float] = []
+    close: list[float] = []
+    volume: list[float] = []
+
+    price = 100.0
+    for idx in range(250):
+        price += 0.35
+        open_price = price - 0.3
+        close_price = price
+        high_price = close_price + 0.8
+        low_price = open_price - 0.7
+        open_values.append(open_price)
+        high.append(high_price)
+        low.append(low_price)
+        close.append(close_price)
+        volume.append(1_250_000.0 + (idx * 1_000.0))
+
+    tail = [
+        (186.2, 186.8, 184.8, 185.3, 760_000.0),
+        (185.1, 185.5, 183.9, 184.4, 700_000.0),
+        (184.3, 184.8, 183.2, 183.8, 660_000.0),
+        (183.6, 184.1, 182.9, 183.3, 610_000.0),
+        (183.2, 183.8, 183.05, 183.4, 540_000.0),
+        (183.35, 183.7, 183.2, 183.45, 500_000.0),
+        (183.42, 183.62, 183.31, 183.5, 460_000.0),
+        (183.46, 183.58, 183.36, 183.49, 430_000.0),
+        (183.48, 183.55, 183.4, 183.5, 410_000.0),
+        (183.49, 183.53, 183.43, 183.48, 390_000.0),
+    ]
+    for row in tail:
+        open_price, high_price, low_price, close_price, volume_value = row
+        open_values.append(open_price)
+        high.append(high_price)
+        low.append(low_price)
+        close.append(close_price)
+        volume.append(volume_value)
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": volume,
+        },
+        index=index,
+    )
+
+
 class AdHocScreenServiceTests(unittest.TestCase):
     def test_run_prefetches_once_and_evaluates_selected_screeners(self) -> None:
         ticker_frame = _frame("2026-01-01", 40)
@@ -284,6 +338,28 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "hve")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_inside_dryup_catalog_entry(self) -> None:
+        ticker_frame = _inside_dryup_frame()
+        benchmark_frame = _frame("2025-01-02", 260)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 12, 31),
+                screener_ids=["inside_dryup"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "inside_dryup")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_falls_back_to_internet_when_benchmark_missing_in_db(self) -> None:

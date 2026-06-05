@@ -153,6 +153,7 @@ class RunServiceTests(unittest.TestCase):
         action_ids = {item["id"] for item in self.service.list_actions()}
         self.assertIn("fearzone", action_ids)
         self.assertIn("hve", action_ids)
+        self.assertIn("inside_dryup", action_ids)
         self.assertIn("earnings_weekly_criteria", action_ids)
 
     def test_launch_earnings_weekly_criteria_includes_reference_date(self) -> None:

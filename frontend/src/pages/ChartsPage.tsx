@@ -27,6 +27,7 @@ export function ChartsPage() {
   const auth = useAuth();
   const setupOptions = [
     { id: "hve", label: "HVE" },
+    { id: "inside_dryup", label: "Inside Dry-Up" },
     { id: "ftd_sweep", label: "FTD Sweep" },
     { id: "weekly_htf_pullback", label: "Weekly HTF Pullback" },
     { id: "htf_8w_runup", label: "HTF 8W Runup" },
@@ -53,6 +54,7 @@ export function ChartsPage() {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [selectedSetups, setSelectedSetups] = useState<Record<string, boolean>>({
     hve: false,
+    inside_dryup: false,
     ftd_sweep: false,
     weekly_htf_pullback: false,
     htf_8w_runup: false,
@@ -933,6 +935,20 @@ function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAn
         secondaryEntryLabel: "50D MA",
         stopPrice: readNumber(hit.low_price),
         stopLabel: "Signal low",
+      };
+    case "inside_dryup":
+      return {
+        setupLabel: "Inside Day Dry-Up",
+        eventDate: readString(hit.signal_date),
+        eventLabel: "Inside day",
+        triggerPrice: readNumber(hit.trigger_price),
+        triggerLabel: "Inside-day high",
+        entryPrice: readNumber(hit.trigger_price),
+        entryLabel: "Trigger",
+        secondaryEntryPrice: readNumber(hit.ema21),
+        secondaryEntryLabel: "21 EMA",
+        stopPrice: readNumber(hit.stop_price),
+        stopLabel: "Inside-day low",
       };
     case "ftd_sweep":
       return {
