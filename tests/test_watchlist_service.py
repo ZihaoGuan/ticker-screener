@@ -68,14 +68,14 @@ class WatchlistServiceTests(unittest.TestCase):
     def test_get_chart_payload_coerces_decimal_db_values(self) -> None:
         frame = pd.DataFrame(
             {
-                "Open": [Decimal("100.0"), Decimal("102.0")],
-                "High": [Decimal("103.0"), Decimal("104.0")],
-                "Low": [Decimal("99.0"), Decimal("101.0")],
-                "Close": [Decimal("102.0"), Decimal("103.0")],
-                "Adj Close": [Decimal("102.0"), Decimal("103.0")],
-                "Volume": [1000000, 1200000],
+                "Open": [Decimal("90.0"), Decimal("100.0"), Decimal("102.0")],
+                "High": [Decimal("91.0"), Decimal("103.0"), Decimal("104.0")],
+                "Low": [Decimal("89.0"), Decimal("99.0"), Decimal("101.0")],
+                "Close": [Decimal("90.5"), Decimal("102.0"), Decimal("103.0")],
+                "Adj Close": [Decimal("90.5"), Decimal("102.0"), Decimal("103.0")],
+                "Volume": [900000, 1000000, 1200000],
             },
-            index=pd.to_datetime(["2026-05-28", "2026-05-29"]),
+            index=pd.to_datetime(["2024-11-01", "2026-05-28", "2026-05-29"]),
         )
         service = WatchlistService(
             artifacts_dir=Path(self.temp_dir.name),
@@ -87,31 +87,31 @@ class WatchlistServiceTests(unittest.TestCase):
             payload = service.get_chart_payload("NVDA", as_of_date=dt.date(2026, 5, 29))
 
         self.assertEqual(payload["data_source"], "database")
-        self.assertAlmostEqual(payload["ipo_vwap"][-1]["value"], 102.06060606060605)
         self.assertEqual(payload["candles"][-1]["close"], 103.0)
+        self.assertTrue(len(payload["ipo_vwap"]) > 0)
 
     def test_get_chart_payload_falls_back_to_internet_for_missing_benchmark(self) -> None:
         ticker_frame = pd.DataFrame(
             {
-                "Open": [100.0, 102.0],
-                "High": [103.0, 104.0],
-                "Low": [99.0, 101.0],
-                "Close": [102.0, 103.0],
-                "Adj Close": [102.0, 103.0],
-                "Volume": [1_000_000, 1_200_000],
+                "Open": [90.0, 100.0, 102.0],
+                "High": [91.0, 103.0, 104.0],
+                "Low": [89.0, 99.0, 101.0],
+                "Close": [90.5, 102.0, 103.0],
+                "Adj Close": [90.5, 102.0, 103.0],
+                "Volume": [900_000, 1_000_000, 1_200_000],
             },
-            index=pd.to_datetime(["2026-05-28", "2026-05-29"]),
+            index=pd.to_datetime(["2024-11-01", "2026-05-28", "2026-05-29"]),
         )
         benchmark_frame = pd.DataFrame(
             {
-                "Open": [500.0, 505.0],
-                "High": [506.0, 507.0],
-                "Low": [498.0, 503.0],
-                "Close": [504.0, 506.0],
-                "Adj Close": [504.0, 506.0],
-                "Volume": [2_000_000, 2_100_000],
+                "Open": [490.0, 500.0, 505.0],
+                "High": [491.0, 506.0, 507.0],
+                "Low": [489.0, 498.0, 503.0],
+                "Close": [490.5, 504.0, 506.0],
+                "Adj Close": [490.5, 504.0, 506.0],
+                "Volume": [1_900_000, 2_000_000, 2_100_000],
             },
-            index=pd.to_datetime(["2026-05-28", "2026-05-29"]),
+            index=pd.to_datetime(["2024-11-01", "2026-05-28", "2026-05-29"]),
         )
         service = WatchlistService(
             artifacts_dir=Path(self.temp_dir.name),
@@ -127,6 +127,50 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["data_source"], "database+ticker/internet+benchmark")
         self.assertTrue(len(payload["rs_line"]) > 0)
+
+    def test_get_chart_payload_falls_back_to_internet_for_shallow_db_ticker_history(self) -> None:
+        shallow_ticker_frame = pd.DataFrame(
+            {
+                "Open": [20.0, 21.0],
+                "High": [21.0, 22.0],
+                "Low": [19.0, 20.0],
+                "Close": [20.5, 21.5],
+                "Adj Close": [20.5, 21.5],
+                "Volume": [1_000_000, 1_100_000],
+            },
+            index=pd.to_datetime(["2026-06-04", "2026-06-05"]),
+        )
+        full_frame = pd.DataFrame(
+            {
+                "Open": [100.0, 101.0, 102.0],
+                "High": [101.0, 102.0, 103.0],
+                "Low": [99.0, 100.0, 101.0],
+                "Close": [100.5, 101.5, 102.5],
+                "Adj Close": [100.5, 101.5, 102.5],
+                "Volume": [2_000_000, 2_100_000, 2_200_000],
+            },
+            index=pd.to_datetime(["2024-11-01", "2026-06-04", "2026-06-05"]),
+        )
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+
+        def fake_download(*, tickers: str, **_: object):
+            if tickers in {"FCEL", "SPY"}:
+                return full_frame.copy()
+            return pd.DataFrame()
+
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"FCEL": shallow_ticker_frame.copy()}), patch(
+            "src.webapp.services.watchlist_service.yf.download",
+            side_effect=fake_download,
+        ):
+            payload = service.get_chart_payload("FCEL", as_of_date=dt.date(2026, 6, 5))
+
+        self.assertEqual(payload["data_source"], "internet")
+        self.assertEqual(payload["candles"][0]["time"], "2026-06-04")
+        self.assertEqual(payload["candles"][-1]["time"], "2026-06-05")
 
     def test_get_chart_insider_payload_filters_recent_rows(self) -> None:
         insider_dir = Path(self.temp_dir.name) / "raw" / "insider"

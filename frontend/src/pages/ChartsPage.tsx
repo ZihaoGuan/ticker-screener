@@ -20,8 +20,12 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   rsSignals: true,
   flexSr: false,
 };
-const CHART_CACHE_PREFIX = "chart-screen-cache-v1";
-const CHART_CACHE_TTL_MS = 60 * 60 * 1000;
+const CHART_CACHE_PREFIX = "chart-screen-cache-v2";
+const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "fundamentals" | "insider", number> = {
+  payload: 10 * 60 * 1000,
+  fundamentals: 60 * 60 * 1000,
+  insider: 4 * 60 * 60 * 1000,
+};
 
 export function ChartsPage() {
   const auth = useAuth();
@@ -106,7 +110,7 @@ export function ChartsPage() {
         if (hasUsableChartData(response)) {
           writeChartCache(cacheKey, response);
         } else {
-          localStorage.removeItem(cacheKey);
+          clearChartCacheKey(cacheKey);
         }
         setPayload(response);
         if (!requestedDate && response.resolved_as_of_date) {
@@ -775,13 +779,40 @@ function readChartCache<T>(key: string): T | null {
 }
 
 function writeChartCache<T>(key: string, value: T) {
+  const kind = resolveChartCacheKind(key);
+  const ttlMs = kind ? CHART_CACHE_TTL_MS_BY_KIND[kind] : 0;
+  if (ttlMs <= 0) {
+    return;
+  }
   localStorage.setItem(
     key,
     JSON.stringify({
       value,
-      expiresAt: Date.now() + CHART_CACHE_TTL_MS,
+      expiresAt: Date.now() + ttlMs,
     }),
   );
+}
+
+function clearChartCacheKey(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Ignore storage errors while clearing stale chart cache entries.
+  }
+}
+
+function resolveChartCacheKind(key: string): "payload" | "fundamentals" | "insider" | null {
+  const suffix = key.replace(`${CHART_CACHE_PREFIX}:`, "");
+  if (suffix.startsWith("payload:")) {
+    return "payload";
+  }
+  if (suffix.startsWith("fundamentals:")) {
+    return "fundamentals";
+  }
+  if (suffix.startsWith("insider:")) {
+    return "insider";
+  }
+  return null;
 }
 
 function hasUsableChartData(payload: WatchlistChartResponse | null | undefined): boolean {

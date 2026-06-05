@@ -18,7 +18,12 @@ import yfinance as yf
 from ...config import AppConfig
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
-from ...market_data_access import load_many_ticker_windows_for_range, resolve_database_url, resolve_market_data_source
+from ...market_data_access import (
+    db_frame_has_recent_coverage,
+    load_many_ticker_windows_for_range,
+    resolve_database_url,
+    resolve_market_data_source,
+)
 from ...ticker_filters import normalize_ticker_symbol
 from ...universe import UniverseTicker, load_universe
 from ...config import load_app_config
@@ -117,6 +122,7 @@ class WatchlistService:
         frame, benchmark_frame, data_source = self._load_chart_frames(
             ticker=normalized_ticker,
             benchmark_ticker=self.benchmark_ticker,
+            required_start_date=chart_request.visible_start_date,
             start_date=chart_request.fetch_start_date,
             end_date=chart_request.fetch_end_date,
             warmup_trading_days=chart_request.warmup_trading_days,
@@ -386,6 +392,7 @@ class WatchlistService:
         *,
         ticker: str,
         benchmark_ticker: str,
+        required_start_date: dt.date,
         start_date: dt.date,
         end_date: dt.date,
         warmup_trading_days: int,
@@ -400,8 +407,12 @@ class WatchlistService:
             )
             ticker_frame = _normalize_download_frame(frames.get(ticker))
             benchmark_frame = _normalize_download_frame(frames.get(benchmark_ticker))
-            if ticker_frame is not None and not ticker_frame.empty:
+            if _frame_covers_requested_window(ticker_frame, start_date=required_start_date, end_date=end_date):
                 if benchmark_frame is None or benchmark_frame.empty:
+                    benchmark_frame = _download_history_frame(ticker=benchmark_ticker, start_date=start_date, end_date=end_date)
+                    if benchmark_frame is not None and not benchmark_frame.empty:
+                        return ticker_frame, benchmark_frame, "database+ticker/internet+benchmark"
+                elif not _frame_covers_requested_window(benchmark_frame, start_date=required_start_date, end_date=end_date):
                     benchmark_frame = _download_history_frame(ticker=benchmark_ticker, start_date=start_date, end_date=end_date)
                     if benchmark_frame is not None and not benchmark_frame.empty:
                         return ticker_frame, benchmark_frame, "database+ticker/internet+benchmark"
@@ -516,6 +527,21 @@ def _normalize_download_frame(history: pd.DataFrame | None) -> pd.DataFrame | No
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame = frame.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
     return frame if not frame.empty else None
+
+
+def _frame_covers_requested_window(
+    frame: pd.DataFrame | None,
+    *,
+    start_date: dt.date,
+    end_date: dt.date,
+) -> bool:
+    if frame is None or frame.empty:
+        return False
+    first_index = frame.index.min()
+    first_date = first_index.date() if hasattr(first_index, "date") else first_index
+    if first_date is None or first_date > start_date:
+        return False
+    return db_frame_has_recent_coverage(frame, end_date)
 
 
 def _download_history_frame(*, ticker: str, start_date: dt.date, end_date: dt.date) -> pd.DataFrame | None:
