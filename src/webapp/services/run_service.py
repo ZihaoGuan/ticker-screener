@@ -673,6 +673,8 @@ class RunService:
             command.extend(["--end-date", str(normalized_options["end_date"])])
         if normalized_options.get("chunk_size") is not None:
             command.extend(["--chunk-size", str(normalized_options["chunk_size"])])
+        if action_id == "sync_postgres_market_data" and normalized_options.get("include_excluded_tickers"):
+            command.append("--include-excluded-tickers")
         if normalized_options.get("strategy_ids_json"):
             command.extend(["--strategy-ids-json", str(normalized_options["strategy_ids_json"])])
         if normalized_options.get("overwrite_policy"):
@@ -749,6 +751,9 @@ class RunService:
                 normalized[key] = int(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{key.replace('_', ' ').title()} must be an integer.") from exc
+
+        if "include_excluded_tickers" in options:
+            normalized["include_excluded_tickers"] = bool(options.get("include_excluded_tickers"))
 
         for key in (
             "include_sectors",

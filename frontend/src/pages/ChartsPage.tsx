@@ -69,6 +69,8 @@ export function ChartsPage() {
   const [isListDialogOpen, setIsListDialogOpen] = useState(false);
   const [listDialogMode, setListDialogMode] = useState<"addExclusion" | "removeExclusion">("addExclusion");
   const [isSavingListAction, setIsSavingListAction] = useState(false);
+  const [isLaunchingBackfill, setIsLaunchingBackfill] = useState(false);
+  const [backfillNotice, setBackfillNotice] = useState("");
 
   useEffect(() => {
     setTickerInput(requestedTicker);
@@ -84,6 +86,7 @@ export function ChartsPage() {
       setNotice("");
       setFundamentalsNotice("");
       setInsiderNotice("");
+      setBackfillNotice("");
       return;
     }
     setIsLoading(true);
@@ -310,7 +313,9 @@ export function ChartsPage() {
     { key: "flexSr", label: "Flex SR (exp)" },
   ];
   const canManageExclusions = auth.hasCapability("manage_exclusions");
+  const canSyncHistory = auth.hasCapability("sync_history");
   const currentExclusion = tickerListStatus?.exclusion_entry ?? null;
+  const showBackfillSection = canSyncHistory && requestedTicker !== "" && payload?.data_source === "internet";
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -369,6 +374,30 @@ export function ChartsPage() {
       setNotice(error instanceof Error ? error.message : "Failed to update ticker list.");
     } finally {
       setIsSavingListAction(false);
+    }
+  };
+
+  const handleBackfillTicker = async () => {
+    if (!requestedTicker) {
+      return;
+    }
+    setIsLaunchingBackfill(true);
+    setBackfillNotice("");
+    try {
+      const response = await fetchJson<{ ok: boolean; job_id: string }>("/api/admin/history-sync", {
+        method: "POST",
+        body: JSON.stringify({
+          start_date: "2020-01-01",
+          tickers: [requestedTicker],
+          chunk_size: 1,
+          include_excluded_tickers: true,
+        }),
+      });
+      setBackfillNotice(`Backfill job launched: ${response.job_id}`);
+    } catch (error) {
+      setBackfillNotice(error instanceof Error ? error.message : "Failed to launch ticker backfill.");
+    } finally {
+      setIsLaunchingBackfill(false);
     }
   };
 
@@ -509,6 +538,26 @@ export function ChartsPage() {
         </form>
         {requestedTicker ? <p className="panel-copy">Browser cache lasts 1 hour for chart, fundamentals, and insider data. Refresh to bypass cache.</p> : null}
       </Panel>
+
+      {showBackfillSection ? (
+        <Panel title="Admin Backfill" aside={<span className="eyebrow">Internet fallback detected</span>}>
+          <p className="panel-copy">
+            This chart loaded from internet fallback instead of full DB coverage. You can queue a targeted Postgres backfill for{" "}
+            <strong>{requestedTicker}</strong>.
+          </p>
+          {currentExclusion ? (
+            <p className="panel-copy">
+              {requestedTicker} is currently excluded, so this repair path will explicitly bypass exclusion filtering for the one-off backfill job.
+            </p>
+          ) : null}
+          <div className="button-row">
+            <button className="primary-button" type="button" onClick={() => void handleBackfillTicker()} disabled={isLaunchingBackfill}>
+              {isLaunchingBackfill ? "Launching Backfill..." : `Backfill ${requestedTicker}`}
+            </button>
+          </div>
+          {backfillNotice ? <p className="panel-copy">{backfillNotice}</p> : null}
+        </Panel>
+      ) : null}
 
       <Panel title="Setup Overlays" aside={<span className="eyebrow">Optional screener overlays for this ticker/date</span>}>
         <div className="chart-toolbar">

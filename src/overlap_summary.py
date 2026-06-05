@@ -53,6 +53,16 @@ PIPELINES = (
         "filename": "gap_fill_{date}.json",
     },
     {
+        "id": "hve",
+        "label": "HVE",
+        "filename": "hve_{date}.json",
+    },
+    {
+        "id": "inside_dryup",
+        "label": "Inside Dry-Up",
+        "filename": "inside_dryup_{date}.json",
+    },
+    {
         "id": "ftd_sweep",
         "label": "Sweep Success",
         "filename": "ftd_sweep_{date}.json",

@@ -939,7 +939,7 @@ def launch_history_sync(
 ) -> JSONResponse:
     request_payload = payload or {}
     options: dict[str, object] = {}
-    for key in ("start_date", "end_date", "tickers", "chunk_size"):
+    for key in ("start_date", "end_date", "tickers", "chunk_size", "include_excluded_tickers"):
         if key in request_payload:
             options[key] = request_payload[key]
     try:

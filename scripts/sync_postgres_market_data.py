@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int, help="Optional universe limit for smoke runs.")
     parser.add_argument("--tickers", nargs="+", help="Optional explicit ticker list instead of the configured universe.")
+    parser.add_argument(
+        "--include-excluded-tickers",
+        action="store_true",
+        help="When used with --tickers, allow explicit repair/backfill of tickers that are currently excluded.",
+    )
     parser.add_argument("--chunk-size", type=int, default=100, help="Number of tickers per yfinance download call.")
     parser.add_argument("--max-retries", type=int, default=4, help="Maximum retry attempts for transient/rate-limit errors.")
     parser.add_argument(
@@ -152,14 +157,16 @@ def _resolve_date_window(args: argparse.Namespace) -> tuple[str, str]:
     return args.start_date, end_date.isoformat()
 
 
-def _manual_tickers(symbols: list[str], excluded: set[str]) -> list["UniverseTicker"]:
+def _manual_tickers(symbols: list[str], excluded: set[str], *, include_excluded: bool = False) -> list["UniverseTicker"]:
     from src.universe import UniverseTicker
 
     seen: set[str] = set()
     result: list[UniverseTicker] = []
     for raw in symbols:
         symbol = str(raw).strip().upper()
-        if not symbol or symbol in excluded or symbol in seen:
+        if not symbol or symbol in seen:
+            continue
+        if not include_excluded and symbol in excluded:
             continue
         seen.add(symbol)
         result.append(UniverseTicker(symbol=symbol))
@@ -172,7 +179,7 @@ def _load_target_universe(args: argparse.Namespace) -> tuple[Any, list["Universe
     config = load_app_config(args.config or None)
     excluded = load_excluded_tickers(config)
     if args.tickers:
-        return config, _manual_tickers(args.tickers, excluded)
+        return config, _manual_tickers(args.tickers, excluded, include_excluded=bool(args.include_excluded_tickers))
     return config, load_universe(config, limit=args.limit)
 
 
