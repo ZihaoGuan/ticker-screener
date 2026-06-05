@@ -37,13 +37,14 @@ def list_exclusion_entries(config: AppConfig) -> list[dict[str, Any]]:
     if auto_dir.exists():
         for path in sorted(auto_dir.glob("*.txt")):
             label = _humanize_auto_source(path.stem)
+            default_reason = "Low cap auto filter" if path.stem.strip().lower().endswith("-low-cap") else f"Auto rule from {label}"
             for record in _read_user_file_records(path):
                 _merge_entry(
                     aggregated,
                     ticker=record["ticker"],
                     source_kind="auto",
                     source_label=label,
-                    reason=record["reason"] or f"Auto rule from {label}",
+                    reason=record["reason"] or default_reason,
                     removable=False,
                 )
 
@@ -237,6 +238,12 @@ def _read_header_lines(path: Path) -> list[str]:
 
 
 def _humanize_auto_source(stem: str) -> str:
+    normalized = stem.strip().lower()
+    if normalized.endswith("-low-cap"):
+        base = normalized[: -len("-low-cap")].replace("-", " ").strip()
+        if base:
+            return f"Auto low cap - {base}"
+        return "Auto low cap"
     return f"Auto {stem.replace('-', ' ')}"
 
 

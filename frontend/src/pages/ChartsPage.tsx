@@ -59,7 +59,7 @@ export function ChartsPage() {
   const [tickerListStatus, setTickerListStatus] = useState<AdminTickerListStatusResponse | null>(null);
   const [isTickerListLoading, setIsTickerListLoading] = useState(false);
   const [isListDialogOpen, setIsListDialogOpen] = useState(false);
-  const [listDialogMode, setListDialogMode] = useState<"moveToInclusion" | "removeExclusion">("moveToInclusion");
+  const [listDialogMode, setListDialogMode] = useState<"addExclusion" | "removeExclusion">("addExclusion");
   const [isSavingListAction, setIsSavingListAction] = useState(false);
 
   useEffect(() => {
@@ -289,7 +289,6 @@ export function ChartsPage() {
   ];
   const canManageExclusions = auth.hasCapability("manage_exclusions");
   const currentExclusion = tickerListStatus?.exclusion_entry ?? null;
-  const currentInclusion = tickerListStatus?.inclusion_entry ?? null;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -326,16 +325,15 @@ export function ChartsPage() {
     }
     setIsSavingListAction(true);
     try {
-      if (listDialogMode === "moveToInclusion") {
-        await fetchJson<{ ok: boolean }>("/api/admin/inclusions", {
+      if (listDialogMode === "addExclusion") {
+        await fetchJson<{ ok: boolean }>("/api/admin/exclusions", {
           method: "POST",
           body: JSON.stringify({
             ticker: requestedTicker,
             reason,
-            remove_from_exclusions: true,
           }),
         });
-        setNotice(`${requestedTicker} moved to inclusion list.`);
+        setNotice(`${requestedTicker} added to exclusions.`);
       } else {
         await fetchJson<{ ok: boolean }>(`/api/admin/exclusions/${requestedTicker}/remove`, {
           method: "POST",
@@ -376,13 +374,13 @@ export function ChartsPage() {
               <button
                 className="ghost-button"
                 type="button"
-                disabled={!requestedTicker || Boolean(currentInclusion) || isTickerListLoading}
+                disabled={!requestedTicker || Boolean(currentExclusion) || isTickerListLoading}
                 onClick={() => {
-                  setListDialogMode("moveToInclusion");
+                  setListDialogMode("addExclusion");
                   setIsListDialogOpen(true);
                 }}
               >
-                Move To Inclusion
+                Add To Exclusion
               </button>
               <button
                 className="ghost-button"
@@ -402,11 +400,9 @@ export function ChartsPage() {
             <p className="panel-copy">
               {isTickerListLoading
                 ? "Checking admin ticker-list status..."
-                : currentInclusion
-                  ? `${requestedTicker} is in inclusion list.`
-                  : currentExclusion
-                    ? `${requestedTicker} is excluded via ${currentExclusion.sources.join(", ")}.`
-                    : `${requestedTicker} is not in admin include/exclude lists.`}
+                : currentExclusion
+                  ? `${requestedTicker} is in exclusion list via ${currentExclusion.sources.join(", ")}.`
+                  : `${requestedTicker} is not in exclusion list.`}
             </p>
           ) : null}
         </div>
@@ -695,13 +691,13 @@ export function ChartsPage() {
 
       <ExclusionDialog
         isOpen={isListDialogOpen}
-        mode={listDialogMode === "moveToInclusion" ? "add" : "remove"}
+        mode={listDialogMode === "addExclusion" ? "add" : "remove"}
         ticker={requestedTicker || "--"}
-        title={listDialogMode === "moveToInclusion" ? `Move ${requestedTicker} to inclusion list` : `Remove ${requestedTicker} from exclusions`}
-        confirmLabel={listDialogMode === "moveToInclusion" ? "Move To Inclusion" : "Remove Exclusion"}
+        title={listDialogMode === "addExclusion" ? `Add ${requestedTicker} to exclusions` : `Remove ${requestedTicker} from exclusions`}
+        confirmLabel={listDialogMode === "addExclusion" ? "Add To Exclusion" : "Remove Exclusion"}
         helperText={
-          listDialogMode === "moveToInclusion"
-            ? "This writes to the manual inclusion list and also removes the ticker from removable exclusion files."
+          listDialogMode === "addExclusion"
+            ? "This writes to the manual exclusions list so future scans can skip this ticker."
             : "This removes the ticker from removable exclusion files."
         }
         submitting={isSavingListAction}
