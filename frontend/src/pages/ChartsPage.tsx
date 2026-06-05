@@ -254,6 +254,8 @@ export function ChartsPage() {
       ? ((lastCandle.close - previousCandle.close) / previousCandle.close) * 100
       : null;
   const latestRsMarker = payload?.rs_markers?.[payload.rs_markers.length - 1] ?? null;
+  const adr14Pct = useMemo(() => computeAdrPercent(chartData, 14), [chartData]);
+  const adr14InRange = adr14Pct != null ? adr14Pct >= 3 && adr14Pct <= 10 : null;
   const earningsRows = fundamentalsPayload?.earnings_eps_history ?? [];
   const setupAnnotations = useMemo<ChartAnnotations[]>(() => {
     return (setupPayload?.screeners ?? [])
@@ -418,6 +420,12 @@ export function ChartsPage() {
           <div>
             <span className="eyebrow">Bars</span>
             <strong>{chartData.length || "-"}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">ADR14</span>
+            <strong className={adr14InRange == null ? undefined : `adr-badge ${adr14InRange ? "is-in-range" : "is-out-of-range"}`}>
+              {formatPercent(adr14Pct)}
+            </strong>
           </div>
           <div>
             <span className="eyebrow">Inst Float</span>
@@ -789,6 +797,21 @@ function formatMetric(value: number | null | undefined) {
 
 function formatPercent(value: number | null | undefined) {
   return value == null ? "--" : `${value.toFixed(2)}%`;
+}
+
+function computeAdrPercent(candles: CandlePoint[], lookbackDays: number): number | null {
+  const window = candles.slice(-lookbackDays);
+  if (window.length < lookbackDays) {
+    return null;
+  }
+  let totalRangePct = 0;
+  for (const candle of window) {
+    if (!Number.isFinite(candle.high) || !Number.isFinite(candle.low) || !Number.isFinite(candle.close) || candle.close <= 0) {
+      return null;
+    }
+    totalRangePct += ((candle.high - candle.low) / candle.close) * 100;
+  }
+  return totalRangePct / window.length;
 }
 
 function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAnnotations | null {
