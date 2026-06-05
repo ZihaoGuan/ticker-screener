@@ -33,6 +33,16 @@ def manual_excluded_tickers_path(config: AppConfig) -> Path:
     return project_root() / candidate
 
 
+def manual_included_tickers_path(config: AppConfig) -> Path:
+    raw_value = str(getattr(config, "manual_included_tickers_file", "") or "").strip()
+    if not raw_value:
+        return project_root() / "config" / "manual_include_tickers.txt"
+    candidate = Path(raw_value)
+    if candidate.is_absolute():
+        return candidate
+    return project_root() / candidate
+
+
 def auto_excluded_tickers_dir(config: AppConfig) -> Path:
     raw_value = str(getattr(config, "auto_excluded_tickers_dir", "") or "").strip()
     if not raw_value:
@@ -106,7 +116,12 @@ def load_excluded_tickers(config: AppConfig) -> set[str]:
         for path in sorted(auto_dir.glob("*.txt")):
             excluded.update(_load_ticker_file(path))
     excluded.update(_load_special_security_tickers(special_security_tickers_path(config)))
+    excluded.difference_update(load_included_tickers(config))
     return excluded
+
+
+def load_included_tickers(config: AppConfig) -> set[str]:
+    return _load_ticker_file(manual_included_tickers_path(config))
 
 
 def filter_symbols(symbols: Iterable[str], excluded: set[str]) -> list[str]:

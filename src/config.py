@@ -76,6 +76,7 @@ class AppConfig:
     earnings_watchlist_exclude_ics_urls: tuple[str, ...] = ()
     excluded_tickers_file: str = "config/smallcap_exclude_tickers.txt"
     manual_excluded_tickers_file: str = "config/manual_exclude_tickers.txt"
+    manual_included_tickers_file: str = "config/manual_include_tickers.txt"
     auto_excluded_tickers_dir: str = "config/auto_exclude_tickers"
     special_security_tickers_file: str = "artifacts/special_security_tickers_to_filter.csv"
     earnings_surprise_provider: str = "auto"

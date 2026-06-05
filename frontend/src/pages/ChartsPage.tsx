@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import { ExclusionDialog } from "../components/ExclusionDialog";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
-import type { AdHocScreenResponse, CandlePoint, ChartAnnotations, ChartFundamentalsResponse, ChartInsiderResponse, WatchlistChartResponse } from "../lib/types";
+import type { AdHocScreenResponse, AdminTickerListStatusResponse, CandlePoint, ChartAnnotations, ChartFundamentalsResponse, ChartInsiderResponse, WatchlistChartResponse } from "../lib/types";
 
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
@@ -22,6 +24,7 @@ const CHART_CACHE_PREFIX = "chart-screen-cache-v1";
 const CHART_CACHE_TTL_MS = 60 * 60 * 1000;
 
 export function ChartsPage() {
+  const auth = useAuth();
   const setupOptions = [
     { id: "ftd_sweep", label: "FTD Sweep" },
     { id: "weekly_htf_pullback", label: "Weekly HTF Pullback" },
@@ -53,6 +56,11 @@ export function ChartsPage() {
     htf_8w_runup: false,
     vcp: false,
   });
+  const [tickerListStatus, setTickerListStatus] = useState<AdminTickerListStatusResponse | null>(null);
+  const [isTickerListLoading, setIsTickerListLoading] = useState(false);
+  const [isListDialogOpen, setIsListDialogOpen] = useState(false);
+  const [listDialogMode, setListDialogMode] = useState<"moveToInclusion" | "removeExclusion">("moveToInclusion");
+  const [isSavingListAction, setIsSavingListAction] = useState(false);
 
   useEffect(() => {
     setTickerInput(requestedTicker);
@@ -140,6 +148,19 @@ export function ChartsPage() {
       })
       .finally(() => setIsInsiderLoading(false));
   }, [payload?.resolved_as_of_date, refreshNonce, requestedDate, requestedTicker]);
+
+  useEffect(() => {
+    if (!requestedTicker || !auth.hasCapability("manage_exclusions")) {
+      setTickerListStatus(null);
+      setIsTickerListLoading(false);
+      return;
+    }
+    setIsTickerListLoading(true);
+    void fetchJson<AdminTickerListStatusResponse>(`/api/admin/ticker-lists/${requestedTicker}`)
+      .then(setTickerListStatus)
+      .catch(() => setTickerListStatus(null))
+      .finally(() => setIsTickerListLoading(false));
+  }, [auth, requestedTicker, refreshNonce]);
 
   useEffect(() => {
     if (!requestedTicker) {
@@ -266,6 +287,9 @@ export function ChartsPage() {
     { key: "rsSignals", label: "RS markers" },
     { key: "flexSr", label: "Flex SR (exp)" },
   ];
+  const canManageExclusions = auth.hasCapability("manage_exclusions");
+  const currentExclusion = tickerListStatus?.exclusion_entry ?? null;
+  const currentInclusion = tickerListStatus?.inclusion_entry ?? null;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -296,6 +320,38 @@ export function ChartsPage() {
     setRefreshNonce((current) => current + 1);
   };
 
+  const handleTickerListAction = async (reason: string) => {
+    if (!requestedTicker) {
+      return;
+    }
+    setIsSavingListAction(true);
+    try {
+      if (listDialogMode === "moveToInclusion") {
+        await fetchJson<{ ok: boolean }>("/api/admin/inclusions", {
+          method: "POST",
+          body: JSON.stringify({
+            ticker: requestedTicker,
+            reason,
+            remove_from_exclusions: true,
+          }),
+        });
+        setNotice(`${requestedTicker} moved to inclusion list.`);
+      } else {
+        await fetchJson<{ ok: boolean }>(`/api/admin/exclusions/${requestedTicker}/remove`, {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        });
+        setNotice(`${requestedTicker} removed from removable exclusions.`);
+      }
+      setIsListDialogOpen(false);
+      setRefreshNonce((current) => current + 1);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to update ticker list.");
+    } finally {
+      setIsSavingListAction(false);
+    }
+  };
+
   return (
     <div className="page-grid charts-page">
       <section className="hero-strip">
@@ -315,7 +371,44 @@ export function ChartsPage() {
               <span className="hero-change neutral">Select ticker to load chart</span>
             )}
           </div>
+          {canManageExclusions ? (
+            <div className="button-row" style={{ marginTop: 12 }}>
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={!requestedTicker || Boolean(currentInclusion) || isTickerListLoading}
+                onClick={() => {
+                  setListDialogMode("moveToInclusion");
+                  setIsListDialogOpen(true);
+                }}
+              >
+                Move To Inclusion
+              </button>
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={!requestedTicker || !currentExclusion?.removable || isTickerListLoading}
+                onClick={() => {
+                  setListDialogMode("removeExclusion");
+                  setIsListDialogOpen(true);
+                }}
+              >
+                Remove From Exclusion
+              </button>
+            </div>
+          ) : null}
           {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, MA stack, gap zones, HTF box, and fearzone panel.</p>}
+          {canManageExclusions && requestedTicker ? (
+            <p className="panel-copy">
+              {isTickerListLoading
+                ? "Checking admin ticker-list status..."
+                : currentInclusion
+                  ? `${requestedTicker} is in inclusion list.`
+                  : currentExclusion
+                    ? `${requestedTicker} is excluded via ${currentExclusion.sources.join(", ")}.`
+                    : `${requestedTicker} is not in admin include/exclude lists.`}
+            </p>
+          ) : null}
         </div>
         <div className="hero-stats">
           <div>
@@ -599,6 +692,22 @@ export function ChartsPage() {
           </>
         ) : null}
       </Panel>
+
+      <ExclusionDialog
+        isOpen={isListDialogOpen}
+        mode={listDialogMode === "moveToInclusion" ? "add" : "remove"}
+        ticker={requestedTicker || "--"}
+        title={listDialogMode === "moveToInclusion" ? `Move ${requestedTicker} to inclusion list` : `Remove ${requestedTicker} from exclusions`}
+        confirmLabel={listDialogMode === "moveToInclusion" ? "Move To Inclusion" : "Remove Exclusion"}
+        helperText={
+          listDialogMode === "moveToInclusion"
+            ? "This writes to the manual inclusion list and also removes the ticker from removable exclusion files."
+            : "This removes the ticker from removable exclusion files."
+        }
+        submitting={isSavingListAction}
+        onClose={() => setIsListDialogOpen(false)}
+        onSubmit={handleTickerListAction}
+      />
     </div>
   );
 }

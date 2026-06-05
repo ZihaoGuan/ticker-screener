@@ -655,6 +655,8 @@ export type ScheduledJobConfigResponse = {
 export type AdminResponse = {
   excluded_tickers: ExclusionEntry[];
   excluded_count: number;
+  included_tickers?: Array<{ ticker: string; reason: string }>;
+  included_count?: number;
   users?: Array<{
     id: number;
     email: string;
@@ -684,6 +686,14 @@ export type AdminResponse = {
     sample_partial_tickers: PartialTickerSummary[];
     notes: string[];
   };
+};
+
+export type AdminTickerListStatusResponse = {
+  ticker: string;
+  is_excluded: boolean;
+  is_included: boolean;
+  exclusion_entry: ExclusionEntry | null;
+  inclusion_entry: { ticker: string; reason: string } | null;
 };
 
 export type RrgUniverse = "sector" | "industry" | "theme";

@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Any
 
 from src.config import load_app_config, today_label
-from src.exclusion_registry import add_manual_exclusion, list_exclusion_entries, remove_user_exclusion
+from src.exclusion_registry import (
+    add_manual_exclusion,
+    add_manual_inclusion,
+    list_exclusion_entries,
+    list_inclusion_entries,
+    remove_manual_inclusion,
+    remove_user_exclusion,
+)
 from src.market_data_access import resolve_database_url
 from src.ticker_filters import normalize_ticker_symbol
 from src.universe import load_universe
@@ -19,10 +26,13 @@ class AdminService:
 
     def get_context(self, *, coverage_start: str = "2020-01-01") -> dict[str, Any]:
         excluded = self._load_exclusions()
+        included = self._load_inclusions()
         status = self._history_status(coverage_start=coverage_start)
         return {
             "excluded_tickers": excluded,
             "excluded_count": len(excluded),
+            "included_tickers": included,
+            "included_count": len(included),
             "database_status": status,
         }
 
@@ -39,6 +49,44 @@ class AdminService:
         if not clean_reason:
             raise ValueError("Reason is required.")
         return remove_user_exclusion(config, ticker=ticker, reason=clean_reason)
+
+    def add_inclusion(self, *, ticker: str, reason: str, remove_from_exclusions: bool = True) -> dict[str, Any]:
+        config = load_app_config()
+        clean_reason = reason.strip()
+        if not clean_reason:
+            raise ValueError("Reason is required.")
+        added = add_manual_inclusion(config, ticker=ticker, reason=clean_reason)
+        removed_from: list[str] = []
+        if remove_from_exclusions:
+            try:
+                removed = remove_user_exclusion(config, ticker=ticker, reason=f"Moved to inclusion list. {clean_reason}")
+                removed_from = list(removed.get("removed_from") or [])
+            except ValueError:
+                removed_from = []
+        return {**added, "removed_from": removed_from}
+
+    def remove_inclusion(self, *, ticker: str, reason: str) -> dict[str, Any]:
+        config = load_app_config()
+        clean_reason = reason.strip()
+        if not clean_reason:
+            raise ValueError("Reason is required.")
+        return remove_manual_inclusion(config, ticker=ticker, reason=clean_reason)
+
+    def get_ticker_list_status(self, *, ticker: str) -> dict[str, Any]:
+        normalized = normalize_ticker_symbol(ticker)
+        if not normalized:
+            raise ValueError("Ticker is required.")
+        exclusion_entries = self._load_exclusions()
+        inclusion_entries = self._load_inclusions()
+        exclusion_entry = next((entry for entry in exclusion_entries if str(entry.get("ticker") or "") == normalized), None)
+        inclusion_entry = next((entry for entry in inclusion_entries if str(entry.get("ticker") or "") == normalized), None)
+        return {
+            "ticker": normalized,
+            "is_excluded": exclusion_entry is not None,
+            "is_included": inclusion_entry is not None,
+            "exclusion_entry": exclusion_entry,
+            "inclusion_entry": inclusion_entry,
+        }
 
     def get_partial_ticker_detail(self, *, ticker: str, coverage_start: str = "2020-01-01") -> dict[str, Any]:
         normalized = normalize_ticker_symbol(ticker)
@@ -93,6 +141,10 @@ class AdminService:
     def _load_exclusions(self) -> list[dict[str, Any]]:
         config = load_app_config()
         return list_exclusion_entries(config)
+
+    def _load_inclusions(self) -> list[dict[str, Any]]:
+        config = load_app_config()
+        return list_inclusion_entries(config)
 
     def _history_status(self, *, coverage_start: str) -> dict[str, Any]:
         status: dict[str, Any] = {

@@ -677,6 +677,18 @@ def exclusions_data(
     return JSONResponse(service.get_context(coverage_start=coverage_start))
 
 
+@router.get("/admin/ticker-lists/{ticker}", response_class=JSONResponse)
+def ticker_list_status(
+    ticker: str,
+    service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    try:
+        return JSONResponse(service.get_ticker_list_status(ticker=ticker))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/admin/partial-tickers/{ticker}", response_class=JSONResponse)
 def partial_ticker_detail(
     ticker: str,
@@ -824,6 +836,37 @@ def add_exclusion(
     return JSONResponse({"ok": True, "entry": entry})
 
 
+@router.post("/admin/inclusions", response_class=JSONResponse)
+def add_inclusion(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: AdminService = Depends(get_admin_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        entry = service.add_inclusion(
+            ticker=str(request_payload.get("ticker") or ""),
+            reason=str(request_payload.get("reason") or ""),
+            remove_from_exclusions=bool(request_payload.get("remove_from_exclusions", True)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.inclusion.add",
+        resource_type="inclusion",
+        resource_id=str(entry.get("ticker") or ""),
+        resource_label=str(entry.get("ticker") or ""),
+        message=f"Added inclusion for {entry.get('ticker')}.",
+        metadata={"ticker": entry.get("ticker"), "reason": entry.get("reason"), "removed_from": entry.get("removed_from", [])},
+    )
+    return JSONResponse({"ok": True, "entry": entry})
+
+
 @router.post("/admin/exclusions/{ticker}/remove", response_class=JSONResponse)
 def remove_exclusion(
     request: Request,
@@ -851,6 +894,37 @@ def remove_exclusion(
         resource_label=str(entry.get("ticker") or ticker),
         message=f"Removed exclusion for {entry.get('ticker') or ticker}.",
         metadata={"ticker": entry.get("ticker") or ticker, "reason": entry.get("reason"), "removed_from": entry.get("removed_from", [])},
+    )
+    return JSONResponse({"ok": True, "entry": entry})
+
+
+@router.post("/admin/inclusions/{ticker}/remove", response_class=JSONResponse)
+def remove_inclusion(
+    request: Request,
+    ticker: str,
+    payload: dict[str, object] | None = Body(default=None),
+    service: AdminService = Depends(get_admin_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        entry = service.remove_inclusion(
+            ticker=ticker,
+            reason=str(request_payload.get("reason") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.inclusion.remove",
+        resource_type="inclusion",
+        resource_id=str(entry.get("ticker") or ticker),
+        resource_label=str(entry.get("ticker") or ticker),
+        message=f"Removed inclusion for {entry.get('ticker') or ticker}.",
+        metadata={"ticker": entry.get("ticker") or ticker, "reason": entry.get("reason")},
     )
     return JSONResponse({"ok": True, "entry": entry})
 

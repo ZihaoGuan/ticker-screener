@@ -9,6 +9,7 @@ from .config import AppConfig, project_root
 from .ticker_filters import (
     auto_excluded_tickers_dir,
     excluded_tickers_path,
+    manual_included_tickers_path,
     manual_excluded_tickers_path,
     normalize_ticker_symbol,
     special_security_tickers_path,
@@ -59,6 +60,10 @@ def list_exclusion_entries(config: AppConfig) -> list[dict[str, Any]]:
     return sorted(aggregated.values(), key=lambda item: item["ticker"])
 
 
+def list_inclusion_entries(config: AppConfig) -> list[dict[str, Any]]:
+    return sorted(_read_user_file_records(manual_included_tickers_path(config)), key=lambda item: item["ticker"])
+
+
 def add_manual_exclusion(config: AppConfig, *, ticker: str, reason: str) -> dict[str, Any]:
     normalized = normalize_ticker_symbol(ticker)
     if not normalized:
@@ -68,6 +73,18 @@ def add_manual_exclusion(config: AppConfig, *, ticker: str, reason: str) -> dict
     record_map[normalized] = {"ticker": normalized, "reason": reason.strip()}
     _write_user_file_records(manual_excluded_tickers_path(config), list(record_map.values()))
     _append_audit_log(action="add", ticker=normalized, reason=reason.strip(), source="manual")
+    return {"ticker": normalized, "reason": reason.strip()}
+
+
+def add_manual_inclusion(config: AppConfig, *, ticker: str, reason: str) -> dict[str, Any]:
+    normalized = normalize_ticker_symbol(ticker)
+    if not normalized:
+        raise ValueError("Ticker is required.")
+    records = _read_user_file_records(manual_included_tickers_path(config))
+    record_map = {record["ticker"]: record for record in records}
+    record_map[normalized] = {"ticker": normalized, "reason": reason.strip()}
+    _write_user_file_records(manual_included_tickers_path(config), list(record_map.values()))
+    _append_audit_log(action="include", ticker=normalized, reason=reason.strip(), source="manual_include")
     return {"ticker": normalized, "reason": reason.strip()}
 
 
@@ -93,6 +110,20 @@ def remove_user_exclusion(config: AppConfig, *, ticker: str, reason: str) -> dic
 
     _append_audit_log(action="remove", ticker=normalized, reason=reason.strip(), source=",".join(removed_from))
     return {"ticker": normalized, "removed_from": removed_from, "reason": reason.strip()}
+
+
+def remove_manual_inclusion(config: AppConfig, *, ticker: str, reason: str) -> dict[str, Any]:
+    normalized = normalize_ticker_symbol(ticker)
+    if not normalized:
+        raise ValueError("Ticker is required.")
+
+    records = _read_user_file_records(manual_included_tickers_path(config))
+    if not any(record["ticker"] == normalized for record in records):
+        raise ValueError(f"{normalized} is not in manual inclusion list.")
+    next_records = [record for record in records if record["ticker"] != normalized]
+    _write_user_file_records(manual_included_tickers_path(config), next_records)
+    _append_audit_log(action="uninclude", ticker=normalized, reason=reason.strip(), source="manual_include")
+    return {"ticker": normalized, "reason": reason.strip()}
 
 
 def _merge_entry(
