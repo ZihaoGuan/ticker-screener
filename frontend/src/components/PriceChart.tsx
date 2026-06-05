@@ -14,6 +14,7 @@ export type ChartVisibility = {
   htfBox: boolean;
   rsLine: boolean;
   rsSignals: boolean;
+  flexSr: boolean;
 };
 
 type PriceChartProps = {
@@ -47,6 +48,25 @@ type HorizontalAnnotation = {
   price: number;
 };
 
+type SrAnchor = {
+  index: number;
+  time: string;
+  value: number;
+  kind: "high" | "low";
+  score: number;
+};
+
+type FlexibleSrCurve = {
+  anchors: SrAnchor[];
+  backfit: Array<{ time: string; value: number }>;
+  projection: Array<{ time: string; value: number }>;
+};
+
+type FlexibleSrOverlay = {
+  resistance: FlexibleSrCurve | null;
+  support: FlexibleSrCurve | null;
+};
+
 export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations = [], extraMarkers = [], visibility, forceFearzonePanel = false }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
@@ -64,6 +84,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     htfBox: true,
     rsLine: true,
     rsSignals: true,
+    flexSr: false,
   };
 
   const ma20 = useMemo(() => overlays?.ma20 ?? buildMovingAverage(candles, 20), [candles, overlays?.ma20]);
@@ -85,6 +106,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
   );
   const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations, extraAnnotations), [candles, annotations, extraAnnotations]);
   const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, extraAnnotations), [annotations, extraAnnotations]);
+  const flexibleSrOverlay = useMemo(() => (options.flexSr ? buildFlexibleSrOverlay(candles) : null), [candles, options.flexSr]);
   const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
     const point = param.point;
     const normalizedTime = normalizeCrosshairTime(param.time);
@@ -196,6 +218,38 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         crosshairMarkerVisible: false,
       }),
     );
+    const flexResistanceSeries = priceChart.addLineSeries({
+      color: "#f87171",
+      lineWidth: 3,
+      lineStyle: LineStyle.Solid,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const flexResistanceProjectionSeries = priceChart.addLineSeries({
+      color: "rgba(248, 113, 113, 0.92)",
+      lineWidth: 2,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const flexSupportSeries = priceChart.addLineSeries({
+      color: "#4ade80",
+      lineWidth: 3,
+      lineStyle: LineStyle.Solid,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const flexSupportProjectionSeries = priceChart.addLineSeries({
+      color: "rgba(74, 222, 128, 0.92)",
+      lineWidth: 2,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
 
     candleSeries.setData(
       candles.map((item) => ({
@@ -221,6 +275,10 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     ma50Series.setData(options.maStack ? ma50 : []);
     ma200Series.setData(options.maStack ? ma200 : []);
     rsSeries.setData(showRsPane ? rsLine : []);
+    flexResistanceSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.backfit ?? [] : []);
+    flexResistanceProjectionSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.projection ?? [] : []);
+    flexSupportSeries.setData(options.flexSr ? flexibleSrOverlay?.support?.backfit ?? [] : []);
+    flexSupportProjectionSeries.setData(options.flexSr ? flexibleSrOverlay?.support?.projection ?? [] : []);
     if (candles.length > 0) {
       const startTime = candles[0].time;
       const endTime = candles[candles.length - 1].time;
@@ -290,6 +348,24 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         color: marker.color,
         shape: marker.shape,
       });
+    }
+    if (options.flexSr) {
+      for (const anchor of flexibleSrOverlay?.resistance?.anchors ?? []) {
+        priceMarkers.push({
+          time: anchor.time,
+          position: "aboveBar" as const,
+          color: "#f87171",
+          shape: "circle" as const,
+        });
+      }
+      for (const anchor of flexibleSrOverlay?.support?.anchors ?? []) {
+        priceMarkers.push({
+          time: anchor.time,
+          position: "belowBar" as const,
+          color: "#4ade80",
+          shape: "circle" as const,
+        });
+      }
     }
     if (priceMarkers.length > 0) {
       candleSeries.setMarkers(priceMarkers);
@@ -429,6 +505,8 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     extraAnnotations,
     extraMarkers,
     weeklyEma8,
+    options.flexSr,
+    flexibleSrOverlay,
   ]);
 
   const handleZoom = (direction: "in" | "out" | "reset") => {
@@ -857,4 +935,205 @@ function buildHorizontalAnnotations(annotations?: ChartAnnotations, extraAnnotat
     addLine(item.stopPrice, item.stopLabel ?? "Stop", "#ef4444", 2, LineStyle.Dotted);
   }
   return lines;
+}
+
+function buildFlexibleSrOverlay(candles: CandlePoint[]): FlexibleSrOverlay {
+  if (candles.length < 30) {
+    return { resistance: null, support: null };
+  }
+
+  const resistanceAnchors = selectFlexibleSrAnchors(candles, "high");
+  const supportAnchors = selectFlexibleSrAnchors(candles, "low");
+
+  return {
+    resistance: buildFlexibleSrCurve(candles, resistanceAnchors),
+    support: buildFlexibleSrCurve(candles, supportAnchors),
+  };
+}
+
+function selectFlexibleSrAnchors(candles: CandlePoint[], kind: "high" | "low"): SrAnchor[] {
+  const pivots = detectPivotAnchors(candles, kind);
+  if (pivots.length < 3) {
+    return [];
+  }
+
+  const selected: SrAnchor[] = [];
+  const minGap = Math.max(8, Math.floor(candles.length / 18));
+  let cursor = pivots.length - 1;
+
+  while (cursor >= 0 && selected.length < 3) {
+    const base = pivots[cursor];
+    if (!base) {
+      cursor -= 1;
+      continue;
+    }
+    let best = base;
+    const windowStartIndex = Math.max(0, base.index - Math.max(24, minGap * 3));
+    while (cursor >= 0 && pivots[cursor].index >= windowStartIndex) {
+      const candidate = pivots[cursor];
+      if (candidate.score > best.score) {
+        best = candidate;
+      }
+      cursor -= 1;
+    }
+    if (selected.length > 0 && best.index >= selected[0].index - minGap) {
+      continue;
+    }
+    selected.unshift(best);
+  }
+
+  return selected.length === 3 ? selected : [];
+}
+
+function detectPivotAnchors(candles: CandlePoint[], kind: "high" | "low"): SrAnchor[] {
+  const pivots: SrAnchor[] = [];
+  const span = Math.min(8, Math.max(3, Math.floor(candles.length / 55)));
+  const recentWeight = 0.35;
+
+  for (let index = span; index < candles.length - span; index += 1) {
+    const current = candles[index];
+    const currentValue = kind === "high" ? current.high : current.low;
+    let isPivot = true;
+
+    for (let offset = 1; offset <= span; offset += 1) {
+      const left = candles[index - offset];
+      const right = candles[index + offset];
+      const leftValue = kind === "high" ? left.high : left.low;
+      const rightValue = kind === "high" ? right.high : right.low;
+      if (kind === "high") {
+        if (currentValue <= leftValue || currentValue < rightValue) {
+          isPivot = false;
+          break;
+        }
+      } else if (currentValue >= leftValue || currentValue > rightValue) {
+        isPivot = false;
+        break;
+      }
+    }
+
+    if (!isPivot) {
+      continue;
+    }
+
+    const leftBase = candles[index - span].close;
+    const rightBase = candles[index + span].close;
+    const swingMagnitude =
+      kind === "high"
+        ? Math.max(0, currentValue - Math.max(leftBase, rightBase))
+        : Math.max(0, Math.min(leftBase, rightBase) - currentValue);
+    const candleRange = Math.max(0.0001, current.high - current.low);
+    const recencyScore = index / Math.max(1, candles.length - 1);
+    const score = swingMagnitude + candleRange * 0.2 + recencyScore * recentWeight * current.close;
+
+    pivots.push({
+      index,
+      time: current.time,
+      value: Number(currentValue.toFixed(4)),
+      kind,
+      score,
+    });
+  }
+
+  return pivots;
+}
+
+function buildFlexibleSrCurve(candles: CandlePoint[], anchors: SrAnchor[]): FlexibleSrCurve | null {
+  if (anchors.length !== 3) {
+    return null;
+  }
+  const [a, b, c] = anchors;
+  if (a.index === b.index || a.index === c.index || b.index === c.index) {
+    return null;
+  }
+
+  const coefficients = solveQuadraticThroughPoints(
+    { x: a.index, y: a.value },
+    { x: b.index, y: b.value },
+    { x: c.index, y: c.value },
+  );
+  if (!coefficients) {
+    return null;
+  }
+
+  const backfit: Array<{ time: string; value: number }> = [];
+  for (let index = a.index; index <= c.index; index += 1) {
+    const candle = candles[index];
+    if (!candle) {
+      continue;
+    }
+    backfit.push({
+      time: candle.time,
+      value: Number(evaluateQuadratic(coefficients, index).toFixed(4)),
+    });
+  }
+
+  const projection: Array<{ time: string; value: number }> = [];
+  const projectionBars = Math.min(40, Math.max(12, Math.floor(candles.length * 0.08)));
+  for (let offset = 0; offset <= projectionBars; offset += 1) {
+    const index = c.index + offset;
+    const time =
+      offset === 0
+        ? candles[c.index]?.time
+        : addBusinessDays(candles[c.index]?.time ?? anchors[2].time, offset);
+    if (!time) {
+      continue;
+    }
+    projection.push({
+      time,
+      value: Number(evaluateQuadratic(coefficients, index).toFixed(4)),
+    });
+  }
+
+  return { anchors, backfit, projection };
+}
+
+function solveQuadraticThroughPoints(
+  first: { x: number; y: number },
+  second: { x: number; y: number },
+  third: { x: number; y: number },
+) {
+  const denominator = (first.x - second.x) * (first.x - third.x) * (second.x - third.x);
+  if (Math.abs(denominator) < 1e-9) {
+    return null;
+  }
+  const qa =
+    (third.x * (second.y - first.y) +
+      second.x * (first.y - third.y) +
+      first.x * (third.y - second.y)) /
+    denominator;
+  const qb =
+    (third.x * third.x * (first.y - second.y) +
+      second.x * second.x * (third.y - first.y) +
+      first.x * first.x * (second.y - third.y)) /
+    denominator;
+  const qc =
+    (second.x * third.x * (second.x - third.x) * first.y +
+      third.x * first.x * (third.x - first.x) * second.y +
+      first.x * second.x * (first.x - second.x) * third.y) /
+    denominator;
+  if (![qa, qb, qc].every((value) => Number.isFinite(value))) {
+    return null;
+  }
+  return { qa, qb, qc };
+}
+
+function evaluateQuadratic(coefficients: { qa: number; qb: number; qc: number }, x: number) {
+  return coefficients.qa * x * x + coefficients.qb * x + coefficients.qc;
+}
+
+function addBusinessDays(baseDate: string, offset: number) {
+  const parsed = new Date(`${baseDate}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  let remaining = offset;
+  while (remaining > 0) {
+    parsed.setUTCDate(parsed.getUTCDate() + 1);
+    const day = parsed.getUTCDay();
+    if (day === 0 || day === 6) {
+      continue;
+    }
+    remaining -= 1;
+  }
+  return parsed.toISOString().slice(0, 10);
 }

@@ -16,6 +16,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   htfBox: true,
   rsLine: true,
   rsSignals: true,
+  flexSr: false,
 };
 const CHART_CACHE_PREFIX = "chart-screen-cache-v1";
 const CHART_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -263,6 +264,7 @@ export function ChartsPage() {
     { key: "htfBox", label: "HTF box" },
     { key: "rsLine", label: "RS line" },
     { key: "rsSignals", label: "RS markers" },
+    { key: "flexSr", label: "Flex SR (exp)" },
   ];
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {

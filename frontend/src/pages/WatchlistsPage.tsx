@@ -37,6 +37,7 @@ export function WatchlistsPage() {
     htfBox: true,
     rsLine: true,
     rsSignals: true,
+    flexSr: false,
   });
   const requestedStem = searchParams.get("stem") ?? "";
   const requestedTicker = (searchParams.get("ticker") ?? "").toUpperCase();
