@@ -255,6 +255,72 @@ CREATE INDEX IF NOT EXISTS idx_app_audit_events_actor_user_event_at
 CREATE INDEX IF NOT EXISTS idx_app_audit_events_resource_event_at
   ON app_audit_events(resource_type, resource_id, event_at DESC);
 
+CREATE TABLE IF NOT EXISTS portfolios (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  created_by_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS portfolio_positions (
+  id BIGSERIAL PRIMARY KEY,
+  portfolio_id BIGINT NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+  ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
+  shares NUMERIC(24,6) NOT NULL,
+  entry_price NUMERIC(24,6) NOT NULL,
+  opened_at DATE NOT NULL,
+  notes TEXT,
+  created_by_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  updated_by_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_positions_portfolio_ticker
+  ON portfolio_positions(portfolio_id, ticker);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_positions_ticker_opened_at
+  ON portfolio_positions(ticker, opened_at DESC);
+
+CREATE TABLE IF NOT EXISTS portfolio_import_batches (
+  id BIGSERIAL PRIMARY KEY,
+  portfolio_id BIGINT REFERENCES portfolios(id) ON DELETE CASCADE,
+  source_name TEXT NOT NULL DEFAULT '',
+  imported_by_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  row_count INTEGER NOT NULL DEFAULT 0,
+  accepted_count INTEGER NOT NULL DEFAULT 0,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  raw_csv_text TEXT NOT NULL DEFAULT '',
+  summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_import_batches_portfolio_created_at
+  ON portfolio_import_batches(portfolio_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS portfolio_advice_snapshots (
+  position_id BIGINT PRIMARY KEY REFERENCES portfolio_positions(id) ON DELETE CASCADE,
+  as_of_date DATE,
+  latest_trade_date DATE,
+  market_data_status TEXT NOT NULL DEFAULT 'pending',
+  close_price NUMERIC(24,6),
+  signal_status TEXT NOT NULL DEFAULT 'review',
+  stop_loss_price NUMERIC(24,6),
+  tp1_price NUMERIC(24,6),
+  tp2_price NUMERIC(24,6),
+  tp1_sell_fraction NUMERIC(12,6),
+  tp2_sell_fraction NUMERIC(12,6),
+  net_cost_after_tp1 NUMERIC(24,6),
+  remaining_cost_basis_after_tp1 NUMERIC(24,6),
+  explanation TEXT,
+  data_source TEXT NOT NULL DEFAULT '',
+  signal_context_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  refreshed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS scope_json JSONB NOT NULL DEFAULT '{}'::jsonb;

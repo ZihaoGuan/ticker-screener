@@ -696,6 +696,96 @@ export type AdminTickerListStatusResponse = {
   inclusion_entry: { ticker: string; reason: string } | null;
 };
 
+export type PortfolioAdvice = {
+  as_of_date?: string | null;
+  latest_trade_date?: string | null;
+  market_data_status: "pending" | "ready" | "stale" | "missing" | string;
+  close_price?: number | null;
+  signal_status: "hold" | "trim" | "raise_stop" | "review" | string;
+  stop_loss_price?: number | null;
+  tp1_price?: number | null;
+  tp2_price?: number | null;
+  tp1_sell_fraction?: number | null;
+  tp2_sell_fraction?: number | null;
+  net_cost_after_tp1?: number | null;
+  remaining_cost_basis_after_tp1?: number | null;
+  explanation?: string | null;
+  data_source?: string | null;
+  signal_context?: Record<string, unknown>;
+  refreshed_at?: string | null;
+};
+
+export type PortfolioPosition = {
+  id: number;
+  portfolio_id: number;
+  portfolio_name: string;
+  ticker: string;
+  shares: number;
+  entry_price: number;
+  opened_at: string;
+  notes?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  market_value?: number | null;
+  unrealized_pl?: number | null;
+  unrealized_pl_pct?: number | null;
+  advice: PortfolioAdvice;
+};
+
+export type PortfolioSummary = {
+  position_count: number;
+  total_market_value: number;
+  total_cost_basis: number;
+  total_unrealized_pl: number;
+  total_unrealized_pl_pct: number;
+  stale_advice_count: number;
+  missing_advice_count: number;
+  last_refreshed_at?: string | null;
+};
+
+export type PortfolioContextResponse = {
+  database_configured: boolean;
+  summary: PortfolioSummary;
+  positions: PortfolioPosition[];
+  portfolios: Array<{
+    id: number;
+    name: string;
+    created_by_user_id?: number | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+  }>;
+  market_regime: {
+    title: string;
+    status: string;
+    description: string;
+  };
+};
+
+export type PortfolioImportResponse = {
+  ok: boolean;
+  portfolio_name: string;
+  import_batch_id?: number | null;
+  accepted_count: number;
+  error_count: number;
+  accepted: Array<{
+    row: number;
+    position: Partial<PortfolioPosition> & { ticker: string };
+  }>;
+  errors: Array<{
+    row: number;
+    message: string;
+  }>;
+};
+
+export type PortfolioRefreshResponse = {
+  ok: boolean;
+  refreshed_count: number;
+  positions: Array<{
+    position_id: number;
+    ticker: string;
+  }>;
+};
+
 export type RrgUniverse = "sector" | "industry" | "theme";
 export type RrgCadence = "weekly" | "daily-2m";
 

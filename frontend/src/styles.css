@@ -1487,6 +1487,147 @@ a {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
+.portfolio-page {
+  gap: 24px;
+}
+
+.portfolio-summary-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.portfolio-main-grid {
+  align-items: start;
+}
+
+.portfolio-card-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.portfolio-metric-card {
+  min-height: 0;
+}
+
+.portfolio-metric-value {
+  font-size: 32px;
+  margin-top: 16px;
+}
+
+.portfolio-notice {
+  border: 1px solid rgba(78, 222, 163, 0.35);
+  border-radius: 8px;
+  background: rgba(78, 222, 163, 0.08);
+  color: #d1fae5;
+  padding: 14px 16px;
+}
+
+.portfolio-advice-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.portfolio-advice-metrics {
+  display: grid;
+  gap: 14px;
+}
+
+.portfolio-advice-metric {
+  min-height: 0;
+}
+
+.portfolio-advice-metric.is-hold {
+  border-color: rgba(52, 211, 153, 0.45);
+}
+
+.portfolio-advice-metric.is-trim {
+  border-color: rgba(251, 113, 133, 0.45);
+}
+
+.portfolio-advice-metric.is-raise_stop {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.portfolio-signal-pill,
+.portfolio-data-badge {
+  border-radius: 999px;
+  border: 1px solid #3f3f46;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
+
+.portfolio-signal-pill.is-hold,
+.portfolio-data-badge.is-ready {
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.3);
+  color: #6ee7b7;
+}
+
+.portfolio-signal-pill.is-trim,
+.portfolio-data-badge.is-missing {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.3);
+  color: #fda4af;
+}
+
+.portfolio-signal-pill.is-raise_stop,
+.portfolio-data-badge.is-stale {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #fcd34d;
+}
+
+.portfolio-signal-pill.is-review,
+.portfolio-data-badge.is-pending {
+  background: rgba(161, 161, 170, 0.14);
+  border-color: rgba(161, 161, 170, 0.24);
+  color: #d4d4d8;
+}
+
+.portfolio-mix-list {
+  display: grid;
+  gap: 12px;
+}
+
+.portfolio-placeholder {
+  display: grid;
+  gap: 16px;
+}
+
+.portfolio-placeholder-chart {
+  min-height: 220px;
+  border-radius: 10px;
+  border: 1px dashed #3f3f46;
+  background:
+    linear-gradient(180deg, rgba(78, 222, 163, 0.08), rgba(9, 9, 11, 0.08)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 60%);
+  position: relative;
+  overflow: hidden;
+}
+
+.portfolio-placeholder-chart::after {
+  content: "";
+  position: absolute;
+  inset: 24px 18px 24px 18px;
+  border-left: 1px solid rgba(161, 161, 170, 0.2);
+  border-bottom: 1px solid rgba(161, 161, 170, 0.2);
+  background:
+    linear-gradient(120deg, transparent 0%, transparent 18%, rgba(78, 222, 163, 0.35) 18%, rgba(78, 222, 163, 0.35) 22%, transparent 22%, transparent 100%);
+}
+
+.portfolio-csv-input {
+  min-height: 180px;
+}
+
 .summary-stat {
   font-size: 16px;
   font-weight: 600;
@@ -1695,6 +1836,7 @@ a {
   .card-grid,
   .overlap-cards,
   .summary-grid,
+  .portfolio-summary-grid,
   .guide-grid,
   .rrg-grid,
   .rrg-item-grid,
@@ -1744,6 +1886,11 @@ a {
   .hero-actions .ghost-button,
   .hero-actions .secondary-button {
     width: 100%;
+  }
+
+  .portfolio-card-grid,
+  .portfolio-advice-layout {
+    grid-template-columns: 1fr;
   }
 
   .chart-toggle {

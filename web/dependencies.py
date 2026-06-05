@@ -26,6 +26,7 @@ from src.webapp.services.backtest_service import BacktestService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.overlap_service import OverlapService
+from src.webapp.services.portfolio_service import PortfolioService
 from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.scheduled_job_service import ScheduledJobService
@@ -80,6 +81,10 @@ def get_backtest_service() -> BacktestService:
 
 def get_overlap_service() -> OverlapService:
     return OverlapService(artifacts_dir=config.artifacts_dir)
+
+
+def get_portfolio_service() -> PortfolioService:
+    return PortfolioService(database_url=config.database_url)
 
 
 def get_rrg_service() -> RrgService:

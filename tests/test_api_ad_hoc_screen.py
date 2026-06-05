@@ -17,6 +17,7 @@ if TestClient is not None:
         get_backtest_service,
         get_current_principal,
         get_earnings_calendar_service,
+        get_portfolio_service,
         get_run_service,
         get_screener_history_service,
         get_user_admin_service,
@@ -325,6 +326,117 @@ class _FakeEarningsCalendarService:
         }
 
 
+class _FakePortfolioService:
+    def get_context(self):
+        return {
+            "database_configured": True,
+            "summary": {
+                "position_count": 1,
+                "total_market_value": 1400.0,
+                "total_cost_basis": 1000.0,
+                "total_unrealized_pl": 400.0,
+                "total_unrealized_pl_pct": 40.0,
+                "stale_advice_count": 0,
+                "missing_advice_count": 0,
+                "last_refreshed_at": "2026-06-06T02:00:00+00:00",
+            },
+            "positions": [
+                {
+                    "id": 1,
+                    "portfolio_id": 1,
+                    "portfolio_name": "Main",
+                    "ticker": "NVDA",
+                    "shares": 10,
+                    "entry_price": 100,
+                    "opened_at": "2026-05-01",
+                    "notes": "",
+                    "created_at": "2026-06-06T00:00:00+00:00",
+                    "updated_at": "2026-06-06T00:00:00+00:00",
+                    "market_value": 1400.0,
+                    "unrealized_pl": 400.0,
+                    "unrealized_pl_pct": 40.0,
+                    "advice": {
+                        "as_of_date": "2026-06-06",
+                        "latest_trade_date": "2026-06-06",
+                        "market_data_status": "ready",
+                        "close_price": 140.0,
+                        "signal_status": "hold",
+                        "stop_loss_price": 128.0,
+                        "tp1_price": 152.0,
+                        "tp2_price": 166.0,
+                        "tp1_sell_fraction": 0.4,
+                        "tp2_sell_fraction": 0.6,
+                        "net_cost_after_tp1": 65.33,
+                        "remaining_cost_basis_after_tp1": 392.0,
+                        "explanation": "Trend context available.",
+                        "data_source": "database",
+                        "signal_context": {},
+                        "refreshed_at": "2026-06-06T02:00:00+00:00",
+                    },
+                }
+            ],
+            "portfolios": [{"id": 1, "name": "Main", "created_by_user_id": 1, "created_at": "2026-06-06T00:00:00+00:00", "updated_at": "2026-06-06T00:00:00+00:00"}],
+            "market_regime": {"title": "Market Regime Placeholder", "status": "deferred", "description": "placeholder"},
+        }
+
+    def create_position(self, **kwargs: object):
+        return {
+            "id": 2,
+            "portfolio_id": 1,
+            "portfolio_name": str(kwargs.get("portfolio_name") or "Main"),
+            "ticker": "AAPL",
+            "shares": 5.0,
+            "entry_price": 200.0,
+            "opened_at": "2026-05-20",
+            "notes": str(kwargs.get("notes") or ""),
+            "created_at": "2026-06-06T00:00:00+00:00",
+            "updated_at": "2026-06-06T00:00:00+00:00",
+            "market_value": None,
+            "unrealized_pl": None,
+            "unrealized_pl_pct": None,
+            "advice": {"market_data_status": "pending"},
+        }
+
+    def import_csv(self, **kwargs: object):
+        _ = kwargs
+        return {
+            "ok": True,
+            "portfolio_name": "Main",
+            "import_batch_id": 9,
+            "accepted_count": 1,
+            "error_count": 1,
+            "accepted": [{"row": 2, "position": {"ticker": "MSFT"}}],
+            "errors": [{"row": 3, "message": "shares must be greater than 0."}],
+        }
+
+    def refresh_advice(self, **kwargs: object):
+        _ = kwargs
+        return {"ok": True, "refreshed_count": 1, "positions": [{"position_id": 1, "ticker": "NVDA"}]}
+
+    def update_position(self, position_id: int, **kwargs: object):
+        _ = kwargs
+        return {
+            "id": position_id,
+            "portfolio_id": 1,
+            "portfolio_name": "Main",
+            "ticker": "NVDA",
+            "shares": 12.0,
+            "entry_price": 110.0,
+            "opened_at": "2026-05-01",
+            "notes": "",
+            "created_at": "2026-06-06T00:00:00+00:00",
+            "updated_at": "2026-06-06T01:00:00+00:00",
+            "market_value": None,
+            "unrealized_pl": None,
+            "unrealized_pl_pct": None,
+            "advice": {"market_data_status": "pending"},
+        }
+
+    def delete_position(self, position_id: int):
+        _ = position_id
+        return None
+
+
 @unittest.skipIf(TestClient is None, "fastapi test dependencies are not installed")
 class ApiAdHocScreenTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -337,6 +449,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_user_admin_service] = lambda: _FakeUserAdminService()
         app.dependency_overrides[get_watchlist_service] = lambda: _FakeWatchlistService()
         app.dependency_overrides[get_earnings_calendar_service] = lambda: _FakeEarningsCalendarService()
+        app.dependency_overrides[get_portfolio_service] = lambda: _FakePortfolioService()
         app.dependency_overrides[get_current_principal] = anonymous_principal
         self.client = TestClient(app)
 
@@ -495,3 +608,40 @@ class ApiAdHocScreenTests(unittest.TestCase):
         response = self.client.get("/api/admin/audit-events")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["events"][0]["action"], "admin.user.invite")
+
+    def test_premium_cannot_access_portfolio(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=2,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/portfolio")
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_access_portfolio(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/portfolio")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["positions"][0]["ticker"], "NVDA")
+
+    def test_admin_can_import_portfolio_positions(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.post(
+            "/api/admin/portfolio/positions/import",
+            json={"csv_text": "ticker,shares,entry_price,opened_at\nMSFT,4,400,2026-05-01\n", "portfolio_name": "Main"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["accepted_count"], 1)
+        self.assertEqual(payload["error_count"], 1)

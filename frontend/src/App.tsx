@@ -11,6 +11,7 @@ import { EarningsPage } from "./pages/EarningsPage";
 import { GuidePage } from "./pages/GuidePage";
 import { LoginPage } from "./pages/LoginPage";
 import { OverlapPage } from "./pages/OverlapPage";
+import { PortfolioPage } from "./pages/PortfolioPage";
 import { ChartsPage } from "./pages/ChartsPage";
 import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
@@ -91,6 +92,14 @@ export default function App() {
             <RoleRoute allowedRoles={["premium", "admin"]}>
               <BacktestsPage />
             </RoleRoute>
+          }
+        />
+        <Route
+          path="/portfolio"
+          element={
+            <ProtectedRoute capability="manage_exclusions">
+              <PortfolioPage />
+            </ProtectedRoute>
           }
         />
         <Route

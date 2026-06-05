@@ -14,6 +14,7 @@ from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.overlap_service import OverlapService
+from src.webapp.services.portfolio_service import PortfolioService
 from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.run_service import RunService
@@ -32,6 +33,7 @@ from web.dependencies import (
     get_dashboard_service,
     get_earnings_calendar_service,
     get_overlap_service,
+    get_portfolio_service,
     get_rrg_service,
     get_run_service,
     get_scheduled_job_service,
@@ -958,6 +960,184 @@ def launch_history_sync(
         metadata={"job_id": job_id, **options},
     )
     return JSONResponse({"ok": True, "job_id": job_id})
+
+
+@router.get("/admin/portfolio", response_class=JSONResponse)
+def admin_portfolio_context(
+    service: PortfolioService = Depends(get_portfolio_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    try:
+        return JSONResponse(jsonable_encoder(service.get_context()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/admin/portfolio/positions", response_class=JSONResponse)
+def admin_create_portfolio_position(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: PortfolioService = Depends(get_portfolio_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        position = service.create_position(
+            ticker=str(request_payload.get("ticker") or ""),
+            shares=request_payload.get("shares"),
+            entry_price=request_payload.get("entry_price"),
+            opened_at=request_payload.get("opened_at"),
+            notes=str(request_payload.get("notes") or ""),
+            portfolio_name=str(request_payload.get("portfolio_name") or ""),
+            actor_user_id=principal.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="portfolio.position.create",
+        resource_type="portfolio_position",
+        resource_id=str(position.get("id") or ""),
+        resource_label=str(position.get("ticker") or ""),
+        message=f"Added portfolio position for {position.get('ticker')}.",
+        metadata=position,
+    )
+    return JSONResponse({"ok": True, "position": position})
+
+
+@router.post("/admin/portfolio/positions/import", response_class=JSONResponse)
+def admin_import_portfolio_positions(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: PortfolioService = Depends(get_portfolio_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        result = service.import_csv(
+            csv_text=str(request_payload.get("csv_text") or ""),
+            portfolio_name=str(request_payload.get("portfolio_name") or ""),
+            actor_user_id=principal.user_id,
+            source_name=str(request_payload.get("source_name") or "portfolio.csv"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="portfolio.import",
+        resource_type="portfolio_import_batch",
+        resource_id=str(result.get("import_batch_id") or ""),
+        resource_label=str(result.get("portfolio_name") or "portfolio"),
+        message=f"Imported {result.get('accepted_count')} portfolio row(s).",
+        metadata={
+            "portfolio_name": result.get("portfolio_name"),
+            "accepted_count": result.get("accepted_count"),
+            "error_count": result.get("error_count"),
+            "source_name": str(request_payload.get("source_name") or "portfolio.csv"),
+        },
+    )
+    return JSONResponse(jsonable_encoder(result))
+
+
+@router.post("/admin/portfolio/advice/refresh", response_class=JSONResponse)
+def admin_refresh_portfolio_advice(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: PortfolioService = Depends(get_portfolio_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    position_id = request_payload.get("position_id")
+    parsed_position_id = int(position_id) if position_id not in (None, "") else None
+    try:
+        result = service.refresh_advice(
+            position_id=parsed_position_id,
+            ticker=str(request_payload.get("ticker") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="portfolio.advice.refresh",
+        resource_type="portfolio_position",
+        resource_id=str(parsed_position_id or request_payload.get("ticker") or "all"),
+        resource_label=str(request_payload.get("ticker") or "portfolio"),
+        message=f"Refreshed advice for {result.get('refreshed_count')} portfolio position(s).",
+        metadata=result,
+    )
+    return JSONResponse(jsonable_encoder(result))
+
+
+@router.post("/admin/portfolio/positions/{position_id}", response_class=JSONResponse)
+def admin_update_portfolio_position(
+    request: Request,
+    position_id: int,
+    payload: dict[str, object] | None = Body(default=None),
+    service: PortfolioService = Depends(get_portfolio_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        position = service.update_position(
+            position_id,
+            ticker=str(request_payload.get("ticker") or ""),
+            shares=request_payload.get("shares"),
+            entry_price=request_payload.get("entry_price"),
+            opened_at=request_payload.get("opened_at"),
+            notes=str(request_payload.get("notes") or ""),
+            portfolio_name=str(request_payload.get("portfolio_name") or ""),
+            actor_user_id=principal.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="portfolio.position.update",
+        resource_type="portfolio_position",
+        resource_id=str(position_id),
+        resource_label=str(position.get("ticker") or position_id),
+        message=f"Updated portfolio position {position_id}.",
+        metadata=position,
+    )
+    return JSONResponse({"ok": True, "position": position})
+
+
+@router.post("/admin/portfolio/positions/{position_id}/delete", response_class=JSONResponse)
+def admin_delete_portfolio_position(
+    request: Request,
+    position_id: int,
+    service: PortfolioService = Depends(get_portfolio_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    try:
+        service.delete_position(position_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="portfolio.position.delete",
+        resource_type="portfolio_position",
+        resource_id=str(position_id),
+        resource_label=str(position_id),
+        message=f"Deleted portfolio position {position_id}.",
+        metadata={"position_id": position_id},
+    )
+    return JSONResponse({"ok": True})
 
 
 @router.get("/admin/users", response_class=JSONResponse)
