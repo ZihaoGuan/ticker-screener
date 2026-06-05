@@ -107,6 +107,16 @@ def _is_share_class_ticker(ticker: str) -> bool:
     return len(suffix) == 1 and suffix.isalpha()
 
 
+def _is_special_suffix_excluded_ticker(ticker: str) -> bool:
+    if len(ticker) != 5:
+        return False
+    return ticker.endswith(("WS", "W", "U"))
+
+
+def is_excluded_ticker(ticker: str, excluded: set[str]) -> bool:
+    return ticker in excluded or _is_special_suffix_excluded_ticker(ticker)
+
+
 def load_excluded_tickers(config: AppConfig) -> set[str]:
     excluded: set[str] = set()
     for path in (excluded_tickers_path(config), manual_excluded_tickers_path(config)):
@@ -129,7 +139,7 @@ def filter_symbols(symbols: Iterable[str], excluded: set[str]) -> list[str]:
     seen: set[str] = set()
     for symbol in symbols:
         ticker = normalize_ticker_symbol(symbol)
-        if not ticker or ticker in seen or ticker in excluded:
+        if not ticker or ticker in seen or is_excluded_ticker(ticker, excluded):
             continue
         seen.add(ticker)
         filtered.append(ticker)
@@ -141,7 +151,7 @@ def filter_universe_tickers(tickers: Iterable["UniverseTicker"], excluded: set[s
     seen: set[str] = set()
     for item in tickers:
         ticker = normalize_ticker_symbol(item.symbol)
-        if not ticker or ticker in seen or ticker in excluded:
+        if not ticker or ticker in seen or is_excluded_ticker(ticker, excluded):
             continue
         seen.add(ticker)
         filtered.append(item if ticker == item.symbol else replace(item, symbol=ticker))
@@ -153,7 +163,7 @@ def filter_earnings_events(events: Iterable["EarningsEvent"], excluded: set[str]
     seen: set[str] = set()
     for item in events:
         ticker = normalize_ticker_symbol(item.ticker)
-        if not ticker or ticker in seen or ticker in excluded:
+        if not ticker or ticker in seen or is_excluded_ticker(ticker, excluded):
             continue
         seen.add(ticker)
         filtered.append(item if ticker == item.ticker else replace(item, ticker=ticker))
@@ -165,7 +175,7 @@ def filter_pre_earnings_events(events: Iterable["PreEarningsEvent"], excluded: s
     seen: set[str] = set()
     for item in events:
         ticker = normalize_ticker_symbol(item.ticker)
-        if not ticker or ticker in seen or ticker in excluded:
+        if not ticker or ticker in seen or is_excluded_ticker(ticker, excluded):
             continue
         seen.add(ticker)
         filtered.append(item if ticker == item.ticker else replace(item, ticker=ticker))
