@@ -725,6 +725,10 @@ class RunService:
             tickers = [item.strip().upper() for item in re.split(r"[\s,]+", raw_tickers.strip()) if item.strip()]
             if tickers:
                 normalized["tickers"] = tickers
+        elif isinstance(raw_tickers, list):
+            tickers = [str(item).strip().upper() for item in raw_tickers if str(item).strip()]
+            if tickers:
+                normalized["tickers"] = tickers
 
         for key in (
             "date_label",
