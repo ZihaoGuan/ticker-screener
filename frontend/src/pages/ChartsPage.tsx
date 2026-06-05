@@ -256,6 +256,13 @@ export function ChartsPage() {
   const latestRsMarker = payload?.rs_markers?.[payload.rs_markers.length - 1] ?? null;
   const adr14Pct = useMemo(() => computeAdrPercent(chartData, 14), [chartData]);
   const adr14InRange = adr14Pct != null ? adr14Pct >= 3 && adr14Pct <= 10 : null;
+  const atr14 = useMemo(() => computeAtr(chartData, 14), [chartData]);
+  const latestMa50 = payload?.ma50?.[payload.ma50.length - 1]?.value ?? null;
+  const atrMultipleFrom50Ma =
+    atr14 != null && latestMa50 != null && Number.isFinite(lastClose ?? NaN)
+      ? ((lastClose ?? 0) - latestMa50) / atr14
+      : null;
+  const hasTrimWarning = atrMultipleFrom50Ma != null ? atrMultipleFrom50Ma >= 3 : false;
   const earningsRows = fundamentalsPayload?.earnings_eps_history ?? [];
   const setupAnnotations = useMemo<ChartAnnotations[]>(() => {
     return (setupPayload?.screeners ?? [])
@@ -277,6 +284,7 @@ export function ChartsPage() {
         position: "belowBar" as const,
       }));
   }, [payload?.setup_markers, selectedSetups.ftd_sweep]);
+  const atrExtensionMarkers = useMemo(() => buildAtrExtensionMarkers(chartData, payload?.ma50 ?? [], 14), [chartData, payload?.ma50]);
   const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
     { key: "ema8", label: "EMA 8" },
     { key: "ema21", label: "EMA 21" },
@@ -426,6 +434,18 @@ export function ChartsPage() {
             <strong className={adr14InRange == null ? undefined : `adr-badge ${adr14InRange ? "is-in-range" : "is-out-of-range"}`}>
               {formatPercent(adr14Pct)}
             </strong>
+          </div>
+          <div>
+            <span className="eyebrow">ATR14</span>
+            <strong>{formatPrice(atr14)}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">ATR x 50MA</span>
+            <strong>{formatAtrMultiple(atrMultipleFrom50Ma)}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">Trim Warn</span>
+            <strong className={hasTrimWarning ? "atr-badge is-warning" : undefined}>{hasTrimWarning ? ">= 3x ATR" : "Normal"}</strong>
           </div>
           <div>
             <span className="eyebrow">Inst Float</span>
@@ -671,7 +691,7 @@ export function ChartsPage() {
               candles={chartData}
               overlays={payload ?? undefined}
               extraAnnotations={setupAnnotations}
-              extraMarkers={historicalSetupMarkers}
+              extraMarkers={[...historicalSetupMarkers, ...atrExtensionMarkers]}
               visibility={chartVisibility}
               forceFearzonePanel
             />
@@ -685,6 +705,10 @@ export function ChartsPage() {
               ) : null}
               {payload?.data_source ? <span className="chart-pill chart-pill-setup">Source {payload.data_source}</span> : null}
               {historicalSetupMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{historicalSetupMarkers.length} old FTD sweep marker(s)</span> : null}
+              {atr14 != null ? <span className="chart-pill chart-pill-setup">ATR14 {formatPrice(atr14)}</span> : null}
+              {atrMultipleFrom50Ma != null ? <span className="chart-pill chart-pill-setup">50MA {formatAtrMultiple(atrMultipleFrom50Ma)}</span> : null}
+              {hasTrimWarning ? <span className="chart-pill chart-pill-event">Trim warning: 3x ATR above 50MA</span> : null}
+              {atrExtensionMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{atrExtensionMarkers.length} ATR extension dot(s)</span> : null}
               {setupAnnotations.map((item, index) =>
                 item.setupLabel ? (
                   <span key={`${item.setupLabel}-${index}`} className="chart-pill chart-pill-setup">
@@ -799,6 +823,14 @@ function formatPercent(value: number | null | undefined) {
   return value == null ? "--" : `${value.toFixed(2)}%`;
 }
 
+function formatAtrMultiple(value: number | null | undefined) {
+  if (value == null) {
+    return "--";
+  }
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(2)}x`;
+}
+
 function computeAdrPercent(candles: CandlePoint[], lookbackDays: number): number | null {
   const window = candles.slice(-lookbackDays);
   if (window.length < lookbackDays) {
@@ -812,6 +844,68 @@ function computeAdrPercent(candles: CandlePoint[], lookbackDays: number): number
     totalRangePct += ((candle.high - candle.low) / candle.close) * 100;
   }
   return totalRangePct / window.length;
+}
+
+function computeAtr(candles: CandlePoint[], lookbackDays: number): number | null {
+  const window = candles.slice(-(lookbackDays + 1));
+  if (window.length < lookbackDays + 1) {
+    return null;
+  }
+  let totalTrueRange = 0;
+  for (let index = 1; index < window.length; index += 1) {
+    const previousClose = window[index - 1]?.close;
+    const candle = window[index];
+    if (
+      candle == null ||
+      previousClose == null ||
+      !Number.isFinite(candle.high) ||
+      !Number.isFinite(candle.low) ||
+      !Number.isFinite(previousClose)
+    ) {
+      return null;
+    }
+    const trueRange = Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - previousClose),
+      Math.abs(candle.low - previousClose),
+    );
+    totalTrueRange += trueRange;
+  }
+  return totalTrueRange / lookbackDays;
+}
+
+function buildAtrExtensionMarkers(
+  candles: CandlePoint[],
+  ma50Series: Array<{ time: string; value: number }>,
+  atrLookbackDays: number,
+): Array<{ time: string; label?: string; color: string; shape: "circle"; position: "aboveBar" }> {
+  if (candles.length < atrLookbackDays + 1 || ma50Series.length === 0) {
+    return [];
+  }
+  const ma50ByTime = new Map(ma50Series.map((point) => [point.time, point.value]));
+  const markers: Array<{ time: string; label?: string; color: string; shape: "circle"; position: "aboveBar" }> = [];
+  for (let index = atrLookbackDays; index < candles.length; index += 1) {
+    const current = candles[index];
+    const ma50 = ma50ByTime.get(current.time);
+    if (ma50 == null || !Number.isFinite(ma50)) {
+      continue;
+    }
+    const atr = computeAtr(candles.slice(0, index + 1), atrLookbackDays);
+    if (atr == null || atr <= 0) {
+      continue;
+    }
+    const multiple = (current.close - ma50) / atr;
+    if (multiple >= 3) {
+      markers.push({
+        time: current.time,
+        label: `ATR ext ${multiple.toFixed(1)}x`,
+        color: "#22c55e",
+        shape: "circle",
+        position: "aboveBar",
+      });
+    }
+  }
+  return markers;
 }
 
 function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAnnotations | null {

@@ -1298,6 +1298,17 @@ a {
   color: #fca5a5;
 }
 
+.atr-badge {
+  border-radius: 999px;
+  padding: 6px 10px;
+  width: fit-content;
+}
+
+.atr-badge.is-warning {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+}
+
 .hero-actions {
   display: flex;
   align-items: center;
