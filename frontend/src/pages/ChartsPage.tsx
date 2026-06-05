@@ -26,7 +26,7 @@ const CHART_CACHE_TTL_MS = 60 * 60 * 1000;
 export function ChartsPage() {
   const auth = useAuth();
   const setupOptions = [
-    { id: "hve", label: "HVE 52W" },
+    { id: "hve", label: "HVE" },
     { id: "ftd_sweep", label: "FTD Sweep" },
     { id: "weekly_htf_pullback", label: "Weekly HTF Pullback" },
     { id: "htf_8w_runup", label: "HTF 8W Runup" },
@@ -922,7 +922,7 @@ function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAn
   switch (id) {
     case "hve":
       return {
-        setupLabel: "HVE 52W",
+        setupLabel: "HVE",
         eventDate: readString(hit.signal_date),
         eventLabel: "HVE signal",
         triggerPrice: readNumber(hit.high_price),

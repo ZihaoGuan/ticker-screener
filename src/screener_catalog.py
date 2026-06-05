@@ -226,7 +226,7 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
         "hve": ScreenerSpec(
             id="hve",
             required_inputs=("daily_bars", "metadata"),
-            lookback_trading_days=320,
+            lookback_trading_days=5000,
             warmup_trading_days=5,
             evaluator=_run_hve,
         ),

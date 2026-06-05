@@ -222,7 +222,7 @@ class RunService:
         ),
         "hve": RunAction(
             "hve",
-            "Run HVE (52W)",
+            "Run HVE",
             "scripts/run_hve_screen.py",
             fields=(
                 _limit_field,

@@ -16,7 +16,7 @@ def build_hve_watchlist(hits: list[HveHit]) -> list[dict[str, object]]:
     watchlist: list[dict[str, object]] = []
     for hit in hits:
         summary = (
-            f"Printed the highest volume in the last 52 weeks on {hit.signal_date}. "
+            f"Printed the highest volume ever on {hit.signal_date}. "
             f"Volume buzz is {hit.volume_buzz_pct:+.1f}% versus the 50D average, "
             f"and the signal bar changed {hit.price_change_pct:+.1f}%. "
             f"Current close is {hit.distance_to_ma50_pct:+.1f}% vs 50D MA and {hit.atr_multiple_from_ma50:+.2f} ATR from the 50D MA."
@@ -26,7 +26,7 @@ def build_hve_watchlist(hits: list[HveHit]) -> list[dict[str, object]]:
                 "ticker": hit.ticker,
                 "sector": hit.sector,
                 "industry": hit.industry,
-                "setup_label": "HVE 52W",
+                "setup_label": "HVE",
                 "summary": summary,
                 "master_note": _format_note(hit),
                 "event_date": hit.signal_date,

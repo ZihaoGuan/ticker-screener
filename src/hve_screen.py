@@ -10,10 +10,10 @@ from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_
 from .universe import UniverseTicker
 
 
-HVE_LOOKBACK_DAYS = 252
+HV1_LOOKBACK_DAYS = 252
 HVE_VOLUME_MA_LENGTH = 50
 HVE_ATR_LENGTH = 14
-HVE_HISTORY_DAYS = 320
+HVE_HISTORY_DAYS = 5000
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,8 @@ class HveHit:
     high_price: float
     low_price: float
     current_volume: float
+    highest_volume_ever: float
+    highest_volume_ever_date: str
     highest_volume_52w: float
     highest_volume_52w_date: str
     volume_ma_50: float
@@ -37,6 +39,8 @@ class HveHit:
     distance_to_ma50_pct: float
     atr14: float
     atr_multiple_from_ma50: float
+    is_hve: bool
+    is_hv1: bool
     is_up_day: bool
     is_above_ma50: bool
     reasons: list[str]
@@ -111,7 +115,7 @@ def find_recent_hve_hit(
     frame: pd.DataFrame,
     *,
     ticker: UniverseTicker,
-    lookback_days: int = HVE_LOOKBACK_DAYS,
+    lookback_days: int = HV1_LOOKBACK_DAYS,
     volume_ma_length: int = HVE_VOLUME_MA_LENGTH,
     atr_length: int = HVE_ATR_LENGTH,
 ) -> HveHit | None:
@@ -130,11 +134,14 @@ def find_recent_hve_hit(
     if lookback_window.empty:
         return None
 
+    highest_volume_ever = float(normalized["Volume"].max())
     highest_volume = float(lookback_window["Volume"].max())
-    if float(latest["Volume"]) < highest_volume:
+    current_volume = float(latest["Volume"])
+    is_hve = current_volume >= highest_volume_ever
+    is_hv1 = current_volume >= highest_volume
+    if not is_hve:
         return None
 
-    highest_row = lookback_window.loc[lookback_window["Volume"] == highest_volume].iloc[-1]
     volume_ma_50 = float(latest["volume_ma_50"]) if pd.notna(latest["volume_ma_50"]) else 0.0
     ma50 = float(latest["ma50"]) if pd.notna(latest["ma50"]) else 0.0
     atr14 = float(latest["atr14"]) if pd.notna(latest["atr14"]) else 0.0
@@ -142,7 +149,6 @@ def find_recent_hve_hit(
     open_price = float(latest["Open"])
     high_price = float(latest["High"])
     low_price = float(latest["Low"])
-    current_volume = float(latest["Volume"])
     previous_close = float(normalized["Close"].iloc[-2])
     volume_buzz_pct = ((current_volume / volume_ma_50) - 1.0) * 100.0 if volume_ma_50 > 0 else 0.0
     price_change_pct = ((current_price / previous_close) - 1.0) * 100.0 if previous_close > 0 else 0.0
@@ -152,7 +158,7 @@ def find_recent_hve_hit(
     is_above_ma50 = ma50 > 0 and current_price >= ma50
 
     reasons = [
-        f"highest volume in last {lookback_days} sessions",
+        "current bar is highest volume ever",
         f"volume buzz {volume_buzz_pct:+.1f}% vs 50D avg",
         f"price change {price_change_pct:+.1f}% on signal bar",
     ]
@@ -174,6 +180,8 @@ def find_recent_hve_hit(
         high_price=high_price,
         low_price=low_price,
         current_volume=current_volume,
+        highest_volume_ever=highest_volume_ever,
+        highest_volume_ever_date=normalized.loc[normalized["Volume"] == highest_volume_ever].index[-1].date().isoformat(),
         highest_volume_52w=highest_volume,
         highest_volume_52w_date=lookback_window.index[lookback_window["Volume"] == highest_volume][-1].date().isoformat(),
         volume_ma_50=volume_ma_50,
@@ -183,6 +191,8 @@ def find_recent_hve_hit(
         distance_to_ma50_pct=distance_to_ma50_pct,
         atr14=atr14,
         atr_multiple_from_ma50=atr_multiple_from_ma50,
+        is_hve=is_hve,
+        is_hv1=is_hv1,
         is_up_day=is_up_day,
         is_above_ma50=is_above_ma50,
         reasons=reasons,
@@ -204,7 +214,7 @@ def run_hve_screen(
     print(
         "starting HVE 52W screen: "
         f"total={total_tickers}, "
-        f"lookback={HVE_LOOKBACK_DAYS}, "
+        f"hv1_lookback={HV1_LOOKBACK_DAYS}, "
         f"volume_ma={HVE_VOLUME_MA_LENGTH}, "
         f"atr={HVE_ATR_LENGTH}"
     )
@@ -230,7 +240,7 @@ def run_hve_screen(
                     frame = _build_price_frame(financials)
                     hit = find_recent_hve_hit(frame, ticker=ticker)
                     if hit is None:
-                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no HVE 52W signal | passed={len(hits)}")
+                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no HVE signal | passed={len(hits)}")
                         continue
                     hits.append(hit)
                     print(
@@ -252,7 +262,7 @@ def run_hve_screen(
     )
 
     print(
-        "finished HVE 52W screen: "
+        "finished HVE screen: "
         f"passed={len(hits)}, failed={len(failures)}, total={total_tickers}"
     )
 
