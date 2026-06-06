@@ -25,6 +25,7 @@ export function RunsPage() {
   const [payload, setPayload] = useState<JobsResponse | null>(null);
   const [selectedActionId, setSelectedActionId] = useState("");
   const [selectedJobId, setSelectedJobId] = useState("");
+  const [selectedChildJobId, setSelectedChildJobId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isCancellingJobId, setIsCancellingJobId] = useState("");
@@ -164,6 +165,7 @@ export function RunsPage() {
   useEffect(() => {
     if (!payload?.jobs?.length) {
       setSelectedJobId("");
+      setSelectedChildJobId(null);
       return;
     }
     setSelectedJobId((current) => {
@@ -183,11 +185,28 @@ export function RunsPage() {
     () => payload?.actions.find((action) => action.id === selectedActionId) ?? payload?.actions[0] ?? null,
     [payload, selectedActionId],
   );
-  const selectedJobLog = useMemo(() => selectedJob?.log_tail ?? "No job log yet.", [selectedJob]);
+  const selectedChildJob = useMemo(
+    () => selectedJob?.child_jobs.find((job) => job.job_run_id === selectedChildJobId) ?? null,
+    [selectedChildJobId, selectedJob],
+  );
+  const selectedJobLog = useMemo(() => selectedChildJob?.log_tail ?? selectedJob?.log_tail ?? "No job log yet.", [selectedChildJob, selectedJob]);
   const selectedScheduledAction = useMemo(
     () => availableScheduledActions.find((item) => item.id === scheduleActionId) ?? null,
     [availableScheduledActions, scheduleActionId],
   );
+
+  useEffect(() => {
+    if (!selectedJob?.child_jobs.length) {
+      setSelectedChildJobId(null);
+      return;
+    }
+    setSelectedChildJobId((current) => {
+      if (current != null && selectedJob.child_jobs.some((job) => job.job_run_id === current)) {
+        return current;
+      }
+      return selectedJob.child_jobs[0].job_run_id;
+    });
+  }, [selectedJob]);
   const suggestedScheduleOptionsJson = useMemo(
     () => buildScheduleOptionsTemplate(scheduleActionId),
     [scheduleActionId],
@@ -901,11 +920,67 @@ export function RunsPage() {
         </Panel>
 
         <Panel
+          title="Child Jobs"
+          aside={
+            <div className="runs-panel-aside">
+              <span className="eyebrow">
+                {selectedJob?.child_jobs.length
+                  ? `${selectedJob.child_jobs.length} child jobs`
+                  : "Select warm batch job"}
+              </span>
+              {selectedChildJob ? <StatusPill status={selectedChildJob.status} /> : null}
+            </div>
+          }
+        >
+          {!selectedJob?.child_jobs.length ? <p className="panel-copy">No child jobs for selected parent job.</p> : null}
+          {selectedJob?.child_jobs.length ? (
+            <div className="data-table-responsive">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Strategy</th>
+                    <th>Date</th>
+                    <th>Status</th>
+                    <th>Hits</th>
+                    <th>Duration</th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedJob.child_jobs.map((job) => (
+                    <tr
+                      key={job.job_run_id}
+                      className={job.job_run_id === selectedChildJobId ? "is-selected-row" : ""}
+                      onClick={() => setSelectedChildJobId(job.job_run_id)}
+                    >
+                      <td data-label="Strategy">{job.strategy_id || job.label}</td>
+                      <td data-label="Date">{job.run_date || "-"}</td>
+                      <td data-label="Status">
+                        <StatusPill status={job.status} />
+                      </td>
+                      <td data-label="Hits">{job.success_count}</td>
+                      <td data-label="Duration">{formatDuration(job.duration_seconds)}</td>
+                      <td data-label="Note">{job.message || (job.skipped ? "Skipped" : "-")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </Panel>
+
+        <Panel
           title="Console Tail"
           aside={
             <div className="runs-panel-aside">
-              <span className="eyebrow">{selectedJob ? `${selectedJob.label} · ${selectedJob.success_count} hits · ${formatDuration(selectedJob.duration_seconds)}` : "Auto-refresh: 4s"}</span>
-              {selectedJob ? <StatusPill status={selectedJob.status} /> : null}
+              <span className="eyebrow">
+                {selectedChildJob
+                  ? `${selectedChildJob.strategy_id || selectedChildJob.label} · ${selectedChildJob.success_count} hits · ${formatDuration(selectedChildJob.duration_seconds)}`
+                  : selectedJob
+                    ? `${selectedJob.label} · ${selectedJob.success_count} hits · ${formatDuration(selectedJob.duration_seconds)}`
+                    : "Auto-refresh: 4s"}
+              </span>
+              {selectedChildJob ? <StatusPill status={selectedChildJob.status} /> : selectedJob ? <StatusPill status={selectedJob.status} /> : null}
             </div>
           }
         >
@@ -973,6 +1048,7 @@ function buildScheduleOptionsTemplate(actionId: string): string {
         market_data_source: "database-first",
         overwrite_policy: "skip_existing",
         candidate_threshold: 4,
+        max_parallel: 5,
       },
       null,
       2,

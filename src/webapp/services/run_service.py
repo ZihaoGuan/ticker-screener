@@ -118,6 +118,13 @@ class RunService:
         placeholder="4",
         help_text="Minimum same-day signal count for overlap candidates.",
     )
+    _max_parallel_field = RunField(
+        "max_parallel",
+        "Max Parallel",
+        "number",
+        placeholder="5",
+        help_text="How many screener sub-jobs to run at once for warm batch.",
+    )
     _entry_signal_threshold_field = RunField(
         "entry_signal_threshold",
         "Entry Threshold",
@@ -165,6 +172,7 @@ class RunService:
                 _market_data_source_field,
                 _overwrite_policy_field,
                 _candidate_threshold_field,
+                _max_parallel_field,
             ),
         ),
         "overlap_backtest_v1": RunAction(
@@ -739,6 +747,8 @@ class RunService:
             command.extend(["--scope-json", str(normalized_options["scope_json"])])
         if normalized_options.get("candidate_threshold") is not None:
             command.extend(["--candidate-threshold", str(normalized_options["candidate_threshold"])])
+        if normalized_options.get("max_parallel") is not None:
+            command.extend(["--max-parallel", str(normalized_options["max_parallel"])])
         if normalized_options.get("entry_signal_threshold") is not None:
             command.extend(["--entry-signal-threshold", str(normalized_options["entry_signal_threshold"])])
         if normalized_options.get("hold_periods_json"):
@@ -809,7 +819,7 @@ class RunService:
             if isinstance(value, str) and value.strip():
                 normalized[key] = value.strip()
 
-        for key in ("chunk_size", "candidate_threshold", "entry_signal_threshold"):
+        for key in ("chunk_size", "candidate_threshold", "entry_signal_threshold", "max_parallel"):
             value = options.get(key)
             if value in (None, ""):
                 continue
@@ -817,6 +827,8 @@ class RunService:
                 normalized[key] = int(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{key.replace('_', ' ').title()} must be an integer.") from exc
+        if "max_parallel" in normalized and (normalized["max_parallel"] < 1 or normalized["max_parallel"] > 20):
+            raise ValueError("Max parallel must be between 1 and 20.")
 
         if "include_excluded_tickers" in options:
             normalized["include_excluded_tickers"] = bool(options.get("include_excluded_tickers"))
