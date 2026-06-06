@@ -955,6 +955,17 @@ class RunService:
         self._persist_completed_job(job_id)
 
     def _update_progress(self, job: dict[str, Any], log_lines: list[str]) -> None:
+        progress = self._extract_progress(log_lines)
+        if progress["success_count"] is not None:
+            job["success_count"] = progress["success_count"]
+        if progress["current"] is None or progress["total"] is None or progress["total"] <= 0:
+            return
+        job["progress_current"] = progress["current"]
+        job["progress_total"] = progress["total"]
+        job["progress_percent"] = progress["percent"]
+        job["progress_label"] = progress["label"]
+
+    def _extract_progress(self, log_lines: list[str]) -> dict[str, Any]:
         current = None
         total = None
         last_line = ""
@@ -971,19 +982,19 @@ class RunService:
                     success_count = int(passed_match.group(1))
             if current is not None and total is not None and success_count is not None:
                 break
-
-        if success_count is not None:
-            job["success_count"] = success_count
-
-        if current is None or total is None or total <= 0:
-            return
-
-        percent = max(0, min(100, round((current / total) * 100)))
-        job["progress_current"] = current
-        job["progress_total"] = total
-        job["progress_percent"] = percent
-        detail = "screening" if "screening" in last_line.lower() else "processing"
-        job["progress_label"] = f"{current}/{total} {detail}"
+        percent = None
+        label = None
+        if current is not None and total is not None and total > 0:
+            percent = max(0, min(100, round((current / total) * 100)))
+            detail = "screening" if "screening" in last_line.lower() else "processing"
+            label = f"{current}/{total} {detail}"
+        return {
+            "current": current,
+            "total": total,
+            "percent": percent,
+            "label": label,
+            "success_count": success_count,
+        }
 
     def _update_artifacts(self, job: dict[str, Any], line: str) -> None:
         watchlist_match = self._watchlist_path_pattern.search(line)
@@ -1175,6 +1186,8 @@ class RunService:
         result_payload = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
         started_at = self._stringify_timestamp(row.get("started_at"))
         finished_at = self._stringify_timestamp(row.get("finished_at"))
+        log_tail = str(result_payload.get("log_tail") or "")
+        progress = self._extract_progress(log_tail.splitlines() if log_tail else [])
         return {
             "job_run_id": int(row["id"]),
             "parent_job_run_id": row.get("parent_job_run_id"),
@@ -1188,14 +1201,18 @@ class RunService:
             "strategy_id": str(result_payload.get("strategy_id") or request_payload.get("strategy_id") or ""),
             "run_date": str(result_payload.get("run_date") or request_payload.get("run_date") or ""),
             "screen_run_id": result_payload.get("screen_run_id"),
-            "success_count": int(result_payload.get("success_count") or 0),
+            "success_count": int(result_payload.get("success_count") or progress["success_count"] or 0),
             "summary_file": str(result_payload.get("summary_file") or ""),
             "watchlist_file": str(result_payload.get("watchlist_file") or ""),
             "raw_results_file": str(result_payload.get("raw_results_file") or ""),
-            "log_tail": str(result_payload.get("log_tail") or ""),
+            "log_tail": log_tail,
             "log_file": str(result_payload.get("log_file") or ""),
             "message": str(result_payload.get("message") or ""),
             "skipped": bool(result_payload.get("skipped")),
+            "progress_current": progress["current"],
+            "progress_total": progress["total"],
+            "progress_percent": progress["percent"],
+            "progress_label": progress["label"],
             "duration_seconds": self._duration_seconds_from_iso(started_at, finished_at),
         }
 

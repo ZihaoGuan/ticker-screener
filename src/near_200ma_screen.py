@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 import datetime as dt
 
 from .config import AppConfig
+from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches
 from .cookstock_bridge import load_configured_cookstock
 from .universe import UniverseTicker
 
@@ -126,10 +127,16 @@ def _to_hit(
     )
 
 
-def run_near_200ma_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Near200MaScreenResult:
+def run_near_200ma_screen(
+    config: AppConfig,
+    tickers: list[UniverseTicker],
+    *,
+    as_of_date: dt.date | None = None,
+) -> Near200MaScreenResult:
     cookstock = load_configured_cookstock(config)
     hits: list[Near200MaHit] = []
     failures: list[dict[str, str]] = []
+    run_date = as_of_date or dt.date.today()
     total_tickers = len(tickers)
 
     print(
@@ -140,77 +147,87 @@ def run_near_200ma_screen(config: AppConfig, tickers: list[UniverseTicker]) -> N
         "market_cap_filter=post-screen > $1B"
     )
 
-    for position, ticker in enumerate(tickers, start=1):
-        print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
-        try:
-            financials = cookstock.cookFinancials(
-                ticker.symbol,
-                benchmarkTicker=config.benchmark_ticker,
-                historyLookbackDays=PRICE_HISTORY_DAYS,
-            )
-            price_rows = financials._get_clean_price_data()
-            closes = [float(item["close"]) for item in price_rows if item.get("close") is not None]
-            if len(closes) < MA_LONG:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: insufficient price history | passed={len(hits)}")
-                continue
+    with freeze_cookstock_today(cookstock, as_of_date):
+        position = 0
+        for ticker_batch in iter_prefetched_cookstock_batches(
+            config,
+            tickers,
+            as_of_date=as_of_date,
+            history_lookback_days=PRICE_HISTORY_DAYS,
+            benchmark_ticker=config.benchmark_ticker,
+        ):
+            for ticker in ticker_batch:
+                position += 1
+                print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
+                try:
+                    financials = cookstock.cookFinancials(
+                        ticker.symbol,
+                        benchmarkTicker=config.benchmark_ticker,
+                        historyLookbackDays=PRICE_HISTORY_DAYS,
+                    )
+                    price_rows = financials._get_clean_price_data()
+                    closes = [float(item["close"]) for item in price_rows if item.get("close") is not None]
+                    if len(closes) < MA_LONG:
+                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: insufficient price history | passed={len(hits)}")
+                        continue
 
-            current_price = closes[-1]
-            ma20 = _sma(closes, MA_SHORT)
-            ma50 = _sma(closes, MA_MEDIUM)
-            ma200 = _sma(closes, MA_LONG)
-            if ma20 is None or ma50 is None or ma200 is None:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing moving averages | passed={len(hits)}")
-                continue
+                    current_price = closes[-1]
+                    ma20 = _sma(closes, MA_SHORT)
+                    ma50 = _sma(closes, MA_MEDIUM)
+                    ma200 = _sma(closes, MA_LONG)
+                    if ma20 is None or ma50 is None or ma200 is None:
+                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing moving averages | passed={len(hits)}")
+                        continue
 
-            distance_to_ma200_pct = _pct_from_level(current_price, ma200)
-            if abs(distance_to_ma200_pct) > MAX_DISTANCE_TO_MA200_PCT:
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"{distance_to_ma200_pct:+.2f}% vs MA200 | passed={len(hits)}"
-                )
-                continue
+                    distance_to_ma200_pct = _pct_from_level(current_price, ma200)
+                    if abs(distance_to_ma200_pct) > MAX_DISTANCE_TO_MA200_PCT:
+                        print(
+                            f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                            f"{distance_to_ma200_pct:+.2f}% vs MA200 | passed={len(hits)}"
+                        )
+                        continue
 
-            recent_rows = price_rows[-RANGE_LOOKBACK_DAYS:]
-            recent_low = min(float(item["low"]) for item in recent_rows if item.get("low") is not None)
-            recent_high = max(float(item["high"]) for item in recent_rows if item.get("high") is not None)
-            avg_volume_20 = float(financials._get_average_volume(20))
-            avg_dollar_volume_20 = float(financials._get_average_dollar_volume(20))
+                    recent_rows = price_rows[-RANGE_LOOKBACK_DAYS:]
+                    recent_low = min(float(item["low"]) for item in recent_rows if item.get("low") is not None)
+                    recent_high = max(float(item["high"]) for item in recent_rows if item.get("high") is not None)
+                    avg_volume_20 = float(financials._get_average_volume(20))
+                    avg_dollar_volume_20 = float(financials._get_average_dollar_volume(20))
 
-            case_group: str | None = None
-            if current_price < ma200 and current_price > ma20 > ma50:
-                case_group = "bull"
-            elif current_price > ma200 and current_price < ma20 < ma50:
-                case_group = "bear"
+                    case_group: str | None = None
+                    if current_price < ma200 and current_price > ma20 > ma50:
+                        case_group = "bull"
+                    elif current_price > ma200 and current_price < ma20 < ma50:
+                        case_group = "bear"
 
-            if case_group is None:
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"no bull/bear 200D setup (price {current_price:.2f}, ma20 {ma20:.2f}, ma50 {ma50:.2f}, ma200 {ma200:.2f}) "
-                    f"| passed={len(hits)}"
-                )
-                continue
+                    if case_group is None:
+                        print(
+                            f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                            f"no bull/bear 200D setup (price {current_price:.2f}, ma20 {ma20:.2f}, ma50 {ma50:.2f}, ma200 {ma200:.2f}) "
+                            f"| passed={len(hits)}"
+                        )
+                        continue
 
-            hit = _to_hit(
-                ticker,
-                config.benchmark_ticker,
-                case_group=case_group,
-                current_price=current_price,
-                ma20=ma20,
-                ma50=ma50,
-                ma200=ma200,
-                avg_volume_20=avg_volume_20,
-                avg_dollar_volume_20=avg_dollar_volume_20,
-                recent_low=recent_low,
-                recent_high=recent_high,
-            )
-            hits.append(hit)
-            print(
-                f"[{position}/{total_tickers}] {ticker.symbol} passed: "
-                f"{case_group} case, {hit.distance_to_ma200_pct:+.2f}% vs MA200 | passed={len(hits)}"
-            )
-        except Exception as exc:
-            failures.append({"ticker": ticker.symbol, "error": str(exc)})
-            print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+                    hit = _to_hit(
+                        ticker,
+                        config.benchmark_ticker,
+                        case_group=case_group,
+                        current_price=current_price,
+                        ma20=ma20,
+                        ma50=ma50,
+                        ma200=ma200,
+                        avg_volume_20=avg_volume_20,
+                        avg_dollar_volume_20=avg_dollar_volume_20,
+                        recent_low=recent_low,
+                        recent_high=recent_high,
+                    )
+                    hits.append(hit)
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} passed: "
+                        f"{case_group} case, {hit.distance_to_ma200_pct:+.2f}% vs MA200 | passed={len(hits)}"
+                    )
+                except Exception as exc:
+                    failures.append({"ticker": ticker.symbol, "error": str(exc)})
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
 
     hits.sort(
         key=lambda item: (
@@ -222,7 +239,7 @@ def run_near_200ma_screen(config: AppConfig, tickers: list[UniverseTicker]) -> N
     )
 
     return Near200MaScreenResult(
-        run_date=dt.date.today().isoformat(),
+        run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
         total_tickers=total_tickers,
         passed_tickers=len(hits),

@@ -245,6 +245,10 @@ export type JobsResponse = {
       log_file: string;
       message: string;
       skipped: boolean;
+      progress_current: number | null;
+      progress_total: number | null;
+      progress_percent: number | null;
+      progress_label: string | null;
       duration_seconds: number;
     }>;
   }[];

@@ -994,7 +994,11 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                       <td data-label="Hits">{job.success_count}</td>
                       <td data-label="Duration">{formatDuration(job.duration_seconds)}</td>
                       <td data-label="Progress">
-                        <ProgressBar status={job.status} progress={job.progress_percent} label={job.progress_label ?? undefined} compact />
+                        {isHierarchicalBatch ? (
+                          <span className="file-meta">-</span>
+                        ) : (
+                          <ProgressBar status={job.status} progress={job.progress_percent} label={job.progress_label ?? undefined} compact />
+                        )}
                       </td>
                       <td data-label="RC" className="mono">{job.return_code ?? "-"}</td>
                       <td data-label="Action">
@@ -1084,6 +1088,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                                                       <th>Status</th>
                                                       <th>Hits</th>
                                                       <th>Duration</th>
+                                                      <th>Progress</th>
                                                       <th>Note</th>
                                                     </tr>
                                                   </thead>
@@ -1104,6 +1109,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                                                         </td>
                                                         <td data-label="Hits">{child.success_count}</td>
                                                         <td data-label="Duration">{formatDuration(child.duration_seconds)}</td>
+                                                        <td data-label="Progress">
+                                                          <ProgressBar status={child.status} progress={child.progress_percent} label={child.progress_label ?? undefined} compact />
+                                                        </td>
                                                         <td data-label="Note">{child.message || (child.skipped ? "Skipped" : "-")}</td>
                                                       </tr>
                                                     ))}

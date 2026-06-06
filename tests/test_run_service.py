@@ -314,7 +314,7 @@ class RunServiceTests(unittest.TestCase):
                     "run_date": "2026-05-31",
                     "screen_run_id": 77,
                     "success_count": 3,
-                    "log_tail": "line one\nline two",
+                    "log_tail": "line one\n[2/10] screening MSFT | passed=3\nline two",
                     "message": "Persisted cached screener result",
                 },
                 "artifact_path": "/tmp/summary.json",
@@ -332,6 +332,9 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(payload[0]["child_jobs"][0]["strategy_id"], "rs")
         self.assertEqual(payload[0]["child_jobs"][0]["screen_run_id"], 77)
         self.assertIn("line two", payload[0]["child_jobs"][0]["log_tail"])
+        self.assertEqual(payload[0]["child_jobs"][0]["progress_current"], 2)
+        self.assertEqual(payload[0]["child_jobs"][0]["progress_total"], 10)
+        self.assertEqual(payload[0]["child_jobs"][0]["progress_percent"], 20)
 
     def test_precheck_reports_db_ready_vs_fallback(self) -> None:
         self.service.history_repository.is_configured = lambda: True  # type: ignore[method-assign]
