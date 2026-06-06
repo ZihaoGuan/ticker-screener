@@ -130,7 +130,73 @@ def _extract_summary_path(stdout: str) -> str:
     return ""
 
 
-def _run_streaming_subprocess(*, command: list[str], process_env: dict[str, str]) -> tuple[int, str, str]:
+def _child_log_path(
+    *,
+    artifacts_dir: Path,
+    parent_job_run_id: int | None,
+    strategy_id: str,
+    run_date: dt.date,
+) -> Path:
+    output_dir = artifacts_dir / "raw" / "batch_subjob_logs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    parent_prefix = str(parent_job_run_id) if parent_job_run_id is not None else "batch"
+    return output_dir / f"{parent_prefix}_{strategy_id}_{run_date.isoformat()}.log"
+
+
+def _initialize_child_log(log_file: Path) -> None:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text("", encoding="utf-8")
+
+
+def _extract_success_count(lines: list[str]) -> int:
+    for line in reversed(lines):
+        if "passed=" not in line:
+            continue
+        try:
+            return int(line.split("passed=", 1)[1].split()[0])
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _update_child_job(
+    *,
+    run_service: RunService,
+    child_job_run_id: int | None,
+    status: str,
+    strategy_id: str,
+    run_date: str,
+    success_count: int,
+    log_tail: str,
+    log_file: str,
+    message: str,
+    skipped: bool,
+) -> None:
+    run_service.history_repository.update_job_run(
+        child_job_run_id,
+        status=status,
+        result_payload={
+            "strategy_id": strategy_id,
+            "run_date": run_date,
+            "success_count": success_count,
+            "log_tail": log_tail,
+            "log_file": log_file,
+            "message": message,
+            "skipped": skipped,
+        },
+    )
+
+
+def _run_streaming_subprocess(
+    *,
+    command: list[str],
+    process_env: dict[str, str],
+    log_file: Path,
+    run_service: RunService,
+    child_job_run_id: int | None,
+    strategy_id: str,
+    run_date: str,
+) -> tuple[int, str, str]:
     process = subprocess.Popen(
         command,
         cwd=str(PROJECT_ROOT),
@@ -141,18 +207,36 @@ def _run_streaming_subprocess(*, command: list[str], process_env: dict[str, str]
         bufsize=1,
     )
     collected_lines: list[str] = []
+    line_counter = 0
     summary_path = ""
     assert process.stdout is not None
-    for raw_line in process.stdout:
-        line = raw_line.rstrip()
-        print(line, flush=True)
-        collected_lines.append(line)
-        if len(collected_lines) > 400:
-            collected_lines = collected_lines[-400:]
-        if not summary_path and line.startswith("Wrote run summary to "):
-            summary_path = line.removeprefix("Wrote run summary to ").strip()
+    with log_file.open("a", encoding="utf-8") as handle:
+        for raw_line in process.stdout:
+            line = raw_line.rstrip()
+            print(line, flush=True)
+            collected_lines.append(line)
+            if len(collected_lines) > 400:
+                collected_lines = collected_lines[-400:]
+            handle.write(raw_line)
+            handle.flush()
+            line_counter += 1
+            if not summary_path and line.startswith("Wrote run summary to "):
+                summary_path = line.removeprefix("Wrote run summary to ").strip()
+            if line_counter == 1 or line_counter % 5 == 0:
+                _update_child_job(
+                    run_service=run_service,
+                    child_job_run_id=child_job_run_id,
+                    status="running",
+                    strategy_id=strategy_id,
+                    run_date=run_date,
+                    success_count=_extract_success_count(collected_lines),
+                    log_tail="\n".join(collected_lines[-120:]),
+                    log_file=str(log_file),
+                    message=f"Running screener for {strategy_id} {run_date}",
+                    skipped=False,
+                )
     return_code = process.wait()
-    combined = "\n".join(collected_lines)
+    combined = "\n".join(collected_lines[-120:])
     if not summary_path:
         summary_path = _extract_summary_path(combined)
     return return_code, combined, summary_path
@@ -217,6 +301,25 @@ def _run_single_strategy(
         print(f"Skipped cached sub-job {strategy_id} {target_date.isoformat()} using existing screen run {existing_run.get('id')}.")
         return {"strategy_id": strategy_id, "status": "success", "success_count": int(existing_run.get("hit_count") or 0), "message": "skipped"}
 
+    log_file = _child_log_path(
+        artifacts_dir=config.artifacts_dir,
+        parent_job_run_id=parent_job_run_id,
+        strategy_id=strategy_id,
+        run_date=target_date,
+    )
+    _initialize_child_log(log_file)
+    _update_child_job(
+        run_service=run_service,
+        child_job_run_id=child_job_run_id,
+        status="running",
+        strategy_id=strategy_id,
+        run_date=target_date.isoformat(),
+        success_count=0,
+        log_tail="Starting screener sub-job...",
+        log_file=str(log_file),
+        message=f"Running screener for {strategy_id} {target_date.isoformat()}",
+        skipped=False,
+    )
     command = [sys.executable, "-u", action.script_path, "--date-label", target_date.isoformat(), "--as-of-date", target_date.isoformat()]
     command.extend(action.extra_args)
     tickers = scope.get("tickers")
@@ -246,7 +349,15 @@ def _run_single_strategy(
     process_env["PYTHONUNBUFFERED"] = "1"
     if config.database_url:
         process_env["TICKER_SCREENER_DATABASE_URL"] = config.database_url
-    return_code, combined, summary_path = _run_streaming_subprocess(command=command, process_env=process_env)
+    return_code, combined, summary_path = _run_streaming_subprocess(
+        command=command,
+        process_env=process_env,
+        log_file=log_file,
+        run_service=run_service,
+        child_job_run_id=child_job_run_id,
+        strategy_id=strategy_id,
+        run_date=target_date.isoformat(),
+    )
     if return_code != 0:
         message = f"Warm screener failed for {strategy_id} {target_date.isoformat()}"
         run_service.history_repository.update_job_run(
@@ -257,8 +368,10 @@ def _run_single_strategy(
                 "run_date": target_date.isoformat(),
                 "success_count": 0,
                 "log_tail": combined[-8000:],
+                "log_file": str(log_file),
                 "message": message,
             },
+            artifact_path=str(log_file),
             finished_at=_finished_at_iso(),
         )
         return {"strategy_id": strategy_id, "status": "failed", "success_count": 0, "message": message}
@@ -287,10 +400,11 @@ def _run_single_strategy(
             "watchlist_file": str(summary_payload.get("watchlist_file") or ""),
             "raw_results_file": raw_path,
             "log_tail": combined[-8000:],
+            "log_file": str(log_file),
             "message": f"Persisted warmed screener result for {strategy_id} {target_date.isoformat()}",
             "skipped": False,
         },
-        artifact_path=summary_path,
+        artifact_path=summary_path or str(log_file),
         finished_at=_finished_at_iso(),
     )
     return {"strategy_id": strategy_id, "status": "success", "success_count": success_count, "message": "ok"}
