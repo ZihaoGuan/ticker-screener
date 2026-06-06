@@ -224,7 +224,7 @@ def run_fearzone_zeiierman_screen(
                     financials = cookstock.cookFinancials(
                         ticker.symbol,
                         benchmarkTicker=config.benchmark_ticker,
-                        history_lookback_days=history_days,
+                        historyLookbackDays=history_days,
                     )
                     frame = _build_price_frame(financials)
                     hit = find_recent_fearzone_zeiierman_hit(frame, ticker=ticker, config=config)
