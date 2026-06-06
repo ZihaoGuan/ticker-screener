@@ -504,3 +504,25 @@ class HistoryRepository:
                 row = cursor.fetchone()
             connection.commit()
         return int(row[0]) if row else None
+
+    def rewrite_screen_run_artifact_paths(self, path_map: dict[str, str]) -> int:
+        if not path_map:
+            return 0
+        connection = self._connect()
+        if connection is None:
+            return 0
+        updated = 0
+        sql = """
+            UPDATE screen_runs
+            SET raw_artifact_path = CASE WHEN raw_artifact_path = %s THEN %s ELSE raw_artifact_path END,
+                watchlist_artifact_path = CASE WHEN watchlist_artifact_path = %s THEN %s ELSE watchlist_artifact_path END
+            WHERE raw_artifact_path = %s
+               OR watchlist_artifact_path = %s
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                for old_path, new_path in path_map.items():
+                    cursor.execute(sql, (old_path, new_path, old_path, new_path, old_path, old_path))
+                    updated += int(cursor.rowcount or 0)
+            connection.commit()
+        return updated

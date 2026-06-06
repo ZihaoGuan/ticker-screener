@@ -83,6 +83,39 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(payload["watchlist_stem"], "rs_new_high_2026-05-31")
         self.assertEqual(payload["watchlist_url"], "/watchlists?stem=rs_new_high_2026-05-31")
 
+    def test_serialize_job_resolves_stem_from_dated_watchlist_path(self) -> None:
+        watchlist_path = self.project_root / "artifacts" / "screeners" / "2026-05-31" / "weekly_rs" / "watchlist.json"
+        watchlist_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path = watchlist_path.parent / "run_summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "strategy_id": "weekly_rs",
+                    "date_label": "dell-2026-05-31",
+                    "watchlist_file": str(watchlist_path),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.service._serialize_job(
+            {
+                "job_id": "job-2",
+                "action_id": "weekly_rs",
+                "label": "Run Weekly RS",
+                "status": "success",
+                "command": "python scripts/run_weekly_rs_screen.py",
+                "started_at": "2026-05-31T00:00:00+00:00",
+                "finished_at": "2026-05-31T00:02:00+00:00",
+                "watchlist_file": str(watchlist_path),
+                "_started_monotonic": 1.0,
+                "_finished_monotonic": 2.0,
+            }
+        )
+
+        self.assertEqual(payload["watchlist_stem"], "weekly_rs_new_high_dell-2026-05-31")
+        self.assertEqual(payload["watchlist_url"], "/watchlists?stem=weekly_rs_new_high_dell-2026-05-31")
+
     def test_cancel_marks_job_and_terminates_process(self) -> None:
         process = _DummyProcess()
         job = {

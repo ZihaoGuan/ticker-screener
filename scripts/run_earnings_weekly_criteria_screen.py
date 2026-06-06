@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.artifact_paths import build_screener_artifact_paths
 from src.config import load_app_config, today_label
 from src.cookstock_bridge import load_configured_cookstock
 from src.earnings_growth_screen import (
@@ -340,13 +341,15 @@ def main() -> int:
     raw_payload["pass_mode"] = args.pass_mode
     watchlist = build_earnings_growth_watchlist([_dict_to_hit(item) for item in hits])
 
-    raw_path = PROJECT_ROOT / "artifacts" / "raw" / f"{CRITERIA_STRATEGY_ID}_{date_label}.json"
-    watchlist_path = PROJECT_ROOT / "artifacts" / "watchlists" / f"{CRITERIA_STRATEGY_ID}_{date_label}.json"
-    summary_path = PROJECT_ROOT / "artifacts" / "raw" / f"{CRITERIA_STRATEGY_ID}_run_summary_{date_label}.json"
+    artifact_paths = build_screener_artifact_paths(PROJECT_ROOT / "artifacts", strategy_id=CRITERIA_STRATEGY_ID, date_label=date_label)
+    raw_path = artifact_paths.raw_results_path
+    watchlist_path = artifact_paths.watchlist_path
+    summary_path = artifact_paths.summary_path
 
     _write_json(raw_path, raw_payload)
     _write_json(watchlist_path, watchlist)
     summary_payload = {
+        "strategy_id": CRITERIA_STRATEGY_ID,
         "date_label": date_label,
         "as_of_date": run_date.isoformat(),
         "source": "next-week-earnings",

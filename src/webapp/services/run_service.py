@@ -13,6 +13,7 @@ import threading
 import uuid
 from typing import Any
 
+from src.artifact_paths import watchlist_stem_from_path
 from src.config import load_app_config
 from src.market_data_access import db_frame_has_recent_coverage, load_many_ticker_windows
 from src.screener_catalog import build_screener_catalog
@@ -982,10 +983,7 @@ class RunService:
     def _watchlist_stem_from_path(self, watchlist_file: str) -> str:
         if not watchlist_file:
             return ""
-        path = Path(watchlist_file.strip())
-        if path.suffix.lower() != ".json":
-            return ""
-        return path.stem
+        return watchlist_stem_from_path(watchlist_file.strip())
 
     def _job_type_for_action(self, action_id: str) -> str:
         if action_id in {"screener_history_batch"}:

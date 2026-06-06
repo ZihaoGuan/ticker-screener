@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.artifact_paths import build_screener_artifact_paths
 from src.config import load_app_config, today_label
 from src.cookstock_bridge import load_configured_cookstock
 from src.peg_screen import EarningsEvent, run_peg_screen
@@ -130,15 +131,18 @@ def main() -> int:
     watchlist_source = result.hits
     watchlist = build_peg_watchlist(watchlist_source, strategy_profile=args.strategy_profile)
 
-    raw_path = PROJECT_ROOT / "artifacts" / "raw" / f"peg_earnings_gap_{date_label}.json"
-    watchlist_path = PROJECT_ROOT / "artifacts" / "watchlists" / f"peg_earnings_gap_{date_label}.json"
-    summary_path = PROJECT_ROOT / "artifacts" / "raw" / f"peg_run_summary_{date_label}.json"
+    strategy_id = "sean_peg" if args.strategy_profile == "sean-peg" else "legacy_peg"
+    artifact_paths = build_screener_artifact_paths(PROJECT_ROOT / "artifacts", strategy_id=strategy_id, date_label=date_label)
+    raw_path = artifact_paths.raw_results_path
+    watchlist_path = artifact_paths.watchlist_path
+    summary_path = artifact_paths.summary_path
 
     _write_json(raw_path, result.to_dict())
     _write_json(watchlist_path, watchlist)
     _write_json(
         summary_path,
         {
+            "strategy_id": strategy_id,
             "date_label": date_label,
             "as_of_date": as_of_date.isoformat() if as_of_date else None,
             "source": args.source if not args.tickers else "manual-tickers",

@@ -232,7 +232,7 @@ Of the current overlap-member screeners, only the PEG variants depend on earning
 
 ### Current state
 
-1. Watchlists come from `artifacts/watchlists/*.json`.
+1. Watchlists come from `artifacts/screeners/YYYY-MM-DD/<strategy>/watchlist.json`, with temporary legacy fallback to flat `artifacts/watchlists/*.json` during migration.
 2. Charts currently fetch market data live with `yfinance`.
 3. Job status is in memory only.
 

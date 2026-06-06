@@ -6,6 +6,7 @@ from collections import defaultdict
 from html import escape
 from pathlib import Path
 
+from src.artifact_paths import build_screener_artifact_paths, resolve_legacy_paths
 from src.etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 
 
@@ -140,20 +141,27 @@ def build_ticker_metadata(
 
 
 def resolve_pipeline_path(watchlist_dir: Path, date_label: str, pipeline: dict[str, str]) -> tuple[Path | None, str]:
-    primary = watchlist_dir / pipeline["filename"].format(date=date_label)
-    if primary.exists():
-        return primary, "primary"
-    fallback_name = pipeline.get("fallback_filename")
-    if fallback_name:
-        fallback = watchlist_dir / fallback_name.format(date=date_label)
-        if fallback.exists():
-            return fallback, "fallback"
+    artifacts_dir = watchlist_dir.parent
+    strategy_id = str(pipeline["id"])
+    dated_path = build_screener_artifact_paths(artifacts_dir, strategy_id=strategy_id, date_label=date_label).watchlist_path
+    if dated_path.exists():
+        return dated_path, "dated"
+    for legacy_path in resolve_legacy_paths(artifacts_dir, strategy_id=strategy_id, date_label=date_label)["watchlist"]:
+        if legacy_path.exists():
+            return legacy_path, "legacy"
     return None, "missing"
 
 
 def discover_supported_dates(watchlist_dir: Path) -> list[str]:
     dates: set[str] = set()
-    if not watchlist_dir.exists():
+    screeners_dir = watchlist_dir.parent / "screeners"
+    if screeners_dir.exists():
+        for path in screeners_dir.glob("*/*/watchlist.json"):
+            if len(path.parts) >= 3:
+                match = DATE_LABEL_RE.search(path.parts[-3])
+                if match:
+                    dates.add(match.group(0))
+    if not watchlist_dir.exists() and not dates:
         return []
     for pipeline in PIPELINES:
         for key in ("filename", "fallback_filename"):
@@ -234,7 +242,12 @@ def build_overlap_payload(date_label: str, watchlist_dir: Path) -> dict[str, obj
     ]
     overlap_two_plus.sort(key=lambda item: (-int(item["pipeline_count"]), str(item["ticker"])))
     overlap_three_plus = [item for item in overlap_two_plus if int(item["pipeline_count"]) >= 3]
-    fearzone_entries = load_watchlist(watchlist_dir / f"fearzone_{date_label}.json")
+    fearzone_path, _ = resolve_pipeline_path(
+        watchlist_dir,
+        date_label,
+        {"id": "fearzone", "label": "Fearzone", "filename": "fearzone_{date}.json"},
+    )
+    fearzone_entries = load_watchlist(fearzone_path)
     fearzone_tickers = extract_tickers(fearzone_entries)
 
     return {

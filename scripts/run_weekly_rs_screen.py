@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.artifact_paths import build_screener_artifact_paths
 from src.config import load_app_config, today_label, override_config
 from src.rs_screen import run_rs_screen
 from src.ticker_filters import filter_symbols, load_excluded_tickers
@@ -64,15 +65,17 @@ def main() -> int:
     result = run_rs_screen(config, universe, signal_profile="weekly")
     watchlist = build_watchlist(result.hits, signal_profile="weekly")
 
-    raw_path = PROJECT_ROOT / "artifacts" / "raw" / f"weekly_rs_new_high_{date_label}.json"
-    watchlist_path = PROJECT_ROOT / "artifacts" / "watchlists" / f"weekly_rs_new_high_{date_label}.json"
-    summary_path = PROJECT_ROOT / "artifacts" / "raw" / f"weekly_rs_run_summary_{date_label}.json"
+    artifact_paths = build_screener_artifact_paths(PROJECT_ROOT / "artifacts", strategy_id="weekly_rs", date_label=date_label)
+    raw_path = artifact_paths.raw_results_path
+    watchlist_path = artifact_paths.watchlist_path
+    summary_path = artifact_paths.summary_path
 
     _write_json(raw_path, result.to_dict())
     _write_json(watchlist_path, watchlist)
     _write_json(
         summary_path,
         {
+            "strategy_id": "weekly_rs",
             "date_label": date_label,
             "signal_profile": "weekly",
             "total_tickers": result.total_tickers,

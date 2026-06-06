@@ -223,20 +223,20 @@ Render charts from the generated watchlist:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/render_rs_watchlist.py \
-  --watchlist-file /Users/Zihao.Guan/Personal/ticker-screener/artifacts/watchlists/rs_new_high_before_price_YYYY-MM-DD.json
+  --watchlist-file /Users/Zihao.Guan/Personal/ticker-screener/artifacts/screeners/YYYY-MM-DD/rs/watchlist.json
 ```
 
 Enrich an existing watchlist or raw screen JSON with earnings date, recent beat/miss status, and next-two-weeks earnings context:
 
 ```bash
 python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/enrich_with_earnings.py \
-  --input-file /Users/Zihao.Guan/Personal/ticker-screener/artifacts/watchlists/rs_new_high_before_price_YYYY-MM-DD.json
+  --input-file /Users/Zihao.Guan/Personal/ticker-screener/artifacts/screeners/YYYY-MM-DD/rs/watchlist.json
 ```
 
 The enricher supports either:
 
-- a watchlist JSON array in `artifacts/watchlists/*.json`
-- a raw screen payload with `hits[]` in `artifacts/raw/*.json`
+- a watchlist JSON array in `artifacts/screeners/YYYY-MM-DD/<strategy>/watchlist.json`
+- a raw screen payload with `hits[]` in `artifacts/screeners/YYYY-MM-DD/<strategy>/raw_results.json`
 
 Supported providers are `fmp`, `ainvest`, `yfinance`, and `auto`. The default provider is `yfinance`. `auto` prefers `AInvest` when `AINVEST_API_KEY` is present, then `FMP` when `FMP_API_KEY` is present, then `yfinance`.
 
@@ -333,26 +333,15 @@ GitHub Actions now includes:
 
 ## Artifacts
 
-The screen step writes:
+Each screener run now writes to:
 
-- `artifacts/raw/rs_new_high_before_price_<date>.json`
-- `artifacts/raw/run_summary_<date>.json`
-- `artifacts/watchlists/rs_new_high_before_price_<date>.json`
-- `artifacts/raw/weekly_rs_new_high_<date>.json`
-- `artifacts/raw/weekly_rs_run_summary_<date>.json`
-- `artifacts/watchlists/weekly_rs_new_high_<date>.json`
-- `artifacts/raw/weekly_htf_pullback_<date>.json`
-- `artifacts/raw/weekly_htf_pullback_run_summary_<date>.json`
-- `artifacts/watchlists/weekly_htf_pullback_<date>.json`
-- `artifacts/raw/vcp_<date>.json`
-- `artifacts/raw/vcp_run_summary_<date>.json`
-- `artifacts/watchlists/vcp_<date>.json`
-- `artifacts/raw/peg_earnings_gap_<date>.json`
-- `artifacts/raw/peg_run_summary_<date>.json`
-- `artifacts/watchlists/peg_earnings_gap_<date>.json`
-- `artifacts/raw/cup_handle_<date>.json`
-- `artifacts/raw/cup_handle_run_summary_<date>.json`
-- `artifacts/watchlists/cup_handle_<date>.json`
+- `artifacts/screeners/YYYY-MM-DD/<strategy>/raw_results.json`
+- `artifacts/screeners/YYYY-MM-DD/<strategy>/watchlist.json`
+- `artifacts/screeners/YYYY-MM-DD/<strategy>/run_summary.json`
+
+The migration helper for old flat files is:
+
+- `python3 scripts/migrate_watchlist_artifacts_to_date_folders.py --dry-run`
 
 The render step writes:
 
@@ -432,4 +421,3 @@ It also maintains these bucket-root files:
 The root `index.html` acts as a landing page across published workflows and lets you filter runs by workflow, text, and minimum hit count.
 
 The Discord notification will include the public `index.html` link when `R2_PUBLIC_BASE_URL` is set. Without the R2 secrets, the publish job is skipped and the rest of the workflow still runs normally.
-
