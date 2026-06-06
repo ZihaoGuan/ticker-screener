@@ -311,6 +311,9 @@ CREATE TABLE IF NOT EXISTS portfolio_advice_snapshots (
   tp2_price NUMERIC(24,6),
   tp1_sell_fraction NUMERIC(12,6),
   tp2_sell_fraction NUMERIC(12,6),
+  average_up_price NUMERIC(24,6),
+  average_up_share_fraction NUMERIC(12,6),
+  blended_entry_after_average_up NUMERIC(24,6),
   net_cost_after_tp1 NUMERIC(24,6),
   remaining_cost_basis_after_tp1 NUMERIC(24,6),
   explanation TEXT,
@@ -330,6 +333,9 @@ ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS source_kind TEXT NOT NULL DEFAU
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS result_summary_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS deleted_reason TEXT;
+ALTER TABLE portfolio_advice_snapshots ADD COLUMN IF NOT EXISTS average_up_price NUMERIC(24,6);
+ALTER TABLE portfolio_advice_snapshots ADD COLUMN IF NOT EXISTS average_up_share_fraction NUMERIC(12,6);
+ALTER TABLE portfolio_advice_snapshots ADD COLUMN IF NOT EXISTS blended_entry_after_average_up NUMERIC(24,6);
 
 CREATE INDEX IF NOT EXISTS idx_screen_runs_strategy_run_date
   ON screen_runs(strategy_id, run_date DESC);

@@ -20,6 +20,7 @@ from src.webapp.repositories.portfolio_repository import PortfolioRepository
 DEFAULT_PORTFOLIO_NAME = "Main"
 TP1_SELL_FRACTION = 0.40
 TP2_SELL_FRACTION = 0.60
+AVERAGE_UP_SHARE_FRACTION = 0.25
 ADVICE_LOOKBACK_DAYS = 320
 STALE_TOLERANCE_DAYS = 7
 
@@ -256,6 +257,9 @@ class PortfolioService:
                 "tp2_price": None,
                 "tp1_sell_fraction": TP1_SELL_FRACTION,
                 "tp2_sell_fraction": TP2_SELL_FRACTION,
+                "average_up_price": None,
+                "average_up_share_fraction": AVERAGE_UP_SHARE_FRACTION,
+                "blended_entry_after_average_up": None,
                 "net_cost_after_tp1": None,
                 "remaining_cost_basis_after_tp1": None,
                 "explanation": "No database price history is available for this ticker yet. Run a history sync before relying on advice.",
@@ -279,6 +283,9 @@ class PortfolioService:
                 "tp2_price": None,
                 "tp1_sell_fraction": TP1_SELL_FRACTION,
                 "tp2_sell_fraction": TP2_SELL_FRACTION,
+                "average_up_price": None,
+                "average_up_share_fraction": AVERAGE_UP_SHARE_FRACTION,
+                "blended_entry_after_average_up": None,
                 "net_cost_after_tp1": None,
                 "remaining_cost_basis_after_tp1": None,
                 "explanation": f"Latest close is from {latest_trade_date.isoformat()}; refresh market data before using stop or take-profit advice.",
@@ -356,6 +363,13 @@ class PortfolioService:
         tp2_multiple = 3.2 if signal_status == "hold" else 2.2
         tp1_price = _round_price(close_price + (tp1_multiple * atr_value))
         tp2_price = _round_price(close_price + (tp2_multiple * atr_value))
+        average_up_price = _round_price(
+            max(
+                close_price + (0.5 * atr_value),
+                (ma20 or close_price) * 1.01,
+                close_price * 1.02,
+            )
+        )
 
         shares = _safe_float(row.get("shares")) or 0.0
         entry_price = _safe_float(row.get("entry_price")) or 0.0
@@ -364,6 +378,12 @@ class PortfolioService:
             entry_price=entry_price,
             take_profit_price=tp1_price,
             sell_fraction=TP1_SELL_FRACTION,
+        )
+        blended_entry_after_average_up = _compute_blended_entry_after_average_up(
+            shares=shares,
+            entry_price=entry_price,
+            add_price=average_up_price,
+            add_fraction=AVERAGE_UP_SHARE_FRACTION,
         )
 
         explanation_parts = []
@@ -383,6 +403,10 @@ class PortfolioService:
             trend_note.append(f"50D vs 200D {(ma50 or close_price) / ma200 - 1:+.1%}" if ma50 else f"close vs 200D {close_price / ma200 - 1:+.1%}")
         if trend_note:
             explanation_parts.append("Trend context: " + ", ".join(trend_note))
+        if signal_status in {"hold", "raise_stop"} and average_up_price is not None and blended_entry_after_average_up is not None:
+            explanation_parts.append(
+                f"Average-up path: add {int(AVERAGE_UP_SHARE_FRACTION * 100)}% near {average_up_price:.2f} for blended entry {blended_entry_after_average_up:.2f}."
+            )
         if not explanation_parts:
             explanation_parts.append("Advice uses the latest close plus moving-average and volatility fallback rules.")
 
@@ -397,6 +421,9 @@ class PortfolioService:
             "tp2_price": tp2_price,
             "tp1_sell_fraction": TP1_SELL_FRACTION,
             "tp2_sell_fraction": TP2_SELL_FRACTION,
+            "average_up_price": average_up_price,
+            "average_up_share_fraction": AVERAGE_UP_SHARE_FRACTION,
+            "blended_entry_after_average_up": _round_price(blended_entry_after_average_up) if blended_entry_after_average_up is not None else None,
             "net_cost_after_tp1": _round_price(net_cost_after_tp1) if net_cost_after_tp1 is not None else None,
             "remaining_cost_basis_after_tp1": _round_price(remaining_cost_basis) if remaining_cost_basis is not None else None,
             "explanation": " ".join(explanation_parts),
@@ -487,6 +514,9 @@ class PortfolioService:
                 "tp2_price": _round_price(_safe_float(row.get("tp2_price"))),
                 "tp1_sell_fraction": _safe_float(row.get("tp1_sell_fraction")),
                 "tp2_sell_fraction": _safe_float(row.get("tp2_sell_fraction")),
+                "average_up_price": _round_price(_safe_float(row.get("average_up_price"))),
+                "average_up_share_fraction": _safe_float(row.get("average_up_share_fraction")),
+                "blended_entry_after_average_up": _round_price(_safe_float(row.get("blended_entry_after_average_up"))),
                 "net_cost_after_tp1": _round_price(_safe_float(row.get("net_cost_after_tp1"))),
                 "remaining_cost_basis_after_tp1": _round_price(_safe_float(row.get("remaining_cost_basis_after_tp1"))),
                 "explanation": str(row.get("explanation") or ""),
@@ -595,3 +625,20 @@ def _compute_remaining_cost_basis_per_share(
     remaining_cost_basis_total = total_cost_basis - sale_proceeds
     remaining_cost_basis_per_share = remaining_cost_basis_total / remaining_shares
     return remaining_cost_basis_per_share, remaining_cost_basis_total
+
+
+def _compute_blended_entry_after_average_up(
+    *,
+    shares: float,
+    entry_price: float,
+    add_price: float | None,
+    add_fraction: float,
+) -> float | None:
+    if shares <= 0 or entry_price <= 0 or add_price is None or add_fraction <= 0:
+        return None
+    added_shares = shares * add_fraction
+    total_shares = shares + added_shares
+    if total_shares <= 0:
+        return None
+    total_cost = (shares * entry_price) + (added_shares * add_price)
+    return total_cost / total_shares

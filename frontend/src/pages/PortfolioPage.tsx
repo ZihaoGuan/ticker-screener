@@ -274,7 +274,7 @@ export function PortfolioPage() {
                     <th>Close</th>
                     <th>Entry</th>
                     <th>Shares</th>
-                    <th>Net Cost After TP1</th>
+                    <th>After TP1 / Avg Up</th>
                     <th>Signal</th>
                     <th>Actions</th>
                   </tr>
@@ -295,7 +295,10 @@ export function PortfolioPage() {
                       <td data-label="Close">{formatCurrency(position.advice.close_price)}</td>
                       <td data-label="Entry">{formatCurrency(position.entry_price)}</td>
                       <td data-label="Shares">{formatNumber(position.shares)}</td>
-                      <td data-label="Net Cost After TP1">{formatCurrency(position.advice.net_cost_after_tp1)}</td>
+                      <td data-label="After TP1 / Avg Up">
+                        <div>{formatCurrency(position.advice.net_cost_after_tp1)}</div>
+                        <div className="ticker-company-inline">{formatCurrency(position.advice.blended_entry_after_average_up)}</div>
+                      </td>
                       <td data-label="Signal">
                         <span className={`portfolio-signal-pill is-${normalizeSignalClass(position.advice.signal_status)}`}>
                           {humanizeSignal(position.advice.signal_status)}
@@ -463,6 +466,8 @@ export function PortfolioPage() {
                     value={`${formatCurrency(selectedPosition.advice.tp1_price)} / ${formatCurrency(selectedPosition.advice.tp2_price)}`}
                   />
                   <AdviceMetric label="Net Cost After TP1" value={formatCurrency(selectedPosition.advice.net_cost_after_tp1)} />
+                  <AdviceMetric label="Average-Up Trigger" value={formatCurrency(selectedPosition.advice.average_up_price)} />
+                  <AdviceMetric label="Blended Entry After Add" value={formatCurrency(selectedPosition.advice.blended_entry_after_average_up)} />
                   <AdviceMetric label="Remaining Cost Basis" value={formatCurrency(selectedPosition.advice.remaining_cost_basis_after_tp1)} />
                 </div>
                 <div className="detail-card">
@@ -492,6 +497,12 @@ export function PortfolioPage() {
                       <span>Take Profit Tranches</span>
                       <span>
                         {formatFraction(selectedPosition.advice.tp1_sell_fraction)} @ TP1, {formatFraction(selectedPosition.advice.tp2_sell_fraction)} @ TP2
+                      </span>
+                    </div>
+                    <div className="range-item">
+                      <span>Average-Up Scenario</span>
+                      <span>
+                        Add {formatFraction(selectedPosition.advice.average_up_share_fraction)} near {formatCurrency(selectedPosition.advice.average_up_price)}
                       </span>
                     </div>
                     {selectedPosition.notes ? (

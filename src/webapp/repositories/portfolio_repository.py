@@ -118,6 +118,9 @@ class PortfolioRepository:
               advice.tp2_price,
               advice.tp1_sell_fraction,
               advice.tp2_sell_fraction,
+              advice.average_up_price,
+              advice.average_up_share_fraction,
+              advice.blended_entry_after_average_up,
               advice.net_cost_after_tp1,
               advice.remaining_cost_basis_after_tp1,
               advice.explanation,
@@ -247,6 +250,9 @@ class PortfolioRepository:
         tp2_price: float | None,
         tp1_sell_fraction: float | None,
         tp2_sell_fraction: float | None,
+        average_up_price: float | None,
+        average_up_share_fraction: float | None,
+        blended_entry_after_average_up: float | None,
         net_cost_after_tp1: float | None,
         remaining_cost_basis_after_tp1: float | None,
         explanation: str,
@@ -260,11 +266,12 @@ class PortfolioRepository:
             INSERT INTO portfolio_advice_snapshots (
               position_id, as_of_date, latest_trade_date, market_data_status, close_price, signal_status,
               stop_loss_price, tp1_price, tp2_price, tp1_sell_fraction, tp2_sell_fraction,
+              average_up_price, average_up_share_fraction, blended_entry_after_average_up,
               net_cost_after_tp1, remaining_cost_basis_after_tp1, explanation, data_source, signal_context_json,
               refreshed_at, updated_at
             )
             VALUES (
-              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW(), NOW()
+              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW(), NOW()
             )
             ON CONFLICT (position_id)
             DO UPDATE SET
@@ -278,6 +285,9 @@ class PortfolioRepository:
               tp2_price = EXCLUDED.tp2_price,
               tp1_sell_fraction = EXCLUDED.tp1_sell_fraction,
               tp2_sell_fraction = EXCLUDED.tp2_sell_fraction,
+              average_up_price = EXCLUDED.average_up_price,
+              average_up_share_fraction = EXCLUDED.average_up_share_fraction,
+              blended_entry_after_average_up = EXCLUDED.blended_entry_after_average_up,
               net_cost_after_tp1 = EXCLUDED.net_cost_after_tp1,
               remaining_cost_basis_after_tp1 = EXCLUDED.remaining_cost_basis_after_tp1,
               explanation = EXCLUDED.explanation,
@@ -302,6 +312,9 @@ class PortfolioRepository:
                         tp2_price,
                         tp1_sell_fraction,
                         tp2_sell_fraction,
+                        average_up_price,
+                        average_up_share_fraction,
+                        blended_entry_after_average_up,
                         net_cost_after_tp1,
                         remaining_cost_basis_after_tp1,
                         explanation,

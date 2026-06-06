@@ -200,6 +200,8 @@ class PortfolioServiceTests(unittest.TestCase):
         self.assertIsNotNone(advice["tp1_price"])
         self.assertIsNotNone(advice["tp2_price"])
         self.assertIsNotNone(advice["net_cost_after_tp1"])
+        self.assertIsNotNone(advice["average_up_price"])
+        self.assertIsNotNone(advice["blended_entry_after_average_up"])
         self.assertIn(advice["signal_status"], {"hold", "raise_stop"})
 
     def test_refresh_advice_marks_stale_market_data(self) -> None:

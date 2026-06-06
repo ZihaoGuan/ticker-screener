@@ -707,6 +707,9 @@ export type PortfolioAdvice = {
   tp2_price?: number | null;
   tp1_sell_fraction?: number | null;
   tp2_sell_fraction?: number | null;
+  average_up_price?: number | null;
+  average_up_share_fraction?: number | null;
+  blended_entry_after_average_up?: number | null;
   net_cost_after_tp1?: number | null;
   remaining_cost_basis_after_tp1?: number | null;
   explanation?: string | null;
