@@ -143,19 +143,11 @@ def main() -> int:
             process_env["PYTHONUNBUFFERED"] = "1"
             if config.database_url:
                 process_env["TICKER_SCREENER_DATABASE_URL"] = config.database_url
-            process = subprocess.run(
-                command,
-                cwd=str(PROJECT_ROOT),
-                env=process_env,
-                capture_output=True,
-                text=True,
-                check=False,
+            return_code, combined, summary_path = _run_streaming_subprocess(
+                command=command,
+                process_env=process_env,
             )
-            stdout = process.stdout or ""
-            stderr = process.stderr or ""
-            combined = "\n".join(item for item in (stdout, stderr) if item).strip()
-            summary_path = _extract_summary_path(combined)
-            if process.returncode != 0:
+            if return_code != 0:
                 run_service.history_repository.update_job_run(
                     child_job_run_id,
                     status="failed",
@@ -168,7 +160,6 @@ def main() -> int:
                     },
                     finished_at=_finished_at_iso(),
                 )
-                print(combined, flush=True)
                 raise RuntimeError(f"Warm screener failed for {strategy_id} {target_date.isoformat()}")
             if not summary_path:
                 raise RuntimeError("Unable to find run summary path from screener output.")
@@ -201,7 +192,6 @@ def main() -> int:
                 finished_at=_finished_at_iso(),
             )
             completed += 1
-            print(combined, flush=True)
             print(f"[{completed}/{total}] processing {strategy_id} {target_date.isoformat()} | passed={int(summary_payload.get('passed_tickers') or 0)}")
 
         overlap_payload = overlap_service.build_overlap_for_date(
@@ -240,6 +230,34 @@ def _extract_summary_path(stdout: str) -> str:
         if line.startswith("Wrote run summary to "):
             return line.removeprefix("Wrote run summary to ").strip()
     return ""
+
+
+def _run_streaming_subprocess(*, command: list[str], process_env: dict[str, str]) -> tuple[int, str, str]:
+    process = subprocess.Popen(
+        command,
+        cwd=str(PROJECT_ROOT),
+        env=process_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    collected_lines: list[str] = []
+    summary_path = ""
+    assert process.stdout is not None
+    for raw_line in process.stdout:
+        line = raw_line.rstrip()
+        print(line, flush=True)
+        collected_lines.append(line)
+        if len(collected_lines) > 400:
+            collected_lines = collected_lines[-400:]
+        if not summary_path and line.startswith("Wrote run summary to "):
+            summary_path = line.removeprefix("Wrote run summary to ").strip()
+    return_code = process.wait()
+    combined = "\n".join(collected_lines)
+    if not summary_path:
+        summary_path = _extract_summary_path(combined)
+    return return_code, combined, summary_path
 
 
 if __name__ == "__main__":
