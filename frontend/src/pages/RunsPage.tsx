@@ -19,13 +19,20 @@ import type {
 } from "../lib/types";
 import "./RunsPage.css";
 
-export function RunsPage() {
+type RunsPageMode = "screeners" | "warmup" | "backtests";
+
+type RunsPageProps = {
+  mode?: RunsPageMode;
+};
+
+export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const auth = useAuth();
   const canManageSchedules = auth.hasCapability("manage_exclusions");
   const [payload, setPayload] = useState<JobsResponse | null>(null);
   const [selectedActionId, setSelectedActionId] = useState("");
   const [selectedJobId, setSelectedJobId] = useState("");
   const [selectedChildJobId, setSelectedChildJobId] = useState<number | null>(null);
+  const [expandedBatchDateByJobId, setExpandedBatchDateByJobId] = useState<Record<string, string | null>>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isCancellingJobId, setIsCancellingJobId] = useState("");
@@ -145,51 +152,89 @@ export function RunsPage() {
     loadScheduleConfig();
   }, [canManageSchedules]);
 
+  const visibleActions = useMemo(() => {
+    const actions = payload?.actions ?? [];
+    if (mode === "warmup") {
+      return actions.filter((action) => action.id === "signal_warm_batch");
+    }
+    if (mode === "backtests") {
+      return actions.filter((action) => action.id === "overlap_backtest_v1");
+    }
+    return actions.filter((action) => !["signal_warm_batch", "overlap_backtest_v1"].includes(action.id));
+  }, [mode, payload]);
+
+  const visibleJobs = useMemo(() => {
+    const jobs = payload?.jobs ?? [];
+    if (mode === "warmup") {
+      return jobs.filter((job) => ["signal_warm_batch", "screener_history_batch"].includes(job.action_id));
+    }
+    if (mode === "backtests") {
+      return jobs.filter((job) => job.action_id === "overlap_backtest_v1");
+    }
+    return jobs.filter((job) => !["signal_warm_batch", "screener_history_batch", "overlap_backtest_v1"].includes(job.action_id));
+  }, [mode, payload]);
+
+  const visibleActiveJob = useMemo(() => visibleJobs.find((job) => job.status === "running") ?? null, [visibleJobs]);
+
   useEffect(() => {
-    if (!payload?.actions?.length) {
+    if (!visibleActions.length) {
       return;
     }
-    setSelectedActionId((current) => current || payload.actions[0].id);
+    setSelectedActionId((current) => (current && visibleActions.some((action) => action.id === current) ? current : visibleActions[0].id));
     setWarmStrategyIds((current) => {
       if (current.trim()) {
         return current;
       }
-      return payload.actions
+      return (payload?.actions ?? [])
         .filter((item) => !["signal_warm_batch", "overlap_backtest_v1"].includes(item.id))
         .slice(0, 4)
         .map((item) => item.id)
         .join(",");
     });
-  }, [payload]);
+  }, [payload, visibleActions]);
 
   useEffect(() => {
-    if (!payload?.jobs?.length) {
+    if (!visibleJobs.length) {
       setSelectedJobId("");
       setSelectedChildJobId(null);
       return;
     }
     setSelectedJobId((current) => {
-      if (current && payload.jobs.some((job) => job.job_id === current)) {
+      if (current && visibleJobs.some((job) => job.job_id === current)) {
         return current;
       }
-      return payload.jobs[0].job_id;
+      return visibleJobs[0].job_id;
     });
-  }, [payload]);
+  }, [visibleJobs]);
 
-  const activeJob = useMemo(() => payload?.jobs.find((job) => job.status === "running") ?? null, [payload]);
   const selectedJob = useMemo(
-    () => payload?.jobs.find((job) => job.job_id === selectedJobId) ?? payload?.jobs[0] ?? null,
-    [payload, selectedJobId],
+    () => visibleJobs.find((job) => job.job_id === selectedJobId) ?? visibleJobs[0] ?? null,
+    [selectedJobId, visibleJobs],
   );
   const selectedAction = useMemo(
-    () => payload?.actions.find((action) => action.id === selectedActionId) ?? payload?.actions[0] ?? null,
-    [payload, selectedActionId],
+    () => visibleActions.find((action) => action.id === selectedActionId) ?? visibleActions[0] ?? null,
+    [selectedActionId, visibleActions],
   );
   const selectedChildJob = useMemo(
     () => selectedJob?.child_jobs.find((job) => job.job_run_id === selectedChildJobId) ?? null,
     [selectedChildJobId, selectedJob],
   );
-  const selectedJobLog = useMemo(() => selectedChildJob?.log_tail ?? selectedJob?.log_tail ?? "No job log yet.", [selectedChildJob, selectedJob]);
+  const childJobGroups = useMemo(() => groupChildJobsByDate(selectedJob?.child_jobs ?? []), [selectedJob]);
+  const expandedBatchDate = useMemo(
+    () => (selectedJob ? expandedBatchDateByJobId[selectedJob.job_id] ?? null : null),
+    [expandedBatchDateByJobId, selectedJob],
+  );
+  const selectedJobLog = useMemo(() => {
+    if (selectedChildJob) {
+      return selectedChildJob.log_tail || "No screener log yet.";
+    }
+    if (selectedJob && isHierarchicalBatchJob(selectedJob.action_id)) {
+      return childJobGroups.length > 0
+        ? "Select date row, then click screener row to view separate log."
+        : "Waiting for screener subtasks to attach to this batch run.";
+    }
+    return selectedJob?.log_tail ?? "No job log yet.";
+  }, [childJobGroups.length, selectedChildJob, selectedJob]);
   const selectedScheduledAction = useMemo(
     () => availableScheduledActions.find((item) => item.id === scheduleActionId) ?? null,
     [availableScheduledActions, scheduleActionId],
@@ -204,7 +249,23 @@ export function RunsPage() {
       if (current != null && selectedJob.child_jobs.some((job) => job.job_run_id === current)) {
         return current;
       }
-      return selectedJob.child_jobs[0].job_run_id;
+      return null;
+    });
+  }, [selectedJob]);
+
+  useEffect(() => {
+    if (!selectedJob || !isHierarchicalBatchJob(selectedJob.action_id)) {
+      return;
+    }
+    const availableDates = new Set(selectedJob.child_jobs.map((job) => job.run_date || "Unscheduled"));
+    setExpandedBatchDateByJobId((current) => {
+      const activeDate = current[selectedJob.job_id] ?? null;
+      if (activeDate && availableDates.has(activeDate)) {
+        return current;
+      }
+      const next = { ...current };
+      next[selectedJob.job_id] = null;
+      return next;
     });
   }, [selectedJob]);
   const suggestedScheduleOptionsJson = useMemo(
@@ -221,6 +282,10 @@ export function RunsPage() {
   }, [lastSuggestedOptionsJson, scheduleActionId, scheduleOptionsJson, suggestedScheduleOptionsJson]);
 
   useEffect(() => {
+    if (mode !== "warmup") {
+      setCoveragePayload(null);
+      return;
+    }
     if (!warmStrategyIds.trim()) {
       setCoveragePayload(null);
       return;
@@ -243,17 +308,26 @@ export function RunsPage() {
         .finally(() => setIsLoadingCoverage(false));
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [warmFrom, warmStrategyIds, warmThreshold, warmTo]);
+  }, [mode, warmFrom, warmStrategyIds, warmThreshold, warmTo]);
 
   useEffect(() => {
+    if (mode !== "backtests") {
+      setBacktestsPayload(null);
+      setSelectedBacktest(null);
+      setSelectedBacktestId(null);
+      return;
+    }
     setIsLoadingBacktests(true);
     void fetchJson<BacktestRunsResponseV1>("/api/backtests-v1")
       .then((result) => setBacktestsPayload(result))
       .catch(() => setBacktestsPayload({ configured: false, runs: [] }))
       .finally(() => setIsLoadingBacktests(false));
-  }, [payload]);
+  }, [mode, payload]);
 
   useEffect(() => {
+    if (mode !== "backtests") {
+      return;
+    }
     if (!backtestsPayload?.runs?.length) {
       setSelectedBacktestId(null);
       setSelectedBacktest(null);
@@ -265,9 +339,12 @@ export function RunsPage() {
       }
       return backtestsPayload.runs[0].id;
     });
-  }, [backtestsPayload]);
+  }, [backtestsPayload, mode]);
 
   useEffect(() => {
+    if (mode !== "backtests") {
+      return;
+    }
     if (selectedBacktestId == null) {
       setSelectedBacktest(null);
       return;
@@ -277,7 +354,7 @@ export function RunsPage() {
       .then((result) => setSelectedBacktest(result))
       .catch(() => setSelectedBacktest(null))
       .finally(() => setIsLoadingBacktestDetail(false));
-  }, [selectedBacktestId]);
+  }, [mode, selectedBacktestId]);
 
   const handleRunAction = async (params: Record<string, string | string[]>, actionId = selectedActionId) => {
     setIsRunning(true);
@@ -436,13 +513,18 @@ export function RunsPage() {
     return `${remainingSeconds}s`;
   };
 
+  const pageTitle =
+    mode === "warmup" ? "Warmup Batch" : mode === "backtests" ? "Backtest Runner" : "Available Screeners";
+  const jobsPanelTitle =
+    mode === "warmup" ? "Recent Warmup Jobs" : mode === "backtests" ? "Recent Backtest Jobs" : "Recent Screener Jobs";
+
   return (
     <>
       <div className="page-grid">
-        <Panel title="Available Screeners">
+        <Panel title={pageTitle}>
           {isLoading && !payload ? <LoadingBlock label="Loading available screeners…" /> : null}
           <div className="screeners-grid">
-            {(payload?.actions ?? []).map((action) => (
+            {visibleActions.map((action) => (
               <div key={action.id} className="screener-card">
                 {(() => {
                   const configureOnly = ["signal_warm_batch", "overlap_backtest_v1"].includes(action.id);
@@ -478,7 +560,7 @@ export function RunsPage() {
           </div>
         </Panel>
 
-        {canManageSchedules ? (
+        {canManageSchedules && mode === "screeners" ? (
           <>
             <Panel title="Scheduled Screeners" aside={<span className="eyebrow">{scheduledJobs.length} tracked</span>}>
               {isLoadingScheduledJobs ? <LoadingBlock label="Loading scheduled job status…" compact /> : null}
@@ -664,33 +746,38 @@ export function RunsPage() {
 
         <Panel
           title="Current Progress"
-          aside={activeJob ? <span className="eyebrow">{activeJob.label}</span> : <span className="eyebrow">Idle</span>}
+          aside={visibleActiveJob ? <span className="eyebrow">{visibleActiveJob.label}</span> : <span className="eyebrow">Idle</span>}
         >
           <div className="run-progress-panel">
             <ProgressBar
-              status={activeJob?.status ?? "cancelled"}
+              status={visibleActiveJob?.status ?? "cancelled"}
               label={
-                activeJob
-                  ? `${activeJob.label} · ${activeJob.progress_label || `started ${activeJob.started_at || "just now"}`} · ${activeJob.success_count} hits · ${formatDuration(activeJob.duration_seconds)}`
-                  : "No screener currently running"
+                visibleActiveJob
+                  ? `${visibleActiveJob.label} · ${visibleActiveJob.progress_label || `started ${visibleActiveJob.started_at || "just now"}`} · ${visibleActiveJob.success_count} hits · ${formatDuration(visibleActiveJob.duration_seconds)}`
+                  : mode === "warmup"
+                    ? "No warmup batch currently running"
+                    : mode === "backtests"
+                      ? "No backtest currently running"
+                      : "No screener currently running"
               }
-              progress={activeJob?.progress_percent ?? null}
+              progress={visibleActiveJob?.progress_percent ?? null}
             />
-            {activeJob ? (
+            {visibleActiveJob ? (
               <div className="button-row">
                 <button
                   className="secondary-button"
                   type="button"
-                  onClick={() => void handleCancelJob(activeJob.job_id)}
-                  disabled={isCancellingJobId === activeJob.job_id}
+                  onClick={() => void handleCancelJob(visibleActiveJob.job_id)}
+                  disabled={isCancellingJobId === visibleActiveJob.job_id}
                 >
-                  {isCancellingJobId === activeJob.job_id ? "Stopping..." : "Stop Current Job"}
+                  {isCancellingJobId === visibleActiveJob.job_id ? "Stopping..." : "Stop Current Job"}
                 </button>
               </div>
             ) : null}
           </div>
         </Panel>
 
+        {mode === "warmup" ? (
         <Panel title="Warm Coverage" aside={<span className="eyebrow">{coveragePayload?.days.length ?? 0} dates</span>}>
           <div className="run-params-grid">
             <label className="field">
@@ -748,7 +835,9 @@ export function RunsPage() {
             </table>
           </div>
         </Panel>
+        ) : null}
 
+        {mode === "backtests" ? (
         <Panel title="Backtest V1" aside={<span className="eyebrow">{backtestsPayload?.runs.length ?? 0} runs</span>}>
           {isLoadingBacktests ? <LoadingBlock label="Loading backtests…" compact /> : null}
           <p className="panel-copy">Entry uses same-day close when signal count is at least four.</p>
@@ -851,8 +940,9 @@ export function RunsPage() {
             </table>
           </div>
         </Panel>
+        ) : null}
 
-        <Panel title="Recent Screener Jobs">
+        <Panel title={jobsPanelTitle}>
           {isLoading && !payload ? <LoadingBlock label="Loading recent jobs…" /> : null}
           <div className="data-table-responsive">
             <table className="data-table">
@@ -868,13 +958,22 @@ export function RunsPage() {
                   <th>Duration</th>
                   <th>Progress</th>
                   <th>RC</th>
-                  <th>Action</th>
+                                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {(payload?.jobs ?? []).flatMap((job) => {
+                {visibleJobs.length === 0 ? (
+                  <tr>
+                    <td colSpan={11}>
+                      {mode === "warmup" ? "No warmup jobs yet." : mode === "backtests" ? "No backtest jobs yet." : "No screener jobs yet."}
+                    </td>
+                  </tr>
+                ) : visibleJobs.flatMap((job) => {
                   const isSelected = job.job_id === selectedJob?.job_id;
                   const hasChildren = job.child_jobs.length > 0;
+                  const isHierarchicalBatch = isHierarchicalBatchJob(job.action_id);
+                  const groupedChildren = groupChildJobsByDate(job.child_jobs);
+                  const activeDate = expandedBatchDateByJobId[job.job_id] ?? null;
                   const rows = [
                     <tr
                       key={job.job_id}
@@ -921,50 +1020,106 @@ export function RunsPage() {
                       </td>
                     </tr>,
                   ];
-                  if (isSelected && hasChildren) {
+                  if (isSelected && isHierarchicalBatch) {
                     rows.push(
                       <tr key={`${job.job_id}-children`} className="child-jobs-expanded-row">
                         <td colSpan={11}>
                           <div className="child-jobs-expanded">
                             <div className="child-jobs-expanded-header">
-                              <strong>Subtasks</strong>
-                              <span className="file-meta">Click subtask to inspect its log.</span>
+                              <strong>Dates to Screen</strong>
+                              <span className="file-meta">Click date, then click screener to inspect its log.</span>
                             </div>
-                            <div className="data-table-responsive">
-                              <table className="data-table">
-                                <thead>
-                                  <tr>
-                                    <th>Strategy</th>
-                                    <th>Date</th>
-                                    <th>Status</th>
-                                    <th>Hits</th>
-                                    <th>Duration</th>
-                                    <th>Note</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {job.child_jobs.map((child) => (
-                                    <tr
-                                      key={child.job_run_id}
-                                      className={child.job_run_id === selectedChildJobId ? "is-selected-row" : ""}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        setSelectedChildJobId(child.job_run_id);
-                                      }}
-                                    >
-                                      <td data-label="Strategy">{child.strategy_id || child.label}</td>
-                                      <td data-label="Date">{child.run_date || "-"}</td>
-                                      <td data-label="Status">
-                                        <StatusPill status={child.status} />
-                                      </td>
-                                      <td data-label="Hits">{child.success_count}</td>
-                                      <td data-label="Duration">{formatDuration(child.duration_seconds)}</td>
-                                      <td data-label="Note">{child.message || (child.skipped ? "Skipped" : "-")}</td>
+                            {groupedChildren.length === 0 ? (
+                              <p className="panel-copy">Waiting for screener subtasks to attach to this batch run.</p>
+                            ) : (
+                              <div className="data-table-responsive">
+                                <table className="data-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Date</th>
+                                      <th>Status</th>
+                                      <th>Screeners</th>
+                                      <th>Hits</th>
+                                      <th>Duration</th>
+                                      <th>Note</th>
                                     </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
+                                  </thead>
+                                  <tbody>
+                                    {groupedChildren.flatMap((group) => {
+                                      const dateRows = [
+                                        <tr
+                                          key={`${job.job_id}-${group.runDate}`}
+                                          className={group.runDate === activeDate ? "is-selected-row child-date-row" : "child-date-row"}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setExpandedBatchDateByJobId((current) => {
+                                              const next = { ...current };
+                                              next[job.job_id] = current[job.job_id] === group.runDate ? null : group.runDate;
+                                              return next;
+                                            });
+                                            if (activeDate === group.runDate && selectedChildJob?.run_date === group.runDate) {
+                                              setSelectedChildJobId(null);
+                                            }
+                                          }}
+                                        >
+                                          <td data-label="Date">{group.runDate}</td>
+                                          <td data-label="Status">
+                                            <StatusPill status={group.status} />
+                                          </td>
+                                          <td data-label="Screeners">{group.children.length}</td>
+                                          <td data-label="Hits">{group.successCount}</td>
+                                          <td data-label="Duration">{formatDuration(group.durationSeconds)}</td>
+                                          <td data-label="Note">{group.note}</td>
+                                        </tr>,
+                                      ];
+                                      if (group.runDate === activeDate) {
+                                        dateRows.push(
+                                          <tr key={`${job.job_id}-${group.runDate}-screeners`} className="child-date-expanded-row">
+                                            <td colSpan={6}>
+                                              <div className="child-date-expanded">
+                                                <table className="data-table child-screener-table">
+                                                  <thead>
+                                                    <tr>
+                                                      <th>Screener</th>
+                                                      <th>Status</th>
+                                                      <th>Hits</th>
+                                                      <th>Duration</th>
+                                                      <th>Note</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {group.children.map((child) => (
+                                                      <tr
+                                                        key={child.job_run_id}
+                                                        className={child.job_run_id === selectedChildJobId ? "is-selected-row" : ""}
+                                                        onClick={(event) => {
+                                                          event.stopPropagation();
+                                                          setExpandedBatchDateByJobId((current) => ({ ...current, [job.job_id]: group.runDate }));
+                                                          setSelectedChildJobId(child.job_run_id);
+                                                        }}
+                                                      >
+                                                        <td data-label="Screener">{child.strategy_id || child.label}</td>
+                                                        <td data-label="Status">
+                                                          <StatusPill status={child.status} />
+                                                        </td>
+                                                        <td data-label="Hits">{child.success_count}</td>
+                                                        <td data-label="Duration">{formatDuration(child.duration_seconds)}</td>
+                                                        <td data-label="Note">{child.message || (child.skipped ? "Skipped" : "-")}</td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </td>
+                                          </tr>,
+                                        );
+                                      }
+                                      return dateRows;
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>,
@@ -985,6 +1140,8 @@ export function RunsPage() {
               <span className="eyebrow">
                 {selectedChildJob
                   ? `${selectedChildJob.strategy_id || selectedChildJob.label} · ${selectedChildJob.success_count} hits · ${formatDuration(selectedChildJob.duration_seconds)}`
+                  : selectedJob && isHierarchicalBatchJob(selectedJob.action_id) && expandedBatchDate
+                    ? `${expandedBatchDate} · choose screener for separate log`
                   : selectedJob
                     ? `${selectedJob.label} · ${selectedJob.success_count} hits · ${formatDuration(selectedJob.duration_seconds)}`
                     : "Auto-refresh: 4s"}
@@ -1012,6 +1169,76 @@ function isoDateDaysAgo(daysAgo: number): string {
   const value = new Date();
   value.setDate(value.getDate() - daysAgo);
   return value.toISOString().slice(0, 10);
+}
+
+function isHierarchicalBatchJob(actionId: string): boolean {
+  return actionId === "signal_warm_batch" || actionId === "screener_history_batch";
+}
+
+function groupChildJobsByDate(childJobs: JobsResponse["jobs"][number]["child_jobs"]) {
+  const groups = new Map<string, JobsResponse["jobs"][number]["child_jobs"]>();
+  childJobs.forEach((child) => {
+    const runDate = child.run_date || "Unscheduled";
+    const existing = groups.get(runDate) ?? [];
+    existing.push(child);
+    groups.set(runDate, existing);
+  });
+  return Array.from(groups.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([runDate, children]) => {
+      const summary = summarizeChildStatuses(children);
+      return {
+        runDate,
+        children,
+        status: summarizeGroupStatus(summary),
+        successCount: children.reduce((total, child) => total + (child.success_count || 0), 0),
+        durationSeconds: children.reduce((total, child) => total + (child.duration_seconds || 0), 0),
+        note:
+          summary.running > 0
+            ? `${summary.running}/${children.length} running`
+            : summary.failed > 0
+              ? `${summary.failed} failed`
+              : summary.success === children.length
+                ? "All done"
+                : `${summary.success}/${children.length} complete`,
+      };
+    });
+}
+
+function summarizeChildStatuses(childJobs: JobsResponse["jobs"][number]["child_jobs"]) {
+  return childJobs.reduce(
+    (summary, child) => {
+      if (child.status === "running") {
+        summary.running += 1;
+      } else if (child.status === "failed") {
+        summary.failed += 1;
+      } else if (child.status === "cancelled") {
+        summary.cancelled += 1;
+      } else if (child.status === "success") {
+        summary.success += 1;
+      } else {
+        summary.queued += 1;
+      }
+      return summary;
+    },
+    { queued: 0, running: 0, success: 0, failed: 0, cancelled: 0 },
+  );
+}
+
+function summarizeGroupStatus(summary: { queued: number; running: number; success: number; failed: number; cancelled: number }): "queued" | "running" | "success" | "failed" | "cancelled" {
+  if (summary.running > 0) {
+    return "running";
+  }
+  if (summary.failed > 0) {
+    return "failed";
+  }
+  if (summary.cancelled > 0 && summary.success === 0 && summary.running === 0 && summary.failed === 0) {
+    return "cancelled";
+  }
+  if (summary.success > 0 && summary.queued === 0) {
+    return "success";
+  }
+  return "queued";
 }
 
 function buildScheduleOptionsTemplate(actionId: string): string {

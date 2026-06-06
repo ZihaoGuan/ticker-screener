@@ -5,6 +5,7 @@ import { RoleRoute } from "./auth/RoleRoute";
 import { useAuth } from "./auth/AuthContext";
 import { LoadingBlock } from "./components/LoadingBlock";
 import { AdminPage } from "./pages/AdminPage";
+import { BacktestsPage } from "./pages/BacktestsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EarningsPage } from "./pages/EarningsPage";
 import { GuidePage } from "./pages/GuidePage";
@@ -14,6 +15,7 @@ import { PortfolioPage } from "./pages/PortfolioPage";
 import { ChartsPage } from "./pages/ChartsPage";
 import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
+import { WarmupPage } from "./pages/WarmupPage";
 import { WeeklyWatchlistPage } from "./pages/WeeklyWatchlistPage";
 import { WatchlistsPage } from "./pages/WatchlistsPage";
 
@@ -37,7 +39,23 @@ export default function App() {
           path="/screeners"
           element={
             <ProtectedRoute capability="run_screeners">
-              <RunsPage />
+              <RunsPage mode="screeners" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/warmup"
+          element={
+            <ProtectedRoute capability="run_screeners">
+              <WarmupPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/backtests"
+          element={
+            <ProtectedRoute capability="run_screeners">
+              <BacktestsPage />
             </ProtectedRoute>
           }
         />

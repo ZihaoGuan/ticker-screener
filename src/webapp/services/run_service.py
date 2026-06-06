@@ -765,9 +765,9 @@ class RunService:
             command.extend(["--signal-cache-policy", str(normalized_options["signal_cache_policy"])])
         if normalized_options.get("market_data_mode"):
             command.extend(["--market-data-mode", str(normalized_options["market_data_mode"])])
-        if action_id == "screener_history_batch" and normalized_options.get("market_data_source"):
+        if action_id in {"screener_history_batch", "signal_warm_batch"} and normalized_options.get("market_data_source"):
             command.extend(["--market-data-source", str(normalized_options["market_data_source"])])
-        if action_id == "screener_history_batch" and normalized_options.get("job_run_id") is not None:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "overlap_backtest_v1"} and normalized_options.get("job_run_id") is not None:
             command.extend(["--job-run-id", str(normalized_options["job_run_id"])])
         if normalized_options.get("filter_precedence"):
             command.extend(["--filter-precedence", str(normalized_options["filter_precedence"])])

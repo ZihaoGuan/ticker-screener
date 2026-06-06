@@ -165,12 +165,13 @@ class ScreenerHistoryService:
         config_hash = stable_json_hash(config_json)
         scope_hash = stable_json_hash(scope_json)
         signal_date = self._resolve_run_date(summary_payload, options)
+        failed_ticker_count = self._coerce_failure_count(summary_payload.get("failed_tickers"))
         result_summary = {
             "date_label": summary_payload.get("date_label"),
             "as_of_date": summary_payload.get("as_of_date"),
             "total_tickers": int(summary_payload.get("total_tickers") or 0),
             "passed_tickers": int(summary_payload.get("passed_tickers") or 0),
-            "failed_tickers": int(summary_payload.get("failed_tickers") or 0),
+            "failed_tickers": failed_ticker_count,
         }
         source_kind = str(summary_payload.get("source") or ("manual-tickers" if scope_json["tickers"] else "exchange-universe"))
         screen_run_id = self.repository.upsert_screen_run(
@@ -184,7 +185,7 @@ class ScreenerHistoryService:
             market_data_mode=str(options.get("market_data_source") or "internet"),
             source_kind=source_kind,
             hit_count=int(summary_payload.get("passed_tickers") or 0),
-            failure_count=int(summary_payload.get("failed_tickers") or 0),
+            failure_count=failed_ticker_count,
             result_summary_json=result_summary,
             raw_artifact_path=str(summary_payload.get("raw_results_file") or ""),
             watchlist_artifact_path=str(summary_payload.get("watchlist_file") or ""),
@@ -192,6 +193,13 @@ class ScreenerHistoryService:
         rows = self._build_hit_rows(strategy_id=strategy_id, signal_date=signal_date, raw_payload=raw_payload)
         self.repository.replace_screen_run_hits(screen_run_id, rows)
         return screen_run_id
+
+    def _coerce_failure_count(self, raw_value: Any) -> int:
+        if isinstance(raw_value, list):
+            return len(raw_value)
+        if raw_value in (None, ""):
+            return 0
+        return int(raw_value)
 
     def _resolve_run_date(self, summary_payload: dict[str, Any], options: dict[str, Any]) -> dt.date:
         for value in (

@@ -139,6 +139,23 @@
   margin-bottom: 10px;
 }
 
+.child-date-row {
+  cursor: pointer;
+}
+
+.child-date-expanded-row td {
+  padding: 0;
+}
+
+.child-date-expanded {
+  padding: 10px 12px 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.child-screener-table {
+  margin-top: 0;
+}
+
 @media (max-width: 768px) {
   .screeners-grid {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

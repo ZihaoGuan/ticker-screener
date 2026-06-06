@@ -216,6 +216,66 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("--date-label", command)
         self.assertIn("--limit", command)
 
+    def test_launch_signal_warm_batch_includes_parent_job_run_id_and_market_data_source(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+        self.service.history_repository.create_job_run = lambda **kwargs: 321  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "signal_warm_batch",
+            options={
+                "strategy_ids": ["rs", "vcp"],
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-05",
+                "market_data_source": "internet",
+                "overwrite_policy": "skip_existing",
+                "candidate_threshold": "4",
+                "max_parallel": "3",
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        self.assertIn("scripts/run_signal_warm_batch.py", command)
+        self.assertIn("--market-data-source", command)
+        self.assertIn("internet", command)
+        self.assertIn("--job-run-id", command)
+        self.assertTrue(any(str(item).isdigit() for item in command[command.index("--job-run-id") + 1 : command.index("--job-run-id") + 2]))
+
+    def test_launch_overlap_backtest_includes_parent_job_run_id(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+        self.service.history_repository.create_job_run = lambda **kwargs: 654  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "overlap_backtest_v1",
+            options={
+                "strategy_ids": ["rs", "vcp"],
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-05",
+                "entry_signal_threshold": "4",
+                "hold_periods_json": "[5, 10]",
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        self.assertIn("scripts/run_overlap_backtest_v1.py", command)
+        self.assertIn("--job-run-id", command)
+        self.assertTrue(any(str(item).isdigit() for item in command[command.index("--job-run-id") + 1 : command.index("--job-run-id") + 2]))
+
     def test_list_jobs_attaches_batch_child_job_logs(self) -> None:
         RunService._jobs = [
             {

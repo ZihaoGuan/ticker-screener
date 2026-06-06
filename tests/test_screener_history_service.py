@@ -83,6 +83,34 @@ class ScreenerHistoryServiceTests(unittest.TestCase):
         self.assertEqual((self.repository.hit_rows or [])[1]["ticker"], "MSFT")
         self.assertFalse((self.repository.hit_rows or [])[1]["passed"])
 
+    def test_persist_screen_run_accepts_failure_list_in_summary_payload(self) -> None:
+        summary_payload = {
+            "date_label": "2026-03-23",
+            "as_of_date": "2026-03-23",
+            "passed_tickers": 48,
+            "failed_tickers": [{"ticker": "VIDA", "error": "400 yahoo"}],
+            "total_tickers": 3611,
+            "raw_results_file": "/tmp/raw.json",
+            "watchlist_file": "/tmp/watch.json",
+        }
+        raw_payload = {
+            "hits": [{"ticker": "VZLA", "reasons": ["passed"]}],
+            "failed_tickers": [{"ticker": "VIDA", "error": "400 yahoo"}],
+        }
+
+        screen_run_id = self.service.persist_screen_run(
+            strategy_id="rs",
+            options={"market_data_source": "internet", "tickers": []},
+            summary_payload=summary_payload,
+            raw_payload=raw_payload,
+            job_run_id=123,
+        )
+
+        self.assertEqual(screen_run_id, 17)
+        assert self.repository.screen_run_payload is not None
+        self.assertEqual(self.repository.screen_run_payload["failure_count"], 1)
+        self.assertEqual((self.repository.screen_run_payload["result_summary_json"] or {})["failed_tickers"], 1)
+
     def test_soft_delete_uses_default_reason(self) -> None:
         deleted = self.service.soft_delete(42, reason="")
 
