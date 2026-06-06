@@ -1022,6 +1022,7 @@ class RunService:
         duration_seconds = self._job_duration_seconds(job)
         watchlist_file = str(job.get("watchlist_file") or "")
         watchlist_stem = self._watchlist_stem_from_path(watchlist_file)
+        options = dict(job.get("options") or {})
         return {
             "job_id": str(job.get("job_id") or ""),
             "action_id": str(job.get("action_id") or ""),
@@ -1042,6 +1043,7 @@ class RunService:
             "watchlist_url": f"/watchlists?stem={watchlist_stem}" if watchlist_stem else "",
             "summary_file": str(job.get("summary_file") or ""),
             "raw_results_file": str(job.get("raw_results_file") or ""),
+            "scan_target": self._describe_job_scan_target(str(job.get("action_id") or ""), options),
             "job_run_id": job.get("job_run_id"),
             "screen_run_id": job.get("screen_run_id"),
             "backtest_run_id": job.get("backtest_run_id"),
@@ -1164,6 +1166,8 @@ class RunService:
             child_jobs = grouped.get(parent_id, [])
             job["child_jobs"] = child_jobs
             job["child_job_summary"] = self._summarize_child_jobs(child_jobs)
+            if job.get("action_id") in {"screener_history_batch", "signal_warm_batch"}:
+                job["scan_target"] = self._describe_batch_scan_target(job, child_jobs)
         return jobs
 
     def _serialize_child_job_run(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -1202,6 +1206,27 @@ class RunService:
             if status in summary:
                 summary[status] += 1
         return summary
+
+    def _describe_job_scan_target(self, action_id: str, options: dict[str, Any]) -> str:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "overlap_backtest_v1"}:
+            start_date = str(options.get("start_date") or "").strip()
+            end_date = str(options.get("end_date") or "").strip()
+            if start_date and end_date:
+                return f"{start_date} to {end_date}"
+            return start_date or end_date
+        as_of_date = str(options.get("as_of_date") or "").strip()
+        if as_of_date:
+            return as_of_date
+        date_label = str(options.get("date_label") or "").strip()
+        if date_label:
+            return date_label
+        return ""
+
+    def _describe_batch_scan_target(self, job: dict[str, Any], child_jobs: list[dict[str, Any]]) -> str:
+        running_child = next((item for item in child_jobs if item.get("status") == "running" and str(item.get("run_date") or "").strip()), None)
+        if running_child is not None:
+            return str(running_child.get("run_date") or "")
+        return self._describe_job_scan_target(str(job.get("action_id") or ""), dict(job.get("options") or {}))
 
     def _duration_seconds_from_iso(self, started_at: str, finished_at: str) -> int:
         if not started_at:

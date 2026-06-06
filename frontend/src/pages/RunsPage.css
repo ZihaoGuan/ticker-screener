@@ -122,6 +122,23 @@
   margin: 16px 0;
 }
 
+.child-jobs-expanded-row td {
+  padding: 0;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.child-jobs-expanded {
+  padding: 12px;
+}
+
+.child-jobs-expanded-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 @media (max-width: 768px) {
   .screeners-grid {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

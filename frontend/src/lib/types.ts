@@ -212,6 +212,7 @@ export type JobsResponse = {
     watchlist_url: string;
     summary_file: string;
     raw_results_file?: string;
+    scan_target?: string;
     screen_run_id?: number | null;
     backtest_run_id?: number | null;
     cancel_requested: boolean;

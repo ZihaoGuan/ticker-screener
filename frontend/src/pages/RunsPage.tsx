@@ -860,6 +860,7 @@ export function RunsPage() {
                 <tr>
                   <th>Job ID</th>
                   <th>Screener</th>
+                  <th>Scan Date</th>
                   <th>Status</th>
                   <th>Start Time</th>
                   <th>Finish Time</th>
@@ -871,102 +872,110 @@ export function RunsPage() {
                 </tr>
               </thead>
               <tbody>
-                {(payload?.jobs ?? []).map((job) => (
-                  <tr
-                    key={job.job_id}
-                    className={job.job_id === selectedJob?.job_id ? "is-selected-row" : ""}
-                    onClick={() => setSelectedJobId(job.job_id)}
-                  >
-                    <td data-label="Job ID" className="mono">#{job.job_id}</td>
-                    <td data-label="Screener">{job.label}</td>
-                    <td data-label="Status">
-                      <StatusPill status={job.status} />
-                    </td>
-                    <td data-label="Start Time">{formatLocalDateTime(job.started_at)}</td>
-                    <td data-label="Finish Time">{formatLocalDateTime(job.finished_at)}</td>
-                    <td data-label="Hits">{job.success_count}</td>
-                    <td data-label="Duration">{formatDuration(job.duration_seconds)}</td>
-                    <td data-label="Progress">
-                      <ProgressBar status={job.status} progress={job.progress_percent} label={job.progress_label ?? undefined} compact />
-                    </td>
-                    <td data-label="RC" className="mono">{job.return_code ?? "-"}</td>
-                    <td data-label="Action">
-                      {job.status === "running" ? (
-                        <button
-                          className="table-action-button"
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleCancelJob(job.job_id);
-                          }}
-                          disabled={isCancellingJobId === job.job_id}
-                        >
-                          {isCancellingJobId === job.job_id ? "Stopping..." : "Stop"}
-                        </button>
-                      ) : job.watchlist_url ? (
-                        <Link className="table-action-button table-link-button" to={job.watchlist_url} onClick={(event) => event.stopPropagation()}>
-                          Open Result
-                        </Link>
-                      ) : (
-                        <span className="eyebrow">Done</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {(payload?.jobs ?? []).flatMap((job) => {
+                  const isSelected = job.job_id === selectedJob?.job_id;
+                  const hasChildren = job.child_jobs.length > 0;
+                  const rows = [
+                    <tr
+                      key={job.job_id}
+                      className={isSelected ? "is-selected-row" : ""}
+                      onClick={() => setSelectedJobId(job.job_id)}
+                    >
+                      <td data-label="Job ID" className="mono">#{job.job_id}</td>
+                      <td data-label="Screener">
+                        {job.label}
+                        {hasChildren ? <span className="file-meta"> · {job.child_jobs.length} subtasks</span> : null}
+                      </td>
+                      <td data-label="Scan Date">{job.scan_target || "-"}</td>
+                      <td data-label="Status">
+                        <StatusPill status={job.status} />
+                      </td>
+                      <td data-label="Start Time">{formatLocalDateTime(job.started_at)}</td>
+                      <td data-label="Finish Time">{formatLocalDateTime(job.finished_at)}</td>
+                      <td data-label="Hits">{job.success_count}</td>
+                      <td data-label="Duration">{formatDuration(job.duration_seconds)}</td>
+                      <td data-label="Progress">
+                        <ProgressBar status={job.status} progress={job.progress_percent} label={job.progress_label ?? undefined} compact />
+                      </td>
+                      <td data-label="RC" className="mono">{job.return_code ?? "-"}</td>
+                      <td data-label="Action">
+                        {job.status === "running" ? (
+                          <button
+                            className="table-action-button"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleCancelJob(job.job_id);
+                            }}
+                            disabled={isCancellingJobId === job.job_id}
+                          >
+                            {isCancellingJobId === job.job_id ? "Stopping..." : "Stop"}
+                          </button>
+                        ) : job.watchlist_url ? (
+                          <Link className="table-action-button table-link-button" to={job.watchlist_url} onClick={(event) => event.stopPropagation()}>
+                            Open Result
+                          </Link>
+                        ) : (
+                          <span className="eyebrow">Done</span>
+                        )}
+                      </td>
+                    </tr>,
+                  ];
+                  if (isSelected && hasChildren) {
+                    rows.push(
+                      <tr key={`${job.job_id}-children`} className="child-jobs-expanded-row">
+                        <td colSpan={11}>
+                          <div className="child-jobs-expanded">
+                            <div className="child-jobs-expanded-header">
+                              <strong>Subtasks</strong>
+                              <span className="file-meta">Click subtask to inspect its log.</span>
+                            </div>
+                            <div className="data-table-responsive">
+                              <table className="data-table">
+                                <thead>
+                                  <tr>
+                                    <th>Strategy</th>
+                                    <th>Date</th>
+                                    <th>Status</th>
+                                    <th>Hits</th>
+                                    <th>Duration</th>
+                                    <th>Note</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {job.child_jobs.map((child) => (
+                                    <tr
+                                      key={child.job_run_id}
+                                      className={child.job_run_id === selectedChildJobId ? "is-selected-row" : ""}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setSelectedChildJobId(child.job_run_id);
+                                      }}
+                                    >
+                                      <td data-label="Strategy">{child.strategy_id || child.label}</td>
+                                      <td data-label="Date">{child.run_date || "-"}</td>
+                                      <td data-label="Status">
+                                        <StatusPill status={child.status} />
+                                      </td>
+                                      <td data-label="Hits">{child.success_count}</td>
+                                      <td data-label="Duration">{formatDuration(child.duration_seconds)}</td>
+                                      <td data-label="Note">{child.message || (child.skipped ? "Skipped" : "-")}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>,
+                    );
+                  }
+                  return rows;
+                })}
               </tbody>
             </table>
           </div>
           {hasError ? <p className="panel-copy">Latest job snapshot failed to refresh. Showing empty fallback.</p> : null}
-        </Panel>
-
-        <Panel
-          title="Child Jobs"
-          aside={
-            <div className="runs-panel-aside">
-              <span className="eyebrow">
-                {selectedJob?.child_jobs.length
-                  ? `${selectedJob.child_jobs.length} child jobs`
-                  : "Select warm batch job"}
-              </span>
-              {selectedChildJob ? <StatusPill status={selectedChildJob.status} /> : null}
-            </div>
-          }
-        >
-          {!selectedJob?.child_jobs.length ? <p className="panel-copy">No child jobs for selected parent job.</p> : null}
-          {selectedJob?.child_jobs.length ? (
-            <div className="data-table-responsive">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Strategy</th>
-                    <th>Date</th>
-                    <th>Status</th>
-                    <th>Hits</th>
-                    <th>Duration</th>
-                    <th>Note</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedJob.child_jobs.map((job) => (
-                    <tr
-                      key={job.job_run_id}
-                      className={job.job_run_id === selectedChildJobId ? "is-selected-row" : ""}
-                      onClick={() => setSelectedChildJobId(job.job_run_id)}
-                    >
-                      <td data-label="Strategy">{job.strategy_id || job.label}</td>
-                      <td data-label="Date">{job.run_date || "-"}</td>
-                      <td data-label="Status">
-                        <StatusPill status={job.status} />
-                      </td>
-                      <td data-label="Hits">{job.success_count}</td>
-                      <td data-label="Duration">{formatDuration(job.duration_seconds)}</td>
-                      <td data-label="Note">{job.message || (job.skipped ? "Skipped" : "-")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
         </Panel>
 
         <Panel
