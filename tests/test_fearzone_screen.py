@@ -92,3 +92,21 @@ class FearzoneScreenTests(unittest.TestCase):
             config=AppConfig(),
         )
         self.assertIsNone(hit)
+
+    def test_find_recent_fearzone_hit_keeps_recent_setup_after_pullback(self) -> None:
+        frame = _fearzone_frame()
+        signal_index = len(frame.index) - 5
+        signal_low = float(frame["Low"].iloc[signal_index])
+        frame.iloc[-1, frame.columns.get_loc("Close")] = signal_low - 0.5
+        frame.iloc[-1, frame.columns.get_loc("Open")] = signal_low + 0.2
+        frame.iloc[-1, frame.columns.get_loc("High")] = signal_low + 0.6
+        frame.iloc[-1, frame.columns.get_loc("Low")] = signal_low - 0.8
+
+        hit = find_recent_fearzone_hit(
+            frame,
+            ticker=UniverseTicker(symbol="AAPL"),
+            benchmark_ticker="SPY",
+            config=AppConfig(),
+        )
+
+        self.assertIsNotNone(hit)

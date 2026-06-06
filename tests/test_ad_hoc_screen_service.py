@@ -131,6 +131,29 @@ def _fearzone_frame() -> pd.DataFrame:
     )
 
 
+def _fearzone_zeiierman_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-01", periods=220, freq="B")
+    close = [100.0 + ((80.0 / 219.0) * idx) for idx in range(220)]
+    drop_offsets = [0.0, 6.1, 12.2, 18.3, 24.4, 30.5, 36.6, 42.7, 48.8, 55.0]
+    for position, offset in enumerate(drop_offsets, start=len(close) - len(drop_offsets)):
+        close[position] -= offset
+    open_values = [value * 1.002 for value in close]
+    high = [max(op, cl) + 1.0 for op, cl in zip(open_values, close, strict=False)]
+    low = [min(op, cl) - 1.0 for op, cl in zip(open_values, close, strict=False)]
+    volume = [1_250_000.0 for _ in close]
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": volume,
+        },
+        index=index,
+    )
+
+
 def _hve_frame() -> pd.DataFrame:
     index = pd.date_range(start="2025-01-02", periods=320, freq="B")
     open_values = [100.0 + (idx * 0.2) for idx in range(320)]
@@ -316,6 +339,28 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "fearzone")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_fearzone_zeiierman_catalog_entry(self) -> None:
+        ticker_frame = _fearzone_zeiierman_frame()
+        benchmark_frame = _frame("2025-01-01", 220)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 11, 4),
+                screener_ids=["fearzone_zeiierman"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "fearzone_zeiierman")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_supports_hve_catalog_entry(self) -> None:

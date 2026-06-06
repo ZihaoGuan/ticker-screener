@@ -82,6 +82,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("cup_handle", "cup_handle", "Cup Handle"),
         ("gap_fill", "gap_fill", "Gap Fill"),
         ("ftd_sweep", "ftd_sweep", "FTD Sweep"),
+        ("fearzone_zeiierman", "fearzone_zeiierman", "Fearzone Zeiierman"),
         ("fearzone", "fearzone", "Fearzone"),
         ("near_200ma", "near_200ma", "Near 200MA"),
         ("lost_21ema", "lost_21ema", "Lost 21EMA"),

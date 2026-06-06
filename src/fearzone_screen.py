@@ -137,12 +137,12 @@ def find_recent_fearzone_hit(
     in_fz2 = fz2_value < fz2_lower
 
     impulse_pct = ((bars["Close"] / bars["Close"].shift(impulse_lookback)) - 1.0) * 100.0
-    negative_impulse = impulse_pct <= (-abs(float(config.fearzone_negative_impulse_pct)))
+    negative_impulse = impulse_pct < (-abs(float(config.fearzone_negative_impulse_pct)))
 
     bar_range = bars["High"] - bars["Low"]
     range_floor = bars["Low"] + (bar_range * float(config.fearzone_ricochet_zone_pct))
     close_in_range_pct = np.where(bar_range > 0, ((bars["Close"] - bars["Low"]) / bar_range) * 100.0, np.nan)
-    in_ricochet_zone = bars["Close"] <= range_floor
+    in_ricochet_zone = bars["Close"] < range_floor
 
     slow_k = _compute_slow_k(frame=bars, k_length=int(config.fearzone_stochastic_k), d_length=int(config.fearzone_stochastic_d))
     magic_k1 = slow_k < float(config.fearzone_magic_k1_threshold)
@@ -163,11 +163,6 @@ def find_recent_fearzone_hit(
 
     latest_close = float(bars["Close"].iloc[-1])
     signal_low = float(bars["Low"].iloc[signal_position])
-    latest_ma200 = ma200.iloc[-1]
-    if latest_close < signal_low:
-        return None
-    if pd.isna(latest_ma200) or latest_close <= float(latest_ma200):
-        return None
 
     signal_triggers: list[str] = []
     if bool(negative_impulse.iloc[signal_position]):
@@ -186,7 +181,7 @@ def find_recent_fearzone_hit(
     if signal_age_bars == 0:
         reasons.append("signal fired on latest bar")
     else:
-        reasons.append(f"signal is {signal_age_bars} bar(s) old and still above signal low")
+        reasons.append(f"signal is {signal_age_bars} bar(s) old")
 
     avg_volume_20 = float(bars["Volume"].tail(20).mean())
     avg_dollar_volume_20 = float((bars["Close"] * bars["Volume"]).tail(20).mean())

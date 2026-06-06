@@ -69,6 +69,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("fearzone_{date_label}.json",),
         "legacy_summary_templates": ("fearzone_run_summary_{date_label}.json",),
     },
+    "fearzone_zeiierman": {
+        "stem_template": "fearzone_zeiierman_{date_label}",
+        "legacy_watchlist_templates": ("fearzone_zeiierman_{date_label}.json",),
+        "legacy_raw_templates": ("fearzone_zeiierman_{date_label}.json",),
+        "legacy_summary_templates": ("fearzone_zeiierman_run_summary_{date_label}.json",),
+    },
     "near_200ma": {
         "stem_template": "near_200ma_{date_label}",
         "legacy_watchlist_templates": ("near_200ma_{date_label}.json",),
@@ -135,6 +141,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("cup_handle", "cup_handle"),
     ("gap_fill", "gap_fill"),
     ("ftd_sweep", "ftd_sweep"),
+    ("fearzone_zeiierman", "fearzone_zeiierman"),
     ("fearzone", "fearzone"),
     ("near_200ma", "near_200ma"),
     ("lost_21ema", "lost_21ema"),

@@ -33,6 +33,10 @@ class AppConfig:
     fearzone_magic_k1_threshold: float = 30.0
     fearzone_ma_long_period: int = 200
     fearzone_recent_signal_lookback_days: int = 5
+    fearzone_zeiierman_high_period: int = 30
+    fearzone_zeiierman_stdev_period: int = 50
+    fearzone_zeiierman_ma_type: str = "WMA"
+    fearzone_zeiierman_recent_signal_lookback_days: int = 5
     ftd_sweep_history_days: int = 365
     ftd_sweep_pivot_lookback_left: int = 21
     ftd_sweep_pivot_lookback_right: int = 1
