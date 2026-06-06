@@ -102,9 +102,8 @@ class RunService:
     _strategy_ids_field = RunField(
         "strategy_ids",
         "Screeners",
-        "text",
-        placeholder="rs,vcp,fearzone",
-        help_text="Comma- or space-separated screener ids.",
+        "multiselect",
+        help_text="Choose one or more screener ids for warm or backtest runs.",
     )
     _overwrite_policy_field = RunField(
         "overwrite_policy",
@@ -883,6 +882,12 @@ class RunService:
         return catalog
 
     def _field_options(self, field: RunField, filter_catalog: dict[str, list[str]]) -> list[dict[str, str]]:
+        if field.field_id == "strategy_ids":
+            return [
+                {"value": action.action_id, "label": action.label}
+                for action in self._actions.values()
+                if action.visible_in_runs and action.action_id not in {"signal_warm_batch", "overlap_backtest_v1"}
+            ]
         if field.field_id.endswith("sectors"):
             return [{"value": value, "label": value} for value in filter_catalog.get("sectors", [])]
         if field.field_id.endswith("industries"):

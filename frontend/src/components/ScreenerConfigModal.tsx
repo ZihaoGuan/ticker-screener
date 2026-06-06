@@ -162,23 +162,26 @@ export function ScreenerConfigModal({
                     ))}
                   </select>
                 ) : field.type === "multiselect" ? (
-                  <select
-                    multiple
-                    value={Array.isArray(fieldValues[field.id]) ? fieldValues[field.id] : []}
-                    onChange={(e) =>
-                      handleFieldChange(
-                        field.id,
-                        Array.from(e.target.selectedOptions).map((opt) => opt.value),
-                      )
-                    }
-                    className="modal-select modal-multiselect"
-                  >
-                    {field.options.map((option: { value: string; label: string }) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <>
+                    <select
+                      multiple
+                      value={Array.isArray(fieldValues[field.id]) ? fieldValues[field.id] : []}
+                      onChange={(e) =>
+                        handleFieldChange(
+                          field.id,
+                          Array.from(e.target.selectedOptions).map((opt) => opt.value),
+                        )
+                      }
+                      className="modal-select modal-multiselect"
+                    >
+                      {field.options.map((option: { value: string; label: string }) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="field-help-text">Hold Cmd or Ctrl to select multiple.</span>
+                  </>
                 ) : (
                   <input
                     type={field.type}
