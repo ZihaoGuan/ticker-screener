@@ -17,6 +17,7 @@ class AppConfig:
     rs_new_high_history_days: int = 400
     rs_new_high_require_before_price: bool = True
     rs_weekly_recent_signal_weeks: int = 4
+    rs_rating_min: float = 90.0
     htf_history_days: int = 365
     htf_runup_window_days: int = 40
     htf_min_runup_pct: float = 100.0

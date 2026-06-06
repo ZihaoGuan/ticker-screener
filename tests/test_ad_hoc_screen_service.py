@@ -154,6 +154,38 @@ def _fearzone_zeiierman_frame() -> pd.DataFrame:
     )
 
 
+def _rs_rating_stock_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2024-01-01", periods=320, freq="B")
+    close = 50.0 + (150.0 * (pd.Series(range(320), index=index) / 319.0) ** 1.2)
+    return pd.DataFrame(
+        {
+            "Open": close * 0.998,
+            "High": close + 1.0,
+            "Low": close - 1.0,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": 1_250_000.0,
+        },
+        index=index,
+    )
+
+
+def _rs_rating_benchmark_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2024-01-01", periods=320, freq="B")
+    close = pd.Series([100.0 + ((5.0 / 319.0) * idx) for idx in range(320)], index=index)
+    return pd.DataFrame(
+        {
+            "Open": close,
+            "High": close,
+            "Low": close,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": 1_000_000.0,
+        },
+        index=index,
+    )
+
+
 def _hve_frame() -> pd.DataFrame:
     index = pd.date_range(start="2025-01-02", periods=320, freq="B")
     open_values = [100.0 + (idx * 0.2) for idx in range(320)]
@@ -383,6 +415,28 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "hve")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_rs_rating_catalog_entry(self) -> None:
+        ticker_frame = _rs_rating_stock_frame()
+        benchmark_frame = _rs_rating_benchmark_frame()
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 3, 21),
+                screener_ids=["rs_rating"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "rs_rating")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_supports_inside_dryup_catalog_entry(self) -> None:

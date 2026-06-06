@@ -8,6 +8,7 @@
   "rs_new_high_history_days": 400,
   "rs_new_high_require_before_price": true,
   "rs_weekly_recent_signal_weeks": 4,
+  "rs_rating_min": 90.0,
   "htf_history_days": 365,
   "htf_runup_window_days": 40,
   "htf_min_runup_pct": 100.0,
