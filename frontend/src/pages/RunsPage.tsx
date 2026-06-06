@@ -8,7 +8,15 @@ import { ScreenerConfigModal } from "../components/ScreenerConfigModal";
 import { StatusPill } from "../components/StatusPill";
 import { fetchJson } from "../lib/api";
 import { formatLocalDateTime } from "../lib/format";
-import type { JobsResponse, ScheduledJobConfig, ScheduledJobConfigResponse, ScheduledJobSummary } from "../lib/types";
+import type {
+  BacktestRunDetailV1,
+  BacktestRunsResponseV1,
+  JobsResponse,
+  OverlapWarmCoverageResponse,
+  ScheduledJobConfig,
+  ScheduledJobConfigResponse,
+  ScheduledJobSummary,
+} from "../lib/types";
 import "./RunsPage.css";
 
 export function RunsPage() {
@@ -54,6 +62,18 @@ export function RunsPage() {
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const [isSavingScheduleSettings, setIsSavingScheduleSettings] = useState(false);
   const [scheduleNotice, setScheduleNotice] = useState("");
+  const [warmStrategyIds, setWarmStrategyIds] = useState("");
+  const [warmFrom, setWarmFrom] = useState(isoDateDaysAgo(20));
+  const [warmTo, setWarmTo] = useState(isoDateDaysAgo(1));
+  const [warmThreshold, setWarmThreshold] = useState("4");
+  const [coveragePayload, setCoveragePayload] = useState<OverlapWarmCoverageResponse | null>(null);
+  const [isLoadingCoverage, setIsLoadingCoverage] = useState(false);
+  const [coverageNotice, setCoverageNotice] = useState("");
+  const [backtestsPayload, setBacktestsPayload] = useState<BacktestRunsResponseV1 | null>(null);
+  const [isLoadingBacktests, setIsLoadingBacktests] = useState(false);
+  const [selectedBacktestId, setSelectedBacktestId] = useState<number | null>(null);
+  const [selectedBacktest, setSelectedBacktest] = useState<BacktestRunDetailV1 | null>(null);
+  const [isLoadingBacktestDetail, setIsLoadingBacktestDetail] = useState(false);
 
   const refresh = () => {
     void fetchJson<JobsResponse>("/api/jobs")
@@ -129,6 +149,16 @@ export function RunsPage() {
       return;
     }
     setSelectedActionId((current) => current || payload.actions[0].id);
+    setWarmStrategyIds((current) => {
+      if (current.trim()) {
+        return current;
+      }
+      return payload.actions
+        .filter((item) => !["signal_warm_batch", "overlap_backtest_v1"].includes(item.id))
+        .slice(0, 4)
+        .map((item) => item.id)
+        .join(",");
+    });
   }, [payload]);
 
   useEffect(() => {
@@ -170,6 +200,65 @@ export function RunsPage() {
     }
     setLastSuggestedOptionsJson(suggestedScheduleOptionsJson);
   }, [lastSuggestedOptionsJson, scheduleActionId, scheduleOptionsJson, suggestedScheduleOptionsJson]);
+
+  useEffect(() => {
+    if (!warmStrategyIds.trim()) {
+      setCoveragePayload(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setIsLoadingCoverage(true);
+      setCoverageNotice("");
+      const query = new URLSearchParams({
+        from: warmFrom,
+        to: warmTo,
+        strategyIds: warmStrategyIds,
+        candidateThreshold: warmThreshold || "4",
+      });
+      void fetchJson<OverlapWarmCoverageResponse>(`/api/overlap-warm/coverage?${query.toString()}`)
+        .then((result) => setCoveragePayload(result))
+        .catch((error) => {
+          setCoveragePayload(null);
+          setCoverageNotice(error instanceof Error ? error.message : "Failed to load warm coverage.");
+        })
+        .finally(() => setIsLoadingCoverage(false));
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [warmFrom, warmStrategyIds, warmThreshold, warmTo]);
+
+  useEffect(() => {
+    setIsLoadingBacktests(true);
+    void fetchJson<BacktestRunsResponseV1>("/api/backtests-v1")
+      .then((result) => setBacktestsPayload(result))
+      .catch(() => setBacktestsPayload({ configured: false, runs: [] }))
+      .finally(() => setIsLoadingBacktests(false));
+  }, [payload]);
+
+  useEffect(() => {
+    if (!backtestsPayload?.runs?.length) {
+      setSelectedBacktestId(null);
+      setSelectedBacktest(null);
+      return;
+    }
+    setSelectedBacktestId((current) => {
+      if (current != null && backtestsPayload.runs.some((item) => item.id === current)) {
+        return current;
+      }
+      return backtestsPayload.runs[0].id;
+    });
+  }, [backtestsPayload]);
+
+  useEffect(() => {
+    if (selectedBacktestId == null) {
+      setSelectedBacktest(null);
+      return;
+    }
+    setIsLoadingBacktestDetail(true);
+    void fetchJson<BacktestRunDetailV1>(`/api/backtests-v1/${selectedBacktestId}`)
+      .then((result) => setSelectedBacktest(result))
+      .catch(() => setSelectedBacktest(null))
+      .finally(() => setIsLoadingBacktestDetail(false));
+  }, [selectedBacktestId]);
 
   const handleRunAction = async (params: Record<string, string | string[]>, actionId = selectedActionId) => {
     setIsRunning(true);
@@ -336,24 +425,35 @@ export function RunsPage() {
           <div className="screeners-grid">
             {(payload?.actions ?? []).map((action) => (
               <div key={action.id} className="screener-card">
+                {(() => {
+                  const configureOnly = ["signal_warm_batch", "overlap_backtest_v1"].includes(action.id);
+                  return (
+                    <>
                 <div className="screener-card-header">
                   <h3>{action.label}</h3>
                 </div>
                 <p className="screener-description">
-                  {action.fields.length > 0
+                  {configureOnly
+                    ? "Open config to choose date range and screener set."
+                    : action.fields.length > 0
                     ? "Run with defaults now, or open config for custom parameters."
                     : "Run immediately with the default screener settings."}
                 </p>
                 <div className="screener-card-actions">
-                  <button className="screener-run-button" onClick={() => void handleQuickRun(action.id)} type="button" disabled={isRunning}>
-                    RUN DEFAULT
-                  </button>
+                  {!configureOnly ? (
+                    <button className="screener-run-button" onClick={() => void handleQuickRun(action.id)} type="button" disabled={isRunning}>
+                      RUN DEFAULT
+                    </button>
+                  ) : null}
                   {action.fields.length > 0 ? (
                     <button className="screener-config-button" onClick={() => handleConfigureClick(action.id)} type="button" disabled={isRunning}>
-                      CONFIGURE
+                      {configureOnly ? "OPEN CONFIG" : "CONFIGURE"}
                     </button>
                   ) : null}
                 </div>
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -572,6 +672,167 @@ export function RunsPage() {
           </div>
         </Panel>
 
+        <Panel title="Warm Coverage" aside={<span className="eyebrow">{coveragePayload?.days.length ?? 0} dates</span>}>
+          <div className="run-params-grid">
+            <label className="field">
+              <span>Screeners</span>
+              <input type="text" value={warmStrategyIds} onChange={(event) => setWarmStrategyIds(event.target.value)} placeholder="rs,vcp,gap_fill,fearzone" />
+            </label>
+            <label className="field">
+              <span>From</span>
+              <input type="date" value={warmFrom} onChange={(event) => setWarmFrom(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>To</span>
+              <input type="date" value={warmTo} onChange={(event) => setWarmTo(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Threshold</span>
+              <input type="number" min={2} max={20} value={warmThreshold} onChange={(event) => setWarmThreshold(event.target.value)} />
+            </label>
+          </div>
+          {isLoadingCoverage ? <LoadingBlock label="Loading warm coverage…" compact /> : null}
+          {coverageNotice ? <p className="panel-copy">{coverageNotice}</p> : null}
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Screened</th>
+                  <th>Overlap</th>
+                  <th>4+</th>
+                  <th>Missing</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(coveragePayload?.days ?? []).map((day) => (
+                  <tr key={day.date}>
+                    <td data-label="Date">
+                      <Link className="table-action-button table-link-button" to={`/report?date=${encodeURIComponent(day.date)}`}>
+                        {day.date}
+                      </Link>
+                    </td>
+                    <td data-label="Screened">
+                      {day.screened_strategy_count}/{day.expected_strategy_count} · {day.screen_status}
+                    </td>
+                    <td data-label="Overlap">{day.overlap_ready ? "ready" : "pending"}</td>
+                    <td data-label="4+">{day.overlap_four_plus_count}</td>
+                    <td data-label="Missing">{day.missing_strategy_ids.join(", ") || "-"}</td>
+                  </tr>
+                ))}
+                {!isLoadingCoverage && (coveragePayload?.days.length ?? 0) === 0 ? (
+                  <tr>
+                    <td colSpan={5}>No warm coverage rows yet.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+
+        <Panel title="Backtest V1" aside={<span className="eyebrow">{backtestsPayload?.runs.length ?? 0} runs</span>}>
+          {isLoadingBacktests ? <LoadingBlock label="Loading backtests…" compact /> : null}
+          <p className="panel-copy">Entry uses same-day close when signal count is at least four.</p>
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Range</th>
+                  <th>Screeners</th>
+                  <th>Trades</th>
+                  <th>5D Avg</th>
+                  <th>10D Avg</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(backtestsPayload?.runs ?? []).map((run) => {
+                  const holds = run.summary?.holds ?? {};
+                  const avg5d = holds["5"]?.avg_return_pct;
+                  const avg10d = holds["10"]?.avg_return_pct;
+                  return (
+                    <tr key={run.id} className={run.id === selectedBacktestId ? "is-selected-row" : ""} onClick={() => setSelectedBacktestId(run.id)}>
+                      <td data-label="Created">{formatLocalDateTime(run.created_at)}</td>
+                      <td data-label="Range">{run.start_date} to {run.end_date}</td>
+                      <td data-label="Screeners">{run.strategy_ids_json.join(", ")}</td>
+                      <td data-label="Trades">{run.summary?.trade_count ?? 0}</td>
+                      <td data-label="5D Avg">{avg5d == null ? "-" : `${avg5d.toFixed(2)}%`}</td>
+                      <td data-label="10D Avg">{avg10d == null ? "-" : `${avg10d.toFixed(2)}%`}</td>
+                    </tr>
+                  );
+                })}
+                {!isLoadingBacktests && (backtestsPayload?.runs.length ?? 0) === 0 ? (
+                  <tr>
+                    <td colSpan={6}>No backtest runs yet.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          <div className="backtest-detail-grid">
+            <article className="metric-card">
+              <h3>Selected Run</h3>
+              <div className="metric-value">{selectedBacktest?.id ?? "-"}</div>
+              <p className="card-meta">{selectedBacktest?.strategy_ids_json?.join(", ") || "No run selected"}</p>
+            </article>
+            <article className="metric-card">
+              <h3>Trades</h3>
+              <div className="metric-value">{selectedBacktest?.summary?.trade_count ?? 0}</div>
+              <p className="card-meta">Threshold {selectedBacktest?.entry_signal_threshold ?? 4}</p>
+            </article>
+            <article className="metric-card">
+              <h3>5D Excess</h3>
+              <div className="metric-value">
+                {selectedBacktest?.summary?.holds?.["5"]?.avg_excess_return_pct == null ? "-" : `${selectedBacktest.summary.holds["5"].avg_excess_return_pct?.toFixed(2)}%`}
+              </div>
+            </article>
+            <article className="metric-card">
+              <h3>10D Excess</h3>
+              <div className="metric-value">
+                {selectedBacktest?.summary?.holds?.["10"]?.avg_excess_return_pct == null ? "-" : `${selectedBacktest.summary.holds["10"].avg_excess_return_pct?.toFixed(2)}%`}
+              </div>
+            </article>
+          </div>
+          {isLoadingBacktestDetail ? <LoadingBlock label="Loading backtest detail…" compact /> : null}
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Ticker</th>
+                  <th>Signals</th>
+                  <th>5D</th>
+                  <th>10D</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(selectedBacktest?.trades ?? []).slice(0, 20).map((trade) => {
+                  const hold5 = trade.hold_results_json["5"] as { return_pct?: number } | undefined;
+                  const hold10 = trade.hold_results_json["10"] as { return_pct?: number } | undefined;
+                  return (
+                    <tr key={`${trade.signal_date}-${trade.ticker}`}>
+                      <td data-label="Date">{trade.signal_date}</td>
+                      <td data-label="Ticker">
+                        <Link className="table-action-button table-link-button" to={`/charts?ticker=${encodeURIComponent(trade.ticker)}&date=${encodeURIComponent(trade.signal_date)}`}>
+                          {trade.ticker}
+                        </Link>
+                      </td>
+                      <td data-label="Signals">{trade.signal_count}</td>
+                      <td data-label="5D">{hold5?.return_pct == null ? "-" : `${hold5.return_pct.toFixed(2)}%`}</td>
+                      <td data-label="10D">{hold10?.return_pct == null ? "-" : `${hold10.return_pct.toFixed(2)}%`}</td>
+                    </tr>
+                  );
+                })}
+                {!isLoadingBacktestDetail && (selectedBacktest?.trades.length ?? 0) === 0 ? (
+                  <tr>
+                    <td colSpan={5}>No trade rows for selected run.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+
         <Panel title="Recent Screener Jobs">
           {isLoading && !payload ? <LoadingBlock label="Loading recent jobs…" /> : null}
           <div className="data-table-responsive">
@@ -663,6 +924,12 @@ export function RunsPage() {
   );
 }
 
+function isoDateDaysAgo(daysAgo: number): string {
+  const value = new Date();
+  value.setDate(value.getDate() - daysAgo);
+  return value.toISOString().slice(0, 10);
+}
+
 function buildScheduleOptionsTemplate(actionId: string): string {
   const sharedUniverseTemplate = {
     market_data_source: "database-first",
@@ -697,22 +964,28 @@ function buildScheduleOptionsTemplate(actionId: string): string {
       2,
     );
   }
-  if (actionId === "backtest_v1") {
+  if (actionId === "signal_warm_batch") {
     return JSON.stringify(
       {
-        entry_rule: {
-          mode: "min_count_same_day",
-          screener_ids: ["rs", "vcp"],
-          min_count: 2,
-        },
-        date_range: {
-          start_date: "2026-01-01",
-          end_date: "{{local_date}}",
-        },
-        exit_rules: [],
-        position_rules: {},
-        signal_cache_policy: "reuse_then_fill",
-        market_data_mode: "database_only",
+        strategy_ids: ["rs", "vcp", "gap_fill", "fearzone"],
+        start_date: "{{local_date_plus_14}}",
+        end_date: "{{local_date}}",
+        market_data_source: "database-first",
+        overwrite_policy: "skip_existing",
+        candidate_threshold: 4,
+      },
+      null,
+      2,
+    );
+  }
+  if (actionId === "overlap_backtest_v1") {
+    return JSON.stringify(
+      {
+        strategy_ids: ["rs", "vcp", "gap_fill", "fearzone"],
+        start_date: "{{local_date_plus_14}}",
+        end_date: "{{local_date}}",
+        entry_signal_threshold: 4,
+        hold_periods_json: "[5, 10]",
       },
       null,
       2,

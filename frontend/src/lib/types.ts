@@ -14,7 +14,6 @@ export type RoleName = "visitor" | "premium" | "admin";
 export type CapabilityName =
   | "view_results"
   | "run_screeners"
-  | "run_backtests"
   | "manage_exclusions"
   | "sync_history"
   | "manage_users";
@@ -148,7 +147,6 @@ export type DashboardResponse = {
     artifacts_dir: string;
     latest_sync_at: string | null;
     screen_run_count: number | null;
-    backtest_run_count: number | null;
   };
   recent_watchlists: WatchlistFile[];
   strategy_cards: StrategyCard[];
@@ -531,6 +529,81 @@ export type SignalCacheCalendarResponse = {
   days: SignalCacheCalendarDay[];
 };
 
+export type OverlapWarmCoverageDay = {
+  date: string;
+  expected_strategy_count: number;
+  screened_strategy_count: number;
+  screened_strategy_ids: string[];
+  missing_strategy_ids: string[];
+  screen_status: "none" | "partial" | "complete";
+  overlap_ready: boolean;
+  candidate_count: number;
+  overlap_two_plus_count: number;
+  overlap_three_plus_count: number;
+  overlap_four_plus_count: number;
+  overlap_run_id?: number | null;
+  updated_at?: string | null;
+};
+
+export type OverlapWarmCoverageResponse = {
+  configured: boolean;
+  from: string;
+  to: string;
+  strategy_ids: string[];
+  candidate_threshold: number;
+  days: OverlapWarmCoverageDay[];
+};
+
+export type BacktestHoldSummary = {
+  trade_count: number;
+  avg_return_pct?: number | null;
+  median_return_pct?: number | null;
+  win_rate_pct?: number | null;
+  avg_spy_return_pct?: number | null;
+  avg_excess_return_pct?: number | null;
+};
+
+export type BacktestRunSummaryV1 = {
+  id: number;
+  strategy_id: string;
+  strategy_set_key: string;
+  strategy_ids_json: string[];
+  start_date: string;
+  end_date: string;
+  parameters: Record<string, unknown>;
+  summary: {
+    trade_count?: number;
+    holds?: Record<string, BacktestHoldSummary>;
+  };
+  job_run_id?: number | null;
+  hold_periods_json?: number[];
+  entry_signal_threshold?: number;
+  artifact_path?: string | null;
+  created_at: string;
+};
+
+export type BacktestTradeV1 = {
+  id: number;
+  signal_date: string;
+  ticker: string;
+  signal_count: number;
+  contributing_strategies_json: string[];
+  entry_date: string;
+  entry_price: number;
+  hold_results_json: Record<string, unknown>;
+  metadata_json: Record<string, unknown>;
+  created_at?: string | null;
+};
+
+export type BacktestRunDetailV1 = BacktestRunSummaryV1 & {
+  trades: BacktestTradeV1[];
+};
+
+export type BacktestRunsResponseV1 = {
+  configured: boolean;
+  runs: BacktestRunSummaryV1[];
+};
+
 export type ScreenerRunHit = {
   id: number;
   strategy_id: string;
@@ -573,39 +646,6 @@ export type ScreenerRunsResponse = {
   runs: ScreenerRunSummary[];
   coverage: SignalCacheCoverage[];
   available_strategies: Array<{ id: string; label: string }>;
-};
-
-export type BacktestRunSummary = {
-  id: number;
-  strategy_id: string;
-  start_date: string;
-  end_date: string;
-  parameters: Record<string, unknown>;
-  summary: {
-    entry_count?: number;
-    signal_count?: number;
-    partial?: boolean;
-    results_by_rule?: Record<string, { trade_count: number; avg_return_pct: number | null; median_return_pct: number | null; win_rate_pct: number | null }>;
-  };
-  html_report_path: string;
-  json_report_path: string;
-  job_run_id?: number | null;
-  created_at?: string;
-};
-
-export type BacktestsResponse = {
-  backtest_templates: Array<{
-    label: string;
-    description: string;
-    entry_rule: { mode: "min_count_same_day"; screener_ids: string[]; min_count: number };
-    exit_rules: Array<Record<string, unknown>>;
-    signal_cache_policy: "reuse_then_fill" | "reuse_only";
-    market_data_mode: "database_only";
-  }>;
-  backtest_runs: BacktestRunSummary[];
-  signal_cache: SignalCacheCoverage[];
-  available_strategies: Array<{ id: string; label: string }>;
-  default_exit_rules: Array<Record<string, unknown>>;
 };
 
 export type ScheduledJobStatus = "running" | "success" | "failed" | "unknown";

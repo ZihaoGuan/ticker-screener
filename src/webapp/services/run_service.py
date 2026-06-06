@@ -97,6 +97,42 @@ class RunService:
         help_text="Choose whether screeners pull directly from the internet or prefer Postgres daily_bars and fall back to the internet if needed.",
         options=(("internet", "Internet"), ("database-first", "Database First, Fallback to Internet")),
     )
+    _start_date_field = RunField("start_date", "Start Date", "date")
+    _end_date_field = RunField("end_date", "End Date", "date")
+    _strategy_ids_field = RunField(
+        "strategy_ids",
+        "Screeners",
+        "text",
+        placeholder="rs,vcp,fearzone",
+        help_text="Comma- or space-separated screener ids.",
+    )
+    _overwrite_policy_field = RunField(
+        "overwrite_policy",
+        "Overwrite Policy",
+        "select",
+        options=(("skip_existing", "Skip Existing"), ("overwrite", "Overwrite")),
+    )
+    _candidate_threshold_field = RunField(
+        "candidate_threshold",
+        "Candidate Threshold",
+        "number",
+        placeholder="4",
+        help_text="Minimum same-day signal count for overlap candidates.",
+    )
+    _entry_signal_threshold_field = RunField(
+        "entry_signal_threshold",
+        "Entry Threshold",
+        "number",
+        placeholder="4",
+        help_text="Minimum same-day signal count for entries.",
+    )
+    _hold_periods_json_field = RunField(
+        "hold_periods_json",
+        "Hold Periods JSON",
+        "text",
+        placeholder="[5, 10]",
+        help_text="Trading-day hold list as JSON array.",
+    )
     _filter_precedence_field = RunField(
         "filter_precedence",
         "Filter Precedence",
@@ -118,12 +154,32 @@ class RunService:
             supports_limit=False,
             visible_in_runs=False,
         ),
-        "backtest_v1": RunAction(
-            "backtest_v1",
-            "Run Backtest",
-            "scripts/run_backtest.py",
+        "signal_warm_batch": RunAction(
+            "signal_warm_batch",
+            "Warm Signals + Overlap",
+            "scripts/run_signal_warm_batch.py",
             supports_limit=False,
-            visible_in_runs=False,
+            fields=(
+                _strategy_ids_field,
+                _start_date_field,
+                _end_date_field,
+                _market_data_source_field,
+                _overwrite_policy_field,
+                _candidate_threshold_field,
+            ),
+        ),
+        "overlap_backtest_v1": RunAction(
+            "overlap_backtest_v1",
+            "Run Overlap Backtest V1",
+            "scripts/run_overlap_backtest_v1.py",
+            supports_limit=False,
+            fields=(
+                _strategy_ids_field,
+                _start_date_field,
+                _end_date_field,
+                _entry_signal_threshold_field,
+                _hold_periods_json_field,
+            ),
         ),
         "sync_postgres_market_data": RunAction(
             "sync_postgres_market_data",
@@ -682,6 +738,12 @@ class RunService:
             command.extend(["--overwrite-policy", str(normalized_options["overwrite_policy"])])
         if normalized_options.get("scope_json"):
             command.extend(["--scope-json", str(normalized_options["scope_json"])])
+        if normalized_options.get("candidate_threshold") is not None:
+            command.extend(["--candidate-threshold", str(normalized_options["candidate_threshold"])])
+        if normalized_options.get("entry_signal_threshold") is not None:
+            command.extend(["--entry-signal-threshold", str(normalized_options["entry_signal_threshold"])])
+        if normalized_options.get("hold_periods_json"):
+            command.extend(["--hold-periods-json", str(normalized_options["hold_periods_json"])])
         if normalized_options.get("entry_rule_json"):
             command.extend(["--entry-rule-json", str(normalized_options["entry_rule_json"])])
         if normalized_options.get("date_range_json"):
@@ -696,7 +758,7 @@ class RunService:
             command.extend(["--market-data-mode", str(normalized_options["market_data_mode"])])
         if action_id == "screener_history_batch" and normalized_options.get("market_data_source"):
             command.extend(["--market-data-source", str(normalized_options["market_data_source"])])
-        if action_id in {"screener_history_batch", "backtest_v1"} and normalized_options.get("job_run_id") is not None:
+        if action_id == "screener_history_batch" and normalized_options.get("job_run_id") is not None:
             command.extend(["--job-run-id", str(normalized_options["job_run_id"])])
         if normalized_options.get("filter_precedence"):
             command.extend(["--filter-precedence", str(normalized_options["filter_precedence"])])
@@ -748,7 +810,7 @@ class RunService:
             if isinstance(value, str) and value.strip():
                 normalized[key] = value.strip()
 
-        for key in ("chunk_size",):
+        for key in ("chunk_size", "candidate_threshold", "entry_signal_threshold"):
             value = options.get(key)
             if value in (None, ""):
                 continue
@@ -774,11 +836,18 @@ class RunService:
                 if normalized_values:
                     normalized[key] = normalized_values
 
+        strategy_ids: list[str] = []
         if isinstance(options.get("strategy_ids"), list):
             strategy_ids = [str(item).strip() for item in options["strategy_ids"] if str(item).strip()]
-            if strategy_ids:
-                normalized["strategy_ids"] = strategy_ids
-                normalized["strategy_ids_json"] = json.dumps(strategy_ids)
+        elif isinstance(options.get("strategy_ids"), str) and options["strategy_ids"].strip():
+            strategy_ids = [item.strip() for item in re.split(r"[\s,]+", str(options["strategy_ids"]).strip()) if item.strip()]
+        if strategy_ids:
+            normalized["strategy_ids"] = strategy_ids
+            normalized["strategy_ids_json"] = json.dumps(strategy_ids)
+
+        hold_periods_json = options.get("hold_periods_json")
+        if isinstance(hold_periods_json, str) and hold_periods_json.strip():
+            normalized["hold_periods_json"] = hold_periods_json.strip()
 
         for key, fallback in (
             ("scope", {}),
@@ -928,6 +997,9 @@ class RunService:
         raw_results_file = payload.get("raw_results_file")
         if isinstance(raw_results_file, str) and raw_results_file.strip():
             job["raw_results_file"] = raw_results_file.strip()
+        backtest_run_id = payload.get("backtest_run_id")
+        if isinstance(backtest_run_id, int):
+            job["backtest_run_id"] = backtest_run_id
 
     def _serialize_job(self, job: dict[str, Any]) -> dict[str, Any]:
         duration_seconds = self._job_duration_seconds(job)
@@ -986,10 +1058,10 @@ class RunService:
         return watchlist_stem_from_path(watchlist_file.strip())
 
     def _job_type_for_action(self, action_id: str) -> str:
-        if action_id in {"screener_history_batch"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch"}:
             return "screen_cache_batch"
-        if action_id in {"backtest_v1"}:
-            return "backtest"
+        if action_id in {"overlap_backtest_v1"}:
+            return "backtest_run"
         if action_id in {"sync_postgres_market_data"}:
             return "admin_sync"
         return "screen_run"
@@ -1019,7 +1091,7 @@ class RunService:
         if str(job.get("status")) != "success":
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "sync_postgres_market_data"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "overlap_backtest_v1"}:
             return
         summary_file = str(job.get("summary_file") or "").strip()
         if not summary_file:
@@ -1030,9 +1102,6 @@ class RunService:
         try:
             summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
         except Exception:
-            return
-        if action_id == "backtest_v1":
-            self._persist_backtest_job(job, summary_payload)
             return
         raw_results_file = str(summary_payload.get("raw_results_file") or job.get("raw_results_file") or "").strip()
         if not raw_results_file:
@@ -1057,20 +1126,11 @@ class RunService:
                 if live is not None:
                     live["screen_run_id"] = screen_run_id
 
-    def _persist_backtest_job(self, job: dict[str, Any], summary_payload: dict[str, Any]) -> None:
-        backtest_run_id = summary_payload.get("backtest_run_id")
-        if backtest_run_id is None:
-            return
-        with self._jobs_lock:
-            live = self._jobs_by_id.get(str(job.get("job_id") or ""))
-            if live is not None:
-                live["backtest_run_id"] = backtest_run_id
-
     def _attach_child_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         parent_job_run_ids = [
             int(job["job_run_id"])
             for job in jobs
-            if job.get("action_id") == "screener_history_batch" and isinstance(job.get("job_run_id"), int)
+            if job.get("action_id") in {"screener_history_batch", "signal_warm_batch"} and isinstance(job.get("job_run_id"), int)
         ]
         if not parent_job_run_ids:
             return jobs

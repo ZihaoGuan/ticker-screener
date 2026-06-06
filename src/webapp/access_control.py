@@ -13,7 +13,6 @@ ROLE_ADMIN = "admin"
 
 CAP_VIEW_RESULTS = "view_results"
 CAP_RUN_SCREENERS = "run_screeners"
-CAP_RUN_BACKTESTS = "run_backtests"
 CAP_MANAGE_EXCLUSIONS = "manage_exclusions"
 CAP_SYNC_HISTORY = "sync_history"
 CAP_MANAGE_USERS = "manage_users"
@@ -24,7 +23,6 @@ ROLE_CAPABILITIES: dict[RoleName, tuple[CapabilityName, ...]] = {
     ROLE_ADMIN: (
         CAP_VIEW_RESULTS,
         CAP_RUN_SCREENERS,
-        CAP_RUN_BACKTESTS,
         CAP_MANAGE_EXCLUSIONS,
         CAP_SYNC_HISTORY,
         CAP_MANAGE_USERS,

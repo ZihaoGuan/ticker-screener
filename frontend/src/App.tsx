@@ -5,7 +5,6 @@ import { RoleRoute } from "./auth/RoleRoute";
 import { useAuth } from "./auth/AuthContext";
 import { LoadingBlock } from "./components/LoadingBlock";
 import { AdminPage } from "./pages/AdminPage";
-import { BacktestsPage } from "./pages/BacktestsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EarningsPage } from "./pages/EarningsPage";
 import { GuidePage } from "./pages/GuidePage";
@@ -86,14 +85,6 @@ export default function App() {
           }
         />
         <Route path="/overlap" element={<Navigate to="/report" replace />} />
-        <Route
-          path="/backtests"
-          element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
-              <BacktestsPage />
-            </RoleRoute>
-          }
-        />
         <Route
           path="/portfolio"
           element={

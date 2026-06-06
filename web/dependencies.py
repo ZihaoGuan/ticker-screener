@@ -6,7 +6,6 @@ from fastapi.templating import Jinja2Templates
 from src.webapp.access_control import (
     CAP_MANAGE_EXCLUSIONS,
     CAP_MANAGE_USERS,
-    CAP_RUN_BACKTESTS,
     CAP_RUN_SCREENERS,
     CAP_SYNC_HISTORY,
     Principal,
@@ -22,9 +21,9 @@ from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.admin_service import AdminService
 from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.audit_service import AuditService
-from src.webapp.services.backtest_service import BacktestService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
+from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.portfolio_service import PortfolioService
 from src.webapp.services.rrg_service import RrgService
@@ -75,12 +74,12 @@ def get_screener_history_service() -> ScreenerHistoryService:
     return ScreenerHistoryService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
 
 
-def get_backtest_service() -> BacktestService:
-    return BacktestService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
-
-
 def get_overlap_service() -> OverlapService:
     return OverlapService(artifacts_dir=config.artifacts_dir)
+
+
+def get_overlap_backtest_service() -> OverlapBacktestService:
+    return OverlapBacktestService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
 
 
 def get_portfolio_service() -> PortfolioService:
@@ -173,10 +172,6 @@ def require_run_screeners(principal: Principal = Depends(require_capability(CAP_
 
 
 def require_member_access(principal: Principal = Depends(require_roles(ROLE_PREMIUM, ROLE_ADMIN))) -> Principal:
-    return principal
-
-
-def require_run_backtests(principal: Principal = Depends(require_capability(CAP_RUN_BACKTESTS))) -> Principal:
     return principal
 
 

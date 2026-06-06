@@ -115,6 +115,13 @@
   gap: 12px;
 }
 
+.backtest-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
 @media (max-width: 768px) {
   .screeners-grid {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

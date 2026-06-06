@@ -9,10 +9,10 @@ from fastapi.responses import JSONResponse
 from src.webapp.access_control import Principal
 from src.webapp.services.admin_service import AdminService
 from src.webapp.services.audit_service import AuditService
-from src.webapp.services.backtest_service import BacktestService, DEFAULT_EXIT_RULES
 from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
+from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.portfolio_service import PortfolioService
 from src.webapp.services.rrg_service import RrgService
@@ -27,11 +27,11 @@ from web.dependencies import (
     clear_auth_cookie,
     config,
     get_audit_service,
-    get_backtest_service,
     get_auth_service,
     get_current_principal,
     get_dashboard_service,
     get_earnings_calendar_service,
+    get_overlap_backtest_service,
     get_overlap_service,
     get_portfolio_service,
     get_rrg_service,
@@ -43,7 +43,6 @@ from web.dependencies import (
     require_member_access,
     require_manage_exclusions,
     require_manage_users,
-    require_run_backtests,
     require_run_screeners,
     require_sync_history,
     set_auth_cookie,
@@ -419,7 +418,7 @@ def soft_delete_screener_run(
     run_id: int,
     payload: dict[str, object] | None = Body(default=None),
     service: ScreenerHistoryService = Depends(get_screener_history_service),
-    principal: Principal = Depends(require_run_backtests),
+    principal: Principal = Depends(require_run_screeners),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
@@ -445,7 +444,7 @@ def launch_screener_history_batch(
     request: Request,
     payload: dict[str, object] | None = Body(default=None),
     service: RunService = Depends(get_run_service),
-    principal: Principal = Depends(require_run_backtests),
+    principal: Principal = Depends(require_run_screeners),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
@@ -480,6 +479,71 @@ def launch_screener_history_batch(
         metadata={"job_id": job_id, **options},
     )
     return JSONResponse({"ok": True, "job_id": job_id})
+
+
+@router.get("/overlap-warm/coverage", response_class=JSONResponse)
+def overlap_warm_coverage(
+    from_date: str = Query(alias="from"),
+    to_date: str = Query(alias="to"),
+    strategy_ids_raw: list[str] | None = Query(default=None, alias="strategyIds"),
+    candidate_threshold: int = Query(default=4, alias="candidateThreshold", ge=2, le=20),
+    service: OverlapBacktestService = Depends(get_overlap_backtest_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    try:
+        start_date = dt.date.fromisoformat(from_date)
+        end_date = dt.date.fromisoformat(to_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="from and to must be YYYY-MM-DD") from exc
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="to must be on or after from")
+    strategy_ids: list[str] = []
+    for item in strategy_ids_raw or []:
+        for part in str(item).split(","):
+            normalized = part.strip()
+            if normalized and normalized not in strategy_ids:
+                strategy_ids.append(normalized)
+    if not strategy_ids:
+        raise HTTPException(status_code=400, detail="strategyIds is required")
+    days = service.list_overlap_coverage(
+        strategy_ids=strategy_ids,
+        start_date=start_date,
+        end_date=end_date,
+        candidate_threshold=candidate_threshold,
+    )
+    return JSONResponse(
+        jsonable_encoder(
+            {
+                "configured": service.is_configured(),
+                "from": start_date.isoformat(),
+                "to": end_date.isoformat(),
+                "strategy_ids": strategy_ids,
+                "candidate_threshold": candidate_threshold,
+                "days": days,
+            }
+        )
+    )
+
+
+@router.get("/backtests-v1", response_class=JSONResponse)
+def backtests_v1(
+    limit: int = Query(default=20, ge=1, le=100),
+    service: OverlapBacktestService = Depends(get_overlap_backtest_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    return JSONResponse({"configured": service.is_configured(), "runs": jsonable_encoder(service.list_backtest_runs(limit=limit))})
+
+
+@router.get("/backtests-v1/{run_id}", response_class=JSONResponse)
+def backtest_v1_detail(
+    run_id: int,
+    service: OverlapBacktestService = Depends(get_overlap_backtest_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    payload = service.get_backtest_run(run_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Unknown backtest run: {run_id}")
+    return JSONResponse(jsonable_encoder(payload))
 
 
 @router.get("/watchlists", response_class=JSONResponse)
@@ -604,70 +668,6 @@ def overlap_by_date(
     _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     return JSONResponse(service.get_summary(date_label))
-
-
-@router.get("/backtests", response_class=JSONResponse)
-def backtests_data(
-    service: BacktestService = Depends(get_backtest_service),
-    history_service: ScreenerHistoryService = Depends(get_screener_history_service),
-    run_service: RunService = Depends(get_run_service),
-    _: Principal = Depends(require_member_access),
-) -> JSONResponse:
-    return JSONResponse(
-        jsonable_encoder(
-            {
-                "backtest_templates": service.default_templates(),
-                "backtest_runs": service.list_runs(limit=20),
-                "signal_cache": history_service.list_signal_cache_summary(),
-                "available_strategies": [{"id": item["id"], "label": item["label"]} for item in run_service.list_actions()],
-                "default_exit_rules": DEFAULT_EXIT_RULES,
-            }
-        )
-    )
-
-
-@router.post("/backtests", response_class=JSONResponse)
-def launch_backtest(
-    request: Request,
-    payload: dict[str, object] | None = Body(default=None),
-    service: RunService = Depends(get_run_service),
-    principal: Principal = Depends(require_run_backtests),
-    audit_service: AuditService = Depends(get_audit_service),
-) -> JSONResponse:
-    request_payload = payload or {}
-    entry_rule = request_payload.get("entry_rule")
-    date_range = request_payload.get("date_range")
-    exit_rules = request_payload.get("exit_rules")
-    position_rules = request_payload.get("position_rules")
-    if not isinstance(entry_rule, dict):
-        raise HTTPException(status_code=400, detail="entry_rule must be an object")
-    if not isinstance(date_range, dict):
-        raise HTTPException(status_code=400, detail="date_range must be an object")
-    if exit_rules is not None and not isinstance(exit_rules, list):
-        raise HTTPException(status_code=400, detail="exit_rules must be an array")
-    if position_rules is not None and not isinstance(position_rules, dict):
-        raise HTTPException(status_code=400, detail="position_rules must be an object")
-    options = {
-        "entry_rule": entry_rule,
-        "date_range": date_range,
-        "exit_rules": list(exit_rules or DEFAULT_EXIT_RULES),
-        "position_rules": dict(position_rules or {}),
-        "signal_cache_policy": str(request_payload.get("signal_cache_policy") or "reuse_then_fill"),
-        "market_data_mode": str(request_payload.get("market_data_mode") or "database_only"),
-    }
-    job_id = service.launch("backtest_v1", options=options)
-    _record_audit(
-        audit_service=audit_service,
-        principal=principal,
-        request=request,
-        action="backtests.launch",
-        resource_type="run_job",
-        resource_id=job_id,
-        resource_label="backtest_v1",
-        message="Queued backtest run.",
-        metadata={"job_id": job_id, **options},
-    )
-    return JSONResponse({"ok": True, "job_id": job_id})
 
 
 @router.get("/admin/exclusions", response_class=JSONResponse)

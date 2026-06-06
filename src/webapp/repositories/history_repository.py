@@ -447,64 +447,6 @@ class HistoryRepository:
                 cursor.execute(sql, tuple(params))
                 return self._rows_to_dicts(cursor, cursor.fetchall())
 
-    def list_backtest_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
-        connection = self._connect()
-        if connection is None:
-            return []
-        sql = """
-            SELECT id, strategy_id, start_date, end_date, parameters, summary,
-                   html_report_path, json_report_path, job_run_id, created_at
-            FROM backtest_runs
-            ORDER BY created_at DESC, id DESC
-            LIMIT %s
-        """
-        with connection:
-            with connection.cursor() as cursor:
-                cursor.execute(sql, (max(1, int(limit)),))
-                return self._rows_to_dicts(cursor, cursor.fetchall())
-
-    def create_backtest_run(
-        self,
-        *,
-        strategy_id: str,
-        start_date: dt.date,
-        end_date: dt.date,
-        parameters: dict[str, Any],
-        summary: dict[str, Any],
-        html_report_path: str,
-        json_report_path: str,
-        job_run_id: int | None,
-    ) -> int | None:
-        connection = self._connect()
-        if connection is None:
-            return None
-        sql = """
-            INSERT INTO backtest_runs (
-                strategy_id, start_date, end_date, parameters, summary,
-                html_report_path, json_report_path, job_run_id
-            )
-            VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
-            RETURNING id
-        """
-        with connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    sql,
-                    (
-                        strategy_id,
-                        start_date,
-                        end_date,
-                        json.dumps(parameters),
-                        json.dumps(summary),
-                        html_report_path,
-                        json_report_path,
-                        job_run_id,
-                    ),
-                )
-                row = cursor.fetchone()
-            connection.commit()
-        return int(row[0]) if row else None
-
     def rewrite_screen_run_artifact_paths(self, path_map: dict[str, str]) -> int:
         if not path_map:
             return 0
@@ -526,3 +468,325 @@ class HistoryRepository:
                     updated += int(cursor.rowcount or 0)
             connection.commit()
         return updated
+
+    def upsert_overlap_run(
+        self,
+        *,
+        run_date: dt.date,
+        strategy_set_key: str,
+        strategy_ids: list[str],
+        market_data_mode: str,
+        candidate_threshold: int,
+        source_job_run_id: int | None,
+        artifact_path: str,
+        summary_json: dict[str, Any],
+    ) -> int | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            INSERT INTO overlap_runs (
+                run_date,
+                strategy_set_key,
+                strategy_ids_json,
+                market_data_mode,
+                candidate_threshold,
+                source_job_run_id,
+                artifact_path,
+                summary_json
+            )
+            VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s::jsonb)
+            ON CONFLICT (run_date, strategy_set_key, candidate_threshold)
+            DO UPDATE SET
+                strategy_ids_json = EXCLUDED.strategy_ids_json,
+                market_data_mode = EXCLUDED.market_data_mode,
+                source_job_run_id = EXCLUDED.source_job_run_id,
+                artifact_path = EXCLUDED.artifact_path,
+                summary_json = EXCLUDED.summary_json
+            RETURNING id
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql,
+                    (
+                        run_date,
+                        strategy_set_key,
+                        json.dumps(strategy_ids),
+                        market_data_mode,
+                        candidate_threshold,
+                        source_job_run_id,
+                        artifact_path,
+                        json.dumps(summary_json),
+                    ),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+        return int(row[0]) if row else None
+
+    def replace_overlap_run_members(self, overlap_run_id: int | None, rows: list[dict[str, Any]]) -> None:
+        if overlap_run_id is None:
+            return
+        connection = self._connect()
+        if connection is None:
+            return
+        delete_sql = "DELETE FROM overlap_run_members WHERE overlap_run_id = %s"
+        insert_sql = """
+            INSERT INTO overlap_run_members (
+                overlap_run_id, run_date, ticker, signal_count, contributing_strategies_json, metadata_json
+            )
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb)
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(delete_sql, (overlap_run_id,))
+                for row in rows:
+                    cursor.execute(
+                        insert_sql,
+                        (
+                            overlap_run_id,
+                            row["run_date"],
+                            row["ticker"],
+                            row["signal_count"],
+                            json.dumps(row.get("contributing_strategies_json") or []),
+                            json.dumps(row.get("metadata_json") or {}),
+                        ),
+                    )
+            connection.commit()
+
+    def list_overlap_runs(
+        self,
+        *,
+        strategy_set_key: str = "",
+        start_date: dt.date | None = None,
+        end_date: dt.date | None = None,
+        candidate_threshold: int | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        where = ["1=1"]
+        params: list[Any] = []
+        if strategy_set_key:
+            where.append("strategy_set_key = %s")
+            params.append(strategy_set_key)
+        if start_date is not None:
+            where.append("run_date >= %s")
+            params.append(start_date)
+        if end_date is not None:
+            where.append("run_date <= %s")
+            params.append(end_date)
+        if candidate_threshold is not None:
+            where.append("candidate_threshold = %s")
+            params.append(candidate_threshold)
+        sql = f"""
+            SELECT id, run_date, strategy_set_key, strategy_ids_json, market_data_mode,
+                   candidate_threshold, source_job_run_id, artifact_path, summary_json, created_at
+            FROM overlap_runs
+            WHERE {" AND ".join(where)}
+            ORDER BY run_date DESC, id DESC
+            LIMIT %s
+        """
+        params.append(max(1, int(limit)))
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, tuple(params))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def list_overlap_run_members(
+        self,
+        *,
+        overlap_run_id: int | None = None,
+        start_date: dt.date | None = None,
+        end_date: dt.date | None = None,
+        min_signal_count: int | None = None,
+        strategy_set_key: str = "",
+    ) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        where = ["1=1"]
+        params: list[Any] = []
+        join = ""
+        if overlap_run_id is not None:
+            where.append("members.overlap_run_id = %s")
+            params.append(overlap_run_id)
+        if start_date is not None:
+            where.append("members.run_date >= %s")
+            params.append(start_date)
+        if end_date is not None:
+            where.append("members.run_date <= %s")
+            params.append(end_date)
+        if min_signal_count is not None:
+            where.append("members.signal_count >= %s")
+            params.append(min_signal_count)
+        if strategy_set_key:
+            join = "JOIN overlap_runs runs ON runs.id = members.overlap_run_id"
+            where.append("runs.strategy_set_key = %s")
+            params.append(strategy_set_key)
+        sql = f"""
+            SELECT members.id, members.overlap_run_id, members.run_date, members.ticker,
+                   members.signal_count, members.contributing_strategies_json, members.metadata_json,
+                   members.created_at
+            FROM overlap_run_members members
+            {join}
+            WHERE {" AND ".join(where)}
+            ORDER BY members.run_date DESC, members.signal_count DESC, members.ticker ASC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, tuple(params))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def create_backtest_run(
+        self,
+        *,
+        strategy_id: str,
+        strategy_set_key: str,
+        strategy_ids: list[str],
+        start_date: dt.date,
+        end_date: dt.date,
+        parameters: dict[str, Any],
+        summary: dict[str, Any],
+        job_run_id: int | None,
+        artifact_path: str = "",
+        html_report_path: str = "",
+        json_report_path: str = "",
+    ) -> int | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            INSERT INTO backtest_runs (
+                strategy_id,
+                strategy_set_key,
+                strategy_ids_json,
+                start_date,
+                end_date,
+                parameters,
+                summary,
+                html_report_path,
+                json_report_path,
+                job_run_id,
+                hold_periods_json,
+                entry_signal_threshold,
+                artifact_path
+            )
+            VALUES (
+                %s, %s, %s::jsonb, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s::jsonb, %s, %s
+            )
+            RETURNING id
+        """
+        hold_periods = parameters.get("hold_periods") if isinstance(parameters.get("hold_periods"), list) else [5, 10]
+        threshold = int(parameters.get("entry_signal_threshold") or 4)
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql,
+                    (
+                        strategy_id,
+                        strategy_set_key,
+                        json.dumps(strategy_ids),
+                        start_date,
+                        end_date,
+                        json.dumps(parameters),
+                        json.dumps(summary),
+                        html_report_path,
+                        json_report_path,
+                        job_run_id,
+                        json.dumps(hold_periods),
+                        threshold,
+                        artifact_path,
+                    ),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+        return int(row[0]) if row else None
+
+    def replace_backtest_run_trades(self, backtest_run_id: int | None, rows: list[dict[str, Any]]) -> None:
+        if backtest_run_id is None:
+            return
+        connection = self._connect()
+        if connection is None:
+            return
+        delete_sql = "DELETE FROM backtest_run_trades WHERE backtest_run_id = %s"
+        insert_sql = """
+            INSERT INTO backtest_run_trades (
+                backtest_run_id,
+                signal_date,
+                ticker,
+                signal_count,
+                contributing_strategies_json,
+                entry_date,
+                entry_price,
+                hold_results_json,
+                metadata_json
+            )
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb, %s::jsonb)
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(delete_sql, (backtest_run_id,))
+                for row in rows:
+                    cursor.execute(
+                        insert_sql,
+                        (
+                            backtest_run_id,
+                            row["signal_date"],
+                            row["ticker"],
+                            row["signal_count"],
+                            json.dumps(row.get("contributing_strategies_json") or []),
+                            row["entry_date"],
+                            row["entry_price"],
+                            json.dumps(row.get("hold_results_json") or {}),
+                            json.dumps(row.get("metadata_json") or {}),
+                        ),
+                    )
+            connection.commit()
+
+    def list_backtest_runs_v2(self, *, limit: int = 30) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        sql = """
+            SELECT id, strategy_id, strategy_set_key, strategy_ids_json, start_date, end_date,
+                   parameters, summary, html_report_path, json_report_path, job_run_id,
+                   hold_periods_json, entry_signal_threshold, artifact_path, created_at
+            FROM backtest_runs
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (max(1, int(limit)),))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def get_backtest_run_v2(self, run_id: int) -> dict[str, Any] | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            SELECT id, strategy_id, strategy_set_key, strategy_ids_json, start_date, end_date,
+                   parameters, summary, html_report_path, json_report_path, job_run_id,
+                   hold_periods_json, entry_signal_threshold, artifact_path, created_at
+            FROM backtest_runs
+            WHERE id = %s
+        """
+        trades_sql = """
+            SELECT id, signal_date, ticker, signal_count, contributing_strategies_json,
+                   entry_date, entry_price, hold_results_json, metadata_json, created_at
+            FROM backtest_run_trades
+            WHERE backtest_run_id = %s
+            ORDER BY signal_date DESC, ticker ASC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (run_id,))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+                if not rows:
+                    return None
+                payload = rows[0]
+                cursor.execute(trades_sql, (run_id,))
+                payload["trades"] = self._rows_to_dicts(cursor, cursor.fetchall())
+        return payload

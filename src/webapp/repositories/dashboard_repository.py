@@ -15,5 +15,4 @@ class DashboardRepository:
             "artifacts_dir": str(self.artifacts_dir),
             "latest_sync_at": None,
             "screen_run_count": None,
-            "backtest_run_count": None,
         }

@@ -140,6 +140,61 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
 CREATE INDEX IF NOT EXISTS idx_backtest_runs_strategy_created_at
   ON backtest_runs(strategy_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS overlap_runs (
+  id BIGSERIAL PRIMARY KEY,
+  run_date DATE NOT NULL,
+  strategy_set_key TEXT NOT NULL,
+  strategy_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  market_data_mode TEXT NOT NULL DEFAULT 'database-first',
+  candidate_threshold INTEGER NOT NULL DEFAULT 4,
+  source_job_run_id BIGINT REFERENCES job_runs(id) ON DELETE SET NULL,
+  artifact_path TEXT,
+  summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (run_date, strategy_set_key, candidate_threshold)
+);
+
+CREATE INDEX IF NOT EXISTS idx_overlap_runs_strategy_set_date
+  ON overlap_runs(strategy_set_key, run_date DESC);
+
+CREATE TABLE IF NOT EXISTS overlap_run_members (
+  id BIGSERIAL PRIMARY KEY,
+  overlap_run_id BIGINT NOT NULL REFERENCES overlap_runs(id) ON DELETE CASCADE,
+  run_date DATE NOT NULL,
+  ticker TEXT NOT NULL,
+  signal_count INTEGER NOT NULL,
+  contributing_strategies_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (overlap_run_id, ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_overlap_run_members_date_count
+  ON overlap_run_members(run_date DESC, signal_count DESC, ticker ASC);
+
+ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS strategy_set_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS strategy_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS entry_signal_threshold INTEGER NOT NULL DEFAULT 4;
+ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS hold_periods_json JSONB NOT NULL DEFAULT '[5, 10]'::jsonb;
+ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS artifact_path TEXT;
+
+CREATE TABLE IF NOT EXISTS backtest_run_trades (
+  id BIGSERIAL PRIMARY KEY,
+  backtest_run_id BIGINT NOT NULL REFERENCES backtest_runs(id) ON DELETE CASCADE,
+  signal_date DATE NOT NULL,
+  ticker TEXT NOT NULL,
+  signal_count INTEGER NOT NULL,
+  contributing_strategies_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  entry_date DATE NOT NULL,
+  entry_price NUMERIC(24,6) NOT NULL,
+  hold_results_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_run_trades_run_signal_date
+  ON backtest_run_trades(backtest_run_id, signal_date DESC, ticker ASC);
+
 CREATE TABLE IF NOT EXISTS report_artifacts (
   id BIGSERIAL PRIMARY KEY,
   artifact_type TEXT NOT NULL,
