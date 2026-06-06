@@ -32,7 +32,8 @@ class PortfolioService:
         self.config = load_app_config()
 
     def get_context(self) -> dict[str, Any]:
-        positions = [self._serialize_position(row) for row in self.repository.list_positions()]
+        base_rows = self.repository.list_positions()
+        positions = [self._serialize_position(row) for row in self._build_positions_with_transactions(base_rows)]
         summary = self._build_summary(positions)
         return {
             "database_configured": self.repository.is_configured(),
@@ -45,6 +46,49 @@ class PortfolioService:
                 "description": "Space reserved for VIX, Fear & Greed, or other macro gauges in a later iteration.",
             },
         }
+
+    def record_transaction(
+        self,
+        position_id: int,
+        *,
+        side: str,
+        shares: object,
+        price: object,
+        trade_date: object,
+        fees: object = 0,
+        notes: str = "",
+        actor_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        self._require_configured()
+        position = self.repository.get_position(position_id)
+        if position is None:
+            raise ValueError("Position not found.")
+        normalized_side = str(side or "").strip().lower()
+        if normalized_side not in {"buy", "sell"}:
+            raise ValueError("side must be buy or sell.")
+        parsed_shares = self._parse_positive_number(shares, field="shares")
+        parsed_price = self._parse_positive_number(price, field="price")
+        parsed_trade_date = self._parse_date(trade_date, field="trade_date")
+        parsed_fees = self._parse_non_negative_number(fees, field="fees")
+
+        if normalized_side == "sell":
+            state = self._compute_position_state(position, self.repository.list_position_transactions([position_id]))
+            if parsed_shares > float(state["shares"] or 0):
+                raise ValueError("sell shares exceed current holding.")
+
+        created = self.repository.create_transaction(
+            position_id=position_id,
+            trade_date=parsed_trade_date,
+            side=normalized_side,
+            shares=parsed_shares,
+            price=parsed_price,
+            fees=parsed_fees,
+            notes=str(notes or "").strip(),
+            created_by_user_id=actor_user_id,
+        )
+        if created is None:
+            raise ValueError("Failed to create transaction.")
+        return self._serialize_transaction(created)
 
     def create_position(
         self,
@@ -196,7 +240,7 @@ class PortfolioService:
         ticker: str = "",
     ) -> dict[str, Any]:
         self._require_configured()
-        all_rows = self.repository.list_positions()
+        all_rows = self._build_positions_with_transactions(self.repository.list_positions())
         normalized_ticker = self._normalize_ticker(ticker) if str(ticker or "").strip() else ""
         rows = [
             row
@@ -446,6 +490,8 @@ class PortfolioService:
         missing_count = 0
 
         for position in positions:
+            if bool(position.get("is_closed")):
+                continue
             shares = _safe_float(position.get("shares")) or 0.0
             entry_price = _safe_float(position.get("entry_price")) or 0.0
             close_price = _safe_float(position.get("advice", {}).get("close_price"))
@@ -463,7 +509,7 @@ class PortfolioService:
 
         total_unrealized_pl = total_market_value - total_cost_basis
         return {
-            "position_count": len(positions),
+            "position_count": sum(1 for item in positions if not bool(item.get("is_closed"))),
             "total_market_value": round(total_market_value, 2),
             "total_cost_basis": round(total_cost_basis, 2),
             "total_unrealized_pl": round(total_unrealized_pl, 2),
@@ -500,9 +546,14 @@ class PortfolioService:
             "notes": str(row.get("notes") or ""),
             "created_at": _to_iso_datetime(row.get("created_at")),
             "updated_at": _to_iso_datetime(row.get("updated_at")),
+            "seed_shares": round(_safe_float(row.get("seed_shares")) or shares, 6),
+            "seed_entry_price": round(_safe_float(row.get("seed_entry_price")) or entry_price, 6),
+            "realized_pl": round(_safe_float(row.get("realized_pl")) or 0.0, 2),
+            "is_closed": bool(row.get("is_closed")),
             "market_value": round(market_value, 2) if market_value is not None else None,
             "unrealized_pl": round(unrealized_pl, 2) if unrealized_pl is not None else None,
             "unrealized_pl_pct": round(unrealized_pl_pct, 2) if unrealized_pl_pct is not None else None,
+            "transactions": [self._serialize_transaction(item) for item in list(row.get("transactions") or [])],
             "advice": {
                 "as_of_date": _to_iso_date(row.get("as_of_date")),
                 "latest_trade_date": _to_iso_date(row.get("latest_trade_date")),
@@ -553,6 +604,102 @@ class PortfolioService:
             return dt.date.fromisoformat(str(value))
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{field} must be an ISO date (YYYY-MM-DD).") from exc
+
+    def _parse_non_negative_number(self, value: object, *, field: str) -> float:
+        if value in (None, ""):
+            return 0.0
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be a number.") from exc
+        if parsed < 0:
+            raise ValueError(f"{field} must be 0 or greater.")
+        return parsed
+
+    def _build_positions_with_transactions(self, base_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        position_ids = [int(row.get("id") or 0) for row in base_rows if int(row.get("id") or 0) > 0]
+        transactions = self.repository.list_position_transactions(position_ids)
+        grouped: dict[int, list[dict[str, Any]]] = {}
+        for item in transactions:
+            grouped.setdefault(int(item.get("position_id") or 0), []).append(item)
+
+        payload: list[dict[str, Any]] = []
+        for row in base_rows:
+            position_id = int(row.get("id") or 0)
+            state = self._compute_position_state(row, grouped.get(position_id, []))
+            payload.append({**row, **state})
+        return payload
+
+    def _compute_position_state(self, row: dict[str, Any], transactions: list[dict[str, Any]]) -> dict[str, Any]:
+        seed_shares = _safe_float(row.get("shares")) or 0.0
+        seed_entry_price = _safe_float(row.get("entry_price")) or 0.0
+        current_shares = seed_shares
+        total_cost = (seed_shares * seed_entry_price) + (_safe_float(row.get("fees")) or 0.0)
+        realized_pl = 0.0
+        serialized_transactions = [
+            {
+                "id": 0,
+                "position_id": int(row.get("id") or 0),
+                "trade_date": _to_iso_date(row.get("opened_at")),
+                "side": "buy",
+                "shares": round(seed_shares, 6),
+                "price": _round_price(seed_entry_price),
+                "fees": 0.0,
+                "notes": "Initial position",
+                "created_at": _to_iso_datetime(row.get("created_at")),
+            }
+        ]
+        serialized_transactions.extend(self._serialize_transaction(item) for item in transactions)
+
+        for item in transactions:
+            side = str(item.get("side") or "").lower()
+            shares = _safe_float(item.get("shares")) or 0.0
+            price = _safe_float(item.get("price")) or 0.0
+            fees = _safe_float(item.get("fees")) or 0.0
+            if shares <= 0:
+                continue
+            if side == "buy":
+                total_cost += (shares * price) + fees
+                current_shares += shares
+                continue
+            if side == "sell":
+                if current_shares <= 0:
+                    continue
+                average_cost = total_cost / current_shares if current_shares > 0 else 0.0
+                realized_pl += (shares * price) - fees - (shares * average_cost)
+                total_cost -= shares * average_cost
+                current_shares = max(0.0, current_shares - shares)
+
+        entry_price = (total_cost / current_shares) if current_shares > 0 else 0.0
+        first_buy_date = _to_iso_date(row.get("opened_at")) or ""
+        if serialized_transactions:
+            buy_dates = [str(item.get("trade_date") or "") for item in serialized_transactions if str(item.get("side") or "").lower() == "buy" and str(item.get("trade_date") or "")]
+            if buy_dates:
+                first_buy_date = min(([first_buy_date] if first_buy_date else []) + buy_dates)
+
+        return {
+            "shares": round(current_shares, 6),
+            "entry_price": round(entry_price, 6) if current_shares > 0 else 0.0,
+            "opened_at": first_buy_date or None,
+            "seed_shares": seed_shares,
+            "seed_entry_price": seed_entry_price,
+            "realized_pl": round(realized_pl, 2),
+            "is_closed": current_shares <= 0,
+            "transactions": serialized_transactions,
+        }
+
+    def _serialize_transaction(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(row.get("id") or 0),
+            "position_id": int(row.get("position_id") or 0),
+            "trade_date": _to_iso_date(row.get("trade_date")),
+            "side": str(row.get("side") or "").lower(),
+            "shares": round(_safe_float(row.get("shares")) or 0.0, 6),
+            "price": _round_price(_safe_float(row.get("price"))),
+            "fees": _round_price(_safe_float(row.get("fees"))),
+            "notes": str(row.get("notes") or ""),
+            "created_at": _to_iso_datetime(row.get("created_at")),
+        }
 
     def _require_configured(self) -> None:
         if not self.repository.is_configured():

@@ -13,10 +13,12 @@ class _FakePortfolioRepository:
     def __init__(self) -> None:
         self.portfolios: dict[int, dict[str, object]] = {}
         self.positions: dict[int, dict[str, object]] = {}
+        self.transactions: dict[int, dict[str, object]] = {}
         self.advice: dict[int, dict[str, object]] = {}
         self.import_batches: list[dict[str, object]] = []
         self.next_portfolio_id = 1
         self.next_position_id = 1
+        self.next_transaction_id = 1
 
     @property
     def database_url(self) -> str:
@@ -75,6 +77,23 @@ class _FakePortfolioRepository:
         self.positions.pop(position_id)
         self.advice.pop(position_id, None)
         return True
+
+    def create_transaction(self, **kwargs: object):
+        payload = {
+            "id": self.next_transaction_id,
+            "created_at": dt.datetime(2026, 6, 6, 3, tzinfo=dt.timezone.utc),
+            **kwargs,
+        }
+        self.transactions[self.next_transaction_id] = payload
+        self.next_transaction_id += 1
+        return dict(payload)
+
+    def list_position_transactions(self, position_ids: list[int] | None = None):
+        rows = list(self.transactions.values())
+        if position_ids:
+            rows = [item for item in rows if int(item["position_id"]) in position_ids]
+        rows.sort(key=lambda item: (item["trade_date"], item["id"]))
+        return [dict(item) for item in rows]
 
     def list_positions(self):
         rows: list[dict[str, object]] = []
@@ -203,6 +222,43 @@ class PortfolioServiceTests(unittest.TestCase):
         self.assertIsNotNone(advice["average_up_price"])
         self.assertIsNotNone(advice["blended_entry_after_average_up"])
         self.assertIn(advice["signal_status"], {"hold", "raise_stop"})
+
+    def test_transactions_update_current_shares_and_average_cost(self) -> None:
+        position = self.service.create_position(
+            ticker="AMD",
+            shares=10,
+            entry_price=100,
+            opened_at="2026-05-01",
+            portfolio_name="Main",
+        )
+
+        buy = self.service.record_transaction(
+            position["id"],
+            side="buy",
+            shares=5,
+            price=120,
+            trade_date="2026-05-10",
+            fees=0,
+        )
+        self.assertEqual(buy["side"], "buy")
+
+        sell = self.service.record_transaction(
+            position["id"],
+            side="sell",
+            shares=4,
+            price=130,
+            trade_date="2026-05-15",
+            fees=0,
+        )
+        self.assertEqual(sell["side"], "sell")
+
+        payload = self.service.get_context()
+        item = payload["positions"][0]
+        self.assertEqual(item["shares"], 11.0)
+        self.assertAlmostEqual(item["entry_price"], 106.67, places=2)
+        self.assertAlmostEqual(item["realized_pl"], 93.33, places=2)
+        self.assertEqual(len(item["transactions"]), 3)
+        self.assertEqual(item["transactions"][0]["notes"], "Initial position")
 
     def test_refresh_advice_marks_stale_market_data(self) -> None:
         position = self.service.create_position(

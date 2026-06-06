@@ -137,6 +137,26 @@ class PortfolioRepository:
                 cursor.execute(sql)
                 return self._rows_to_dicts(cursor, cursor.fetchall())
 
+    def list_position_transactions(self, position_ids: list[int] | None = None) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        where = ""
+        params: list[Any] = []
+        if position_ids:
+            where = "WHERE position_id = ANY(%s)"
+            params.append(position_ids)
+        sql = f"""
+            SELECT id, position_id, trade_date, side, shares, price, fees, notes, created_by_user_id, created_at
+            FROM portfolio_position_transactions
+            {where}
+            ORDER BY trade_date ASC, id ASC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, params)
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
     def get_position(self, position_id: int) -> dict[str, Any] | None:
         connection = self._connect()
         if connection is None:
@@ -235,6 +255,38 @@ class PortfolioRepository:
                 deleted = cursor.rowcount > 0
             connection.commit()
         return deleted
+
+    def create_transaction(
+        self,
+        *,
+        position_id: int,
+        trade_date: dt.date,
+        side: str,
+        shares: float,
+        price: float,
+        fees: float = 0.0,
+        notes: str = "",
+        created_by_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            INSERT INTO portfolio_position_transactions (
+              position_id, trade_date, side, shares, price, fees, notes, created_by_user_id
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, position_id, trade_date, side, shares, price, fees, notes, created_by_user_id, created_at
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql,
+                    (position_id, trade_date, side, shares, price, fees, notes, created_by_user_id),
+                )
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows[0] if rows else None
 
     def upsert_advice_snapshot(
         self,

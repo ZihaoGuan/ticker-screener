@@ -1114,6 +1114,43 @@ def admin_update_portfolio_position(
     return JSONResponse({"ok": True, "position": position})
 
 
+@router.post("/admin/portfolio/positions/{position_id}/transactions", response_class=JSONResponse)
+def admin_create_portfolio_transaction(
+    request: Request,
+    position_id: int,
+    payload: dict[str, object] | None = Body(default=None),
+    service: PortfolioService = Depends(get_portfolio_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        transaction = service.record_transaction(
+            position_id,
+            side=str(request_payload.get("side") or ""),
+            shares=request_payload.get("shares"),
+            price=request_payload.get("price"),
+            trade_date=request_payload.get("trade_date"),
+            fees=request_payload.get("fees"),
+            notes=str(request_payload.get("notes") or ""),
+            actor_user_id=principal.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="portfolio.transaction.create",
+        resource_type="portfolio_transaction",
+        resource_id=str(transaction.get("id") or ""),
+        resource_label=str(transaction.get("side") or ""),
+        message=f"Recorded {transaction.get('side')} transaction for position {position_id}.",
+        metadata=transaction,
+    )
+    return JSONResponse({"ok": True, "transaction": transaction})
+
+
 @router.post("/admin/portfolio/positions/{position_id}/delete", response_class=JSONResponse)
 def admin_delete_portfolio_position(
     request: Request,

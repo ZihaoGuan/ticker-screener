@@ -352,9 +352,26 @@ class _FakePortfolioService:
                     "notes": "",
                     "created_at": "2026-06-06T00:00:00+00:00",
                     "updated_at": "2026-06-06T00:00:00+00:00",
+                    "seed_shares": 10,
+                    "seed_entry_price": 100,
+                    "realized_pl": 95.0,
+                    "is_closed": False,
                     "market_value": 1400.0,
                     "unrealized_pl": 400.0,
                     "unrealized_pl_pct": 40.0,
+                    "transactions": [
+                        {
+                            "id": 77,
+                            "position_id": 1,
+                            "trade_date": "2026-05-20",
+                            "side": "buy",
+                            "shares": 2,
+                            "price": 120.0,
+                            "fees": 0.0,
+                            "notes": "added",
+                            "created_at": "2026-06-06T00:00:00+00:00",
+                        }
+                    ],
                     "advice": {
                         "as_of_date": "2026-06-06",
                         "latest_trade_date": "2026-06-06",
@@ -435,6 +452,19 @@ class _FakePortfolioService:
     def delete_position(self, position_id: int):
         _ = position_id
         return None
+
+    def record_transaction(self, position_id: int, **kwargs: object):
+        return {
+            "id": 88,
+            "position_id": position_id,
+            "trade_date": str(kwargs.get("trade_date") or "2026-06-06"),
+            "side": str(kwargs.get("side") or "buy"),
+            "shares": float(kwargs.get("shares") or 1),
+            "price": float(kwargs.get("price") or 100),
+            "fees": float(kwargs.get("fees") or 0),
+            "notes": str(kwargs.get("notes") or ""),
+            "created_at": "2026-06-06T00:00:00+00:00",
+        }
 
 
 @unittest.skipIf(TestClient is None, "fastapi test dependencies are not installed")
@@ -645,3 +675,19 @@ class ApiAdHocScreenTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["accepted_count"], 1)
         self.assertEqual(payload["error_count"], 1)
+
+    def test_admin_can_record_portfolio_transaction(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.post(
+            "/api/admin/portfolio/positions/1/transactions",
+            json={"side": "sell", "shares": 2, "price": 145.5, "trade_date": "2026-06-06", "fees": 1.25},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["transaction"]["side"], "sell")
+        self.assertEqual(payload["transaction"]["position_id"], 1)

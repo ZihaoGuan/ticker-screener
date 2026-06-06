@@ -718,6 +718,18 @@ export type PortfolioAdvice = {
   refreshed_at?: string | null;
 };
 
+export type PortfolioTransaction = {
+  id: number;
+  position_id: number;
+  trade_date?: string | null;
+  side: "buy" | "sell" | string;
+  shares: number;
+  price?: number | null;
+  fees?: number | null;
+  notes?: string | null;
+  created_at?: string | null;
+};
+
 export type PortfolioPosition = {
   id: number;
   portfolio_id: number;
@@ -729,9 +741,14 @@ export type PortfolioPosition = {
   notes?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  seed_shares?: number;
+  seed_entry_price?: number;
+  realized_pl?: number | null;
+  is_closed?: boolean;
   market_value?: number | null;
   unrealized_pl?: number | null;
   unrealized_pl_pct?: number | null;
+  transactions: PortfolioTransaction[];
   advice: PortfolioAdvice;
 };
 

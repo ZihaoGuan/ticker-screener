@@ -283,6 +283,22 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_positions_portfolio_ticker
 CREATE INDEX IF NOT EXISTS idx_portfolio_positions_ticker_opened_at
   ON portfolio_positions(ticker, opened_at DESC);
 
+CREATE TABLE IF NOT EXISTS portfolio_position_transactions (
+  id BIGSERIAL PRIMARY KEY,
+  position_id BIGINT NOT NULL REFERENCES portfolio_positions(id) ON DELETE CASCADE,
+  trade_date DATE NOT NULL,
+  side TEXT NOT NULL,
+  shares NUMERIC(24,6) NOT NULL,
+  price NUMERIC(24,6) NOT NULL,
+  fees NUMERIC(24,6) NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_by_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_position_transactions_position_date
+  ON portfolio_position_transactions(position_id, trade_date ASC, id ASC);
+
 CREATE TABLE IF NOT EXISTS portfolio_import_batches (
   id BIGSERIAL PRIMARY KEY,
   portfolio_id BIGINT REFERENCES portfolios(id) ON DELETE CASCADE,

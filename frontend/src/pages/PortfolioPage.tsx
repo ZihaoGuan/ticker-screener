@@ -49,7 +49,6 @@ export function PortfolioPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [selectedPositionId, setSelectedPositionId] = useState<number | null>(null);
-  const [editingPositionId, setEditingPositionId] = useState<number | null>(null);
   const [positionForm, setPositionForm] = useState<PositionFormState>(EMPTY_POSITION_FORM);
   const [csvText, setCsvText] = useState("");
   const [csvSourceName, setCsvSourceName] = useState("portfolio.csv");
@@ -57,6 +56,14 @@ export function PortfolioPage() {
   const [isSavingPosition, setIsSavingPosition] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [transactionForm, setTransactionForm] = useState({
+    side: "buy",
+    shares: "",
+    price: "",
+    trade_date: "",
+    fees: "",
+    notes: "",
+  });
 
   const loadPortfolio = () => {
     setIsLoading(true);
@@ -89,15 +96,6 @@ export function PortfolioPage() {
     [context.positions, selectedPositionId],
   );
 
-  useEffect(() => {
-    if (!selectedPosition) {
-      return;
-    }
-    if (editingPositionId === selectedPosition.id) {
-      populateFormFromPosition(selectedPosition, setPositionForm);
-    }
-  }, [editingPositionId, selectedPosition]);
-
   const handleSubmitPosition = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSavingPosition(true);
@@ -111,20 +109,11 @@ export function PortfolioPage() {
         notes: positionForm.notes.trim(),
         portfolio_name: positionForm.portfolio_name.trim() || "Main",
       };
-      if (editingPositionId) {
-        await fetchJson<{ ok: boolean }>(`/api/admin/portfolio/positions/${editingPositionId}`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        setNotice(`Updated ${payload.ticker}.`);
-      } else {
-        await fetchJson<{ ok: boolean }>("/api/admin/portfolio/positions", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        setNotice(`Added ${payload.ticker}. Refresh advice when you want updated targets.`);
-      }
-      setEditingPositionId(null);
+      await fetchJson<{ ok: boolean }>("/api/admin/portfolio/positions", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setNotice(`Added ${payload.ticker}. Refresh advice when you want updated targets.`);
       setPositionForm(EMPTY_POSITION_FORM);
       loadPortfolio();
     } catch (error) {
@@ -148,21 +137,12 @@ export function PortfolioPage() {
       if (selectedPositionId === position.id) {
         setSelectedPositionId(null);
       }
-      if (editingPositionId === position.id) {
-        setEditingPositionId(null);
-        setPositionForm(EMPTY_POSITION_FORM);
-      }
       loadPortfolio();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to delete position.");
     } finally {
       setIsSavingPosition(false);
     }
-  };
-
-  const handleEditPosition = (position: PortfolioPosition) => {
-    setEditingPositionId(position.id);
-    populateFormFromPosition(position, setPositionForm);
   };
 
   const handleRefreshAdvice = async (positionId?: number) => {
@@ -229,6 +209,30 @@ export function PortfolioPage() {
     return grouped;
   }, [context.positions]);
 
+  const visiblePositions = useMemo(() => context.positions.filter((item) => !item.is_closed), [context.positions]);
+
+  const handleSubmitTransaction = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedPosition) {
+      return;
+    }
+    setIsSavingPosition(true);
+    setNotice("");
+    try {
+      await fetchJson<{ ok: boolean }>(`/api/admin/portfolio/positions/${selectedPosition.id}/transactions`, {
+        method: "POST",
+        body: JSON.stringify(transactionForm),
+      });
+      setNotice(`${transactionForm.side === "sell" ? "Sold" : "Added"} ${transactionForm.shares} ${selectedPosition.ticker}.`);
+      setTransactionForm({ side: "buy", shares: "", price: "", trade_date: "", fees: "", notes: "" });
+      loadPortfolio();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to record transaction.");
+    } finally {
+      setIsSavingPosition(false);
+    }
+  };
+
   if (isLoading) {
     return <LoadingBlock label="Loading portfolio…" />;
   }
@@ -259,7 +263,7 @@ export function PortfolioPage() {
             title="Active Positions"
             aside={
               <div className="runs-panel-aside">
-                <button className="ghost-button" type="button" disabled={isRefreshing || context.positions.length === 0} onClick={() => void handleRefreshAdvice()}>
+                <button className="ghost-button" type="button" disabled={isRefreshing || visiblePositions.length === 0} onClick={() => void handleRefreshAdvice()}>
                   {isRefreshing ? "Refreshing…" : "Refresh All Advice"}
                 </button>
               </div>
@@ -272,7 +276,7 @@ export function PortfolioPage() {
                   <tr>
                     <th>Ticker</th>
                     <th>Close</th>
-                    <th>Entry</th>
+                    <th>Avg Cost</th>
                     <th>Shares</th>
                     <th>After TP1 / Avg Up</th>
                     <th>Signal</th>
@@ -280,7 +284,7 @@ export function PortfolioPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {context.positions.map((position) => (
+                  {visiblePositions.map((position) => (
                     <tr
                       key={position.id}
                       className={selectedPosition?.id === position.id ? "is-selected-row" : ""}
@@ -293,7 +297,7 @@ export function PortfolioPage() {
                         </div>
                       </td>
                       <td data-label="Close">{formatCurrency(position.advice.close_price)}</td>
-                      <td data-label="Entry">{formatCurrency(position.entry_price)}</td>
+                      <td data-label="Avg Cost">{formatCurrency(position.entry_price)}</td>
                       <td data-label="Shares">{formatNumber(position.shares)}</td>
                       <td data-label="After TP1 / Avg Up">
                         <div>{formatCurrency(position.advice.net_cost_after_tp1)}</div>
@@ -320,16 +324,6 @@ export function PortfolioPage() {
                           <button
                             className="table-action-button"
                             type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleEditPosition(position);
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="table-action-button"
-                            type="button"
                             disabled={isSavingPosition}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -348,7 +342,7 @@ export function PortfolioPage() {
           </Panel>
 
           <div className="portfolio-card-grid">
-            <Panel title={editingPositionId ? "Edit Position" : "Add Position"}>
+            <Panel title="Add Initial Position">
               <form className="run-toolbar" onSubmit={(event) => void handleSubmitPosition(event)}>
                 <div className="run-params-grid">
                   <label className="field">
@@ -378,13 +372,12 @@ export function PortfolioPage() {
                 </div>
                 <div className="button-row">
                   <button className="primary-button" type="submit" disabled={isSavingPosition}>
-                    {isSavingPosition ? "Saving…" : editingPositionId ? "Update Position" : "Add Position"}
+                    {isSavingPosition ? "Saving…" : "Add Position"}
                   </button>
                   <button
                     className="ghost-button"
                     type="button"
                     onClick={() => {
-                      setEditingPositionId(null);
                       setPositionForm(EMPTY_POSITION_FORM);
                     }}
                   >
@@ -460,6 +453,8 @@ export function PortfolioPage() {
                 <div className="portfolio-advice-metrics">
                   <AdviceMetric label="Signal" value={humanizeSignal(selectedPosition.advice.signal_status)} status={selectedPosition.advice.signal_status} />
                   <AdviceMetric label="Close" value={formatCurrency(selectedPosition.advice.close_price)} />
+                  <AdviceMetric label="Current Shares" value={formatNumber(selectedPosition.shares)} />
+                  <AdviceMetric label="Average Cost" value={formatCurrency(selectedPosition.entry_price)} />
                   <AdviceMetric label="Stop Loss" value={formatCurrency(selectedPosition.advice.stop_loss_price)} />
                   <AdviceMetric
                     label="Take Profit"
@@ -469,6 +464,7 @@ export function PortfolioPage() {
                   <AdviceMetric label="Average-Up Trigger" value={formatCurrency(selectedPosition.advice.average_up_price)} />
                   <AdviceMetric label="Blended Entry After Add" value={formatCurrency(selectedPosition.advice.blended_entry_after_average_up)} />
                   <AdviceMetric label="Remaining Cost Basis" value={formatCurrency(selectedPosition.advice.remaining_cost_basis_after_tp1)} />
+                  <AdviceMetric label="Realized P/L" value={formatSignedCurrency(selectedPosition.realized_pl)} />
                 </div>
                 <div className="detail-card">
                   <div className="detail-card-head">
@@ -494,6 +490,12 @@ export function PortfolioPage() {
                       <span>{formatLocalDateTime(selectedPosition.advice.refreshed_at)}</span>
                     </div>
                     <div className="range-item">
+                      <span>Current Holding</span>
+                      <span>
+                        {formatNumber(selectedPosition.shares)} shares @ {formatCurrency(selectedPosition.entry_price)}
+                      </span>
+                    </div>
+                    <div className="range-item">
                       <span>Take Profit Tranches</span>
                       <span>
                         {formatFraction(selectedPosition.advice.tp1_sell_fraction)} @ TP1, {formatFraction(selectedPosition.advice.tp2_sell_fraction)} @ TP2
@@ -516,6 +518,88 @@ export function PortfolioPage() {
               </div>
             )}
           </Panel>
+
+          <div className="portfolio-card-grid">
+            <Panel title={selectedPosition ? `${selectedPosition.ticker} Buy / Sell` : "Buy / Sell"}>
+              {!selectedPosition ? (
+                <LoadingBlock label="Select a position to record a buy or sell transaction." compact />
+              ) : (
+                <form className="run-toolbar" onSubmit={(event) => void handleSubmitTransaction(event)}>
+                  <div className="run-params-grid">
+                    <label className="field">
+                      <span>Action</span>
+                      <select value={transactionForm.side} onChange={(event) => setTransactionForm((current) => ({ ...current, side: event.target.value }))}>
+                        <option value="buy">Buy More</option>
+                        <option value="sell">Sell Shares</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Shares</span>
+                      <input value={transactionForm.shares} onChange={(event) => setTransactionForm((current) => ({ ...current, shares: event.target.value }))} placeholder="25" />
+                    </label>
+                    <label className="field">
+                      <span>Price</span>
+                      <input value={transactionForm.price} onChange={(event) => setTransactionForm((current) => ({ ...current, price: event.target.value }))} placeholder="195.40" />
+                    </label>
+                    <label className="field">
+                      <span>Trade Date</span>
+                      <input type="date" value={transactionForm.trade_date} onChange={(event) => setTransactionForm((current) => ({ ...current, trade_date: event.target.value }))} />
+                    </label>
+                    <label className="field">
+                      <span>Fees</span>
+                      <input value={transactionForm.fees} onChange={(event) => setTransactionForm((current) => ({ ...current, fees: event.target.value }))} placeholder="0" />
+                    </label>
+                    <label className="field" style={{ gridColumn: "1 / -1" }}>
+                      <span>Notes</span>
+                      <textarea value={transactionForm.notes} onChange={(event) => setTransactionForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Reason for add or trim" />
+                    </label>
+                  </div>
+                  <div className="button-row">
+                    <button className="primary-button" type="submit" disabled={isSavingPosition}>
+                      {isSavingPosition ? "Saving…" : transactionForm.side === "sell" ? "Record Sell" : "Record Buy"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </Panel>
+
+            <Panel title={selectedPosition ? `${selectedPosition.ticker} Transaction History` : "Transaction History"}>
+              {!selectedPosition ? (
+                <LoadingBlock label="Select a position to inspect transaction history." compact />
+              ) : selectedPosition.transactions.length <= 1 ? (
+                <LoadingBlock label="Only the initial buy is recorded so far. Add later buys or sells here." compact />
+              ) : (
+                <div className="data-table-responsive">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Side</th>
+                        <th>Shares</th>
+                        <th>Price</th>
+                        <th>Fees</th>
+                        <th>Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedPosition.transactions.map((transaction) => (
+                        <tr key={transaction.id}>
+                          <td data-label="Date">{formatLocalDate(transaction.trade_date)}</td>
+                          <td data-label="Side">
+                            <span className={`portfolio-signal-pill is-${transaction.side === "sell" ? "trim" : "hold"}`}>{transaction.side}</span>
+                          </td>
+                          <td data-label="Shares">{formatNumber(transaction.shares)}</td>
+                          <td data-label="Price">{formatCurrency(transaction.price)}</td>
+                          <td data-label="Fees">{formatCurrency(transaction.fees)}</td>
+                          <td data-label="Notes">{transaction.notes || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
+          </div>
         </div>
 
         <div className="page-grid portfolio-rail">
@@ -584,17 +668,6 @@ function AdviceMetric({
       <div className="summary-stat">{value}</div>
     </div>
   );
-}
-
-function populateFormFromPosition(position: PortfolioPosition, setForm: (value: PositionFormState) => void) {
-  setForm({
-    ticker: position.ticker,
-    shares: String(position.shares),
-    entry_price: String(position.entry_price),
-    opened_at: position.opened_at,
-    notes: position.notes ?? "",
-    portfolio_name: position.portfolio_name,
-  });
 }
 
 function formatCurrency(value: number | null | undefined): string {
