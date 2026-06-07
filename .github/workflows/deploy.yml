@@ -57,9 +57,14 @@ jobs:
                 cp "${preserve_path}" "${BACKUP_DIR}/${preserve_path}"
               fi
             done
+            RESTORE_PATHS="frontend/package-lock.json ${PRESERVE_PATHS}"
             git fetch --all --prune
             git checkout "${GIT_REF}"
-            git restore --source=HEAD --worktree --staged -- frontend/package-lock.json ${PRESERVE_PATHS} || true
+            for restore_path in ${RESTORE_PATHS}; do
+              if git ls-files --error-unmatch -- "${restore_path}" >/dev/null 2>&1; then
+                git restore --source=HEAD --worktree --staged -- "${restore_path}" || true
+              fi
+            done
             git clean -fd -- frontend/package-lock.json frontend/dist frontend/tsconfig.app.tsbuildinfo frontend/tsconfig.node.tsbuildinfo frontend/vite.config.js frontend/vite.config.d.ts
             git pull --ff-only origin "${GIT_REF}"
             for preserve_path in ${PRESERVE_PATHS}; do
