@@ -39,6 +39,7 @@ class HveHit:
     distance_to_ma50_pct: float
     atr14: float
     atr_multiple_from_ma50: float
+    signal_kind: str
     is_hve: bool
     is_hv1: bool
     is_up_day: bool
@@ -139,8 +140,9 @@ def find_recent_hve_hit(
     current_volume = float(latest["Volume"])
     is_hve = current_volume >= highest_volume_ever
     is_hv1 = current_volume >= highest_volume
-    if not is_hve:
+    if not (is_hve or is_hv1):
         return None
+    signal_kind = "HVE" if is_hve else "HV1"
 
     volume_ma_50 = float(latest["volume_ma_50"]) if pd.notna(latest["volume_ma_50"]) else 0.0
     ma50 = float(latest["ma50"]) if pd.notna(latest["ma50"]) else 0.0
@@ -158,10 +160,12 @@ def find_recent_hve_hit(
     is_above_ma50 = ma50 > 0 and current_price >= ma50
 
     reasons = [
-        "current bar is highest volume ever",
+        "current bar is highest volume ever" if is_hve else "current bar is highest volume in the last year",
         f"volume buzz {volume_buzz_pct:+.1f}% vs 50D avg",
         f"price change {price_change_pct:+.1f}% on signal bar",
     ]
+    if is_hve and is_hv1:
+        reasons.append("also highest volume in the last year")
     if is_above_ma50:
         reasons.append(f"holding above 50D MA {ma50:.2f}")
     else:
@@ -191,6 +195,7 @@ def find_recent_hve_hit(
         distance_to_ma50_pct=distance_to_ma50_pct,
         atr14=atr14,
         atr_multiple_from_ma50=atr_multiple_from_ma50,
+        signal_kind=signal_kind,
         is_hve=is_hve,
         is_hv1=is_hv1,
         is_up_day=is_up_day,
@@ -245,7 +250,7 @@ def run_hve_screen(
                     hits.append(hit)
                     print(
                         f"[{position}/{total_tickers}] {ticker.symbol} passed: "
-                        f"vol {hit.current_volume:,.0f}, buzz {hit.volume_buzz_pct:+.1f}%, "
+                        f"{hit.signal_kind} vol {hit.current_volume:,.0f}, buzz {hit.volume_buzz_pct:+.1f}%, "
                         f"change {hit.price_change_pct:+.1f}% | passed={len(hits)}"
                     )
                 except Exception as exc:
@@ -254,6 +259,7 @@ def run_hve_screen(
 
     hits.sort(
         key=lambda item: (
+            0 if item.signal_kind == "HVE" else 1,
             -item.volume_buzz_pct,
             -item.price_change_pct,
             -item.atr_multiple_from_ma50,

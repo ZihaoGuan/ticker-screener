@@ -248,6 +248,40 @@ def _hve_frame() -> pd.DataFrame:
     )
 
 
+def _hv1_only_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2024-01-02", periods=320, freq="B")
+    open_values = [100.0 + (idx * 0.2) for idx in range(320)]
+    close = [100.4 + (idx * 0.2) for idx in range(320)]
+    high = [max(op, cl) + 0.8 for op, cl in zip(open_values, close, strict=False)]
+    low = [min(op, cl) - 0.7 for op, cl in zip(open_values, close, strict=False)]
+    volume = [1_000_000.0 + (idx * 2_500.0) for idx in range(320)]
+
+    old_hve_index = 20
+    open_values[old_hve_index] = 104.0
+    close[old_hve_index] = 106.0
+    high[old_hve_index] = 106.8
+    low[old_hve_index] = 103.5
+    volume[old_hve_index] = 6_500_000.0
+
+    signal_index = len(index) - 1
+    open_values[signal_index] = 163.0
+    close[signal_index] = 169.0
+    high[signal_index] = 170.2
+    low[signal_index] = 162.3
+    volume[signal_index] = 4_900_000.0
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": volume,
+        },
+        index=index,
+    )
+
+
 def _inside_dryup_frame() -> pd.DataFrame:
     index = pd.date_range(start="2025-01-02", periods=260, freq="B")
     open_values: list[float] = []
@@ -800,6 +834,29 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "hve")
         self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_hv1_only_signal_for_hve_catalog_entry(self) -> None:
+        ticker_frame = _hv1_only_frame()
+        benchmark_frame = _frame("2024-01-02", 320)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 3, 24),
+                screener_ids=["hve"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "hve")
+        self.assertTrue(payload["screeners"][0]["passed"])
+        self.assertEqual(payload["screeners"][0]["hit"]["signal_kind"], "HV1")
 
     def test_rs_rating_helper_returns_expected_threshold_behavior(self) -> None:
         strong_metrics = _compute_latest_rs_rating(
