@@ -156,6 +156,7 @@ export type RunAction = {
   id: string;
   label: string;
   bias_group?: "bullish" | "bearish" | "other";
+  bullish_subgroup?: "leaders" | "bottoming" | "";
   command: string;
   supports_limit: boolean;
   fields: Array<{

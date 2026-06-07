@@ -190,6 +190,8 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("td9_bearish", action_ids)
         self.assertIn("macd_golden_cross", action_ids)
         self.assertIn("macd_dead_cross", action_ids)
+        self.assertIn("rsi_ma_bb_bullish", action_ids)
+        self.assertIn("rsi_ma_bb_bearish", action_ids)
         self.assertIn("base_detection", action_ids)
         self.assertIn("cup_detection", action_ids)
         self.assertIn("double_bottom_detection", action_ids)

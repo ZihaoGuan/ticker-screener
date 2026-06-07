@@ -17,6 +17,17 @@
   color: #a1a1aa;
 }
 
+.screener-subgroup-section + .screener-subgroup-section {
+  margin-top: 18px;
+}
+
+.screener-subgroup-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #d4d4d8;
+}
+
 .screener-card {
   background: linear-gradient(135deg, #1f1f23 0%, #18181b 100%);
   border: 1px solid #27272a;

@@ -99,6 +99,18 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("macd_dead_cross_{date_label}.json",),
         "legacy_summary_templates": ("macd_dead_cross_run_summary_{date_label}.json",),
     },
+    "rsi_ma_bb_bullish": {
+        "stem_template": "rsi_ma_bb_bullish_{date_label}",
+        "legacy_watchlist_templates": ("rsi_ma_bb_bullish_{date_label}.json",),
+        "legacy_raw_templates": ("rsi_ma_bb_bullish_{date_label}.json",),
+        "legacy_summary_templates": ("rsi_ma_bb_bullish_run_summary_{date_label}.json",),
+    },
+    "rsi_ma_bb_bearish": {
+        "stem_template": "rsi_ma_bb_bearish_{date_label}",
+        "legacy_watchlist_templates": ("rsi_ma_bb_bearish_{date_label}.json",),
+        "legacy_raw_templates": ("rsi_ma_bb_bearish_{date_label}.json",),
+        "legacy_summary_templates": ("rsi_ma_bb_bearish_run_summary_{date_label}.json",),
+    },
     "base_detection": {
         "stem_template": "base_detection_{date_label}",
         "legacy_watchlist_templates": ("base_detection_{date_label}.json",),
@@ -200,6 +212,8 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("td9_bearish", "td9_bearish"),
     ("macd_golden_cross", "macd_golden_cross"),
     ("macd_dead_cross", "macd_dead_cross"),
+    ("rsi_ma_bb_bullish", "rsi_ma_bb_bullish"),
+    ("rsi_ma_bb_bearish", "rsi_ma_bb_bearish"),
     ("base_detection", "base_detection"),
     ("cup_detection", "cup_detection"),
     ("double_bottom_detection", "double_bottom_detection"),

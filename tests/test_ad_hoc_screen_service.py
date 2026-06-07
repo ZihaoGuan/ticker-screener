@@ -402,6 +402,30 @@ def _macd_dead_cross_frame() -> pd.DataFrame:
     )
 
 
+def _rsi_ma_bb_bullish_frame() -> pd.DataFrame:
+    frame = _rsi_ma_bb_unit_bullish_frame().copy()
+    frame["Adj Close"] = frame["Close"]
+    return frame
+
+
+def _rsi_ma_bb_bearish_frame() -> pd.DataFrame:
+    frame = _rsi_ma_bb_unit_bearish_frame().copy()
+    frame["Adj Close"] = frame["Close"]
+    return frame
+
+
+def _rsi_ma_bb_unit_bullish_frame() -> pd.DataFrame:
+    from tests.test_rsi_ma_bb_screen import _bullish_bb_frame
+
+    return _bullish_bb_frame()
+
+
+def _rsi_ma_bb_unit_bearish_frame() -> pd.DataFrame:
+    from tests.test_rsi_ma_bb_screen import _bearish_bb_frame
+
+    return _bearish_bb_frame()
+
+
 def _active_base_frame() -> pd.DataFrame:
     index = pd.date_range(start="2025-10-01", periods=160, freq="B")
     close: list[float] = []
@@ -1065,6 +1089,50 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "macd_dead_cross")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_rsi_ma_bb_bullish_catalog_entry(self) -> None:
+        ticker_frame = _rsi_ma_bb_bullish_frame()
+        benchmark_frame = _frame("2026-01-02", 80)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2026, 4, 9),
+                screener_ids=["rsi_ma_bb_bullish"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "rsi_ma_bb_bullish")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_rsi_ma_bb_bearish_catalog_entry(self) -> None:
+        ticker_frame = _rsi_ma_bb_bearish_frame()
+        benchmark_frame = _frame("2026-01-02", 80)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"TSLA": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"TSLA": {"ticker": "TSLA", "sector": "Consumer Cyclical", "industry": "Auto", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="TSLA",
+                as_of_date=dt.date(2026, 4, 9),
+                screener_ids=["rsi_ma_bb_bearish"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "rsi_ma_bb_bearish")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_supports_base_detection_catalog_entry(self) -> None:

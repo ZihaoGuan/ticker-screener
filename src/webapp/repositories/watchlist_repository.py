@@ -87,6 +87,8 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("td9_bearish", "td9", "TD9"),
         ("macd_golden_cross", "macd", "MACD"),
         ("macd_dead_cross", "macd", "MACD"),
+        ("rsi_ma_bb_bullish", "rsi_ma_bb", "RSI MA/BB"),
+        ("rsi_ma_bb_bearish", "rsi_ma_bb", "RSI MA/BB"),
         ("base_detection", "base_detection", "Base Detection"),
         ("cup_detection", "cup_detection", "Cup Detection"),
         ("double_bottom_detection", "double_bottom_detection", "Double Bottom Detection"),

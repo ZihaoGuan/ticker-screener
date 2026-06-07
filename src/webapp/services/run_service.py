@@ -34,6 +34,7 @@ class RunAction:
     fields: tuple["RunField", ...] = ()
     visible_in_runs: bool = True
     bias_group: str = "other"
+    bullish_subgroup: str = ""
 
 
 @dataclass(frozen=True)
@@ -229,6 +230,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "vcp": RunAction(
             "vcp",
@@ -249,6 +251,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "cup_handle": RunAction(
             "cup_handle",
@@ -269,6 +272,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "gap_fill": RunAction(
             "gap_fill",
@@ -289,6 +293,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "hve": RunAction(
             "hve",
@@ -309,6 +314,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "inside_dryup": RunAction(
             "inside_dryup",
@@ -329,6 +335,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "ftd_sweep": RunAction(
             "ftd_sweep",
@@ -349,6 +356,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "fearzone": RunAction(
             "fearzone",
@@ -369,6 +377,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="bottoming",
         ),
         "fearzone_zeiierman": RunAction(
             "fearzone_zeiierman",
@@ -389,6 +398,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="bottoming",
         ),
         "td9_bullish": RunAction(
             "td9_bullish",
@@ -409,6 +419,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="bottoming",
         ),
         "td9_bearish": RunAction(
             "td9_bearish",
@@ -449,11 +460,53 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="bottoming",
         ),
         "macd_dead_cross": RunAction(
             "macd_dead_cross",
             "Run MACD Dead Cross",
             "scripts/run_macd_dead_cross_screen.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _market_data_source_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
+            bias_group="bearish",
+        ),
+        "rsi_ma_bb_bullish": RunAction(
+            "rsi_ma_bb_bullish",
+            "Run RSI MA/BB Bullish",
+            "scripts/run_rsi_ma_bb_bullish_screen.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+                _market_data_source_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
+            bias_group="bullish",
+            bullish_subgroup="bottoming",
+        ),
+        "rsi_ma_bb_bearish": RunAction(
+            "rsi_ma_bb_bearish",
+            "Run RSI MA/BB Bearish",
+            "scripts/run_rsi_ma_bb_bearish_screen.py",
             fields=(
                 _limit_field,
                 _tickers_field,
@@ -489,6 +542,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="bottoming",
         ),
         "cup_detection": RunAction(
             "cup_detection",
@@ -509,6 +563,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="bottoming",
         ),
         "double_bottom_detection": RunAction(
             "double_bottom_detection",
@@ -529,6 +584,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="bottoming",
         ),
         "weekly_tight_close": RunAction(
             "weekly_tight_close",
@@ -549,6 +605,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "weekly_tight_close_breakout": RunAction(
             "weekly_tight_close_breakout",
@@ -569,6 +626,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "weekly_htf_pullback": RunAction(
             "weekly_htf_pullback",
@@ -589,6 +647,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "htf_8w_runup": RunAction(
             "htf_8w_runup",
@@ -609,6 +668,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "weekly_rs": RunAction(
             "weekly_rs",
@@ -629,6 +689,7 @@ class RunService:
             ),
             visible_in_runs=False,
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "weekly_rs_before_price": RunAction(
             "weekly_rs_before_price",
@@ -648,6 +709,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "near_200ma": RunAction(
             "near_200ma",
@@ -667,6 +729,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "lost_21ema": RunAction(
             "lost_21ema",
@@ -709,6 +772,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
         "sean_peg": RunAction(
             "sean_peg",
@@ -732,6 +796,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             bias_group="bullish",
+            bullish_subgroup="leaders",
         ),
     }
     _jobs_lock = threading.Lock()
@@ -756,6 +821,7 @@ class RunService:
                 "id": action.action_id,
                 "label": action.label,
                 "bias_group": action.bias_group,
+                "bullish_subgroup": action.bullish_subgroup,
                 "command": " ".join([sys.executable, action.script_path, *action.extra_args]).strip(),
                 "supports_limit": action.supports_limit,
                 "fields": [
