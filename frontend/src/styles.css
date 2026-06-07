@@ -1219,6 +1219,75 @@ a {
   min-width: 0;
 }
 
+.watchlist-board-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.watchlist-board-toolbar {
+  align-items: end;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 0 0 16px;
+}
+
+.watchlist-card-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.watchlist-card {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+  color: inherit;
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  text-decoration: none;
+  transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+}
+
+.watchlist-card:hover {
+  background: #202024;
+  border-color: rgba(52, 211, 153, 0.45);
+  transform: translateY(-1px);
+}
+
+.ticker-card-head {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.ticker-card-meta {
+  color: #a1a1aa;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 10px;
+}
+
+.ticker-card-summary {
+  color: #d4d4d8;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.ticker-card-cta {
+  color: #86efac;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .hero-strip {
   align-items: center;
   background: #18181b;
