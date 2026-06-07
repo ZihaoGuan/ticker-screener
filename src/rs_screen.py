@@ -4,9 +4,11 @@ from dataclasses import asdict, dataclass
 import datetime as dt
 
 import numpy as np
+import pandas as pd
 
 from .config import AppConfig
 from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
+from .rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
 from .universe import UniverseTicker
 
 
@@ -49,6 +51,9 @@ class ScreenHit:
     sector_etf_distance_from_year_high_pct: float | str
     sector_etf_return_vs_rs_window_pct: float | str
     sector_benchmark_return_vs_rs_window_pct: float | str
+    rs_score: float
+    rs_rating: float
+    min_rs_rating: float
     reasons: list[str]
 
     def to_dict(self) -> dict[str, object]:
@@ -154,8 +159,42 @@ def _to_hit(ticker: UniverseTicker, summary: dict[str, object]) -> ScreenHit:
         sector_etf_distance_from_year_high_pct=summary["sector_etf_distance_from_year_high_pct"],
         sector_etf_return_vs_rs_window_pct=summary["sector_etf_return_vs_rs_window_pct"],
         sector_benchmark_return_vs_rs_window_pct=summary["sector_benchmark_return_vs_rs_window_pct"],
+        rs_score=float(summary["rs_score"]),
+        rs_rating=float(summary["rs_rating"]),
+        min_rs_rating=float(summary["min_rs_rating"]),
         reasons=list(summary.get("reasons", [])),
     )
+
+
+def _build_close_frame_from_rows(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(
+        {
+            "Date": pd.to_datetime([row.get("formatted_date") for row in rows]),
+            "Close": [row.get("close") for row in rows],
+        }
+    )
+    return frame.dropna(subset=["Date", "Close"]).set_index("Date").sort_index()
+
+
+def _compute_latest_rs_rating(
+    stock_rows: list[dict[str, object]],
+    benchmark_rows: list[dict[str, object]],
+) -> tuple[float, float] | None:
+    stock_frame = _build_close_frame_from_rows(stock_rows)
+    benchmark_frame = _build_close_frame_from_rows(benchmark_rows)
+    if stock_frame.empty or benchmark_frame.empty:
+        return None
+    aligned = stock_frame.join(benchmark_frame.rename(columns={"Close": "benchmark_close"}), how="inner").dropna()
+    if len(aligned) < 253:
+        return None
+    score_series = compute_weighted_rs_score(aligned["Close"], aligned["benchmark_close"]).reindex(aligned.index)
+    latest_score = score_series.iloc[-1]
+    latest_rating = approximate_rs_rating(float(latest_score)) if pd.notna(latest_score) else None
+    if latest_rating is None:
+        return None
+    return float(latest_score), float(latest_rating)
 
 
 def run_rs_screen(
@@ -200,6 +239,23 @@ def run_rs_screen(
                             for item in financials.priceData.get("priceData", [])
                             if isinstance(item, dict)
                         ]
+                        benchmark_rows = [
+                            item
+                            for item in financials._get_benchmark_price_data(config.benchmark_ticker)
+                            if isinstance(item, dict)
+                        ]
+                        rs_metrics = _compute_latest_rs_rating(price_data, benchmark_rows)
+                        if rs_metrics is None:
+                            continue
+                        latest_rs_score, latest_rs_rating = rs_metrics
+                        if latest_rs_rating < float(config.rs_rating_min):
+                            continue
+                        reasons = list(summary.get("reasons", []))
+                        reasons.append(f"RS rating {latest_rs_rating:.1f} >= {float(config.rs_rating_min):.1f}")
+                        summary["reasons"] = reasons
+                        summary["rs_score"] = latest_rs_score
+                        summary["rs_rating"] = latest_rs_rating
+                        summary["min_rs_rating"] = float(config.rs_rating_min)
                         closes = [
                             float(item["close"])
                             for item in price_data

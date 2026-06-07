@@ -7,6 +7,8 @@ def _format_note(hit: ScreenHit) -> str:
     return (
         f"{' | '.join(hit.reasons)}. "
         f"RS line {hit.current_rs_line:.6f} vs {hit.benchmark_ticker}. "
+        f"RS rating {hit.rs_rating:.1f} (min {hit.min_rs_rating:.1f}), "
+        f"RS score {hit.rs_score:.2f}. "
         f"Daily lookback {hit.daily_lookback_days} sessions, "
         f"weekly lookback {hit.weekly_lookback_weeks} weeks."
     )
@@ -39,6 +41,7 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
                 f"Recent weekly RS NH: {hit.weekly_rs_new_high_recent}. "
                 f"Last weekly signal: {recency_text}. "
                 f"Weekly RS NH before price: {weekly_status}. "
+                f"RS rating: {hit.rs_rating:.1f}. "
                 f"Recent golden cross ({hit.recent_golden_cross_days}D): {hit.recent_golden_cross}. "
                 f"Recent inside day ({hit.recent_inside_day_days}D): {hit.recent_inside_day}. "
                 f"Distance from year high: {hit.distance_from_year_high_pct:.1f}%."
@@ -49,6 +52,7 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
                 f"Signal on {hit.signal_date}. "
                 f"Daily RS NH before price: {hit.daily_rs_new_high_before_price}. "
                 f"Weekly RS NH before price: {weekly_status}. "
+                f"RS rating: {hit.rs_rating:.1f}. "
                 f"Recent golden cross ({hit.recent_golden_cross_days}D): {hit.recent_golden_cross}. "
                 f"Recent inside day ({hit.recent_inside_day_days}D): {hit.recent_inside_day}. "
                 f"Distance from year high: {hit.distance_from_year_high_pct:.1f}%."
@@ -67,6 +71,8 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
                 "entry_price": round(hit.current_price, 4),
                 "entry_label": "Signal close",
                 "entry_timeframe": "daily",
+                "signal_rs_rating": round(hit.rs_rating, 2),
+                "signal_rs_score": round(hit.rs_score, 4),
             }
         )
     return watchlist

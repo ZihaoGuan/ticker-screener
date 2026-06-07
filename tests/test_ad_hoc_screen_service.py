@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.config import AppConfig
+from src.rs_screen import _compute_latest_rs_rating
 from src.screener_engine import ScreenerEvaluationResult, ScreenerSpec
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 
@@ -417,27 +418,50 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["screeners"][0]["id"], "hve")
         self.assertTrue(payload["screeners"][0]["passed"])
 
-    def test_run_supports_rs_rating_catalog_entry(self) -> None:
-        ticker_frame = _rs_rating_stock_frame()
-        benchmark_frame = _rs_rating_benchmark_frame()
-        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+    def test_rs_rating_helper_returns_expected_threshold_behavior(self) -> None:
+        strong_metrics = _compute_latest_rs_rating(
+            [
+                {
+                    "formatted_date": index.date().isoformat(),
+                    "close": float(close),
+                }
+                for index, close in _rs_rating_stock_frame()["Close"].items()
+            ],
+            [
+                {
+                    "formatted_date": index.date().isoformat(),
+                    "close": float(close),
+                }
+                for index, close in _rs_rating_benchmark_frame()["Close"].items()
+            ],
+        )
 
-        with patch(
-            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
-            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
-        ), patch(
-            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
-            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
-        ):
-            payload = service.run(
-                ticker="AAPL",
-                as_of_date=dt.date(2025, 3, 21),
-                screener_ids=["rs_rating"],
-            )
+        self.assertIsNotNone(strong_metrics)
+        assert strong_metrics is not None
+        self.assertGreaterEqual(strong_metrics[1], 90.0)
 
-        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
-        self.assertEqual(payload["screeners"][0]["id"], "rs_rating")
-        self.assertTrue(payload["screeners"][0]["passed"])
+        weak_frame = _frame("2024-01-01", 320)
+        weak_benchmark = _frame("2024-01-01", 320)
+        weak_metrics = _compute_latest_rs_rating(
+            [
+                {
+                    "formatted_date": index.date().isoformat(),
+                    "close": float(close),
+                }
+                for index, close in weak_frame["Close"].items()
+            ],
+            [
+                {
+                    "formatted_date": index.date().isoformat(),
+                    "close": float(close),
+                }
+                for index, close in weak_benchmark["Close"].items()
+            ],
+        )
+
+        self.assertIsNotNone(weak_metrics)
+        assert weak_metrics is not None
+        self.assertLess(weak_metrics[1], 90.0)
 
     def test_run_supports_inside_dryup_catalog_entry(self) -> None:
         ticker_frame = _inside_dryup_frame()

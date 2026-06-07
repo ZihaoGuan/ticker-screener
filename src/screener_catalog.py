@@ -15,7 +15,6 @@ from .htf_runup_screen import run_htf_runup_screen
 from .inside_dryup_screen import find_recent_inside_dryup_hit
 from .lost_21ema_screen import run_lost_21ema_screen
 from .near_200ma_screen import run_near_200ma_screen
-from .rs_rating_screen import find_recent_rs_rating_hit
 from .rs_screen import run_rs_screen
 from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, ScreenerSpec
 from .universe import UniverseTicker
@@ -69,31 +68,6 @@ def _run_rs_daily(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
 def _run_rs_weekly(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     return _single_ticker_result(bundle, run_rs_screen, config, signal_profile="weekly")
-
-
-def _run_rs_rating(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
-    config = bundle.extras["config"]
-    hit = find_recent_rs_rating_hit(
-        bundle.bars,
-        bundle.benchmark_bars,
-        ticker=_ticker_from_bundle(bundle),
-        benchmark_ticker=config.benchmark_ticker,
-        min_rating=float(config.rs_rating_min),
-    )
-    if hit is None:
-        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
-    payload = hit.to_dict()
-    return ScreenerEvaluationResult(
-        passed=True,
-        metrics={
-            "ticker": bundle.ticker,
-            "signal_date": payload["signal_date"],
-            "rs_rating": payload["rs_rating"],
-            "rs_score": payload["rs_score"],
-        },
-        reasons=tuple(str(item) for item in payload.get("reasons", [])),
-        hit=payload,
-    )
 
 
 def _run_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
@@ -268,13 +242,6 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=max_rs_days,
             warmup_trading_days=40,
             evaluator=_run_rs_weekly,
-        ),
-        "rs_rating": ScreenerSpec(
-            id="rs_rating",
-            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
-            lookback_trading_days=max(max_rs_days, 320),
-            warmup_trading_days=10,
-            evaluator=_run_rs_rating,
         ),
         "vcp": ScreenerSpec(
             id="vcp",

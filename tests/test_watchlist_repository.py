@@ -90,19 +90,6 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "fearzone_zeiierman_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "fearzone_zeiierman")
 
-    def test_group_key_supports_rs_rating(self) -> None:
-        self._write_new_watchlist(
-            date_folder="2026-06-06",
-            strategy_id="rs_rating",
-            date_label="2026-06-06",
-            tickers=["NVDA"],
-        )
-
-        rows = self.repository.list_recent_watchlists()
-
-        self.assertEqual(rows[0]["stem"], "rs_rating_2026-06-06")
-        self.assertEqual(rows[0]["group_key"], "rs_rating")
-
 
 if __name__ == "__main__":
     unittest.main()
