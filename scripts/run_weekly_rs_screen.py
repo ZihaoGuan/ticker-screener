@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="Limit the universe for smoke runs.")
     parser.add_argument("--tickers", nargs="+", help="Optional explicit ticker list instead of full exchange universe.")
     parser.add_argument("--date-label", help="Override artifact date label (YYYY-MM-DD).")
+    parser.add_argument("--as-of-date", help="Historical as-of date for replay mode (YYYY-MM-DD).")
     add_universe_filter_args(parser)
     return parser.parse_args()
 
@@ -53,7 +55,8 @@ def main() -> int:
         config = override_config(config, max_tickers=args.limit)
     excluded = load_excluded_tickers(config)
 
-    date_label = args.date_label or today_label()
+    as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else None
+    date_label = args.date_label or today_label(as_of_date)
     filter_criteria = build_filter_criteria_from_args(args)
 
     if args.tickers:
@@ -62,7 +65,7 @@ def main() -> int:
         universe = load_universe(config, limit=args.limit)
         universe = filter_universe_by_criteria(universe, filter_criteria)
 
-    result = run_rs_screen(config, universe, signal_profile="weekly")
+    result = run_rs_screen(config, universe, signal_profile="weekly", as_of_date=as_of_date)
     watchlist = build_watchlist(result.hits, signal_profile="weekly")
 
     artifact_paths = build_screener_artifact_paths(PROJECT_ROOT / "artifacts", strategy_id="weekly_rs", date_label=date_label)
@@ -77,6 +80,7 @@ def main() -> int:
         {
             "strategy_id": "weekly_rs",
             "date_label": date_label,
+            "as_of_date": as_of_date.isoformat() if as_of_date else None,
             "signal_profile": "weekly",
             "total_tickers": result.total_tickers,
             "passed_tickers": result.passed_tickers,
