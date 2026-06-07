@@ -517,47 +517,69 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     mode === "warmup" ? "Warmup Batch" : mode === "backtests" ? "Backtest Runner" : "Available Screeners";
   const jobsPanelTitle =
     mode === "warmup" ? "Recent Warmup Jobs" : mode === "backtests" ? "Recent Backtest Jobs" : "Recent Screener Jobs";
+  const groupedVisibleActions = useMemo(() => {
+    if (mode !== "screeners") {
+      return [{ key: "all", label: "", actions: visibleActions }];
+    }
+    const order: Array<{ key: "bullish" | "bearish" | "other"; label: string }> = [
+      { key: "bullish", label: "Bullish" },
+      { key: "bearish", label: "Bearish" },
+      { key: "other", label: "Other" },
+    ];
+    return order
+      .map((group) => ({
+        key: group.key,
+        label: group.label,
+        actions: visibleActions.filter((action) => (action.bias_group ?? "other") === group.key),
+      }))
+      .filter((group) => group.actions.length > 0);
+  }, [mode, visibleActions]);
 
   return (
     <>
       <div className="page-grid">
         <Panel title={pageTitle}>
           {isLoading && !payload ? <LoadingBlock label="Loading available screeners…" /> : null}
-          <div className="screeners-grid">
-            {visibleActions.map((action) => (
-              <div key={action.id} className="screener-card">
-                {(() => {
-                  const configureOnly = ["signal_warm_batch", "overlap_backtest_v1"].includes(action.id);
-                  return (
-                    <>
-                <div className="screener-card-header">
-                  <h3>{action.label}</h3>
-                </div>
-                <p className="screener-description">
-                  {configureOnly
-                    ? "Open config to choose date range and screener set."
-                    : action.fields.length > 0
-                    ? "Run with defaults now, or open config for custom parameters."
-                    : "Run immediately with the default screener settings."}
-                </p>
-                <div className="screener-card-actions">
-                  {!configureOnly ? (
-                    <button className="screener-run-button" onClick={() => void handleQuickRun(action.id)} type="button" disabled={isRunning}>
-                      RUN DEFAULT
-                    </button>
-                  ) : null}
-                  {action.fields.length > 0 ? (
-                    <button className="screener-config-button" onClick={() => handleConfigureClick(action.id)} type="button" disabled={isRunning}>
-                      {configureOnly ? "OPEN CONFIG" : "CONFIGURE"}
-                    </button>
-                  ) : null}
-                </div>
-                    </>
-                  );
-                })()}
+          {groupedVisibleActions.map((group) => (
+            <div key={group.key} className="screener-group-section">
+              {group.label ? <h2 className="screener-group-title">{group.label}</h2> : null}
+              <div className="screeners-grid">
+                {group.actions.map((action) => (
+                  <div key={action.id} className="screener-card">
+                    {(() => {
+                      const configureOnly = ["signal_warm_batch", "overlap_backtest_v1"].includes(action.id);
+                      return (
+                        <>
+                          <div className="screener-card-header">
+                            <h3>{action.label}</h3>
+                          </div>
+                          <p className="screener-description">
+                            {configureOnly
+                              ? "Open config to choose date range and screener set."
+                              : action.fields.length > 0
+                              ? "Run with defaults now, or open config for custom parameters."
+                              : "Run immediately with the default screener settings."}
+                          </p>
+                          <div className="screener-card-actions">
+                            {!configureOnly ? (
+                              <button className="screener-run-button" onClick={() => void handleQuickRun(action.id)} type="button" disabled={isRunning}>
+                                RUN DEFAULT
+                              </button>
+                            ) : null}
+                            {action.fields.length > 0 ? (
+                              <button className="screener-config-button" onClick={() => handleConfigureClick(action.id)} type="button" disabled={isRunning}>
+                                {configureOnly ? "OPEN CONFIG" : "CONFIGURE"}
+                              </button>
+                            ) : null}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </Panel>
 
         {canManageSchedules && mode === "screeners" ? (

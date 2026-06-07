@@ -4,6 +4,19 @@
   gap: 16px;
 }
 
+.screener-group-section + .screener-group-section {
+  margin-top: 24px;
+}
+
+.screener-group-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a1a1aa;
+}
+
 .screener-card {
   background: linear-gradient(135deg, #1f1f23 0%, #18181b 100%);
   border: 1px solid #27272a;

@@ -33,6 +33,7 @@ class RunAction:
     extra_args: tuple[str, ...] = ()
     fields: tuple["RunField", ...] = ()
     visible_in_runs: bool = True
+    bias_group: str = "other"
 
 
 @dataclass(frozen=True)
@@ -207,6 +208,7 @@ class RunService:
                 _date_label_field,
                 _reference_date_field,
             ),
+            bias_group="other",
         ),
         "rs": RunAction(
             "rs",
@@ -226,6 +228,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "vcp": RunAction(
             "vcp",
@@ -245,6 +248,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "cup_handle": RunAction(
             "cup_handle",
@@ -264,6 +268,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "gap_fill": RunAction(
             "gap_fill",
@@ -283,6 +288,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "hve": RunAction(
             "hve",
@@ -302,6 +308,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "inside_dryup": RunAction(
             "inside_dryup",
@@ -321,6 +328,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "ftd_sweep": RunAction(
             "ftd_sweep",
@@ -340,6 +348,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "fearzone": RunAction(
             "fearzone",
@@ -359,6 +368,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "fearzone_zeiierman": RunAction(
             "fearzone_zeiierman",
@@ -378,6 +388,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "td9_bullish": RunAction(
             "td9_bullish",
@@ -397,6 +408,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "td9_bearish": RunAction(
             "td9_bearish",
@@ -416,6 +428,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bearish",
         ),
         "macd_golden_cross": RunAction(
             "macd_golden_cross",
@@ -435,6 +448,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "macd_dead_cross": RunAction(
             "macd_dead_cross",
@@ -454,6 +468,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bearish",
         ),
         "base_detection": RunAction(
             "base_detection",
@@ -473,6 +488,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "cup_detection": RunAction(
             "cup_detection",
@@ -492,6 +508,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "double_bottom_detection": RunAction(
             "double_bottom_detection",
@@ -511,6 +528,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "weekly_tight_close": RunAction(
             "weekly_tight_close",
@@ -530,6 +548,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "weekly_tight_close_breakout": RunAction(
             "weekly_tight_close_breakout",
@@ -549,6 +568,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "weekly_htf_pullback": RunAction(
             "weekly_htf_pullback",
@@ -568,6 +588,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "htf_8w_runup": RunAction(
             "htf_8w_runup",
@@ -587,6 +608,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "weekly_rs": RunAction(
             "weekly_rs",
@@ -606,6 +628,7 @@ class RunService:
                 _exclude_themes_field,
             ),
             visible_in_runs=False,
+            bias_group="bullish",
         ),
         "weekly_rs_before_price": RunAction(
             "weekly_rs_before_price",
@@ -624,6 +647,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "near_200ma": RunAction(
             "near_200ma",
@@ -642,6 +666,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "lost_21ema": RunAction(
             "lost_21ema",
@@ -660,6 +685,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bearish",
         ),
         "legacy_peg": RunAction(
             "legacy_peg",
@@ -682,6 +708,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
         "sean_peg": RunAction(
             "sean_peg",
@@ -704,6 +731,7 @@ class RunService:
                 _include_themes_field,
                 _exclude_themes_field,
             ),
+            bias_group="bullish",
         ),
     }
     _jobs_lock = threading.Lock()
@@ -727,6 +755,7 @@ class RunService:
             {
                 "id": action.action_id,
                 "label": action.label,
+                "bias_group": action.bias_group,
                 "command": " ".join([sys.executable, action.script_path, *action.extra_args]).strip(),
                 "supports_limit": action.supports_limit,
                 "fields": [

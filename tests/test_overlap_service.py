@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from src.overlap_summary import discover_supported_dates, resolve_pipeline_path
+from src.overlap_summary import build_overlap_payload, discover_supported_dates, resolve_pipeline_path
 
 
 class OverlapSummaryTests(unittest.TestCase):
@@ -41,6 +41,28 @@ class OverlapSummaryTests(unittest.TestCase):
 
         self.assertEqual(path, dated_watchlist)
         self.assertEqual(resolution, "dated")
+
+    def test_build_overlap_payload_includes_new_bullish_pipelines(self) -> None:
+        date_label = "2026-05-24"
+        weekly_rs_root = self.artifacts_dir / "screeners" / date_label / "weekly_rs"
+        weekly_rs_root.mkdir(parents=True, exist_ok=True)
+        (weekly_rs_root / "watchlist.json").write_text(json.dumps([{"ticker": "AAPL"}]), encoding="utf-8")
+        base_root = self.artifacts_dir / "screeners" / date_label / "base_detection"
+        base_root.mkdir(parents=True, exist_ok=True)
+        (base_root / "watchlist.json").write_text(json.dumps([{"ticker": "MSFT"}]), encoding="utf-8")
+        tight_root = self.artifacts_dir / "screeners" / date_label / "weekly_tight_close_breakout"
+        tight_root.mkdir(parents=True, exist_ok=True)
+        (tight_root / "watchlist.json").write_text(json.dumps([{"ticker": "NVDA"}]), encoding="utf-8")
+
+        payload = build_overlap_payload(date_label, self.watchlist_dir)
+        pipeline_ids = [str(item["id"]) for item in payload["pipeline_status"]]
+
+        self.assertIn("weekly_rs", pipeline_ids)
+        self.assertIn("base_detection", pipeline_ids)
+        self.assertIn("weekly_tight_close_breakout", pipeline_ids)
+        self.assertEqual(payload["pipeline_counts"]["weekly_rs"], 1)
+        self.assertEqual(payload["pipeline_counts"]["base_detection"], 1)
+        self.assertEqual(payload["pipeline_counts"]["weekly_tight_close_breakout"], 1)
 
 
 if __name__ == "__main__":

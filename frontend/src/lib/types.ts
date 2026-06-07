@@ -155,6 +155,7 @@ export type DashboardResponse = {
 export type RunAction = {
   id: string;
   label: string;
+  bias_group?: "bullish" | "bearish" | "other";
   command: string;
   supports_limit: boolean;
   fields: Array<{

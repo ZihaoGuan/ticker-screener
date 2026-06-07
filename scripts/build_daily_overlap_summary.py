@@ -17,7 +17,7 @@ from src.overlap_summary import build_html_summary, build_overlap_payload, build
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a daily overlap summary across RS, Sean PEG, Legacy PEG, VCP, Cup and Handle, Weekly HTF 8W Pullback, 8W 100% Runup, Gap Fill, HVE, and Inside Dry-Up watchlists."
+        description="Build a daily overlap summary across the configured bullish screener watchlists."
     )
     parser.add_argument("--date-label", default=today_label(), help="Date label in YYYY-MM-DD format.")
     parser.add_argument(

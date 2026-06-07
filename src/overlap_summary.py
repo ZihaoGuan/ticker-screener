@@ -17,6 +17,11 @@ PIPELINES = (
         "filename": "rs_new_high_before_price_{date}.json",
     },
     {
+        "id": "weekly_rs",
+        "label": "Weekly RS New High Before Price",
+        "filename": "weekly_rs_new_high_{date}.json",
+    },
+    {
         "id": "sean_peg",
         "label": "Sean PEG",
         "filename": "sean_peg_earnings_gap_{date}.json",
@@ -54,6 +59,11 @@ PIPELINES = (
         "filename": "gap_fill_{date}.json",
     },
     {
+        "id": "near_200ma",
+        "label": "Near 200MA",
+        "filename": "near_200ma_{date}.json",
+    },
+    {
         "id": "hve",
         "label": "HVE",
         "filename": "hve_{date}.json",
@@ -67,6 +77,46 @@ PIPELINES = (
         "id": "ftd_sweep",
         "label": "Sweep Success",
         "filename": "ftd_sweep_{date}.json",
+    },
+    {
+        "id": "fearzone_zeiierman",
+        "label": "Fearzone Zeiierman",
+        "filename": "fearzone_zeiierman_{date}.json",
+    },
+    {
+        "id": "td9_bullish",
+        "label": "TD9 Bullish",
+        "filename": "td9_bullish_{date}.json",
+    },
+    {
+        "id": "macd_golden_cross",
+        "label": "MACD Golden Cross",
+        "filename": "macd_golden_cross_{date}.json",
+    },
+    {
+        "id": "base_detection",
+        "label": "Base Detection",
+        "filename": "base_detection_{date}.json",
+    },
+    {
+        "id": "cup_detection",
+        "label": "Cup Detection",
+        "filename": "cup_detection_{date}.json",
+    },
+    {
+        "id": "double_bottom_detection",
+        "label": "Double Bottom Detection",
+        "filename": "double_bottom_detection_{date}.json",
+    },
+    {
+        "id": "weekly_tight_close",
+        "label": "Weekly Tight Close",
+        "filename": "weekly_tight_close_{date}.json",
+    },
+    {
+        "id": "weekly_tight_close_breakout",
+        "label": "Weekly Tight Close Breakout",
+        "filename": "weekly_tight_close_breakout_{date}.json",
     },
 )
 
