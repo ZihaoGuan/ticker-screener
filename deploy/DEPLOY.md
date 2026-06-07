@@ -249,16 +249,17 @@ The deploy workflow logs into the Oracle instance, checks out the requested git 
 
 ```bash
 BACKUP_DIR="$(mktemp -d)"
-for preserve_path in config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt; do
+PRESERVE_PATHS="config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt"
+for preserve_path in ${PRESERVE_PATHS}; do
   if [ -f "${preserve_path}" ]; then
     mkdir -p "${BACKUP_DIR}/$(dirname "${preserve_path}")"
     cp "${preserve_path}" "${BACKUP_DIR}/${preserve_path}"
   fi
 done
-git restore --source=HEAD --worktree --staged -- frontend/package-lock.json config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt || true
+git restore --source=HEAD --worktree --staged -- frontend/package-lock.json ${PRESERVE_PATHS} || true
 git clean -fd -- frontend/package-lock.json frontend/dist frontend/tsconfig.app.tsbuildinfo frontend/tsconfig.node.tsbuildinfo frontend/vite.config.js frontend/vite.config.d.ts
 git pull --ff-only origin "${GIT_REF}"
-for preserve_path in config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt; do
+for preserve_path in ${PRESERVE_PATHS}; do
   if [ -f "${BACKUP_DIR}/${preserve_path}" ]; then
     cp "${BACKUP_DIR}/${preserve_path}" "${preserve_path}"
   fi
