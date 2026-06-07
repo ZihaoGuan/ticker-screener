@@ -85,6 +85,8 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("fearzone_zeiierman", "fearzone_zeiierman", "Fearzone Zeiierman"),
         ("td9_bullish", "td9", "TD9"),
         ("td9_bearish", "td9", "TD9"),
+        ("macd_golden_cross", "macd", "MACD"),
+        ("macd_dead_cross", "macd", "MACD"),
         ("fearzone", "fearzone", "Fearzone"),
         ("near_200ma", "near_200ma", "Near 200MA"),
         ("lost_21ema", "lost_21ema", "Lost 21EMA"),

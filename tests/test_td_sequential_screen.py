@@ -8,7 +8,7 @@ from src.td_sequential_screen import find_recent_td_sequential_hit
 from src.universe import UniverseTicker
 
 
-def _bullish_td9_frame() -> pd.DataFrame:
+def _bearish_td9_frame() -> pd.DataFrame:
     index = pd.date_range(start="2026-01-02", periods=20, freq="B")
     close = [
         100.0,
@@ -48,7 +48,7 @@ def _bullish_td9_frame() -> pd.DataFrame:
     )
 
 
-def _bearish_td9_frame() -> pd.DataFrame:
+def _bullish_td9_frame() -> pd.DataFrame:
     index = pd.date_range(start="2026-01-02", periods=20, freq="B")
     close = [
         100.0,

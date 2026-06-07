@@ -87,6 +87,18 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("td9_bearish_{date_label}.json",),
         "legacy_summary_templates": ("td9_bearish_run_summary_{date_label}.json",),
     },
+    "macd_golden_cross": {
+        "stem_template": "macd_golden_cross_{date_label}",
+        "legacy_watchlist_templates": ("macd_golden_cross_{date_label}.json",),
+        "legacy_raw_templates": ("macd_golden_cross_{date_label}.json",),
+        "legacy_summary_templates": ("macd_golden_cross_run_summary_{date_label}.json",),
+    },
+    "macd_dead_cross": {
+        "stem_template": "macd_dead_cross_{date_label}",
+        "legacy_watchlist_templates": ("macd_dead_cross_{date_label}.json",),
+        "legacy_raw_templates": ("macd_dead_cross_{date_label}.json",),
+        "legacy_summary_templates": ("macd_dead_cross_run_summary_{date_label}.json",),
+    },
     "near_200ma": {
         "stem_template": "near_200ma_{date_label}",
         "legacy_watchlist_templates": ("near_200ma_{date_label}.json",),
@@ -156,6 +168,8 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("fearzone_zeiierman", "fearzone_zeiierman"),
     ("td9_bullish", "td9_bullish"),
     ("td9_bearish", "td9_bearish"),
+    ("macd_golden_cross", "macd_golden_cross"),
+    ("macd_dead_cross", "macd_dead_cross"),
     ("fearzone", "fearzone"),
     ("near_200ma", "near_200ma"),
     ("lost_21ema", "lost_21ema"),

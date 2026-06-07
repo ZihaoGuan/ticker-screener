@@ -103,6 +103,19 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "td9_bullish_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "td9")
 
+    def test_group_key_supports_macd_golden_cross(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="macd_golden_cross",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "macd_golden_cross_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "macd")
+
 
 if __name__ == "__main__":
     unittest.main()

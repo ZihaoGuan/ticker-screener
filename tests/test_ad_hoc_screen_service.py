@@ -267,7 +267,7 @@ def _inside_dryup_frame() -> pd.DataFrame:
     )
 
 
-def _bullish_td9_frame() -> pd.DataFrame:
+def _bearish_td9_frame() -> pd.DataFrame:
     index = pd.date_range(start="2026-01-02", periods=20, freq="B")
     close = [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 99.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0]
     return pd.DataFrame(
@@ -283,9 +283,43 @@ def _bullish_td9_frame() -> pd.DataFrame:
     )
 
 
-def _bearish_td9_frame() -> pd.DataFrame:
+def _bullish_td9_frame() -> pd.DataFrame:
     index = pd.date_range(start="2026-01-02", periods=20, freq="B")
     close = [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 101.0, 99.0, 98.0, 97.0, 96.0, 95.0, 94.0, 93.0, 92.0, 91.0]
+    return pd.DataFrame(
+        {
+            "Open": [value + 0.2 for value in close],
+            "High": [value + 0.8 for value in close],
+            "Low": [value - 0.8 for value in close],
+            "Close": close,
+            "Adj Close": close,
+            "Volume": [1_000_000.0 for _ in close],
+        },
+        index=index,
+    )
+
+
+def _macd_golden_cross_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2026-01-02", periods=60, freq="B")
+    close = [100.0 - (idx * 0.35) for idx in range(55)]
+    close.extend([80.6, 80.1, 79.8, 80.0, 81.8])
+    return pd.DataFrame(
+        {
+            "Open": [value - 0.2 for value in close],
+            "High": [value + 0.8 for value in close],
+            "Low": [value - 0.8 for value in close],
+            "Close": close,
+            "Adj Close": close,
+            "Volume": [1_000_000.0 for _ in close],
+        },
+        index=index,
+    )
+
+
+def _macd_dead_cross_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2026-01-02", periods=60, freq="B")
+    close = [100.0 + (idx * 0.35) for idx in range(55)]
+    close.extend([119.4, 119.8, 120.0, 119.5, 117.5])
     return pd.DataFrame(
         {
             "Open": [value + 0.2 for value in close],
@@ -563,6 +597,50 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "td9_bearish")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_macd_golden_cross_catalog_entry(self) -> None:
+        ticker_frame = _macd_golden_cross_frame()
+        benchmark_frame = _frame("2026-01-02", 80)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2026, 3, 26),
+                screener_ids=["macd_golden_cross"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "macd_golden_cross")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_macd_dead_cross_catalog_entry(self) -> None:
+        ticker_frame = _macd_dead_cross_frame()
+        benchmark_frame = _frame("2026-01-02", 80)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"TSLA": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"TSLA": {"ticker": "TSLA", "sector": "Consumer Cyclical", "industry": "Auto", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="TSLA",
+                as_of_date=dt.date(2026, 3, 26),
+                screener_ids=["macd_dead_cross"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "macd_dead_cross")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_falls_back_to_internet_when_benchmark_missing_in_db(self) -> None:

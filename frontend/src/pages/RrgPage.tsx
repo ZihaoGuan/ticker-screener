@@ -68,10 +68,10 @@ export function RrgPage() {
       signal: controller.signal,
     })
       .then((response) => {
-        writeRrgCache(cacheKey, response);
         setPayload(response);
         setActiveGroupId(response.groups?.[0]?.id ?? "");
         setLoading(false);
+        writeRrgCache(cacheKey, response);
       })
       .catch((error) => {
         if (error instanceof Error && error.name === "AbortError") {
@@ -426,15 +426,23 @@ function readRrgCache(key: string): RrgResponse | null {
 }
 
 function writeRrgCache(key: string, value: RrgResponse) {
-  localStorage.setItem(
-    key,
-    JSON.stringify({
-      savedAt: Date.now(),
-      value,
-    }),
-  );
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        savedAt: Date.now(),
+        value,
+      }),
+    );
+  } catch {
+    // Ignore cache write failures so a valid API response still renders.
+  }
 }
 
 function clearRrgCache(universe: RrgUniverse, cadence: RrgCadence) {
-  localStorage.removeItem(buildRrgCacheKey(universe, cadence));
+  try {
+    localStorage.removeItem(buildRrgCacheKey(universe, cadence));
+  } catch {
+    // Ignore cache clear failures.
+  }
 }

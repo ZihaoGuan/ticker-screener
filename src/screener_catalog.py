@@ -14,6 +14,7 @@ from .hve_screen import find_recent_hve_hit
 from .htf_runup_screen import run_htf_runup_screen
 from .inside_dryup_screen import find_recent_inside_dryup_hit
 from .lost_21ema_screen import run_lost_21ema_screen
+from .macd_screen import find_recent_macd_hit
 from .near_200ma_screen import run_near_200ma_screen
 from .rs_screen import run_rs_screen
 from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, ScreenerSpec
@@ -98,6 +99,40 @@ def _run_td9_bearish(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
         bundle.bars,
         ticker=_ticker_from_bundle(bundle),
         direction="bearish",
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "direction": payload["direction"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_macd_golden_cross(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_macd_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        direction="golden_cross",
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "direction": payload["direction"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_macd_dead_cross(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_macd_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        direction="dead_cross",
     )
     if hit is None:
         return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
@@ -358,6 +393,20 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=120,
             warmup_trading_days=10,
             evaluator=_run_td9_bearish,
+        ),
+        "macd_golden_cross": ScreenerSpec(
+            id="macd_golden_cross",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=180,
+            warmup_trading_days=20,
+            evaluator=_run_macd_golden_cross,
+        ),
+        "macd_dead_cross": ScreenerSpec(
+            id="macd_dead_cross",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=180,
+            warmup_trading_days=20,
+            evaluator=_run_macd_dead_cross,
         ),
         "weekly_htf_pullback": ScreenerSpec(
             id="weekly_htf_pullback",

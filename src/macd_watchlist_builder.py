@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from .td_sequential_screen import TdSequentialHit
+from .macd_screen import MacdHit
 
 
 def _setup_label(direction: str) -> str:
-    return "Bullish TD9" if direction == "bullish" else "Bearish TD9"
+    return "MACD Golden Cross" if direction == "golden_cross" else "MACD Dead Cross"
 
 
-def build_td_sequential_watchlist(hits: list[TdSequentialHit]) -> list[dict[str, object]]:
+def build_macd_watchlist(hits: list[MacdHit]) -> list[dict[str, object]]:
     watchlist: list[dict[str, object]] = []
     for hit in hits:
-        direction_text = "bullish" if hit.direction == "bullish" else "bearish"
-        setup_text = "sell setup 9" if hit.direction == "bullish" else "buy setup 9"
         summary = (
-            f"{direction_text.title()} TD Sequential completed 9 on {hit.signal_date} via {setup_text}. "
-            f"Latest close {hit.signal_close:.2f} versus close[4] {hit.comparison_close:.2f}."
+            f"{_setup_label(hit.direction)} on {hit.signal_date}. "
+            f"MACD {hit.macd_value:+.4f}, signal {hit.signal_value:+.4f}, histogram {hit.histogram_value:+.4f}. "
+            f"Signal age {hit.signal_age_bars} bar(s)."
         )
         watchlist.append(
             {
@@ -28,13 +27,14 @@ def build_td_sequential_watchlist(hits: list[TdSequentialHit]) -> list[dict[str,
                 "event_label": _setup_label(hit.direction),
                 "trigger_label": "Signal close",
                 "trigger_price": round(hit.signal_close, 4),
-                "entry_style": "td9",
+                "entry_style": "macd_cross",
                 "entry_price": round(hit.current_price, 4),
-                "entry_label": "Signal close",
+                "entry_label": "Current close" if hit.signal_age_bars > 0 else "Signal close",
                 "entry_timeframe": "daily",
                 "signal_direction": hit.direction,
-                "setup_count": hit.setup_count,
-                "comparison_close": round(hit.comparison_close, 4),
+                "macd_value": round(hit.macd_value, 4),
+                "signal_value": round(hit.signal_value, 4),
+                "histogram_value": round(hit.histogram_value, 4),
             }
         )
     return watchlist
