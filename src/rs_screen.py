@@ -8,7 +8,7 @@ import pandas as pd
 
 from .config import AppConfig
 from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
-from .rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
+from .rs_rating_screen import approximate_rs_rating, compute_latest_weighted_rs_score
 from .universe import UniverseTicker
 
 
@@ -178,6 +178,19 @@ def _build_close_frame_from_rows(rows: list[dict[str, object]]) -> pd.DataFrame:
     return frame.dropna(subset=["Date", "Close"]).set_index("Date").sort_index()
 
 
+def _build_high_close_frame_from_rows(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(
+        {
+            "Date": pd.to_datetime([row.get("formatted_date") for row in rows]),
+            "High": [row.get("high") for row in rows],
+            "Close": [row.get("close") for row in rows],
+        }
+    )
+    return frame.dropna(subset=["Date", "High", "Close"]).set_index("Date").sort_index()
+
+
 def _compute_latest_rs_rating(
     stock_rows: list[dict[str, object]],
     benchmark_rows: list[dict[str, object]],
@@ -187,14 +200,66 @@ def _compute_latest_rs_rating(
     if stock_frame.empty or benchmark_frame.empty:
         return None
     aligned = stock_frame.join(benchmark_frame.rename(columns={"Close": "benchmark_close"}), how="inner").dropna()
-    if len(aligned) < 253:
+    if len(aligned) < 2:
         return None
-    score_series = compute_weighted_rs_score(aligned["Close"], aligned["benchmark_close"]).reindex(aligned.index)
-    latest_score = score_series.iloc[-1]
+    latest_score = compute_latest_weighted_rs_score(aligned["Close"], aligned["benchmark_close"])
+    if latest_score is None:
+        return None
     latest_rating = approximate_rs_rating(float(latest_score)) if pd.notna(latest_score) else None
     if latest_rating is None:
         return None
     return float(latest_score), float(latest_rating)
+
+
+def _compute_weekly_rs_before_price_context(
+    stock_rows: list[dict[str, object]],
+    benchmark_rows: list[dict[str, object]],
+    *,
+    weekly_lookback_weeks: int,
+    recent_signal_weeks: int,
+) -> dict[str, object] | None:
+    stock_frame = _build_high_close_frame_from_rows(stock_rows)
+    benchmark_frame = _build_close_frame_from_rows(benchmark_rows)
+    if stock_frame.empty or benchmark_frame.empty:
+        return None
+
+    aligned = stock_frame.join(benchmark_frame.rename(columns={"Close": "benchmark_close"}), how="inner").dropna()
+    if aligned.empty:
+        return None
+
+    weekly_stock = aligned[["Close", "High"]].resample("W-FRI").agg({"Close": "last", "High": "max"}).dropna()
+    weekly_benchmark = aligned[["benchmark_close"]].resample("W-FRI").agg({"benchmark_close": "last"}).dropna()
+    weekly_aligned = weekly_stock.join(weekly_benchmark, how="inner").dropna()
+    if weekly_aligned.empty:
+        return None
+
+    weekly_rs_line = weekly_aligned["Close"] / weekly_aligned["benchmark_close"]
+    rolling_rs_high = weekly_rs_line.rolling(window=max(1, int(weekly_lookback_weeks)), min_periods=1).max()
+    rolling_price_high = weekly_aligned["High"].rolling(window=max(1, int(weekly_lookback_weeks)), min_periods=1).max()
+    tolerance = 1e-12
+    weekly_before_price = (weekly_rs_line >= (rolling_rs_high - tolerance)) & (
+        weekly_aligned["High"] < (rolling_price_high - tolerance)
+    )
+
+    latest_flag = bool(weekly_before_price.iloc[-1])
+    recent_flags = weekly_before_price.tail(max(1, int(recent_signal_weeks)))
+    recent_any = bool(recent_flags.any()) if not recent_flags.empty else False
+    weeks_ago = None
+    signal_date = None
+    if recent_any:
+        recent_flags_list = [bool(value) for value in recent_flags.tolist()]
+        true_positions = [idx for idx, value in enumerate(recent_flags_list) if value]
+        if true_positions:
+            last_true_position = true_positions[-1]
+            weeks_ago = len(recent_flags_list) - 1 - last_true_position
+            signal_date = recent_flags.index[last_true_position].date().isoformat()
+
+    return {
+        "latest_weekly_before_price": latest_flag,
+        "recent_weekly_before_price": recent_any,
+        "weekly_before_price_weeks_ago": weeks_ago,
+        "weekly_before_price_signal_date": signal_date,
+    }
 
 
 def run_rs_screen(
@@ -252,9 +317,28 @@ def run_rs_screen(
                         signalProfile=signal_profile,
                     )
                     if summary:
+                        if str(signal_profile).strip().lower() == "weekly":
+                            weekly_context = _compute_weekly_rs_before_price_context(
+                                price_data,
+                                benchmark_rows,
+                                weekly_lookback_weeks=int(summary.get("weekly_lookback_weeks", config.rs_new_high_weekly_lookback_weeks)),
+                                recent_signal_weeks=int(summary.get("weekly_recent_signal_weeks", config.rs_weekly_recent_signal_weeks)),
+                            )
+                            if not weekly_context or not bool(weekly_context["recent_weekly_before_price"]):
+                                continue
+                            summary["weekly_rs_new_high_before_price"] = bool(weekly_context["latest_weekly_before_price"])
+                            summary["weekly_signal_weeks_ago"] = weekly_context["weekly_before_price_weeks_ago"]
+                            if weekly_context["weekly_before_price_signal_date"]:
+                                summary["signal_date"] = str(weekly_context["weekly_before_price_signal_date"])
                         if latest_rs_score is None or latest_rs_rating is None:
                             continue
                         reasons = list(summary.get("reasons", []))
+                        if str(signal_profile).strip().lower() == "weekly":
+                            weeks_ago = summary.get("weekly_signal_weeks_ago")
+                            if weeks_ago in (None, 0):
+                                reasons.append("weekly RS new high before price this week")
+                            else:
+                                reasons.append(f"weekly RS new high before price {int(weeks_ago)} week(s) ago")
                         reasons.append(f"RS rating {latest_rs_rating:.1f}")
                         summary["reasons"] = reasons
                         summary["rs_score"] = latest_rs_score

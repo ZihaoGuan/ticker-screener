@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.config import AppConfig
-from src.rs_screen import _compute_latest_rs_rating
+from src.rs_screen import _compute_latest_rs_rating, _compute_weekly_rs_before_price_context
 from src.screener_engine import ScreenerEvaluationResult, ScreenerSpec
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 
@@ -187,6 +187,41 @@ def _rs_rating_benchmark_frame() -> pd.DataFrame:
     )
 
 
+def _weekly_rs_rows(*, before_price: bool) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    stock_rows: list[dict[str, object]] = []
+    benchmark_rows: list[dict[str, object]] = []
+    daily_index = pd.date_range(start="2025-01-06", periods=60 * 5, freq="B")
+    for week in range(60):
+        week_dates = daily_index[week * 5 : (week + 1) * 5]
+        benchmark_close = 100.0 + (week * 0.3)
+        if week < 55:
+            stock_close = 100.0 + (week * 0.45)
+            stock_high = stock_close + 1.0
+        elif before_price:
+            stock_close = 121.0 + ((week - 55) * 0.2)
+            stock_high = 125.0
+        else:
+            stock_close = 124.0 + ((week - 55) * 0.8)
+            stock_high = stock_close + 1.5
+        if before_price and week >= 55:
+            benchmark_close = 95.0 - ((week - 55) * 0.6)
+        for date_value in week_dates:
+            stock_rows.append(
+                {
+                    "formatted_date": date_value.date().isoformat(),
+                    "close": float(stock_close),
+                    "high": float(stock_high),
+                }
+            )
+            benchmark_rows.append(
+                {
+                    "formatted_date": date_value.date().isoformat(),
+                    "close": float(benchmark_close),
+                }
+            )
+    return stock_rows, benchmark_rows
+
+
 def _hve_frame() -> pd.DataFrame:
     index = pd.date_range(start="2025-01-02", periods=320, freq="B")
     open_values = [100.0 + (idx * 0.2) for idx in range(320)]
@@ -328,6 +363,288 @@ def _macd_dead_cross_frame() -> pd.DataFrame:
             "Close": close,
             "Adj Close": close,
             "Volume": [1_000_000.0 for _ in close],
+        },
+        index=index,
+    )
+
+
+def _active_base_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-10-01", periods=160, freq="B")
+    close: list[float] = []
+    for idx in range(100):
+        close.append(80.0 + (idx * 0.28))
+    close.append(118.0)
+    close.extend(
+        [
+            115.0,
+            114.4,
+            114.8,
+            113.7,
+            114.2,
+            113.8,
+            114.3,
+            113.9,
+            114.5,
+            114.1,
+            113.6,
+            114.0,
+            113.5,
+            114.2,
+            113.9,
+            114.4,
+            114.1,
+            113.7,
+            114.0,
+            113.8,
+            114.2,
+            114.0,
+            113.9,
+            114.1,
+            114.0,
+        ]
+    )
+    while len(close) < len(index):
+        step = len(close) - 126
+        close.append(114.0 + ((step % 6) * 0.18))
+
+    open_values = [value - 0.25 for value in close]
+    high = [value + 0.65 for value in close]
+    low = [value - 0.65 for value in close]
+    volume = [1_000_000.0 for _ in close]
+
+    candidate_index = 100
+    open_values[candidate_index] = 117.2
+    close[candidate_index] = 118.0
+    high[candidate_index] = 120.0
+    low[candidate_index] = 116.0
+
+    for idx in range(candidate_index + 1, len(close)):
+        high[idx] = min(high[idx], 118.9)
+        low[idx] = max(low[idx], 108.0)
+        close[idx] = min(close[idx], 118.0)
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": volume,
+        },
+        index=index,
+    )
+
+
+def _active_cup_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-09-01", periods=145, freq="B")
+    close: list[float] = []
+    for idx in range(100):
+        close.append(80.0 + (idx * 0.28))
+    close.append(118.0)
+    close.extend(
+        [
+            116.0,
+            114.0,
+            112.0,
+            110.0,
+            108.0,
+            106.0,
+            104.0,
+            102.0,
+            100.0,
+            98.0,
+            96.0,
+            95.0,
+            94.5,
+            94.0,
+            93.5,
+            93.5,
+            93.8,
+            94.0,
+            94.2,
+            94.5,
+            95.0,
+            95.5,
+            96.0,
+            97.0,
+            98.0,
+            99.0,
+            100.0,
+            101.0,
+            102.0,
+            103.0,
+            104.5,
+            106.0,
+            108.0,
+            110.0,
+            111.5,
+            112.5,
+            113.5,
+            114.2,
+            114.8,
+            115.2,
+            115.5,
+            115.8,
+            116.0,
+            116.2,
+        ]
+    )
+
+    open_values = [value - 0.25 for value in close]
+    high = [value + 0.75 for value in close]
+    low = [value - 0.75 for value in close]
+    volume = [1_000_000.0 for _ in close]
+
+    candidate_index = 100
+    open_values[candidate_index] = 117.3
+    close[candidate_index] = 118.0
+    high[candidate_index] = 120.0
+    low[candidate_index] = 116.5
+
+    for idx in range(candidate_index + 1, len(close)):
+        high[idx] = min(high[idx], 118.9)
+        close[idx] = min(close[idx], 117.0)
+        low[idx] = max(low[idx], 92.0)
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": volume,
+        },
+        index=index,
+    )
+
+
+def _active_double_bottom_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-09-01", periods=135, freq="B")
+    close: list[float] = []
+    for idx in range(100):
+        close.append(80.0 + (idx * 0.28))
+    close.append(118.0)
+    close.extend(
+        [
+            114.0,
+            110.0,
+            106.0,
+            102.0,
+            99.0,
+            96.0,
+            94.0,
+            95.0,
+            98.0,
+            101.0,
+            104.0,
+            107.0,
+            110.0,
+            111.5,
+            112.0,
+            112.6,
+            111.8,
+            110.0,
+            107.0,
+            104.0,
+            100.0,
+            96.0,
+            91.0,
+            92.0,
+            95.0,
+            98.0,
+            101.0,
+            104.0,
+            107.0,
+            109.0,
+            110.0,
+            110.5,
+            111.0,
+            111.2,
+        ]
+    )
+
+    open_values = [value - 0.25 for value in close]
+    high = [value + 0.85 for value in close]
+    low = [value - 0.85 for value in close]
+    volume = [1_000_000.0 for _ in close]
+
+    candidate_index = 100
+    open_values[candidate_index] = 117.3
+    close[candidate_index] = 118.0
+    high[candidate_index] = 120.0
+    low[candidate_index] = 116.5
+
+    for idx in range(candidate_index + 1, len(close)):
+        high[idx] = min(high[idx], 112.85)
+        low[idx] = max(low[idx], 89.8)
+        close[idx] = min(close[idx], 112.1)
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": volume,
+        },
+        index=index,
+    )
+
+
+def _weekly_tight_close_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-06", periods=105, freq="B")
+    open_values: list[float] = []
+    high_values: list[float] = []
+    low_values: list[float] = []
+    close_values: list[float] = []
+    volume_values: list[float] = []
+
+    for week in range(21):
+        week_dates = index[week * 5 : (week + 1) * 5]
+        if week < 17:
+            week_open = 100.0 + (week * 1.2)
+            week_high = week_open + 3.0
+            week_low = week_open - 3.0
+            week_close = week_open + 1.0
+        elif week == 17:
+            week_open = 120.5
+            week_high = 122.0
+            week_low = 119.0
+            week_close = 121.0
+        elif week == 18:
+            week_open = 120.8
+            week_high = 122.2
+            week_low = 119.4
+            week_close = 121.2
+        elif week == 19:
+            week_open = 121.0
+            week_high = 122.1
+            week_low = 119.5
+            week_close = 121.1
+        else:
+            week_open = 121.8
+            week_high = 123.8
+            week_low = 120.9
+            week_close = 123.1
+
+        for day_index, _date in enumerate(week_dates):
+            open_values.append(week_open + (day_index * 0.02))
+            high_values.append(week_high - (0.1 * (4 - day_index)))
+            low_values.append(week_low + (0.1 * day_index))
+            close_values.append(week_close if day_index == 4 else week_open + (day_index * 0.15))
+            volume_values.append(1_000_000.0)
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high_values,
+            "Low": low_values,
+            "Close": close_values,
+            "Adj Close": close_values,
+            "Volume": volume_values,
         },
         index=index,
     )
@@ -533,6 +850,56 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertLess(weak_metrics[1], 90.0)
         self.assertLessEqual(weak_metrics[1], 99.0)
 
+    def test_rs_rating_helper_supports_shorter_history_like_pine_caps(self) -> None:
+        shorter_stock = _rs_rating_stock_frame().iloc[-180:]
+        shorter_benchmark = _rs_rating_benchmark_frame().iloc[-180:]
+        metrics = _compute_latest_rs_rating(
+            [
+                {
+                    "formatted_date": index.date().isoformat(),
+                    "close": float(close),
+                }
+                for index, close in shorter_stock["Close"].items()
+            ],
+            [
+                {
+                    "formatted_date": index.date().isoformat(),
+                    "close": float(close),
+                }
+                for index, close in shorter_benchmark["Close"].items()
+            ],
+        )
+
+        self.assertIsNotNone(metrics)
+        assert metrics is not None
+        self.assertGreaterEqual(metrics[1], 0.0)
+        self.assertLessEqual(metrics[1], 99.0)
+
+    def test_weekly_rs_before_price_context_requires_price_not_at_new_high(self) -> None:
+        before_price_stock, before_price_benchmark = _weekly_rs_rows(before_price=True)
+        before_price_context = _compute_weekly_rs_before_price_context(
+            before_price_stock,
+            before_price_benchmark,
+            weekly_lookback_weeks=52,
+            recent_signal_weeks=4,
+        )
+
+        self.assertIsNotNone(before_price_context)
+        assert before_price_context is not None
+        self.assertTrue(bool(before_price_context["recent_weekly_before_price"]))
+
+        plain_new_high_stock, plain_new_high_benchmark = _weekly_rs_rows(before_price=False)
+        plain_new_high_context = _compute_weekly_rs_before_price_context(
+            plain_new_high_stock,
+            plain_new_high_benchmark,
+            weekly_lookback_weeks=52,
+            recent_signal_weeks=4,
+        )
+
+        self.assertIsNotNone(plain_new_high_context)
+        assert plain_new_high_context is not None
+        self.assertFalse(bool(plain_new_high_context["recent_weekly_before_price"]))
+
     def test_run_supports_inside_dryup_catalog_entry(self) -> None:
         ticker_frame = _inside_dryup_frame()
         benchmark_frame = _frame("2025-01-02", 260)
@@ -641,6 +1008,116 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "macd_dead_cross")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_base_detection_catalog_entry(self) -> None:
+        ticker_frame = _active_base_frame()
+        benchmark_frame = _frame("2026-01-02", 160)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2026, 5, 12),
+                screener_ids=["base_detection"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "base_detection")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_cup_detection_catalog_entry(self) -> None:
+        ticker_frame = _active_cup_frame()
+        benchmark_frame = _frame("2026-01-02", 145)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2026, 5, 12),
+                screener_ids=["cup_detection"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "cup_detection")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_double_bottom_detection_catalog_entry(self) -> None:
+        ticker_frame = _active_double_bottom_frame()
+        benchmark_frame = _frame("2026-01-02", 135)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2026, 5, 12),
+                screener_ids=["double_bottom_detection"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "double_bottom_detection")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_weekly_tight_close_catalog_entry(self) -> None:
+        ticker_frame = _weekly_tight_close_frame()
+        benchmark_frame = _frame("2026-01-02", 105)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 5, 23),
+                screener_ids=["weekly_tight_close"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "weekly_tight_close")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_weekly_tight_close_breakout_catalog_entry(self) -> None:
+        ticker_frame = _weekly_tight_close_frame()
+        benchmark_frame = _frame("2026-01-02", 105)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 6, 27),
+                screener_ids=["weekly_tight_close_breakout"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "weekly_tight_close_breakout")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_falls_back_to_internet_when_benchmark_missing_in_db(self) -> None:

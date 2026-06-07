@@ -5,6 +5,9 @@ import datetime as dt
 from typing import Callable
 
 from .config import AppConfig
+from .base_detection_screen import find_active_base_detection_hit
+from .cup_detection_screen import find_active_cup_detection_hit
+from .double_bottom_detection_screen import find_active_double_bottom_detection_hit
 from .cup_handle_screen import run_cup_handle_screen
 from .fearzone_zeiierman_screen import find_recent_fearzone_zeiierman_hit
 from .fearzone_screen import find_recent_fearzone_hit
@@ -21,6 +24,7 @@ from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, Scre
 from .td_sequential_screen import find_recent_td_sequential_hit
 from .universe import UniverseTicker
 from .vcp_screen import run_vcp_screen
+from .weekly_tight_close_screen import find_weekly_tight_close_breakout_hit, find_weekly_tight_close_hit
 from .weekly_htf_pullback_screen import run_weekly_htf_pullback_screen
 
 
@@ -140,6 +144,86 @@ def _run_macd_dead_cross(bundle: ScreenerInputBundle) -> ScreenerEvaluationResul
     return ScreenerEvaluationResult(
         passed=True,
         metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "direction": payload["direction"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_base_detection(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_active_base_detection_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "base_type": payload["base_type"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_cup_detection(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_active_cup_detection_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "shape_mode": payload["shape_mode"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_double_bottom_detection(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_active_double_bottom_detection_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "breakout_price": payload["breakout_price"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_weekly_tight_close(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_weekly_tight_close_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "breakout_price": payload["breakout_price"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_weekly_tight_close_breakout(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_weekly_tight_close_breakout_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "breakout_price": payload["breakout_price"]},
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
     )
@@ -407,6 +491,41 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=180,
             warmup_trading_days=20,
             evaluator=_run_macd_dead_cross,
+        ),
+        "base_detection": ScreenerSpec(
+            id="base_detection",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=520,
+            warmup_trading_days=20,
+            evaluator=_run_base_detection,
+        ),
+        "cup_detection": ScreenerSpec(
+            id="cup_detection",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=520,
+            warmup_trading_days=20,
+            evaluator=_run_cup_detection,
+        ),
+        "double_bottom_detection": ScreenerSpec(
+            id="double_bottom_detection",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=520,
+            warmup_trading_days=20,
+            evaluator=_run_double_bottom_detection,
+        ),
+        "weekly_tight_close": ScreenerSpec(
+            id="weekly_tight_close",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=220,
+            warmup_trading_days=20,
+            evaluator=_run_weekly_tight_close,
+        ),
+        "weekly_tight_close_breakout": ScreenerSpec(
+            id="weekly_tight_close_breakout",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=220,
+            warmup_trading_days=20,
+            evaluator=_run_weekly_tight_close_breakout,
         ),
         "weekly_htf_pullback": ScreenerSpec(
             id="weekly_htf_pullback",

@@ -106,6 +106,51 @@ def compute_weighted_rs_score(stock: pd.Series, benchmark: pd.Series) -> pd.Seri
     return (rs_stock / rs_benchmark) * 100
 
 
+def compute_latest_weighted_rs_score(stock: pd.Series, benchmark: pd.Series) -> float | None:
+    aligned = pd.concat([stock, benchmark], axis=1, join="inner").dropna()
+    aligned.columns = ["stock", "benchmark"]
+    if len(aligned) < 2:
+        return None
+
+    latest_index = len(aligned) - 1
+    lookback_63 = min(latest_index, 63)
+    lookback_126 = min(latest_index, 126)
+    lookback_189 = min(latest_index, 189)
+    lookback_252 = min(latest_index, 252)
+    if min(lookback_63, lookback_126, lookback_189, lookback_252) <= 0:
+        return None
+
+    latest_stock = float(aligned["stock"].iloc[-1])
+    latest_benchmark = float(aligned["benchmark"].iloc[-1])
+    stock_63 = float(aligned["stock"].iloc[-1 - lookback_63])
+    stock_126 = float(aligned["stock"].iloc[-1 - lookback_126])
+    stock_189 = float(aligned["stock"].iloc[-1 - lookback_189])
+    stock_252 = float(aligned["stock"].iloc[-1 - lookback_252])
+    benchmark_63 = float(aligned["benchmark"].iloc[-1 - lookback_63])
+    benchmark_126 = float(aligned["benchmark"].iloc[-1 - lookback_126])
+    benchmark_189 = float(aligned["benchmark"].iloc[-1 - lookback_189])
+    benchmark_252 = float(aligned["benchmark"].iloc[-1 - lookback_252])
+
+    if min(stock_63, stock_126, stock_189, stock_252, benchmark_63, benchmark_126, benchmark_189, benchmark_252) <= 0:
+        return None
+
+    rs_stock = (
+        0.4 * (latest_stock / stock_63)
+        + 0.2 * (latest_stock / stock_126)
+        + 0.2 * (latest_stock / stock_189)
+        + 0.2 * (latest_stock / stock_252)
+    )
+    rs_benchmark = (
+        0.4 * (latest_benchmark / benchmark_63)
+        + 0.2 * (latest_benchmark / benchmark_126)
+        + 0.2 * (latest_benchmark / benchmark_189)
+        + 0.2 * (latest_benchmark / benchmark_252)
+    )
+    if rs_benchmark == 0:
+        return None
+    return (rs_stock / rs_benchmark) * 100.0
+
+
 def _attribute_percentile(score: float, taller_perf: float, smaller_perf: float, range_up: int, range_dn: int, weight: float) -> float:
     adjusted_score = score + (score - smaller_perf) * weight
     if adjusted_score > taller_perf - 1:
@@ -152,11 +197,12 @@ def find_recent_rs_rating_hit(
         return None
 
     aligned = stock.join(benchmark.rename(columns={"Close": "BenchmarkClose"}), how="inner").dropna()
-    if len(aligned) < 253:
+    if len(aligned) < 2:
         return None
 
-    score_series = compute_weighted_rs_score(aligned["Close"], aligned["BenchmarkClose"]).reindex(aligned.index)
-    latest_score = score_series.iloc[-1]
+    latest_score = compute_latest_weighted_rs_score(aligned["Close"], aligned["BenchmarkClose"])
+    if latest_score is None:
+        return None
     latest_rating = approximate_rs_rating(float(latest_score)) if pd.notna(latest_score) else None
     if latest_rating is None or latest_rating < float(min_rating):
         return None
