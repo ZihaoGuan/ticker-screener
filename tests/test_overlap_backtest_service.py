@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
+
 from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 
 
@@ -114,7 +116,33 @@ class OverlapBacktestServiceTest(unittest.TestCase):
         )
 
     def test_build_overlap_for_date_persists_summary_and_members(self) -> None:
-        with patch("src.webapp.services.overlap_backtest_service.load_ticker_metadata_map", return_value={"AAPL": {"sector": "Tech"}, "MSFT": {"sector": "Tech"}}):
+        dates = pd.date_range(start="2025-10-01", periods=80, freq="B")
+        aapl_frame = pd.DataFrame(
+            {
+                "Open": [100.0 + (idx * 0.5) for idx in range(len(dates))],
+                "High": [101.8 + (idx * 0.55) for idx in range(len(dates))],
+                "Low": [99.2 + (idx * 0.45) for idx in range(len(dates))],
+                "Close": [100.5 + (idx * 0.5) for idx in range(len(dates))],
+                "Adj Close": [100.5 + (idx * 0.5) for idx in range(len(dates))],
+                "Volume": [1_000_000.0 for _ in range(len(dates))],
+            },
+            index=dates,
+        )
+        msft_frame = pd.DataFrame(
+            {
+                "Open": [80.0 + (idx * 0.2) for idx in range(len(dates))],
+                "High": [81.0 + (idx * 0.22) for idx in range(len(dates))],
+                "Low": [79.4 + (idx * 0.18) for idx in range(len(dates))],
+                "Close": [80.2 + (idx * 0.2) for idx in range(len(dates))],
+                "Adj Close": [80.2 + (idx * 0.2) for idx in range(len(dates))],
+                "Volume": [900_000.0 for _ in range(len(dates))],
+            },
+            index=dates,
+        )
+        with patch("src.webapp.services.overlap_backtest_service.load_ticker_metadata_map", return_value={"AAPL": {"sector": "Tech"}, "MSFT": {"sector": "Tech"}}), patch(
+            "src.webapp.services.overlap_backtest_service.load_many_ticker_windows",
+            return_value={"AAPL": aapl_frame, "MSFT": msft_frame},
+        ):
             payload = self.service.build_overlap_for_date(
                 run_date=dt.date(2026, 1, 2),
                 strategy_ids=["rs", "vcp", "gap_fill", "fearzone"],
@@ -124,9 +152,15 @@ class OverlapBacktestServiceTest(unittest.TestCase):
         self.assertEqual(payload["candidate_count"], 1)
         self.assertEqual(payload["overlap_four_plus_count"], 1)
         self.assertEqual(payload["overlap_two_plus_count"], 2)
+        self.assertEqual(payload["overlap_two_plus"][0]["ticker"], "AAPL")
+        self.assertGreater(payload["overlap_two_plus"][0]["pipeline_count"], payload["overlap_two_plus"][1]["pipeline_count"])
+        self.assertIsNotNone(payload["overlap_two_plus"][0]["adr14_pct"])
+        self.assertIsNotNone(payload["overlap_two_plus"][0]["atr14"])
+        self.assertIn("trim_warning", payload["overlap_two_plus"][0])
         self.assertEqual(self.repository.overlap_summary["strategy_set_key"], "fearzone,gap_fill,rs,vcp")
         self.assertEqual(self.repository.overlap_members["overlap_run_id"], 17)
         self.assertEqual(len(self.repository.overlap_members["rows"]), 2)
+        self.assertIn("adr14_pct", self.repository.overlap_members["rows"][0]["metadata_json"])
         self.assertTrue((Path(self.tmpdir.name) / "raw" / "daily_overlap_summary_2026-01-02.json").exists())
 
     def test_list_overlap_coverage_marks_missing_and_ready(self) -> None:

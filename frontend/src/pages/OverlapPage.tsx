@@ -42,7 +42,10 @@ export function OverlapPage() {
 
   const reportDate = payload?.date_label || requestedDate || "latest";
   const chartDate = payload?.date_label || requestedDate;
-  const candidates = payload?.overlap_two_plus ?? [];
+  const candidates = useMemo(
+    () => [...(payload?.overlap_two_plus ?? [])].sort((left, right) => right.pipeline_count - left.pipeline_count || left.ticker.localeCompare(right.ticker)),
+    [payload?.overlap_two_plus],
+  );
   const pipelineStatus = payload?.pipeline_status ?? [];
   const pipelineTickers = payload?.pipeline_tickers ?? {};
   const selectedTickers = selectedPipelineId ? pipelineTickers[selectedPipelineId] ?? [] : [];
@@ -150,6 +153,8 @@ export function OverlapPage() {
               <tr>
                 <th>Ticker</th>
                 <th>Overlap</th>
+                <th>ADR14</th>
+                <th>Trim</th>
                 <th>Pipelines</th>
                 <th>Sector</th>
               </tr>
@@ -166,6 +171,22 @@ export function OverlapPage() {
                     </Link>
                   </td>
                   <td data-label="Overlap">{entry.pipeline_count}</td>
+                  <td data-label="ADR14">
+                    {entry.adr14_pct == null ? (
+                      "-"
+                    ) : (
+                      <span className={entry.adr14_in_range == null ? undefined : `adr-badge ${entry.adr14_in_range ? "is-in-range" : "is-out-of-range"}`}>
+                        {entry.adr14_pct.toFixed(2)}%
+                      </span>
+                    )}
+                  </td>
+                  <td data-label="Trim">
+                    {entry.trim_warning
+                      ? entry.atr_multiple_from_50ma != null
+                        ? `Warn ${entry.atr_multiple_from_50ma.toFixed(2)}x`
+                        : "Warn"
+                      : "-"}
+                  </td>
                   <td data-label="Pipelines">{entry.pipeline_labels.join(", ")}</td>
                   <td data-label="Sector">{entry.sector ?? "-"}</td>
                 </tr>

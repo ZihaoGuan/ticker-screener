@@ -295,7 +295,7 @@ def run_rs_screen(
                     )
                     price_data = [
                         item
-                        for item in financials.priceData.get("priceData", [])
+                        for item in financials._get_clean_price_data()
                         if isinstance(item, dict)
                     ]
                     benchmark_rows = [

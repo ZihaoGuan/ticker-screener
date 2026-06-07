@@ -32,7 +32,8 @@ class OverlapService:
         return self._empty_summary(date_label)
 
     def _normalize(self, payload: dict[str, Any]) -> dict[str, Any]:
-        overlap_two_plus = payload.get("overlap_two_plus", [])
+        overlap_two_plus = list(payload.get("overlap_two_plus", []))
+        overlap_two_plus.sort(key=lambda item: (-int(item.get("pipeline_count") or 0), str(item.get("ticker") or "")))
         overlap_three_plus = payload.get("overlap_three_plus", [])
         pipeline_status = payload.get("pipeline_status", [])
         return {

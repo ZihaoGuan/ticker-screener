@@ -132,6 +132,11 @@ export type OverlapEntry = {
   pipeline_labels: string[];
   sector?: string;
   theme_tags?: string[];
+  atr14?: number | null;
+  adr14_pct?: number | null;
+  adr14_in_range?: boolean | null;
+  atr_multiple_from_50ma?: number | null;
+  trim_warning?: boolean;
 };
 
 export type OverlapPipelineStatus = {

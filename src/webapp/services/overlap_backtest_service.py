@@ -6,8 +6,10 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from src.config import load_app_config
-from src.market_data_access import load_many_ticker_windows_for_range, load_ticker_metadata_map
+from src.market_data_access import load_many_ticker_windows, load_many_ticker_windows_for_range, load_ticker_metadata_map
 from src.webapp.repositories.history_repository import HistoryRepository
 
 
@@ -102,6 +104,18 @@ class OverlapBacktestService:
                 }
             )
 
+        self._attach_overlap_metrics(entries, run_date=run_date)
+        for member_row in member_rows:
+            ticker = str(member_row.get("ticker") or "").strip().upper()
+            entry = next((item for item in entries if str(item.get("ticker") or "").upper() == ticker), None)
+            if entry is not None:
+                metadata_json = dict(member_row.get("metadata_json") or {})
+                for key in ("atr14", "adr14_pct", "adr14_in_range", "atr_multiple_from_50ma", "trim_warning"):
+                    metadata_json[key] = entry.get(key)
+                member_row["metadata_json"] = metadata_json
+
+        entries.sort(key=lambda item: (-int(item["signal_count"]), str(item["ticker"])))
+
         pipeline_status = []
         for strategy_id in normalized_strategy_ids:
             count = sum(1 for entry in entries if strategy_id in entry["pipeline_ids"])
@@ -147,6 +161,85 @@ class OverlapBacktestService:
         payload["overlap_run_id"] = overlap_run_id
         payload["artifact_path"] = str(artifact_path)
         return payload
+
+    def _attach_overlap_metrics(self, entries: list[dict[str, Any]], *, run_date: dt.date) -> None:
+        tickers = [str(entry.get("ticker") or "").strip().upper() for entry in entries if str(entry.get("ticker") or "").strip()]
+        if not tickers:
+            return
+        frame_map = load_many_ticker_windows(
+            tickers,
+            as_of_date=run_date,
+            trading_days_needed=80,
+            database_url=self.repository.database_url,
+        )
+        metrics_by_ticker: dict[str, dict[str, Any]] = {}
+        for ticker in tickers:
+            metrics_by_ticker[ticker] = self._compute_overlap_metrics(frame_map.get(ticker))
+        for entry in entries:
+            ticker = str(entry.get("ticker") or "").strip().upper()
+            metrics = metrics_by_ticker.get(ticker, {})
+            entry.update(metrics)
+
+    def _compute_overlap_metrics(self, frame: Any) -> dict[str, Any]:
+        if frame is None or getattr(frame, "empty", True):
+            return {
+                "atr14": None,
+                "adr14_pct": None,
+                "adr14_in_range": None,
+                "atr_multiple_from_50ma": None,
+                "trim_warning": False,
+            }
+        normalized = frame.copy()
+        normalized = normalized.dropna(subset=["High", "Low", "Close"])
+        if normalized.empty:
+            return {
+                "atr14": None,
+                "adr14_pct": None,
+                "adr14_in_range": None,
+                "atr_multiple_from_50ma": None,
+                "trim_warning": False,
+            }
+        normalized["ma50"] = normalized["Close"].rolling(50).mean()
+        normalized["atr14"] = self._compute_atr(normalized, length=14)
+        adr14_pct = self._compute_adr_percent(normalized, length=14)
+        latest = normalized.iloc[-1]
+        atr14 = float(latest["atr14"]) if pd.notna(latest["atr14"]) else None
+        ma50 = float(latest["ma50"]) if pd.notna(latest["ma50"]) else None
+        close_price = float(latest["Close"]) if pd.notna(latest["Close"]) else None
+        atr_multiple_from_50ma = None
+        trim_warning = False
+        if atr14 is not None and atr14 > 0 and ma50 is not None and close_price is not None:
+            atr_multiple_from_50ma = (close_price - ma50) / atr14
+            trim_warning = atr_multiple_from_50ma >= 3.0
+        adr14_in_range = None if adr14_pct is None else 3.0 <= adr14_pct <= 10.0
+        return {
+            "atr14": round(atr14, 2) if atr14 is not None else None,
+            "adr14_pct": round(adr14_pct, 2) if adr14_pct is not None else None,
+            "adr14_in_range": adr14_in_range,
+            "atr_multiple_from_50ma": round(atr_multiple_from_50ma, 2) if atr_multiple_from_50ma is not None else None,
+            "trim_warning": trim_warning,
+        }
+
+    @staticmethod
+    def _compute_atr(frame: pd.DataFrame, *, length: int) -> pd.Series:
+        high_low = frame["High"] - frame["Low"]
+        high_close = (frame["High"] - frame["Close"].shift(1)).abs()
+        low_close = (frame["Low"] - frame["Close"].shift(1)).abs()
+        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        return true_range.rolling(length).mean()
+
+    @staticmethod
+    def _compute_adr_percent(frame: pd.DataFrame, *, length: int) -> float | None:
+        if len(frame) < length:
+            return None
+        window = frame.tail(length)
+        if window.empty:
+            return None
+        range_pct = ((window["High"] - window["Low"]) / window["Close"]) * 100.0
+        range_pct = range_pct.replace([float("inf"), float("-inf")], pd.NA).dropna()
+        if len(range_pct) < length:
+            return None
+        return float(range_pct.mean())
 
     def list_overlap_coverage(
         self,
