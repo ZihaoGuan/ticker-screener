@@ -419,7 +419,25 @@ class RunService:
         ),
         "weekly_rs": RunAction(
             "weekly_rs",
-            "Run Weekly RS",
+            "Run Weekly RS New High Before Price",
+            "scripts/run_weekly_rs_screen.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _market_data_source_field,
+                _filter_precedence_field,
+                _include_sectors_field,
+                _exclude_sectors_field,
+                _include_industries_field,
+                _exclude_industries_field,
+                _include_themes_field,
+                _exclude_themes_field,
+            ),
+        ),
+        "weekly_rs_before_price": RunAction(
+            "weekly_rs_before_price",
+            "Run Weekly RS New High Before Price",
             "scripts/run_weekly_rs_screen.py",
             fields=(
                 _limit_field,

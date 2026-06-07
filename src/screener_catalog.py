@@ -243,6 +243,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             warmup_trading_days=40,
             evaluator=_run_rs_weekly,
         ),
+        "weekly_rs_before_price": ScreenerSpec(
+            id="weekly_rs_before_price",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=max_rs_days,
+            warmup_trading_days=40,
+            evaluator=_run_rs_weekly,
+        ),
         "vcp": ScreenerSpec(
             id="vcp",
             required_inputs=("daily_bars", "benchmark_bars", "metadata"),

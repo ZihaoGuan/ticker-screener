@@ -438,7 +438,9 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertIsNotNone(strong_metrics)
         assert strong_metrics is not None
+        self.assertGreaterEqual(strong_metrics[1], 0.0)
         self.assertGreaterEqual(strong_metrics[1], 90.0)
+        self.assertLessEqual(strong_metrics[1], 99.0)
 
         weak_frame = _frame("2024-01-01", 320)
         weak_benchmark = _frame("2024-01-01", 320)
@@ -461,7 +463,9 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertIsNotNone(weak_metrics)
         assert weak_metrics is not None
+        self.assertGreaterEqual(weak_metrics[1], 0.0)
         self.assertLess(weak_metrics[1], 90.0)
+        self.assertLessEqual(weak_metrics[1], 99.0)
 
     def test_run_supports_inside_dryup_catalog_entry(self) -> None:
         ticker_frame = _inside_dryup_frame()

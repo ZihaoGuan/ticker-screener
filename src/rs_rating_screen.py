@@ -124,18 +124,18 @@ def approximate_rs_rating(score: float) -> float | None:
     if score >= first:
         return 99.0
     if score <= svth:
-        return 1.0
+        return 0.0
     if scnd <= score < first:
-        return _attribute_percentile(score, first, scnd, 98, 90, 0.33)
+        return max(0.0, min(99.0, _attribute_percentile(score, first, scnd, 98, 90, 0.33)))
     if thrd <= score < scnd:
-        return _attribute_percentile(score, scnd, thrd, 89, 70, 2.1)
+        return max(0.0, min(99.0, _attribute_percentile(score, scnd, thrd, 89, 70, 2.1)))
     if frth <= score < thrd:
-        return _attribute_percentile(score, thrd, frth, 69, 50, 0.0)
+        return max(0.0, min(99.0, _attribute_percentile(score, thrd, frth, 69, 50, 0.0)))
     if ffth <= score < frth:
-        return _attribute_percentile(score, frth, ffth, 49, 30, 0.0)
+        return max(0.0, min(99.0, _attribute_percentile(score, frth, ffth, 49, 30, 0.0)))
     if sxth <= score < ffth:
-        return _attribute_percentile(score, ffth, sxth, 29, 10, 0.0)
-    return _attribute_percentile(score, sxth, svth, 9, 2, 0.0)
+        return max(0.0, min(99.0, _attribute_percentile(score, ffth, sxth, 29, 10, 0.0)))
+    return max(0.0, min(99.0, _attribute_percentile(score, sxth, svth, 9, 2, 0.0)))
 
 
 def find_recent_rs_rating_hit(

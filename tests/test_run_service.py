@@ -102,7 +102,7 @@ class RunServiceTests(unittest.TestCase):
             {
                 "job_id": "job-2",
                 "action_id": "weekly_rs",
-                "label": "Run Weekly RS",
+                "label": "Run Weekly RS New High Before Price",
                 "status": "success",
                 "command": "python scripts/run_weekly_rs_screen.py",
                 "started_at": "2026-05-31T00:00:00+00:00",
@@ -188,6 +188,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("fearzone_zeiierman", action_ids)
         self.assertIn("hve", action_ids)
         self.assertIn("inside_dryup", action_ids)
+        self.assertIn("weekly_rs_before_price", action_ids)
         self.assertIn("earnings_weekly_criteria", action_ids)
 
     def test_launch_earnings_weekly_criteria_includes_reference_date(self) -> None:

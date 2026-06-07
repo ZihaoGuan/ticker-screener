@@ -7,7 +7,7 @@ def _format_note(hit: ScreenHit) -> str:
     return (
         f"{' | '.join(hit.reasons)}. "
         f"RS line {hit.current_rs_line:.6f} vs {hit.benchmark_ticker}. "
-        f"RS rating {hit.rs_rating:.1f} (min {hit.min_rs_rating:.1f}), "
+        f"RS rating {hit.rs_rating:.1f}, "
         f"RS score {hit.rs_score:.2f}. "
         f"Daily lookback {hit.daily_lookback_days} sessions, "
         f"weekly lookback {hit.weekly_lookback_weeks} weeks."

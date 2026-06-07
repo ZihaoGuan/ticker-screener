@@ -228,34 +228,38 @@ def run_rs_screen(
                         benchmarkTicker=config.benchmark_ticker,
                         historyLookbackDays=config.rs_new_high_history_days,
                     )
+                    price_data = [
+                        item
+                        for item in financials.priceData.get("priceData", [])
+                        if isinstance(item, dict)
+                    ]
+                    benchmark_rows = [
+                        item
+                        for item in financials._get_benchmark_price_data(config.benchmark_ticker)
+                        if isinstance(item, dict)
+                    ]
+                    rs_metrics = _compute_latest_rs_rating(price_data, benchmark_rows)
+                    latest_rs_score: float | None = None
+                    latest_rs_rating: float | None = None
+                    if rs_metrics is not None:
+                        latest_rs_score, latest_rs_rating = rs_metrics
+                        print(f"{ticker.symbol} rs_rating={latest_rs_rating:.1f}")
+                    else:
+                        print(f"{ticker.symbol} rs_rating=n/a")
                     summary = financials.get_rs_new_high_before_price_summary(
                         sectorName=ticker.sector,
                         benchmarkTicker=config.benchmark_ticker,
                         signalProfile=signal_profile,
                     )
                     if summary:
-                        price_data = [
-                            item
-                            for item in financials.priceData.get("priceData", [])
-                            if isinstance(item, dict)
-                        ]
-                        benchmark_rows = [
-                            item
-                            for item in financials._get_benchmark_price_data(config.benchmark_ticker)
-                            if isinstance(item, dict)
-                        ]
-                        rs_metrics = _compute_latest_rs_rating(price_data, benchmark_rows)
-                        if rs_metrics is None:
-                            continue
-                        latest_rs_score, latest_rs_rating = rs_metrics
-                        if latest_rs_rating < float(config.rs_rating_min):
+                        if latest_rs_score is None or latest_rs_rating is None:
                             continue
                         reasons = list(summary.get("reasons", []))
-                        reasons.append(f"RS rating {latest_rs_rating:.1f} >= {float(config.rs_rating_min):.1f}")
+                        reasons.append(f"RS rating {latest_rs_rating:.1f}")
                         summary["reasons"] = reasons
                         summary["rs_score"] = latest_rs_score
                         summary["rs_rating"] = latest_rs_rating
-                        summary["min_rs_rating"] = float(config.rs_rating_min)
+                        summary["min_rs_rating"] = 0.0
                         closes = [
                             float(item["close"])
                             for item in price_data
