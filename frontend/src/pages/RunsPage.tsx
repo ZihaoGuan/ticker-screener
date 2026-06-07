@@ -82,6 +82,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [selectedBacktestId, setSelectedBacktestId] = useState<number | null>(null);
   const [selectedBacktest, setSelectedBacktest] = useState<BacktestRunDetailV1 | null>(null);
   const [isLoadingBacktestDetail, setIsLoadingBacktestDetail] = useState(false);
+  const [batchRunNotice, setBatchRunNotice] = useState("");
 
   const refresh = () => {
     void fetchJson<JobsResponse>("/api/jobs")
@@ -356,24 +357,29 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       .finally(() => setIsLoadingBacktestDetail(false));
   }, [mode, selectedBacktestId]);
 
+  const launchRunAction = async (actionId: string, params: Record<string, string | string[]>) => {
+    const body: Record<string, string | string[]> = {};
+    for (const [key, value] of Object.entries(params)) {
+      if (Array.isArray(value)) {
+        if (value.length > 0) {
+          body[key] = value;
+        }
+      } else if (value.trim()) {
+        body[key] = value.trim();
+      }
+    }
+    await fetchJson<{ ok: boolean; job_id: string }>(`/api/runs/${actionId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  };
+
   const handleRunAction = async (params: Record<string, string | string[]>, actionId = selectedActionId) => {
     setIsRunning(true);
+    setBatchRunNotice("");
     try {
-      const body: Record<string, string | string[]> = {};
-      for (const [key, value] of Object.entries(params)) {
-        if (Array.isArray(value)) {
-          if (value.length > 0) {
-            body[key] = value;
-          }
-        } else if (value.trim()) {
-          body[key] = value.trim();
-        }
-      }
-      await fetchJson<{ ok: boolean; job_id: string }>(`/api/runs/${actionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      await launchRunAction(actionId, params);
       refresh();
     } finally {
       setIsRunning(false);
@@ -388,6 +394,45 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const handleQuickRun = async (actionId: string) => {
     setSelectedActionId(actionId);
     await handleRunAction({}, actionId);
+  };
+
+  const handleBatchRun = async (
+    sectionLabel: string,
+    actions: Array<{
+      id: string;
+      label: string;
+      bias_group?: "bullish" | "bearish" | "other";
+      bullish_subgroup?: "leaders" | "bottoming" | "";
+      command: string;
+      supports_limit: boolean;
+      fields: Array<{
+        id: string;
+        label: string;
+        type: "text" | "number" | "date" | "select" | "multiselect";
+        placeholder?: string | null;
+        help_text?: string | null;
+        options: Array<{ value: string; label: string }>;
+      }>;
+    }>,
+  ) => {
+    if (actions.length === 0) {
+      return;
+    }
+    setIsRunning(true);
+    setBatchRunNotice("");
+    setSelectedActionId(actions[0]?.id ?? "");
+    try {
+      for (const action of actions) {
+        await launchRunAction(action.id, {});
+      }
+      setBatchRunNotice(`Queued ${actions.length} ${sectionLabel.toLowerCase()} screeners.`);
+      refresh();
+    } catch (error) {
+      setBatchRunNotice(error instanceof Error ? error.message : `Failed to queue ${sectionLabel.toLowerCase()} screeners.`);
+      refresh();
+    } finally {
+      setIsRunning(false);
+    }
   };
 
   const handleCancelJob = async (jobId: string) => {
@@ -573,12 +618,25 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       <div className="page-grid">
         <Panel title={pageTitle}>
           {isLoading && !payload ? <LoadingBlock label="Loading available screeners…" /> : null}
+          {batchRunNotice ? <p className="panel-copy">{batchRunNotice}</p> : null}
           {groupedVisibleActions.map((group) => (
             <div key={group.key} className="screener-group-section">
               {group.label ? <h2 className="screener-group-title">{group.label}</h2> : null}
               {group.sections.map((section) => (
                 <div key={section.key} className="screener-subgroup-section">
-                  {section.label ? <h3 className="screener-subgroup-title">{section.label}</h3> : null}
+                  <div className="screener-subgroup-head">
+                    {section.label ? <h3 className="screener-subgroup-title">{section.label}</h3> : null}
+                    {mode === "screeners" ? (
+                      <button
+                        className="screener-batch-button"
+                        onClick={() => void handleBatchRun(section.label || group.label || "selected", section.actions)}
+                        type="button"
+                        disabled={isRunning}
+                      >
+                        RUN ALL
+                      </button>
+                    ) : null}
+                  </div>
                   <div className="screeners-grid">
                     {section.actions.map((action) => (
                       <div key={action.id} className="screener-card">

@@ -51,6 +51,7 @@ export function OverlapPage() {
   const selectedTickers = selectedPipelineId ? pipelineTickers[selectedPipelineId] ?? [] : [];
   const selectedPipeline = pipelineStatus.find((item) => item.id === selectedPipelineId) ?? null;
   const fearzoneTickers = payload?.fearzone_tickers ?? [];
+  const groupedPipelineStatus = useMemo(() => buildPipelineGroups(pipelineStatus), [pipelineStatus]);
 
   return (
     <div className="page-grid">
@@ -88,20 +89,30 @@ export function OverlapPage() {
 
       <Panel title="Pipeline Status" aside={<span className="eyebrow">Artifact inputs for {reportDate}</span>}>
         {isLoading ? <LoadingBlock label="Loading pipeline status…" compact /> : null}
-        <div className="card-grid overlap-cards">
-          {pipelineStatus.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`metric-card overlap-status-tile${selectedPipelineId === item.id ? " is-active" : ""}`}
-              onClick={() => setSelectedPipelineId(item.id)}
-            >
-              <h3>{item.label}</h3>
-              <div className="metric-value">{item.count}</div>
-              <p className="card-meta">{item.file_present ? "Artifact present" : "Artifact missing"}</p>
-            </button>
-          ))}
-        </div>
+        {groupedPipelineStatus.map((group) => (
+          <section key={group.key} className="overlap-group-section">
+            <h2 className="overlap-group-title">{group.label}</h2>
+            {group.sections.map((section) => (
+              <div key={section.key} className="overlap-subgroup-section">
+                {section.label ? <h3 className="overlap-subgroup-title">{section.label}</h3> : null}
+                <div className="card-grid overlap-cards">
+                  {section.items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`metric-card overlap-status-tile${selectedPipelineId === item.id ? " is-active" : ""}`}
+                      onClick={() => setSelectedPipelineId(item.id)}
+                    >
+                      <h3>{item.label}</h3>
+                      <div className="metric-value">{item.count}</div>
+                      <p className="card-meta">{item.file_present ? "Artifact present" : "Artifact missing"}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </section>
+        ))}
       </Panel>
 
       <Panel
@@ -197,4 +208,69 @@ export function OverlapPage() {
       </Panel>
     </div>
   );
+}
+
+function buildPipelineGroups(pipelineStatus: OverlapPipelineStatus[]) {
+  const order: Array<{
+    key: "bullish" | "bearish" | "other";
+    label: string;
+    sections: Array<{
+      key: string;
+      label: string;
+      match: (item: OverlapPipelineStatus) => boolean;
+    }>;
+  }> = [
+    {
+      key: "bullish",
+      label: "Bullish",
+      sections: [
+        {
+          key: "leaders",
+          label: "Leaders",
+          match: (item) => (item.bias_group ?? "other") === "bullish" && (item.bullish_subgroup ?? "leaders") === "leaders",
+        },
+        {
+          key: "bottoming",
+          label: "Bottoming",
+          match: (item) => (item.bias_group ?? "other") === "bullish" && (item.bullish_subgroup ?? "") === "bottoming",
+        },
+      ],
+    },
+    {
+      key: "bearish",
+      label: "Bearish",
+      sections: [
+        {
+          key: "bearish",
+          label: "",
+          match: (item) => (item.bias_group ?? "other") === "bearish",
+        },
+      ],
+    },
+    {
+      key: "other",
+      label: "Other",
+      sections: [
+        {
+          key: "other",
+          label: "",
+          match: (item) => (item.bias_group ?? "other") === "other",
+        },
+      ],
+    },
+  ];
+
+  return order
+    .map((group) => ({
+      key: group.key,
+      label: group.label,
+      sections: group.sections
+        .map((section) => ({
+          key: `${group.key}-${section.key}`,
+          label: section.label,
+          items: pipelineStatus.filter(section.match),
+        }))
+        .filter((section) => section.items.length > 0),
+    }))
+    .filter((group) => group.sections.length > 0);
 }

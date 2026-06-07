@@ -144,6 +144,8 @@ export type OverlapPipelineStatus = {
   label: string;
   count: number;
   file_present: boolean;
+  bias_group?: "bullish" | "bearish" | "other";
+  bullish_subgroup?: "leaders" | "bottoming" | "";
 };
 
 export type DashboardResponse = {
@@ -340,6 +342,8 @@ export type WatchlistChartResponse = {
   weekly_ema8: Array<{ time: string; value: number }>;
   ipo_vwap: Array<{ time: string; value: number }>;
   rs_line: Array<{ time: string; value: number }>;
+  daily_rs_rating?: Array<{ time: string; value: number }>;
+  weekly_rs_rating?: Array<{ time: string; value: number }>;
   rs_markers: Array<{ time: string; kind: "daily_new_high" | "daily_new_high_before_price" }>;
   setup_markers?: Array<{ time: string; kind: string; label?: string }>;
   fearzone_panel: {

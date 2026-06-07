@@ -20,7 +20,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   rsSignals: true,
   flexSr: false,
 };
-const CHART_CACHE_PREFIX = "chart-screen-cache-v2";
+const CHART_CACHE_PREFIX = "chart-screen-cache-v3";
 const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "fundamentals" | "insider", number> = {
   payload: 10 * 60 * 1000,
   fundamentals: 60 * 60 * 1000,
@@ -269,6 +269,8 @@ export function ChartsPage() {
       ? ((lastCandle.close - previousCandle.close) / previousCandle.close) * 100
       : null;
   const latestRsMarker = payload?.rs_markers?.[payload.rs_markers.length - 1] ?? null;
+  const dailyRsRatingSeries = payload?.daily_rs_rating ?? [];
+  const weeklyRsRatingSeries = payload?.weekly_rs_rating ?? [];
   const adr14Pct = useMemo(() => computeAdrPercent(chartData, 14), [chartData]);
   const adr14InRange = adr14Pct != null ? adr14Pct >= 3 && adr14Pct <= 10 : null;
   const atr14 = useMemo(() => computeAtr(chartData, 14), [chartData]);
@@ -778,6 +780,18 @@ export function ChartsPage() {
                 ) : null,
               )}
             </div>
+            <div className="rs-rating-grid">
+              <RsRatingMiniChart
+                title="RS Rating Daily"
+                series={dailyRsRatingSeries}
+                emptyLabel="Daily RS rating needs more history."
+              />
+              <RsRatingMiniChart
+                title="RS Rating Weekly"
+                series={weeklyRsRatingSeries}
+                emptyLabel="Weekly RS rating unavailable yet."
+              />
+            </div>
           </>
         ) : null}
       </Panel>
@@ -803,6 +817,91 @@ export function ChartsPage() {
 
 function formatPrice(value: number | null) {
   return value == null ? "--" : `$${value.toFixed(2)}`;
+}
+
+function RsRatingMiniChart({
+  title,
+  series,
+  emptyLabel,
+}: {
+  title: string;
+  series: Array<{ time: string; value: number }>;
+  emptyLabel: string;
+}) {
+  const path = useMemo(() => buildMiniChartPath(series), [series]);
+  const latestValue = series.length > 0 ? series[series.length - 1]?.value ?? null : null;
+  const latestTime = series.length > 0 ? series[series.length - 1]?.time ?? "" : "";
+
+  return (
+    <div className="chart-card rs-rating-card">
+      <div className="rs-rating-card-head">
+        <div>
+          <div className="chart-rs-header">{title}</div>
+          <div className="rs-rating-meta">{latestTime ? `Latest ${latestTime}` : emptyLabel}</div>
+        </div>
+        <div className="rs-rating-value">{latestValue == null ? "--" : latestValue.toFixed(1)}</div>
+      </div>
+      {series.length === 0 || path == null ? (
+        <p className="panel-copy">{emptyLabel}</p>
+      ) : (
+        <svg className="rs-rating-svg" viewBox="0 0 560 180" preserveAspectRatio="none" aria-label={title}>
+          <rect x="0" y="0" width="560" height="180" rx="10" fill="#111114" />
+          {[30, 70, 90].map((level) => {
+            const y = ratingToChartY(level);
+            return (
+              <g key={level}>
+                <line x1="0" y1={y} x2="560" y2={y} stroke={level >= 90 ? "#14532d" : "#27272a"} strokeDasharray="4 4" strokeWidth="1" />
+                <text x="8" y={y - 4} fill="#71717a" fontSize="11">
+                  {level}
+                </text>
+              </g>
+            );
+          })}
+          <path d={path.areaPath} fill="rgba(96, 165, 250, 0.12)" />
+          <path d={path.linePath} fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+          {path.lastPoint ? <circle cx={path.lastPoint.x} cy={path.lastPoint.y} r="4" fill="#93c5fd" stroke="#0f172a" strokeWidth="1.5" /> : null}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+function buildMiniChartPath(series: Array<{ time: string; value: number }>) {
+  if (series.length < 2) {
+    return null;
+  }
+  const width = 560;
+  const height = 180;
+  const left = 10;
+  const right = 10;
+  const top = 14;
+  const bottom = 20;
+  const usableWidth = width - left - right;
+  const baselineY = height - bottom;
+  const points = series.map((point, index) => {
+    const x = left + (usableWidth * index) / Math.max(1, series.length - 1);
+    const y = ratingToChartY(point.value, { top, bottom, height });
+    return { x, y };
+  });
+  const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${baselineY} L ${points[0].x.toFixed(2)} ${baselineY} Z`;
+  return {
+    linePath,
+    areaPath,
+    lastPoint: points[points.length - 1] ?? null,
+  };
+}
+
+function ratingToChartY(
+  value: number,
+  dimensions: { top?: number; bottom?: number; height?: number } = {},
+) {
+  const top = dimensions.top ?? 14;
+  const bottom = dimensions.bottom ?? 20;
+  const height = dimensions.height ?? 180;
+  const clamped = Math.max(0, Math.min(100, value));
+  const usableHeight = height - top - bottom;
+  return top + ((100 - clamped) / 100) * usableHeight;
 }
 
 function buildChartCacheKey(kind: "payload" | "fundamentals" | "insider", ticker: string, scope: string) {

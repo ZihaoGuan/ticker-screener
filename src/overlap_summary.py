@@ -120,6 +120,30 @@ PIPELINES = (
     },
 )
 
+PIPELINE_GROUPS: dict[str, dict[str, str]] = {
+    "rs": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "weekly_rs": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "sean_peg": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "legacy_peg": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "cup_handle": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "weekly_htf_pullback": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "htf_8w_runup": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "gap_fill": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "near_200ma": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "hve": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "inside_dryup": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "ftd_sweep": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "fearzone_zeiierman": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "td9_bullish": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "macd_golden_cross": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "base_detection": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "cup_detection": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "double_bottom_detection": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "weekly_tight_close": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "weekly_tight_close_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+}
+
 DRUG_THEME_TAGS = {
     "health care",
     "biotech",
@@ -254,6 +278,8 @@ def build_overlap_payload(date_label: str, watchlist_dir: Path) -> dict[str, obj
                 "count": len(tickers),
                 "source_filename": path.name if path is not None else "",
                 "resolution": resolution,
+                "bias_group": PIPELINE_GROUPS.get(pipeline_id, {}).get("bias_group", "other"),
+                "bullish_subgroup": PIPELINE_GROUPS.get(pipeline_id, {}).get("bullish_subgroup", ""),
             }
         )
         for ticker in tickers:

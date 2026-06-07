@@ -24,6 +24,7 @@ from ...market_data_access import (
     resolve_database_url,
     resolve_market_data_source,
 )
+from ...rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
 from ...ticker_filters import normalize_ticker_symbol
 from ...universe import UniverseTicker, load_universe
 from ...config import load_app_config
@@ -164,6 +165,8 @@ class WatchlistService:
         rs_line: pd.Series | None = None
         rs_new_high: pd.Series | None = None
         rs_new_high_before_price: pd.Series | None = None
+        daily_rs_rating: pd.Series | None = None
+        weekly_rs_rating: pd.Series | None = None
         fearzone_panel = _filter_fearzone_panel(
             _compute_fearzone_panel(frame),
             visible_dates={pd.Timestamp(index).date().isoformat() for index in visible_frame.index},
@@ -178,6 +181,9 @@ class WatchlistService:
             benchmark_frame = benchmark_frame.sort_index()
             benchmark_frame = benchmark_frame.loc[benchmark_frame.index <= pd.Timestamp(resolved_as_of_date)].copy()
             rs_line = _compute_rs_line(frame["Close"], benchmark_frame["Close"])
+            daily_rs_rating = _compute_rs_rating_series(frame["Close"], benchmark_frame["Close"])
+            if daily_rs_rating is not None and not daily_rs_rating.empty:
+                weekly_rs_rating = daily_rs_rating.resample("W-FRI").last().dropna()
             rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
                 rs_line=rs_line,
                 price_reference=frame["High"].reindex(rs_line.index),
@@ -194,6 +200,8 @@ class WatchlistService:
         weekly_ema8_points: list[dict[str, Any]] = []
         ipo_vwap: list[dict[str, Any]] = []
         rs_points: list[dict[str, Any]] = []
+        daily_rs_rating_points: list[dict[str, Any]] = []
+        weekly_rs_rating_points: list[dict[str, Any]] = []
         rs_markers: list[dict[str, Any]] = []
 
         visible_index_set = set(visible_frame.index)
@@ -243,6 +251,16 @@ class WatchlistService:
                             "kind": "daily_new_high_before_price" if rs_new_high_before_price is not None and bool(rs_new_high_before_price.loc[index]) else "daily_new_high",
                         }
                     )
+            if daily_rs_rating is not None and index in daily_rs_rating.index and pd.notna(daily_rs_rating.loc[index]):
+                daily_rs_rating_points.append({"time": time_value, "value": float(daily_rs_rating.loc[index])})
+
+        if weekly_rs_rating is not None and not weekly_rs_rating.empty:
+            for index, value in weekly_rs_rating.items():
+                week_date = pd.Timestamp(index).date()
+                if week_date < visible_start_date or week_date > resolved_as_of_date:
+                    continue
+                if pd.notna(value):
+                    weekly_rs_rating_points.append({"time": week_date.isoformat(), "value": float(value)})
 
         return {
             "ticker": normalized_ticker,
@@ -262,6 +280,8 @@ class WatchlistService:
             "weekly_ema8": weekly_ema8_points,
             "ipo_vwap": ipo_vwap,
             "rs_line": rs_points,
+            "daily_rs_rating": daily_rs_rating_points,
+            "weekly_rs_rating": weekly_rs_rating_points,
             "rs_markers": rs_markers,
             "setup_markers": setup_markers,
             "fearzone_panel": fearzone_panel,
@@ -509,6 +529,8 @@ def _empty_chart_payload(
         "weekly_ema8": [],
         "ipo_vwap": [],
         "rs_line": [],
+        "daily_rs_rating": [],
+        "weekly_rs_rating": [],
         "rs_markers": [],
         "setup_markers": [],
         "fearzone_panel": {"rows": [], "signals": []},
@@ -1081,6 +1103,14 @@ def _compute_rs_line(stock: pd.Series, benchmark: pd.Series) -> pd.Series:
     aligned = pd.concat([stock, benchmark], axis=1, join="inner").dropna()
     aligned.columns = ["stock", "benchmark"]
     return aligned["stock"] / aligned["benchmark"]
+
+
+def _compute_rs_rating_series(stock: pd.Series, benchmark: pd.Series) -> pd.Series:
+    score_series = compute_weighted_rs_score(stock, benchmark)
+    if score_series.empty:
+        return pd.Series(dtype=float)
+    rating_series = score_series.apply(approximate_rs_rating).dropna()
+    return rating_series.astype(float)
 
 
 def _compute_rs_new_high_flags(rs_line: pd.Series, price_reference: pd.Series, lookback: int) -> tuple[pd.Series, pd.Series]:
