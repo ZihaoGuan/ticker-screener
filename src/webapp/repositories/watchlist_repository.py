@@ -83,6 +83,8 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("gap_fill", "gap_fill", "Gap Fill"),
         ("ftd_sweep", "ftd_sweep", "FTD Sweep"),
         ("fearzone_zeiierman", "fearzone_zeiierman", "Fearzone Zeiierman"),
+        ("td9_bullish", "td9", "TD9"),
+        ("td9_bearish", "td9", "TD9"),
         ("fearzone", "fearzone", "Fearzone"),
         ("near_200ma", "near_200ma", "Near 200MA"),
         ("lost_21ema", "lost_21ema", "Lost 21EMA"),

@@ -75,6 +75,18 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("fearzone_zeiierman_{date_label}.json",),
         "legacy_summary_templates": ("fearzone_zeiierman_run_summary_{date_label}.json",),
     },
+    "td9_bullish": {
+        "stem_template": "td9_bullish_{date_label}",
+        "legacy_watchlist_templates": ("td9_bullish_{date_label}.json",),
+        "legacy_raw_templates": ("td9_bullish_{date_label}.json",),
+        "legacy_summary_templates": ("td9_bullish_run_summary_{date_label}.json",),
+    },
+    "td9_bearish": {
+        "stem_template": "td9_bearish_{date_label}",
+        "legacy_watchlist_templates": ("td9_bearish_{date_label}.json",),
+        "legacy_raw_templates": ("td9_bearish_{date_label}.json",),
+        "legacy_summary_templates": ("td9_bearish_run_summary_{date_label}.json",),
+    },
     "near_200ma": {
         "stem_template": "near_200ma_{date_label}",
         "legacy_watchlist_templates": ("near_200ma_{date_label}.json",),
@@ -142,6 +154,8 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("gap_fill", "gap_fill"),
     ("ftd_sweep", "ftd_sweep"),
     ("fearzone_zeiierman", "fearzone_zeiierman"),
+    ("td9_bullish", "td9_bullish"),
+    ("td9_bearish", "td9_bearish"),
     ("fearzone", "fearzone"),
     ("near_200ma", "near_200ma"),
     ("lost_21ema", "lost_21ema"),

@@ -201,6 +201,56 @@ class RrgServiceTests(unittest.TestCase):
         self.assertEqual(payload["series"][0]["ticker"], "XLK")
         self.assertIn("fearzone", payload["series"][0])
 
+    def test_rrg_series_builder_skips_ticker_when_fearzone_payload_raises(self) -> None:
+        benchmark_frame = _rotation_frame("2025-01-02", 260)
+        ticker_frame = _rotation_frame("2025-01-02", 260, close_start=118.0, close_step=0.35)
+
+        def fake_fetch_history(ticker: str, period: str) -> pd.DataFrame:
+            if ticker == "SPY":
+                return benchmark_frame
+            if ticker == "XLK":
+                return ticker_frame
+            raise AssertionError(f"unexpected ticker {ticker}")
+
+        with patch.object(self.service, "_universe_entries", return_value=[("Technology", "XLK")]), patch(
+            "src.webapp.services.rrg_service.fetch_history",
+            side_effect=fake_fetch_history,
+        ), patch(
+            "src.webapp.services.rrg_service.compute_rotation_series",
+            side_effect=lambda **kwargs: _mock_rotation_series(kwargs["closes"]),
+        ), patch.object(
+            self.service,
+            "_fearzone_payload",
+            side_effect=ValueError("bad fearzone payload"),
+        ):
+            payload = self.service.get_universe_report(
+                universe="sector",
+                benchmark="SPY",
+                period="3y",
+                trail_weeks=12,
+                cadence="weekly",
+            )
+
+        self.assertEqual(payload["meta"]["count"], 0)
+        self.assertIn("XLK", payload["meta"]["failed_tickers"])
+
+    def test_rrg_universe_report_returns_empty_payload_when_benchmark_fetch_fails(self) -> None:
+        with patch(
+            "src.webapp.services.rrg_service.fetch_history",
+            side_effect=RuntimeError("benchmark fetch failed"),
+        ):
+            payload = self.service.get_universe_report(
+                universe="sector",
+                benchmark="SPY",
+                period="3y",
+                trail_weeks=12,
+                cadence="weekly",
+            )
+
+        self.assertEqual(payload["meta"]["count"], 0)
+        self.assertEqual(payload["series"], [])
+        self.assertTrue(any("Interactive RRG refresh failed" in note for note in payload["meta"]["notes"]))
+
 
 if __name__ == "__main__":
     unittest.main()

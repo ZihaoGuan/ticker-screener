@@ -119,9 +119,41 @@ class RrgService:
         notes: list[str] = []
         effective_period = DAILY_PERIOD if cadence == "daily-2m" else period
         effective_trail = DAILY_TRAIL_POINTS if cadence == "daily-2m" else trail_weeks
+        try:
+            if universe == "theme":
+                groups, failures = self._build_theme_groups(
+                    benchmark=benchmark_symbol,
+                    period=effective_period,
+                    trail_weeks=effective_trail,
+                    cadence=cadence,
+                )
+                if failures:
+                    notes.append(f"Skipped {len(failures)} tickers with missing or unusable history.")
+                if groups:
+                    notes.append(f"Theme universe grouped into batches of {THEME_BATCH_SIZE}.")
+                if cadence == "daily-2m":
+                    notes.append("Daily mode uses raw daily closes from the most recent two months.")
+                flat_series = [series for group in groups for series in group.series]
+                return {
+                    "universe": universe,
+                    "benchmark": benchmark_symbol,
+                    "period": effective_period,
+                    "trail_weeks": effective_trail,
+                    "cadence": cadence,
+                    "generated_at": generated_at,
+                    "series": [self._series_payload(series) for series in flat_series],
+                    "groups": [self._group_payload(group) for group in groups],
+                    "quadrants": self._quadrants_payload(),
+                    "meta": {
+                        "count": len(flat_series),
+                        "notes": notes,
+                        "failed_tickers": failures,
+                    },
+                    "static_report_url": static_report_url,
+                }
 
-        if universe == "theme":
-            groups, failures = self._build_theme_groups(
+            series_list, failures = self._build_series_for_universe(
+                self._universe_entries(universe),
                 benchmark=benchmark_symbol,
                 period=effective_period,
                 trail_weeks=effective_trail,
@@ -129,11 +161,10 @@ class RrgService:
             )
             if failures:
                 notes.append(f"Skipped {len(failures)} tickers with missing or unusable history.")
-            if groups:
-                notes.append(f"Theme universe grouped into batches of {THEME_BATCH_SIZE}.")
+            if not series_list:
+                notes.append("No RRG series could be computed for the requested universe.")
             if cadence == "daily-2m":
                 notes.append("Daily mode uses raw daily closes from the most recent two months.")
-            flat_series = [series for group in groups for series in group.series]
             return {
                 "universe": universe,
                 "benchmark": benchmark_symbol,
@@ -141,46 +172,36 @@ class RrgService:
                 "trail_weeks": effective_trail,
                 "cadence": cadence,
                 "generated_at": generated_at,
-                "series": [self._series_payload(series) for series in flat_series],
-                "groups": [self._group_payload(group) for group in groups],
+                "series": [self._series_payload(series) for series in series_list],
                 "quadrants": self._quadrants_payload(),
                 "meta": {
-                    "count": len(flat_series),
+                    "count": len(series_list),
                     "notes": notes,
                     "failed_tickers": failures,
                 },
                 "static_report_url": static_report_url,
             }
-
-        series_list, failures = self._build_series_for_universe(
-            self._universe_entries(universe),
-            benchmark=benchmark_symbol,
-            period=effective_period,
-            trail_weeks=effective_trail,
-            cadence=cadence,
-        )
-        if failures:
-            notes.append(f"Skipped {len(failures)} tickers with missing or unusable history.")
-        if not series_list:
-            notes.append("No RRG series could be computed for the requested universe.")
-        if cadence == "daily-2m":
-            notes.append("Daily mode uses raw daily closes from the most recent two months.")
-        return {
-            "universe": universe,
-            "benchmark": benchmark_symbol,
-            "period": effective_period,
-            "trail_weeks": effective_trail,
-            "cadence": cadence,
-            "generated_at": generated_at,
-            "series": [self._series_payload(series) for series in series_list],
-            "quadrants": self._quadrants_payload(),
-            "meta": {
-                "count": len(series_list),
-                "notes": notes,
-                "failed_tickers": failures,
-            },
-            "static_report_url": static_report_url,
-        }
+        except Exception as exc:
+            notes.append(f"Interactive RRG refresh failed: {exc}")
+            if cadence == "daily-2m":
+                notes.append("Daily mode uses raw daily closes from the most recent two months.")
+            return {
+                "universe": universe,
+                "benchmark": benchmark_symbol,
+                "period": effective_period,
+                "trail_weeks": effective_trail,
+                "cadence": cadence,
+                "generated_at": generated_at,
+                "series": [],
+                "groups": [],
+                "quadrants": self._quadrants_payload(),
+                "meta": {
+                    "count": 0,
+                    "notes": notes,
+                    "failed_tickers": [],
+                },
+                "static_report_url": static_report_url,
+            }
 
     def _build_theme_groups(
         self,
@@ -227,53 +248,53 @@ class RrgService:
             try:
                 ticker_frame = self._history_frame(symbol, period)
                 ticker_history = self._close_series(ticker_frame, cadence).rename(symbol)
+                closes = pd.concat([benchmark_history, ticker_history], axis=1, join="inner").dropna()
+                if closes.empty:
+                    failures.append(symbol)
+                    continue
+                series = None
+                max_trail = max(1, min(trail_weeks, len(closes)))
+                for effective_trail in range(max_trail, 0, -1):
+                    series = compute_rotation_series(
+                        label=label,
+                        ticker=symbol,
+                        color=f"series-{index}",
+                        closes=closes,
+                        benchmark=benchmark,
+                        ratio_window=DEFAULT_RATIO_WINDOW,
+                        momentum_window=DEFAULT_MOMENTUM_WINDOW,
+                        trail_weeks=effective_trail,
+                    )
+                    if series is not None:
+                        break
+                if series is None:
+                    failures.append(symbol)
+                    continue
+                points = [
+                    RrgPoint(
+                        x=round(float(row["x"]), 2),
+                        y=round(float(row["y"]), 2),
+                        date=self._normalize_date(point_date),
+                    )
+                    for point_date, row in series.trail.iterrows()
+                ]
+                if not points:
+                    failures.append(symbol)
+                    continue
+                series_list.append(
+                    RrgSeries(
+                        ticker=symbol,
+                        label=label,
+                        points=points,
+                        latest=points[-1],
+                        quadrant=series.quadrant,
+                        distance=round(float(series.distance), 3),
+                        fearzone=self._fearzone_payload(symbol, ticker_frame),
+                    )
+                )
             except Exception:
                 failures.append(symbol)
                 continue
-            closes = pd.concat([benchmark_history, ticker_history], axis=1, join="inner").dropna()
-            if closes.empty:
-                failures.append(symbol)
-                continue
-            series = None
-            max_trail = max(1, min(trail_weeks, len(closes)))
-            for effective_trail in range(max_trail, 0, -1):
-                series = compute_rotation_series(
-                    label=label,
-                    ticker=symbol,
-                    color=f"series-{index}",
-                    closes=closes,
-                    benchmark=benchmark,
-                    ratio_window=DEFAULT_RATIO_WINDOW,
-                    momentum_window=DEFAULT_MOMENTUM_WINDOW,
-                    trail_weeks=effective_trail,
-                )
-                if series is not None:
-                    break
-            if series is None:
-                failures.append(symbol)
-                continue
-            points = [
-                RrgPoint(
-                    x=round(float(row["x"]), 2),
-                    y=round(float(row["y"]), 2),
-                    date=self._normalize_date(point_date),
-                )
-                for point_date, row in series.trail.iterrows()
-            ]
-            if not points:
-                failures.append(symbol)
-                continue
-            series_list.append(
-                RrgSeries(
-                    ticker=symbol,
-                    label=label,
-                    points=points,
-                    latest=points[-1],
-                    quadrant=series.quadrant,
-                    distance=round(float(series.distance), 3),
-                    fearzone=self._fearzone_payload(symbol, ticker_frame),
-                )
-            )
         return series_list, sorted(set(failures))
 
     def _history_frame(self, ticker: str, period: str) -> pd.DataFrame:

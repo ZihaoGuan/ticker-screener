@@ -17,6 +17,7 @@ from .lost_21ema_screen import run_lost_21ema_screen
 from .near_200ma_screen import run_near_200ma_screen
 from .rs_screen import run_rs_screen
 from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, ScreenerSpec
+from .td_sequential_screen import find_recent_td_sequential_hit
 from .universe import UniverseTicker
 from .vcp_screen import run_vcp_screen
 from .weekly_htf_pullback_screen import run_weekly_htf_pullback_screen
@@ -73,6 +74,40 @@ def _run_rs_weekly(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
 def _run_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     return _single_ticker_result(bundle, run_vcp_screen, config)
+
+
+def _run_td9_bullish(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_td_sequential_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        direction="bullish",
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "direction": payload["direction"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_td9_bearish(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_td_sequential_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        direction="bearish",
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "direction": payload["direction"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
 
 
 def _run_cup_handle(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
@@ -309,6 +344,20 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             ),
             warmup_trading_days=10,
             evaluator=_run_fearzone_zeiierman,
+        ),
+        "td9_bullish": ScreenerSpec(
+            id="td9_bullish",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=120,
+            warmup_trading_days=10,
+            evaluator=_run_td9_bullish,
+        ),
+        "td9_bearish": ScreenerSpec(
+            id="td9_bearish",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=120,
+            warmup_trading_days=10,
+            evaluator=_run_td9_bearish,
         ),
         "weekly_htf_pullback": ScreenerSpec(
             id="weekly_htf_pullback",

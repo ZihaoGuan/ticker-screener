@@ -186,6 +186,8 @@ class RunServiceTests(unittest.TestCase):
         action_ids = {item["id"] for item in self.service.list_actions()}
         self.assertIn("fearzone", action_ids)
         self.assertIn("fearzone_zeiierman", action_ids)
+        self.assertIn("td9_bullish", action_ids)
+        self.assertIn("td9_bearish", action_ids)
         self.assertIn("hve", action_ids)
         self.assertIn("inside_dryup", action_ids)
         self.assertIn("weekly_rs_before_price", action_ids)
