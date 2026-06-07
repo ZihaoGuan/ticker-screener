@@ -248,9 +248,21 @@ Suggested values:
 The deploy workflow logs into the Oracle instance, checks out the requested git ref, then runs:
 
 ```bash
-git restore --source=HEAD --worktree --staged -- frontend/package-lock.json || true
+BACKUP_DIR="$(mktemp -d)"
+for preserve_path in config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt; do
+  if [ -f "${preserve_path}" ]; then
+    mkdir -p "${BACKUP_DIR}/$(dirname "${preserve_path}")"
+    cp "${preserve_path}" "${BACKUP_DIR}/${preserve_path}"
+  fi
+done
+git restore --source=HEAD --worktree --staged -- frontend/package-lock.json config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt || true
 git clean -fd -- frontend/package-lock.json frontend/dist frontend/tsconfig.app.tsbuildinfo frontend/tsconfig.node.tsbuildinfo frontend/vite.config.js frontend/vite.config.d.ts
 git pull --ff-only origin "${GIT_REF}"
+for preserve_path in config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt; do
+  if [ -f "${BACKUP_DIR}/${preserve_path}" ]; then
+    cp "${BACKUP_DIR}/${preserve_path}" "${preserve_path}"
+  fi
+done
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
 cd deploy
 docker-compose down || true
@@ -260,7 +272,7 @@ docker-compose up -d
 
 You can override that compose command from the workflow UI when needed.
 
-The deploy script now first restores the tracked `frontend/package-lock.json` from `HEAD`, then runs the narrow `git clean` for frontend build artefacts. That avoids `git pull` being blocked by a previously mutated lockfile on the server while still not wiping unrelated local files. The frontend container also uses `npm ci` so the checked-in lockfile is respected instead of being rewritten during deploy.
+The deploy script now preserves the server-local exclusion files (`config/smallcap_exclude_tickers.txt`, `config/manual_exclude_tickers.txt`, and `config/manual_include_tickers.txt`) across `git pull`. It temporarily restores the tracked repo versions so fast-forward deploys do not fail, then copies the server-local files back before rebuild. The same script still restores `frontend/package-lock.json` from `HEAD` and runs the narrow `git clean` for frontend build artefacts, which avoids `git pull` being blocked by a mutated lockfile while still not wiping unrelated local files. The frontend container also uses `npm ci` so the checked-in lockfile is respected instead of being rewritten during deploy.
 
 ## Domain mapping
 

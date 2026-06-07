@@ -49,9 +49,24 @@ jobs:
           script: |
             set -euo pipefail
             cd "${APP_DIR}"
+            BACKUP_DIR="$(mktemp -d)"
+            for preserve_path in \
+              config/smallcap_exclude_tickers.txt \
+              config/manual_exclude_tickers.txt \
+              config/manual_include_tickers.txt
+            do
+              if [ -f "${preserve_path}" ]; then
+                mkdir -p "${BACKUP_DIR}/$(dirname "${preserve_path}")"
+                cp "${preserve_path}" "${BACKUP_DIR}/${preserve_path}"
+              fi
+            done
             git fetch --all --prune
             git checkout "${GIT_REF}"
-            git restore --source=HEAD --worktree --staged -- frontend/package-lock.json || true
+            git restore --source=HEAD --worktree --staged -- \
+              frontend/package-lock.json \
+              config/smallcap_exclude_tickers.txt \
+              config/manual_exclude_tickers.txt \
+              config/manual_include_tickers.txt || true
             git clean -fd -- \
               frontend/package-lock.json \
               frontend/dist \
@@ -60,6 +75,15 @@ jobs:
               frontend/vite.config.js \
               frontend/vite.config.d.ts
             git pull --ff-only origin "${GIT_REF}"
+            for preserve_path in \
+              config/smallcap_exclude_tickers.txt \
+              config/manual_exclude_tickers.txt \
+              config/manual_include_tickers.txt
+            do
+              if [ -f "${BACKUP_DIR}/${preserve_path}" ]; then
+                cp "${BACKUP_DIR}/${preserve_path}" "${preserve_path}"
+              fi
+            done
             docker run --rm \
               --user "$(id -u):$(id -g)" \
               -e HOME=/tmp/npm-home \
