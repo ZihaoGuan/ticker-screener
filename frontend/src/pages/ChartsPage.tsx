@@ -71,8 +71,6 @@ export function ChartsPage() {
   const [isSavingListAction, setIsSavingListAction] = useState(false);
   const [isLaunchingBackfill, setIsLaunchingBackfill] = useState(false);
   const [backfillNotice, setBackfillNotice] = useState("");
-  const [chartHoveredTime, setChartHoveredTime] = useState<string | null>(null);
-  const [chartVisibleIndexRange, setChartVisibleIndexRange] = useState<{ from: number; to: number } | null>(null);
 
   useEffect(() => {
     setTickerInput(requestedTicker);
@@ -759,8 +757,6 @@ export function ChartsPage() {
               extraMarkers={[...historicalSetupMarkers, ...atrExtensionMarkers]}
               visibility={chartVisibility}
               forceFearzonePanel
-              onHoverTimeChange={setChartHoveredTime}
-              onVisibleIndexRangeChange={setChartVisibleIndexRange}
             />
             <div className="chart-annotation-strip">
               {payload?.resolved_as_of_date ? <span className="chart-pill chart-pill-event">As Of {payload.resolved_as_of_date}</span> : null}
@@ -785,13 +781,10 @@ export function ChartsPage() {
               )}
             </div>
             <div className="rs-rating-grid">
-              <RsRatingTimelinePanel
+              <RsRatingMiniChart
                 title="RS Rating Daily"
-                timeline={chartData.map((item) => item.time)}
                 series={dailyRsRatingSeries}
                 emptyLabel="Daily RS rating needs more history."
-                visibleIndexRange={chartVisibleIndexRange}
-                hoveredTime={chartHoveredTime}
               />
               <RsRatingMiniChart
                 title="RS Rating Weekly"
@@ -826,95 +819,6 @@ function formatPrice(value: number | null) {
   return value == null ? "--" : `$${value.toFixed(2)}`;
 }
 
-function RsRatingTimelinePanel({
-  title,
-  timeline,
-  series,
-  emptyLabel,
-  visibleIndexRange,
-  hoveredTime,
-}: {
-  title: string;
-  timeline: string[];
-  series: Array<{ time: string; value: number }>;
-  emptyLabel: string;
-  visibleIndexRange: { from: number; to: number } | null;
-  hoveredTime: string | null;
-}) {
-  const visibleTimeline = useMemo(() => {
-    if (timeline.length === 0) {
-      return [];
-    }
-    if (!visibleIndexRange) {
-      return timeline;
-    }
-    return timeline.slice(visibleIndexRange.from, visibleIndexRange.to + 1);
-  }, [timeline, visibleIndexRange]);
-  const seriesByTime = useMemo(() => new Map(series.map((item) => [item.time, item.value] as const)), [series]);
-  const visibleSeries = useMemo(
-    () =>
-      visibleTimeline.map((time) => ({
-        time,
-        value: seriesByTime.get(time) ?? null,
-      })),
-    [seriesByTime, visibleTimeline],
-  );
-  const chartData = useMemo(() => buildRsTimelinePaths(visibleSeries), [visibleSeries]);
-  const latestPoint = [...visibleSeries].reverse().find((item) => item.value != null) ?? null;
-  const hoverPointIndex = hoveredTime ? visibleTimeline.findIndex((time) => time === hoveredTime) : -1;
-  const hoverX = chartData && hoverPointIndex >= 0 ? chartData.left + hoverPointIndex * chartData.step + Math.max(0.5, chartData.step / 2) : null;
-  const dateMarkers = useMemo(
-    () => (chartData ? buildRsTimelineMarkers(visibleTimeline, chartData.left, chartData.step) : []),
-    [chartData, visibleTimeline],
-  );
-
-  return (
-    <div className="chart-card rs-rating-card">
-      <div className="rs-rating-card-head">
-        <div>
-          <div className="chart-rs-header">{title}</div>
-          <div className="rs-rating-meta">{latestPoint?.time ? `Latest ${latestPoint.time}` : emptyLabel}</div>
-        </div>
-        <div className="rs-rating-value">{latestPoint?.value == null ? "--" : latestPoint.value.toFixed(1)}</div>
-      </div>
-      {!chartData ? (
-        <p className="panel-copy">{emptyLabel}</p>
-      ) : (
-        <svg className="rs-rating-svg" viewBox="0 0 560 180" preserveAspectRatio="none" aria-label={title}>
-          <rect x="0" y="0" width="560" height="180" rx="10" fill="#111114" />
-          {[30, 70, 90].map((level) => {
-            const y = ratingToChartY(level);
-            return (
-              <g key={level}>
-                <line x1="0" y1={y} x2="560" y2={y} stroke={level >= 90 ? "#14532d" : "#27272a"} strokeDasharray="4 4" strokeWidth="1" />
-                <text x="8" y={y - 4} fill="#71717a" fontSize="11">
-                  {level}
-                </text>
-              </g>
-            );
-          })}
-          {chartData.areaSegments.map((segment, index) => (
-            <path key={`area-${index}`} d={segment} fill="rgba(96, 165, 250, 0.12)" />
-          ))}
-          {chartData.lineSegments.map((segment, index) => (
-            <path key={`line-${index}`} d={segment} fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-          ))}
-          {hoverX != null ? <line x1={hoverX} y1={8} x2={hoverX} y2={160} stroke="#60a5fa" strokeWidth="1" strokeDasharray="4 4" opacity="0.95" /> : null}
-          {chartData.lastPoint ? <circle cx={chartData.lastPoint.x} cy={chartData.lastPoint.y} r="4" fill="#93c5fd" stroke="#0f172a" strokeWidth="1.5" /> : null}
-          {dateMarkers.map((marker) => (
-            <g key={`date-${marker.time}`}>
-              <line x1={marker.x} y1={160} x2={marker.x} y2={165} stroke="#a1a1aa" strokeWidth="1" />
-              <text x={marker.x} y={174} fill="#a1a1aa" fontSize="11" textAnchor="middle">
-                {marker.label}
-              </text>
-            </g>
-          ))}
-        </svg>
-      )}
-    </div>
-  );
-}
-
 function RsRatingMiniChart({
   title,
   series,
@@ -924,10 +828,7 @@ function RsRatingMiniChart({
   series: Array<{ time: string; value: number }>;
   emptyLabel: string;
 }) {
-  const path = useMemo(
-    () => buildRsTimelinePaths(series.map((item) => ({ ...item, value: item.value }))),
-    [series],
-  );
+  const path = useMemo(() => buildMiniChartPath(series), [series]);
   const latestValue = series.length > 0 ? series[series.length - 1]?.value ?? null : null;
   const latestTime = series.length > 0 ? series[series.length - 1]?.time ?? "" : "";
 
@@ -956,12 +857,8 @@ function RsRatingMiniChart({
               </g>
             );
           })}
-          {path.areaSegments.map((segment, index) => (
-            <path key={`mini-area-${index}`} d={segment} fill="rgba(96, 165, 250, 0.12)" />
-          ))}
-          {path.lineSegments.map((segment, index) => (
-            <path key={`mini-line-${index}`} d={segment} fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-          ))}
+          <path d={path.areaPath} fill="rgba(96, 165, 250, 0.12)" />
+          <path d={path.linePath} fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
           {path.lastPoint ? <circle cx={path.lastPoint.x} cy={path.lastPoint.y} r="4" fill="#93c5fd" stroke="#0f172a" strokeWidth="1.5" /> : null}
         </svg>
       )}
@@ -969,7 +866,7 @@ function RsRatingMiniChart({
   );
 }
 
-function buildRsTimelinePaths(series: Array<{ time: string; value: number | null }>) {
+function buildMiniChartPath(series: Array<{ time: string; value: number }>) {
   if (series.length < 2) {
     return null;
   }
@@ -980,79 +877,19 @@ function buildRsTimelinePaths(series: Array<{ time: string; value: number | null
   const top = 14;
   const bottom = 20;
   const usableWidth = width - left - right;
-  const step = usableWidth / Math.max(1, series.length - 1);
   const baselineY = height - bottom;
-  const lineSegments: string[] = [];
-  const areaSegments: string[] = [];
-  let currentSegment: Array<{ x: number; y: number }> = [];
-  let lastPoint: { x: number; y: number } | null = null;
-
-  for (let index = 0; index < series.length; index += 1) {
-    const point = series[index];
-    const x = left + step * index;
-    if (point.value == null) {
-      if (currentSegment.length > 1) {
-        lineSegments.push(currentSegment.map((item, itemIndex) => `${itemIndex === 0 ? "M" : "L"} ${item.x.toFixed(2)} ${item.y.toFixed(2)}`).join(" "));
-        areaSegments.push(
-          `${currentSegment.map((item, itemIndex) => `${itemIndex === 0 ? "M" : "L"} ${item.x.toFixed(2)} ${item.y.toFixed(2)}`).join(" ")} L ${currentSegment[currentSegment.length - 1].x.toFixed(2)} ${baselineY} L ${currentSegment[0].x.toFixed(2)} ${baselineY} Z`,
-        );
-      }
-      currentSegment = [];
-      continue;
-    }
+  const points = series.map((point, index) => {
+    const x = left + (usableWidth * index) / Math.max(1, series.length - 1);
     const y = ratingToChartY(point.value, { top, bottom, height });
-    const nextPoint = { x, y };
-    currentSegment.push(nextPoint);
-    lastPoint = nextPoint;
-  }
-
-  if (currentSegment.length > 1) {
-    lineSegments.push(currentSegment.map((item, itemIndex) => `${itemIndex === 0 ? "M" : "L"} ${item.x.toFixed(2)} ${item.y.toFixed(2)}`).join(" "));
-    areaSegments.push(
-      `${currentSegment.map((item, itemIndex) => `${itemIndex === 0 ? "M" : "L"} ${item.x.toFixed(2)} ${item.y.toFixed(2)}`).join(" ")} L ${currentSegment[currentSegment.length - 1].x.toFixed(2)} ${baselineY} L ${currentSegment[0].x.toFixed(2)} ${baselineY} Z`,
-    );
-  }
-
-  if (lineSegments.length === 0) {
-    return null;
-  }
-
+    return { x, y };
+  });
+  const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${baselineY} L ${points[0].x.toFixed(2)} ${baselineY} Z`;
   return {
-    left,
-    step,
-    lineSegments,
-    areaSegments,
-    lastPoint,
+    linePath,
+    areaPath,
+    lastPoint: points[points.length - 1] ?? null,
   };
-}
-
-function buildRsTimelineMarkers(points: string[], left: number, step: number) {
-  if (points.length === 0) {
-    return [];
-  }
-  const targetCount = Math.min(6, points.length);
-  const markers: Array<{ time: string; label: string; x: number }> = [];
-  for (let markerIndex = 0; markerIndex < targetCount; markerIndex += 1) {
-    const pointIndex = targetCount === 1 ? points.length - 1 : Math.round((markerIndex * (points.length - 1)) / (targetCount - 1));
-    const point = points[pointIndex];
-    if (!point) {
-      continue;
-    }
-    markers.push({
-      time: point,
-      label: formatRsTimelineDate(point),
-      x: left + pointIndex * step,
-    });
-  }
-  return markers.filter((marker, index, source) => source.findIndex((item) => item.time === marker.time) === index);
-}
-
-function formatRsTimelineDate(value: string) {
-  const [year, month, day] = value.split("-");
-  if (!year || !month || !day) {
-    return value;
-  }
-  return `${year.slice(2)}-${month}-${day}`;
 }
 
 function ratingToChartY(

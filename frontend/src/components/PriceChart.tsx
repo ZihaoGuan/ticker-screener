@@ -29,8 +29,6 @@ type PriceChartProps = {
   extraMarkers?: Array<{ time: string; label?: string; color: string; shape: "circle" | "square"; position: "aboveBar" | "belowBar" }>;
   visibility?: ChartVisibility;
   forceFearzonePanel?: boolean;
-  onHoverTimeChange?: (hoveredTime: string | null) => void;
-  onVisibleIndexRangeChange?: (range: { from: number; to: number } | null) => void;
 };
 
 type GapZone = {
@@ -69,18 +67,7 @@ type FlexibleSrOverlay = {
   support: FlexibleSrCurve | null;
 };
 
-export function PriceChart({
-  ticker,
-  candles,
-  overlays,
-  annotations,
-  extraAnnotations = [],
-  extraMarkers = [],
-  visibility,
-  forceFearzonePanel = false,
-  onHoverTimeChange,
-  onVisibleIndexRangeChange,
-}: PriceChartProps) {
+export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations = [], extraMarkers = [], visibility, forceFearzonePanel = false }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
   const priceChartApiRef = useRef<IChartApi | null>(null);
@@ -132,7 +119,6 @@ export function PriceChart({
       point.y < 0
     ) {
       setHoverGuide(null);
-      onHoverTimeChange?.(null);
       return;
     }
     const xRatio = Math.max(0, Math.min(1, point.x / width));
@@ -142,18 +128,7 @@ export function PriceChart({
       }
       return { time: normalizedTime, xRatio };
     });
-    onHoverTimeChange?.(normalizedTime);
   };
-
-  useEffect(() => {
-    onVisibleIndexRangeChange?.(visibleIndexRange);
-  }, [onVisibleIndexRangeChange, visibleIndexRange]);
-
-  useEffect(() => {
-    if (hoverGuide == null) {
-      onHoverTimeChange?.(null);
-    }
-  }, [hoverGuide, onHoverTimeChange]);
 
   useEffect(() => {
     if (!priceRootRef.current || !rsRootRef.current) {
