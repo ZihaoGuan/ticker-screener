@@ -36,8 +36,10 @@ class OverlapService:
         overlap_two_plus.sort(key=lambda item: (-int(item.get("pipeline_count") or 0), str(item.get("ticker") or "")))
         overlap_three_plus = payload.get("overlap_three_plus", [])
         pipeline_status = payload.get("pipeline_status", [])
+        available_dates = discover_supported_dates(self.watchlist_dir)
         return {
             "date_label": str(payload.get("date_label", "")),
+            "available_dates": available_dates,
             "unique_ticker_count": int(payload.get("unique_ticker_count", 0) or 0),
             "overlap_two_plus_count": len(overlap_two_plus),
             "overlap_three_plus_count": len(overlap_three_plus),
@@ -54,6 +56,7 @@ class OverlapService:
     def _empty_summary(self, date_label: str) -> dict[str, Any]:
         return {
             "date_label": date_label,
+            "available_dates": discover_supported_dates(self.watchlist_dir),
             "unique_ticker_count": 0,
             "overlap_two_plus_count": 0,
             "overlap_three_plus_count": 0,

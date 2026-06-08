@@ -128,6 +128,7 @@ export type CandlePoint = {
 
 export type OverlapEntry = {
   ticker: string;
+  pipelines?: string[];
   pipeline_count: number;
   pipeline_labels: string[];
   sector?: string;
@@ -480,6 +481,7 @@ export type AdHocScreenResponse = {
 
 export type OverlapResponse = {
   date_label: string;
+  available_dates?: string[];
   unique_ticker_count: number;
   overlap_two_plus_count: number;
   overlap_three_plus_count: number;

@@ -826,6 +826,25 @@ a {
   color: #d4d4d8;
 }
 
+.overlap-date-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.overlap-date-field {
+  max-width: 240px;
+}
+
+.overlap-summary-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.overlap-summary-card {
+  min-height: 120px;
+}
+
 .ticker-chip-grid {
   display: flex;
   flex-wrap: wrap;
