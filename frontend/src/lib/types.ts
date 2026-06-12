@@ -357,6 +357,24 @@ export type WatchlistChartResponse = {
     }>;
     signals: Array<{ time: string }>;
   };
+  vcs?: {
+    score: number;
+    stage: "critical" | "setup" | "base";
+    stage_label: string;
+    color_zone: "green" | "blue" | "base";
+    is_setup_stage: boolean;
+    is_critical_tightness: boolean;
+    tr_short: number;
+    tr_long_avg: number;
+    std_short: number;
+    std_long_avg: number;
+    vol_short_avg: number;
+    vol_avg: number;
+    trend_factor: number;
+    efficiency: number;
+    days_tight: number;
+    is_higher_low: boolean;
+  } | null;
 };
 
 export type ChartFundamentalsResponse = {

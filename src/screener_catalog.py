@@ -19,6 +19,7 @@ from .inside_dryup_screen import find_recent_inside_dryup_hit
 from .lost_21ema_screen import run_lost_21ema_screen
 from .macd_screen import find_recent_macd_hit
 from .near_200ma_screen import run_near_200ma_screen
+from .rti_screen import find_recent_rti_hit
 from .rsi_ma_bb_screen import find_recent_rsi_ma_bb_hit
 from .rs_screen import run_rs_screen
 from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, ScreenerSpec
@@ -26,6 +27,7 @@ from .td_sequential_screen import find_recent_td_sequential_hit
 from .three_weeks_tight_screen import find_three_weeks_tight_hit
 from .universe import UniverseTicker
 from .vcp_screen import run_vcp_screen
+from .vcs_screen import find_recent_vcs_hit
 from .weekly_tight_close_screen import find_weekly_tight_close_breakout_hit, find_weekly_tight_close_hit
 from .weekly_htf_pullback_screen import run_weekly_htf_pullback_screen
 
@@ -180,6 +182,61 @@ def _run_rsi_ma_bb_bearish(bundle: ScreenerInputBundle) -> ScreenerEvaluationRes
     return ScreenerEvaluationResult(
         passed=True,
         metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "direction": payload["direction"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_rti(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_rti_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "signal_kind": payload["signal_kind"],
+            "rti_value": payload["rti_value"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_vcs_setup_stage(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_vcs_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        signal_profile="setup_stage",
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "vcs_score": payload["vcs_score"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_vcs_critical_tightness(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_vcs_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        signal_profile="critical_tightness",
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "vcs_score": payload["vcs_score"]},
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
     )
@@ -557,6 +614,27 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=120,
             warmup_trading_days=20,
             evaluator=_run_rsi_ma_bb_bearish,
+        ),
+        "rti": ScreenerSpec(
+            id="rti",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=20,
+            warmup_trading_days=5,
+            evaluator=_run_rti,
+        ),
+        "vcs_setup_stage": ScreenerSpec(
+            id="vcs_setup_stage",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=90,
+            warmup_trading_days=10,
+            evaluator=_run_vcs_setup_stage,
+        ),
+        "vcs_critical_tightness": ScreenerSpec(
+            id="vcs_critical_tightness",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=90,
+            warmup_trading_days=10,
+            evaluator=_run_vcs_critical_tightness,
         ),
         "base_detection": ScreenerSpec(
             id="base_detection",

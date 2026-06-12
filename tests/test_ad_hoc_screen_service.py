@@ -746,6 +746,73 @@ def _three_weeks_tight_frame() -> pd.DataFrame:
     )
 
 
+def _rti_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-02", periods=8, freq="B")
+    close_values = [100.0 + (idx * 0.4) for idx in range(8)]
+    open_values = [value - 0.2 for value in close_values]
+    volume_values = [1_000_000.0 for _ in close_values]
+    ranges = [6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 1.2, 1.8]
+    high_values = [close + (bar_range / 2.0) for close, bar_range in zip(close_values, ranges)]
+    low_values = [close - (bar_range / 2.0) for close, bar_range in zip(close_values, ranges)]
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high_values,
+            "Low": low_values,
+            "Close": close_values,
+            "Adj Close": close_values,
+            "Volume": volume_values,
+        },
+        index=index,
+    )
+
+
+def _vcs_frame(*, compressed: bool, variant: int = 0) -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-02", periods=90, freq="B")
+    close_values: list[float] = []
+    open_values: list[float] = []
+    high_values: list[float] = []
+    low_values: list[float] = []
+    volume_values: list[float] = []
+
+    for idx, _date in enumerate(index):
+        if idx < 70:
+            center = 100.0 + (idx * (0.35 + (0.03 * variant)))
+            bar_range = 5.0 + (variant * 0.4) - min(idx * 0.02, 1.0)
+            volume = 2_000_000.0 + (variant * 100_000.0) - (idx * 2_000.0)
+        else:
+            if compressed:
+                center = 124.0 + ((idx - 70) * 0.02)
+                bar_range = 0.35
+                volume = 450_000.0
+            else:
+                center = 124.0 + ((idx - 70) * (0.25 + (0.05 * variant)))
+                bar_range = 1.6 + (variant * 1.2) + (((idx - 70) % 3) * 0.7)
+                volume = 1_200_000.0 + (variant * 300_000.0)
+        open_value = center - (bar_range * 0.35)
+        close_value = center + (bar_range * (0.25 if idx % 2 == 0 else -0.15))
+        high_value = max(open_value, close_value) + (bar_range * 0.3)
+        low_value = min(open_value, close_value) - (bar_range * 0.35)
+        open_values.append(open_value)
+        close_values.append(close_value)
+        high_values.append(high_value)
+        low_values.append(low_value)
+        volume_values.append(max(volume, 100_000.0))
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high_values,
+            "Low": low_values,
+            "Close": close_values,
+            "Adj Close": close_values,
+            "Volume": volume_values,
+        },
+        index=index,
+    )
+
+
 class AdHocScreenServiceTests(unittest.TestCase):
     def test_run_prefetches_once_and_evaluates_selected_screeners(self) -> None:
         ticker_frame = _frame("2026-01-01", 40)
@@ -1303,6 +1370,75 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "three_weeks_tight")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_rti_catalog_entry(self) -> None:
+        ticker_frame = _rti_frame()
+        benchmark_frame = _frame("2026-01-02", 20)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 1, 13),
+                screener_ids=["rti"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "rti")
+        self.assertEqual(payload["screeners"][0]["hit"]["signal_kind"], "range_expansion")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_vcs_setup_stage_catalog_entry(self) -> None:
+        ticker_frame = _vcs_frame(compressed=False, variant=1)
+        benchmark_frame = _frame("2026-01-02", 120)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 5, 7),
+                screener_ids=["vcs_setup_stage"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "vcs_setup_stage")
+        self.assertEqual(payload["screeners"][0]["hit"]["stage"], "setup")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_vcs_critical_tightness_catalog_entry(self) -> None:
+        ticker_frame = _vcs_frame(compressed=True)
+        benchmark_frame = _frame("2026-01-02", 120)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 5, 7),
+                screener_ids=["vcs_critical_tightness"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "vcs_critical_tightness")
+        self.assertEqual(payload["screeners"][0]["hit"]["stage"], "critical")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_falls_back_to_internet_when_benchmark_missing_in_db(self) -> None:

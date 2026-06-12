@@ -194,6 +194,32 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "weekly_tight_close_breakout_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "weekly_tight_close_breakout")
 
+    def test_group_key_supports_rti(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="rti",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "rti_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "rti")
+
+    def test_group_key_supports_vcs_setup_stage(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="vcs_setup_stage",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "vcs_setup_stage_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "vcs")
+
 
 if __name__ == "__main__":
     unittest.main()

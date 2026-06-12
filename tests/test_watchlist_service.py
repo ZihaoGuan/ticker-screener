@@ -64,6 +64,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["latest_available_date"], "2026-05-29")
         self.assertEqual(payload["candles"][-1]["time"], "2026-05-29")
         self.assertEqual(payload["data_source"], "internet")
+        self.assertIn("vcs", payload)
 
     def test_get_chart_payload_coerces_decimal_db_values(self) -> None:
         frame = pd.DataFrame(
@@ -178,14 +179,14 @@ class WatchlistServiceTests(unittest.TestCase):
         (insider_dir / "insider_trades_latest.json").write_text(
             """
             {
-              "generated_at": "2026-06-02T00:00:00+00:00",
+              "generated_at": "2026-06-12T00:00:00+00:00",
               "caches": {
                 "NVDA|2026-05-31|14": {
                   "ticker": "NVDA",
                   "requested_tickers": ["NVDA"],
                   "as_of_date": "2026-05-31",
                   "lookback_days": 14,
-                  "refreshed_at": "2026-06-02T00:00:00+00:00",
+                  "refreshed_at": "2026-06-12T00:00:00+00:00",
                   "entries": [
                     {
                       "ticker": "NVDA",

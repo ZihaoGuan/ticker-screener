@@ -27,6 +27,7 @@ from ...market_data_access import (
 from ...rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
 from ...ticker_filters import normalize_ticker_symbol
 from ...universe import UniverseTicker, load_universe
+from ...vcs_indicator import latest_vcs_snapshot
 from ...config import load_app_config
 from ..repositories.insider_repository import InsiderRepository
 from ..repositories.watchlist_repository import WatchlistRepository
@@ -171,6 +172,7 @@ class WatchlistService:
             _compute_fearzone_panel(frame),
             visible_dates={pd.Timestamp(index).date().isoformat() for index in visible_frame.index},
         )
+        vcs_snapshot = latest_vcs_snapshot(frame)
         setup_markers = _compute_ftd_sweep_markers(
             frame=frame,
             visible_dates={pd.Timestamp(index).date().isoformat() for index in visible_frame.index},
@@ -285,6 +287,7 @@ class WatchlistService:
             "rs_markers": rs_markers,
             "setup_markers": setup_markers,
             "fearzone_panel": fearzone_panel,
+            "vcs": vcs_snapshot.to_dict() if vcs_snapshot is not None else None,
         }
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
@@ -534,6 +537,7 @@ def _empty_chart_payload(
         "rs_markers": [],
         "setup_markers": [],
         "fearzone_panel": {"rows": [], "signals": []},
+        "vcs": None,
     }
 
 

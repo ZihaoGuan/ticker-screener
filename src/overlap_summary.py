@@ -84,6 +84,21 @@ PIPELINES = (
         "filename": "fearzone_zeiierman_{date}.json",
     },
     {
+        "id": "rti",
+        "label": "RTI",
+        "filename": "rti_{date}.json",
+    },
+    {
+        "id": "vcs_setup_stage",
+        "label": "VCS Setup Stage",
+        "filename": "vcs_setup_stage_{date}.json",
+    },
+    {
+        "id": "vcs_critical_tightness",
+        "label": "VCS Critical Tightness",
+        "filename": "vcs_critical_tightness_{date}.json",
+    },
+    {
         "id": "td9_bullish",
         "label": "TD9 Bullish",
         "filename": "td9_bullish_{date}.json",
@@ -135,6 +150,9 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "inside_dryup": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "ftd_sweep": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "fearzone_zeiierman": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "rti": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "vcs_setup_stage": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "vcs_critical_tightness": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "td9_bullish": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "macd_golden_cross": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "base_detection": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},

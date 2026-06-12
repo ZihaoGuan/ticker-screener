@@ -280,6 +280,7 @@ export function ChartsPage() {
       ? ((lastClose ?? 0) - latestMa50) / atr14
       : null;
   const hasTrimWarning = atrMultipleFrom50Ma != null ? atrMultipleFrom50Ma >= 3 : false;
+  const vcs = payload?.vcs ?? null;
   const earningsRows = fundamentalsPayload?.earnings_eps_history ?? [];
   const setupAnnotations = useMemo<ChartAnnotations[]>(() => {
     return (setupPayload?.screeners ?? [])
@@ -459,18 +460,26 @@ export function ChartsPage() {
             </p>
           ) : null}
         </div>
-        <div className="hero-stats">
+          <div className="hero-stats">
+          <div>
+            <span className="eyebrow">VCS</span>
+            <strong>{formatScore(vcs?.score)}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">VCS Stage</span>
+            <strong className={vcs ? `status-pill ${vcsStageClass(vcs.stage)}` : undefined}>{vcs?.stage_label ?? "-"}</strong>
+          </div>
           <div>
             <span className="eyebrow">As Of</span>
             <strong>{payload?.resolved_as_of_date ?? "Latest trading day"}</strong>
           </div>
           <div>
-            <span className="eyebrow">Requested</span>
-            <strong>{requestedDate || "Latest"}</strong>
-          </div>
-          <div>
             <span className="eyebrow">Bars</span>
             <strong>{chartData.length || "-"}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">Requested</span>
+            <strong>{requestedDate || "Latest"}</strong>
           </div>
           <div>
             <span className="eyebrow">ADR14</span>
@@ -767,6 +776,7 @@ export function ChartsPage() {
                 </span>
               ) : null}
               {payload?.data_source ? <span className="chart-pill chart-pill-setup">Source {payload.data_source}</span> : null}
+              {vcs ? <span className={`chart-pill ${vcsChartPillClass(vcs.stage)}`}>VCS {formatScore(vcs.score)} {vcs.stage_label}</span> : null}
               {historicalSetupMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{historicalSetupMarkers.length} old FTD sweep marker(s)</span> : null}
               {atr14 != null ? <span className="chart-pill chart-pill-setup">ATR14 {formatPrice(atr14)}</span> : null}
               {atrMultipleFrom50Ma != null ? <span className="chart-pill chart-pill-setup">50MA {formatAtrMultiple(atrMultipleFrom50Ma)}</span> : null}
@@ -817,6 +827,30 @@ export function ChartsPage() {
 
 function formatPrice(value: number | null) {
   return value == null ? "--" : `$${value.toFixed(2)}`;
+}
+
+function formatScore(value: number | null | undefined) {
+  return value == null ? "--" : value.toFixed(1);
+}
+
+function vcsStageClass(stage: "critical" | "setup" | "base"): string {
+  if (stage === "critical") {
+    return "status-success";
+  }
+  if (stage === "setup") {
+    return "status-queued";
+  }
+  return "status-unknown";
+}
+
+function vcsChartPillClass(stage: "critical" | "setup" | "base"): string {
+  if (stage === "critical") {
+    return "chart-pill chart-pill-event";
+  }
+  if (stage === "setup") {
+    return "chart-pill chart-pill-rs";
+  }
+  return "chart-pill chart-pill-setup";
 }
 
 function RsRatingMiniChart({
