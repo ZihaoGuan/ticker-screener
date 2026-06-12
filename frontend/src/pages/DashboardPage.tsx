@@ -7,7 +7,11 @@ import { fetchJson } from "../lib/api";
 import { formatLocalDateTime } from "../lib/format";
 import type { DashboardResponse, JobsResponse } from "../lib/types";
 
-type MarketRegime = "healthy_pullback" | "healthy_uptrend" | "chaos" | "caution";
+type MarketRegime =
+  | "healthy_chaos"
+  | "perfect_convergence_bull"
+  | "perfect_convergence_bear"
+  | "bear_market_rally";
 
 export function DashboardPage() {
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
@@ -42,7 +46,7 @@ export function DashboardPage() {
             </div>
             <p className="card-meta">Weekly 21EMA sets primary trend. Daily 21EMA shows short-term pressure.</p>
             <div className="metric-value">
-              {regimeLatest?.regime_label ?? "Unavailable"} <span>{regimeSubLabel(regimeLatest)}</span>
+              {regimeLatest?.regime_label ?? "Unavailable"} <span>{regimeLatest?.summary ?? "Unavailable"}</span>
             </div>
             <p className="card-meta">
               {regimeLatest
@@ -63,6 +67,32 @@ export function DashboardPage() {
             <p className="card-meta">
               {regimeLatest ? `As of ${regimeLatest.date}` : "Waiting for market data."}
               {regime?.data_source ? ` · Source ${regime.data_source}` : ""}
+            </p>
+          </article>
+
+          <article className="metric-card market-matrix-card">
+            <div className="metric-card-head">
+              <h3>Operational Matrix</h3>
+              <span className={`accent-mark accent-${regimeAccent(regimeLatest?.regime)}`} />
+            </div>
+            <p className="card-meta">Use weekly 21EMA as anchor, daily 21EMA as pulse. Active cell shows current market state.</p>
+            <div className="market-matrix">
+              {MARKET_MATRIX_CELLS.map((cell) => {
+                const isActive = regimeLatest?.regime === cell.regime;
+                return (
+                  <div
+                    key={cell.regime}
+                    className={`market-matrix-cell market-matrix-${cell.tone}${isActive ? " is-active" : ""}`}
+                  >
+                    <div className="market-matrix-axis">{cell.axis}</div>
+                    <strong>{cell.title}</strong>
+                    <p>{cell.copy}</p>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="card-meta">
+              {regimeLatest ? `Active setup: ${regimeLatest.regime_label}.` : "Waiting for market data."}
             </p>
           </article>
 
@@ -201,29 +231,13 @@ function formatPercentSigned(value: number | null | undefined) {
 }
 
 function regimeAccent(regime: MarketRegime | null | undefined) {
-  if (regime === "chaos") {
+  if (regime === "perfect_convergence_bear") {
     return "down";
   }
-  if (regime === "caution") {
+  if (regime === "bear_market_rally") {
     return "neutral";
   }
   return "up";
-}
-
-function regimeSubLabel(latest: DashboardResponse["market_health"]["regime"]["latest"] | null | undefined) {
-  if (!latest) {
-    return "Unavailable";
-  }
-  if (latest.regime === "healthy_pullback") {
-    return "Weekly uptrend, daily reset";
-  }
-  if (latest.regime === "healthy_uptrend") {
-    return "Weekly and daily aligned";
-  }
-  if (latest.regime === "chaos") {
-    return "Weekly + daily weak";
-  }
-  return "Bounce attempt";
 }
 
 function rsiSignalSubLabel(latest: DashboardResponse["market_health"]["rsi_divergence"]["latest"] | null | undefined) {
@@ -235,3 +249,40 @@ function rsiSignalSubLabel(latest: DashboardResponse["market_health"]["rsi_diver
   }
   return "Watch closely";
 }
+
+const MARKET_MATRIX_CELLS: Array<{
+  regime: MarketRegime;
+  axis: string;
+  title: string;
+  copy: string;
+  tone: "up" | "neutral" | "down";
+}> = [
+  {
+    regime: "perfect_convergence_bull",
+    axis: "Above weekly 21EMA + above daily 21EMA",
+    title: "Perfect Convergence (Bull Market)",
+    copy: "Trend your friend. Ride wave, hold, or add with discipline.",
+    tone: "up",
+  },
+  {
+    regime: "bear_market_rally",
+    axis: "Below weekly 21EMA + above daily 21EMA",
+    title: "Bear Market Rally",
+    copy: "Short-term euphoria inside structural downtrend. Bull-trap risk high.",
+    tone: "neutral",
+  },
+  {
+    regime: "healthy_chaos",
+    axis: "Above weekly 21EMA + below daily 21EMA",
+    title: "Healthy Chaos",
+    copy: "Short-term pain inside macro uptrend. Look for controlled buy-the-dip entries.",
+    tone: "up",
+  },
+  {
+    regime: "perfect_convergence_bear",
+    axis: "Below weekly 21EMA + below daily 21EMA",
+    title: "Perfect Convergence (Bear Market)",
+    copy: "Maximum chaos. Defense first, cash king until structure improves.",
+    tone: "down",
+  },
+];

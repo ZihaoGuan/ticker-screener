@@ -169,8 +169,13 @@ export type DashboardResponse = {
         weekly_ema21: number;
         weekly_uptrend: boolean;
         daily_downtrend: boolean;
-        regime: "healthy_pullback" | "healthy_uptrend" | "chaos" | "caution";
+        regime:
+          | "healthy_chaos"
+          | "perfect_convergence_bull"
+          | "perfect_convergence_bear"
+          | "bear_market_rally";
         regime_label: string;
+        summary: string;
         explanation: string;
         daily_distance_pct: number | null;
         weekly_distance_pct: number | null;

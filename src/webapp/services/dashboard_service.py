@@ -148,21 +148,31 @@ def _build_regime_payload(*, frame: pd.DataFrame, weekly: pd.DataFrame, ticker: 
     daily_downtrend = daily_close < daily_ema
 
     if weekly_uptrend and daily_downtrend:
-        regime = "healthy_pullback"
-        regime_label = "Normal Pullback"
-        explanation = "Weekly uptrend intact. Daily below 21EMA = short-term reset inside healthy trend."
+        regime = "healthy_chaos"
+        regime_label = "Healthy Chaos"
+        summary = "Weekly uptrend, daily reset"
+        explanation = (
+            "Macro trend still up. Daily weakness is a normal exhale inside the weekly 21EMA uptrend and often "
+            "becomes the buy-the-dip zone."
+        )
     elif weekly_uptrend and not daily_downtrend:
-        regime = "healthy_uptrend"
-        regime_label = "Healthy Uptrend"
-        explanation = "Weekly uptrend intact. Daily above 21EMA = trend and short-term action aligned."
+        regime = "perfect_convergence_bull"
+        regime_label = "Perfect Convergence (Bull Market)"
+        summary = "Trend and short-term action aligned"
+        explanation = "Price is above both weekly and daily 21EMA. Trend is your friend here: ride, hold, or add carefully."
     elif (not weekly_uptrend) and daily_downtrend:
-        regime = "chaos"
-        regime_label = "Chaos"
-        explanation = "Weekly trend lost and daily still below 21EMA. Primary trend and short-term action both weak."
+        regime = "perfect_convergence_bear"
+        regime_label = "Perfect Convergence (Bear Market)"
+        summary = "Maximum chaos"
+        explanation = "Price is below both weekly and daily 21EMA. Structural trend weak, short-term action weak, capital preservation first."
     else:
-        regime = "caution"
-        regime_label = "Caution"
-        explanation = "Weekly trend below 21EMA, but daily reclaimed 21EMA. Bounce attempt, not full health yet."
+        regime = "bear_market_rally"
+        regime_label = "Bear Market Rally"
+        summary = "Short-term euphoria in structural downtrend"
+        explanation = (
+            "Daily reclaimed 21EMA, but weekly trend is still below its 21EMA anchor. Treat strength as a bounce attempt "
+            "until macro trend improves."
+        )
 
     return {
         "ticker": ticker,
@@ -178,6 +188,7 @@ def _build_regime_payload(*, frame: pd.DataFrame, weekly: pd.DataFrame, ticker: 
             "daily_downtrend": daily_downtrend,
             "regime": regime,
             "regime_label": regime_label,
+            "summary": summary,
             "explanation": explanation,
             "daily_distance_pct": round(((daily_close / daily_ema) - 1.0) * 100.0, 2) if daily_ema else None,
             "weekly_distance_pct": round(((weekly_close / weekly_ema) - 1.0) * 100.0, 2) if weekly_ema else None,

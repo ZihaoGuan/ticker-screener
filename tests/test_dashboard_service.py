@@ -41,7 +41,8 @@ class DashboardServiceTests(unittest.TestCase):
         regime_latest = regime["latest"]
         assert regime_latest is not None
         self.assertTrue(regime_latest["weekly_uptrend"])
-        self.assertIn(regime_latest["regime"], {"healthy_uptrend", "healthy_pullback"})
+        self.assertIn(regime_latest["regime"], {"perfect_convergence_bull", "healthy_chaos"})
+        self.assertIn(regime_latest["summary"], {"Trend and short-term action aligned", "Weekly uptrend, daily reset"})
 
         rsi_divergence = payload["market_health"]["rsi_divergence"]
         self.assertEqual(rsi_divergence["ticker"], "SPY")
@@ -77,7 +78,7 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(spy_extension["data_source"], "unavailable")
         self.assertIsNone(spy_extension["latest"])
 
-    def test_get_dashboard_context_flags_healthy_pullback_when_weekly_uptrend_but_daily_below_21ema(self) -> None:
+    def test_get_dashboard_context_flags_healthy_chaos_when_weekly_uptrend_but_daily_below_21ema(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
             index = pd.date_range(start="2026-01-05", periods=120, freq="B")
@@ -104,7 +105,38 @@ class DashboardServiceTests(unittest.TestCase):
         assert latest is not None
         self.assertTrue(latest["weekly_uptrend"])
         self.assertTrue(latest["daily_downtrend"])
-        self.assertEqual(latest["regime"], "healthy_pullback")
+        self.assertEqual(latest["regime"], "healthy_chaos")
+        self.assertEqual(latest["regime_label"], "Healthy Chaos")
+
+    def test_get_dashboard_context_flags_bear_market_rally_when_weekly_below_but_daily_above_21ema(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
+            index = pd.date_range(start="2026-01-05", periods=140, freq="B")
+            close_values = [220.0 - (idx * 0.7) for idx in range(130)]
+            close_values.extend([129.0, 131.0, 134.0, 137.0, 141.0, 145.0, 148.0, 151.0, 154.0, 157.0])
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config:
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        latest = payload["market_health"]["regime"]["latest"]
+        assert latest is not None
+        self.assertFalse(latest["weekly_uptrend"])
+        self.assertFalse(latest["daily_downtrend"])
+        self.assertEqual(latest["regime"], "bear_market_rally")
+        self.assertEqual(latest["regime_label"], "Bear Market Rally")
 
 
 if __name__ == "__main__":
