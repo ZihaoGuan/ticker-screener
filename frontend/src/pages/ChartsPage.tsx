@@ -19,6 +19,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   htfBox: true,
   rsLine: true,
   rsSignals: true,
+  sellSignals: true,
   flexSr: false,
 };
 const CHART_CACHE_PREFIX = "chart-screen-cache-v4";
@@ -306,6 +307,10 @@ export function ChartsPage() {
       }));
   }, [payload?.setup_markers, selectedSetups.ftd_sweep]);
   const atrExtensionMarkers = useMemo(() => buildAtrExtensionMarkers(chartData, payload?.ma50 ?? [], 14), [chartData, payload?.ma50]);
+  const sellIntoStrengthMarkers = useMemo(
+    () => buildSellIntoStrengthMarkers(chartData, payload?.ma50 ?? []),
+    [chartData, payload?.ma50],
+  );
   const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
     { key: "ema8", label: "EMA 8" },
     { key: "ema21", label: "EMA 21" },
@@ -317,6 +322,7 @@ export function ChartsPage() {
     { key: "htfBox", label: "HTF box" },
     { key: "rsLine", label: "RS line" },
     { key: "rsSignals", label: "RS markers" },
+    { key: "sellSignals", label: "Sell signals" },
     { key: "flexSr", label: "Flex SR (exp)" },
   ];
   const canManageExclusions = auth.hasCapability("manage_exclusions");
@@ -777,7 +783,11 @@ export function ChartsPage() {
               candles={chartData}
               overlays={payload ?? undefined}
               extraAnnotations={setupAnnotations}
-              extraMarkers={[...historicalSetupMarkers, ...atrExtensionMarkers]}
+              extraMarkers={[
+                ...historicalSetupMarkers,
+                ...atrExtensionMarkers,
+                ...(chartVisibility.sellSignals ? sellIntoStrengthMarkers : []),
+              ]}
               visibility={chartVisibility}
               forceFearzonePanel
             />
@@ -804,6 +814,7 @@ export function ChartsPage() {
               {atrMultipleFrom50Ma != null ? <span className="chart-pill chart-pill-setup">50MA {formatAtrMultiple(atrMultipleFrom50Ma)}</span> : null}
               {hasTrimWarning ? <span className="chart-pill chart-pill-event">Trim warning: 3x ATR above 50MA</span> : null}
               {atrExtensionMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{atrExtensionMarkers.length} ATR extension dot(s)</span> : null}
+              {sellIntoStrengthMarkers.length > 0 ? <span className="chart-pill chart-pill-event">{sellIntoStrengthMarkers.length} sell signal(s)</span> : null}
               {setupAnnotations.map((item, index) =>
                 item.setupLabel ? (
                   <span key={`${item.setupLabel}-${index}`} className="chart-pill chart-pill-setup">
@@ -1183,6 +1194,82 @@ function buildAtrExtensionMarkers(
     }
   }
   return markers;
+}
+
+function buildSellIntoStrengthMarkers(
+  candles: CandlePoint[],
+  ma50Series: Array<{ time: string; value: number }>,
+): Array<{ time: string; label?: string; color: string; shape: "square"; position: "aboveBar" }> {
+  if (candles.length < 50 || ma50Series.length === 0) {
+    return [];
+  }
+  const ema10 = buildExponentialMovingAverage(candles, 10);
+  const ema10ByTime = new Map(ema10.map((point) => [point.time, point.value]));
+  const ma50ByTime = new Map(ma50Series.map((point) => [point.time, point.value]));
+  const markers: Array<{ time: string; label?: string; color: string; shape: "square"; position: "aboveBar" }> = [];
+
+  for (let index = 20; index < candles.length; index += 1) {
+    const current = candles[index];
+    const ema10Value = ema10ByTime.get(current.time);
+    const ma50Value = ma50ByTime.get(current.time);
+    if (ema10Value == null || ma50Value == null || ema10Value <= 0 || ma50Value <= 0) {
+      continue;
+    }
+
+    const volumeWindow = candles.slice(Math.max(0, index - 19), index + 1);
+    const avgVolume20 = volumeWindow.reduce((sum, candle) => sum + candle.volume, 0) / volumeWindow.length;
+    if (!Number.isFinite(avgVolume20) || avgVolume20 <= 0) {
+      continue;
+    }
+    const volumeRatio = current.volume / avgVolume20;
+    const distanceFromEma10Pct = ((current.close / ema10Value) - 1) * 100;
+    const distanceFromMa50Pct = ((current.close / ma50Value) - 1) * 100;
+    const threeDayAgo = candles[index - 3];
+    const fiveDayAgo = candles[index - 5];
+    const threeDayRunPct = threeDayAgo && threeDayAgo.close > 0 ? ((current.close / threeDayAgo.close) - 1) * 100 : null;
+    const fiveDayRunPct = fiveDayAgo && fiveDayAgo.close > 0 ? ((current.close / fiveDayAgo.close) - 1) * 100 : null;
+    const parabolicRun = (threeDayRunPct != null && threeDayRunPct >= 12) || (fiveDayRunPct != null && fiveDayRunPct >= 20);
+    const explosiveVolume = volumeRatio >= 1.5;
+    const emaSellSignal = distanceFromEma10Pct >= 20 && parabolicRun && explosiveVolume;
+    const ma50SellSignal = distanceFromMa50Pct >= 50 && explosiveVolume;
+    if (!emaSellSignal && !ma50SellSignal) {
+      continue;
+    }
+    const reasons = [];
+    if (emaSellSignal) {
+      reasons.push(`10EMA +${distanceFromEma10Pct.toFixed(1)}%`);
+    }
+    if (ma50SellSignal) {
+      reasons.push(`50SMA +${distanceFromMa50Pct.toFixed(1)}%`);
+    }
+    reasons.push(`Vol ${volumeRatio.toFixed(1)}x`);
+    markers.push({
+      time: current.time,
+      label: `Sell ${reasons.join(" | ")}`,
+      color: "#ef4444",
+      shape: "square",
+      position: "aboveBar",
+    });
+  }
+
+  return markers;
+}
+
+function buildExponentialMovingAverage(
+  candles: CandlePoint[],
+  length: number,
+): Array<{ time: string; value: number }> {
+  if (candles.length === 0 || length <= 0) {
+    return [];
+  }
+  const alpha = 2 / (length + 1);
+  let ema = candles[0].close;
+  const points = [{ time: candles[0].time, value: Number(ema.toFixed(2)) }];
+  for (let index = 1; index < candles.length; index += 1) {
+    ema = candles[index].close * alpha + ema * (1 - alpha);
+    points.push({ time: candles[index].time, value: Number(ema.toFixed(2)) });
+  }
+  return points;
 }
 
 function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAnnotations | null {

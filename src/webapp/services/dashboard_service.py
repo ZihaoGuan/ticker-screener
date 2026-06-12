@@ -9,7 +9,8 @@ import yfinance as yf
 
 from ...config import load_app_config
 from ...market_data_access import load_daily_bars_frame_from_db
-from ...market_extension import compute_extension_frame, resample_to_weekly
+from ...market_extension import build_moving_average, compute_extension_frame, resample_to_weekly
+from ...rsi_divergence import find_latest_regular_bearish_rsi_divergence
 from ..repositories.dashboard_repository import DashboardRepository
 from ..repositories.watchlist_repository import WatchlistRepository
 
@@ -46,6 +47,16 @@ class DashboardService:
             data_source = "internet" if frame is not None and not frame.empty else "unavailable"
         if frame is None or frame.empty:
             return {
+                "regime": {
+                    "ticker": benchmark,
+                    "data_source": data_source,
+                    "latest": None,
+                },
+                "rsi_divergence": {
+                    "ticker": benchmark,
+                    "data_source": data_source,
+                    "latest": None,
+                },
                 "spy_extension": {
                     "ticker": benchmark,
                     "label": "10W SMA",
@@ -60,6 +71,8 @@ class DashboardService:
             }
 
         weekly = resample_to_weekly(frame[["Open", "High", "Low", "Close", "Volume"]])
+        regime = _build_regime_payload(frame=frame, weekly=weekly, ticker=benchmark, data_source=data_source)
+        rsi_divergence = _build_rsi_divergence_payload(frame=frame, ticker=benchmark, data_source=data_source)
         enriched = compute_extension_frame(weekly, length=10, ma_type="sma", warning_pct=11.0, extreme_pct=15.0)
         latest_valid = enriched.dropna(subset=["moving_average", "extension_pct"]).tail(1)
         latest = None
@@ -75,6 +88,8 @@ class DashboardService:
                 "extension_pct": round(float(row["extension_pct"]), 2),
             }
         return {
+            "regime": regime,
+            "rsi_divergence": rsi_divergence,
             "spy_extension": {
                 "ticker": benchmark,
                 "label": "10W SMA",
@@ -110,3 +125,83 @@ def _download_history_frame(ticker: str, start_date: dt.date, end_date: dt.date)
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame = frame.dropna(subset=["Open", "High", "Low", "Close", "Volume"]).sort_index()
     return frame if not frame.empty else None
+
+
+def _build_regime_payload(*, frame: pd.DataFrame, weekly: pd.DataFrame, ticker: str, data_source: str) -> dict[str, Any]:
+    daily_ema21 = build_moving_average(frame["Close"], length=21, ma_type="ema")
+    weekly_ema21 = build_moving_average(weekly["Close"], length=21, ma_type="ema")
+
+    latest_daily = frame.dropna(subset=["Close"]).tail(1)
+    latest_weekly = weekly.dropna(subset=["Close"]).tail(1)
+    latest_daily_ema = daily_ema21.dropna().tail(1)
+    latest_weekly_ema = weekly_ema21.dropna().tail(1)
+
+    if latest_daily.empty or latest_weekly.empty or latest_daily_ema.empty or latest_weekly_ema.empty:
+        return {"ticker": ticker, "data_source": data_source, "latest": None}
+
+    daily_close = float(latest_daily["Close"].iloc[0])
+    weekly_close = float(latest_weekly["Close"].iloc[0])
+    daily_ema = float(latest_daily_ema.iloc[0])
+    weekly_ema = float(latest_weekly_ema.iloc[0])
+
+    weekly_uptrend = weekly_close > weekly_ema
+    daily_downtrend = daily_close < daily_ema
+
+    if weekly_uptrend and daily_downtrend:
+        regime = "healthy_pullback"
+        regime_label = "Normal Pullback"
+        explanation = "Weekly uptrend intact. Daily below 21EMA = short-term reset inside healthy trend."
+    elif weekly_uptrend and not daily_downtrend:
+        regime = "healthy_uptrend"
+        regime_label = "Healthy Uptrend"
+        explanation = "Weekly uptrend intact. Daily above 21EMA = trend and short-term action aligned."
+    elif (not weekly_uptrend) and daily_downtrend:
+        regime = "chaos"
+        regime_label = "Chaos"
+        explanation = "Weekly trend lost and daily still below 21EMA. Primary trend and short-term action both weak."
+    else:
+        regime = "caution"
+        regime_label = "Caution"
+        explanation = "Weekly trend below 21EMA, but daily reclaimed 21EMA. Bounce attempt, not full health yet."
+
+    return {
+        "ticker": ticker,
+        "data_source": data_source,
+        "latest": {
+            "date": latest_daily.index[-1].date().isoformat(),
+            "weekly_bar_date": latest_weekly.index[-1].date().isoformat(),
+            "daily_close": round(daily_close, 2),
+            "daily_ema21": round(daily_ema, 2),
+            "weekly_close": round(weekly_close, 2),
+            "weekly_ema21": round(weekly_ema, 2),
+            "weekly_uptrend": weekly_uptrend,
+            "daily_downtrend": daily_downtrend,
+            "regime": regime,
+            "regime_label": regime_label,
+            "explanation": explanation,
+            "daily_distance_pct": round(((daily_close / daily_ema) - 1.0) * 100.0, 2) if daily_ema else None,
+            "weekly_distance_pct": round(((weekly_close / weekly_ema) - 1.0) * 100.0, 2) if weekly_ema else None,
+        },
+    }
+
+
+def _build_rsi_divergence_payload(*, frame: pd.DataFrame, ticker: str, data_source: str) -> dict[str, Any]:
+    signal = find_latest_regular_bearish_rsi_divergence(frame)
+    if signal is None:
+        return {"ticker": ticker, "data_source": data_source, "latest": None}
+
+    state = "overbought_warning" if signal.is_overbought else "bearish_divergence"
+    label = "Overbought Warning" if signal.is_overbought else "Bearish Divergence"
+    explanation = (
+        "Filtered regular bearish RSI divergence from attached script logic. Hidden and ghost divergences ignored."
+    )
+    return {
+        "ticker": ticker,
+        "data_source": data_source,
+        "latest": {
+            **signal.to_dict(),
+            "state": state,
+            "label": label,
+            "explanation": explanation,
+        },
+    }

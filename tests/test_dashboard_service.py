@@ -34,6 +34,19 @@ class DashboardServiceTests(unittest.TestCase):
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 
+        regime = payload["market_health"]["regime"]
+        self.assertEqual(regime["ticker"], "SPY")
+        self.assertEqual(regime["data_source"], "database")
+        self.assertIsNotNone(regime["latest"])
+        regime_latest = regime["latest"]
+        assert regime_latest is not None
+        self.assertTrue(regime_latest["weekly_uptrend"])
+        self.assertIn(regime_latest["regime"], {"healthy_uptrend", "healthy_pullback"})
+
+        rsi_divergence = payload["market_health"]["rsi_divergence"]
+        self.assertEqual(rsi_divergence["ticker"], "SPY")
+        self.assertEqual(rsi_divergence["data_source"], "database")
+
         spy_extension = payload["market_health"]["spy_extension"]
         self.assertEqual(spy_extension["ticker"], "SPY")
         self.assertEqual(spy_extension["label"], "10W SMA")
@@ -55,8 +68,43 @@ class DashboardServiceTests(unittest.TestCase):
                 payload = service.get_dashboard_context()
 
         spy_extension = payload["market_health"]["spy_extension"]
+        regime = payload["market_health"]["regime"]
+        rsi_divergence = payload["market_health"]["rsi_divergence"]
+        self.assertEqual(regime["data_source"], "unavailable")
+        self.assertIsNone(regime["latest"])
+        self.assertEqual(rsi_divergence["data_source"], "unavailable")
+        self.assertIsNone(rsi_divergence["latest"])
         self.assertEqual(spy_extension["data_source"], "unavailable")
         self.assertIsNone(spy_extension["latest"])
+
+    def test_get_dashboard_context_flags_healthy_pullback_when_weekly_uptrend_but_daily_below_21ema(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
+            index = pd.date_range(start="2026-01-05", periods=120, freq="B")
+            close_values = [100.0 + (idx * 0.5) for idx in range(115)]
+            close_values.extend([150.0, 148.0, 146.0, 144.0, 142.0])
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config:
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        latest = payload["market_health"]["regime"]["latest"]
+        assert latest is not None
+        self.assertTrue(latest["weekly_uptrend"])
+        self.assertTrue(latest["daily_downtrend"])
+        self.assertEqual(latest["regime"], "healthy_pullback")
 
 
 if __name__ == "__main__":

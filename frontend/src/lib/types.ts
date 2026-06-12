@@ -157,6 +157,44 @@ export type DashboardResponse = {
     screen_run_count: number | null;
   };
   market_health: {
+    regime: {
+      ticker: string;
+      data_source: string;
+      latest: {
+        date: string;
+        weekly_bar_date: string;
+        daily_close: number;
+        daily_ema21: number;
+        weekly_close: number;
+        weekly_ema21: number;
+        weekly_uptrend: boolean;
+        daily_downtrend: boolean;
+        regime: "healthy_pullback" | "healthy_uptrend" | "chaos" | "caution";
+        regime_label: string;
+        explanation: string;
+        daily_distance_pct: number | null;
+        weekly_distance_pct: number | null;
+      } | null;
+    };
+    rsi_divergence: {
+      ticker: string;
+      data_source: string;
+      latest: {
+        signal_date: string;
+        signal_price: number;
+        previous_signal_date: string;
+        previous_signal_price: number;
+        signal_rsi: number;
+        previous_signal_rsi: number;
+        bars_apart: number;
+        price_change_pct: number;
+        overbought_threshold: number;
+        is_overbought: boolean;
+        state: "overbought_warning" | "bearish_divergence";
+        label: string;
+        explanation: string;
+      } | null;
+    };
     spy_extension: {
       ticker: string;
       label: string;

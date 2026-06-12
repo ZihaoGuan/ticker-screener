@@ -15,6 +15,7 @@ export type ChartVisibility = {
   htfBox: boolean;
   rsLine: boolean;
   rsSignals: boolean;
+  sellSignals: boolean;
   flexSr: boolean;
 };
 
@@ -86,6 +87,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     htfBox: true,
     rsLine: true,
     rsSignals: true,
+    sellSignals: true,
     flexSr: false,
   };
 
