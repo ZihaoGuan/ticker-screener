@@ -141,6 +141,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("weekly_tight_close_breakout_{date_label}.json",),
         "legacy_summary_templates": ("weekly_tight_close_breakout_run_summary_{date_label}.json",),
     },
+    "three_weeks_tight": {
+        "stem_template": "three_weeks_tight_{date_label}",
+        "legacy_watchlist_templates": ("three_weeks_tight_{date_label}.json",),
+        "legacy_raw_templates": ("three_weeks_tight_{date_label}.json",),
+        "legacy_summary_templates": ("three_weeks_tight_run_summary_{date_label}.json",),
+    },
     "near_200ma": {
         "stem_template": "near_200ma_{date_label}",
         "legacy_watchlist_templates": ("near_200ma_{date_label}.json",),
@@ -219,6 +225,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("double_bottom_detection", "double_bottom_detection"),
     ("weekly_tight_close", "weekly_tight_close"),
     ("weekly_tight_close_breakout", "weekly_tight_close_breakout"),
+    ("three_weeks_tight", "three_weeks_tight"),
     ("fearzone", "fearzone"),
     ("near_200ma", "near_200ma"),
     ("lost_21ema", "lost_21ema"),

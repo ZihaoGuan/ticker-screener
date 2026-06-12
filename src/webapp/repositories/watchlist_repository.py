@@ -94,6 +94,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("double_bottom_detection", "double_bottom_detection", "Double Bottom Detection"),
         ("weekly_tight_close_breakout", "weekly_tight_close_breakout", "Weekly Tight Close Breakout"),
         ("weekly_tight_close", "weekly_tight_close", "Weekly Tight Close"),
+        ("three_weeks_tight", "three_weeks_tight", "Three Weeks Tight"),
         ("fearzone", "fearzone", "Fearzone"),
         ("near_200ma", "near_200ma", "Near 200MA"),
         ("lost_21ema", "lost_21ema", "Lost 21EMA"),

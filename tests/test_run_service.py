@@ -197,6 +197,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("double_bottom_detection", action_ids)
         self.assertIn("weekly_tight_close", action_ids)
         self.assertIn("weekly_tight_close_breakout", action_ids)
+        self.assertIn("three_weeks_tight", action_ids)
         self.assertIn("hve", action_ids)
         self.assertIn("inside_dryup", action_ids)
         self.assertIn("weekly_rs_before_price", action_ids)

@@ -23,6 +23,7 @@ from .rsi_ma_bb_screen import find_recent_rsi_ma_bb_hit
 from .rs_screen import run_rs_screen
 from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, ScreenerSpec
 from .td_sequential_screen import find_recent_td_sequential_hit
+from .three_weeks_tight_screen import find_three_weeks_tight_hit
 from .universe import UniverseTicker
 from .vcp_screen import run_vcp_screen
 from .weekly_tight_close_screen import find_weekly_tight_close_breakout_hit, find_weekly_tight_close_hit
@@ -259,6 +260,22 @@ def _run_weekly_tight_close_breakout(bundle: ScreenerInputBundle) -> ScreenerEva
     return ScreenerEvaluationResult(
         passed=True,
         metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "breakout_price": payload["breakout_price"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_three_weeks_tight(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_three_weeks_tight_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "buy_price": payload["buy_price"]},
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
     )
@@ -575,6 +592,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=220,
             warmup_trading_days=20,
             evaluator=_run_weekly_tight_close_breakout,
+        ),
+        "three_weeks_tight": ScreenerSpec(
+            id="three_weeks_tight",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=40,
+            warmup_trading_days=5,
+            evaluator=_run_three_weeks_tight,
         ),
         "weekly_htf_pullback": ScreenerSpec(
             id="weekly_htf_pullback",

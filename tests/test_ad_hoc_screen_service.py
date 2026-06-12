@@ -708,6 +708,44 @@ def _weekly_tight_close_frame() -> pd.DataFrame:
     )
 
 
+def _three_weeks_tight_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-06", periods=30, freq="B")
+    open_values: list[float] = []
+    high_values: list[float] = []
+    low_values: list[float] = []
+    close_values: list[float] = []
+    volume_values: list[float] = []
+
+    weekly_closes = [100.0, 108.0, 114.0, 120.0, 120.8, 121.4]
+    weekly_highs = [101.0, 109.0, 115.0, 121.0, 121.7, 121.9]
+    weekly_lows = [98.5, 106.5, 112.5, 118.0, 119.8, 120.2]
+
+    for week in range(6):
+        week_dates = index[week * 5 : (week + 1) * 5]
+        week_open = weekly_closes[week] - 1.0
+        week_close = weekly_closes[week]
+        week_high = weekly_highs[week]
+        week_low = weekly_lows[week]
+        for day_index, _date in enumerate(week_dates):
+            open_values.append(week_open + (day_index * 0.1))
+            high_values.append(week_high - (0.1 * (4 - day_index)))
+            low_values.append(week_low + (0.1 * day_index))
+            close_values.append(week_close if day_index == 4 else week_open + (day_index * 0.2))
+            volume_values.append(1_000_000.0)
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high_values,
+            "Low": low_values,
+            "Close": close_values,
+            "Adj Close": close_values,
+            "Volume": volume_values,
+        },
+        index=index,
+    )
+
+
 class AdHocScreenServiceTests(unittest.TestCase):
     def test_run_prefetches_once_and_evaluates_selected_screeners(self) -> None:
         ticker_frame = _frame("2026-01-01", 40)
@@ -1243,6 +1281,28 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "weekly_tight_close_breakout")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_three_weeks_tight_catalog_entry(self) -> None:
+        ticker_frame = _three_weeks_tight_frame()
+        benchmark_frame = _frame("2026-01-02", 40)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 2, 14),
+                screener_ids=["three_weeks_tight"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "three_weeks_tight")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_falls_back_to_internet_when_benchmark_missing_in_db(self) -> None:
