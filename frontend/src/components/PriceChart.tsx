@@ -7,6 +7,7 @@ import type { CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../l
 export type ChartVisibility = {
   ema8: boolean;
   ema21: boolean;
+  sma50: boolean;
   weeklyEma8: boolean;
   ipoVwap: boolean;
   marketExtension: boolean;
@@ -79,6 +80,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
   const options = visibility ?? {
     ema8: true,
     ema21: true,
+    sma50: true,
     weeklyEma8: true,
     ipoVwap: true,
     marketExtension: true,
@@ -288,7 +290,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     ipoVwapSeries.setData(options.ipoVwap ? ipoVwap : []);
     marketExtensionSeries.setData(options.marketExtension ? marketExtension.line : []);
     ma20Series.setData(options.maStack ? ma20 : []);
-    ma50Series.setData(options.maStack ? ma50 : []);
+    ma50Series.setData(options.sma50 || options.maStack ? ma50 : []);
     ma200Series.setData(options.maStack ? ma200 : []);
     rsSeries.setData(showRsPane ? rsLine : []);
     flexResistanceSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.backfit ?? [] : []);
@@ -519,6 +521,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     ticker,
     options.ema8,
     options.ema21,
+    options.sma50,
     options.weeklyEma8,
     options.ipoVwap,
     options.marketExtension,

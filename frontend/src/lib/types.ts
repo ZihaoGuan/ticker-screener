@@ -200,6 +200,22 @@ export type DashboardResponse = {
         explanation: string;
       } | null;
     };
+    bearish_td9: {
+      ticker: string;
+      data_source: string;
+      latest: {
+        signal_date: string;
+        direction: "bearish";
+        setup_count: number;
+        current_price: number;
+        signal_close: number;
+        comparison_close: number;
+        reasons: string[];
+        label: string;
+        explanation: string;
+        distance_from_compare_pct: number | null;
+      } | null;
+    };
     spy_extension: {
       ticker: string;
       label: string;

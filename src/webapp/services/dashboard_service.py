@@ -11,6 +11,8 @@ from ...config import load_app_config
 from ...market_data_access import load_daily_bars_frame_from_db
 from ...market_extension import build_moving_average, compute_extension_frame, resample_to_weekly
 from ...rsi_divergence import find_latest_regular_bearish_rsi_divergence
+from ...td_sequential_screen import find_recent_td_sequential_hit
+from ...universe import UniverseTicker
 from ..repositories.dashboard_repository import DashboardRepository
 from ..repositories.watchlist_repository import WatchlistRepository
 
@@ -57,6 +59,11 @@ class DashboardService:
                     "data_source": data_source,
                     "latest": None,
                 },
+                "bearish_td9": {
+                    "ticker": benchmark,
+                    "data_source": data_source,
+                    "latest": None,
+                },
                 "spy_extension": {
                     "ticker": benchmark,
                     "label": "10W SMA",
@@ -73,6 +80,7 @@ class DashboardService:
         weekly = resample_to_weekly(frame[["Open", "High", "Low", "Close", "Volume"]])
         regime = _build_regime_payload(frame=frame, weekly=weekly, ticker=benchmark, data_source=data_source)
         rsi_divergence = _build_rsi_divergence_payload(frame=frame, ticker=benchmark, data_source=data_source)
+        bearish_td9 = _build_bearish_td9_payload(frame=frame, ticker=benchmark, data_source=data_source)
         enriched = compute_extension_frame(weekly, length=10, ma_type="sma", warning_pct=11.0, extreme_pct=15.0)
         latest_valid = enriched.dropna(subset=["moving_average", "extension_pct"]).tail(1)
         latest = None
@@ -90,6 +98,7 @@ class DashboardService:
         return {
             "regime": regime,
             "rsi_divergence": rsi_divergence,
+            "bearish_td9": bearish_td9,
             "spy_extension": {
                 "ticker": benchmark,
                 "label": "10W SMA",
@@ -214,5 +223,27 @@ def _build_rsi_divergence_payload(*, frame: pd.DataFrame, ticker: str, data_sour
             "state": state,
             "label": label,
             "explanation": explanation,
+        },
+    }
+
+
+def _build_bearish_td9_payload(*, frame: pd.DataFrame, ticker: str, data_source: str) -> dict[str, Any]:
+    signal = find_recent_td_sequential_hit(frame, ticker=UniverseTicker(symbol=ticker), direction="bearish")
+    if signal is None:
+        return {"ticker": ticker, "data_source": data_source, "latest": None}
+
+    latest_close = float(frame["Close"].dropna().iloc[-1]) if "Close" in frame.columns and not frame["Close"].dropna().empty else None
+    distance_pct = None
+    if latest_close and signal.comparison_close:
+        distance_pct = round(((latest_close / signal.comparison_close) - 1.0) * 100.0, 2)
+
+    return {
+        "ticker": ticker,
+        "data_source": data_source,
+        "latest": {
+            **signal.to_dict(),
+            "label": "Bearish TD9",
+            "explanation": "Nine straight closes above the close four bars earlier. Often marks short-term upside exhaustion.",
+            "distance_from_compare_pct": distance_pct,
         },
     }

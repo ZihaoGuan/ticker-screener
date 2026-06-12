@@ -31,6 +31,8 @@ export function DashboardPage() {
   const regimeLatest = regime?.latest ?? null;
   const rsiDivergence = dashboard?.market_health?.rsi_divergence ?? null;
   const rsiLatest = rsiDivergence?.latest ?? null;
+  const bearishTd9 = dashboard?.market_health?.bearish_td9 ?? null;
+  const td9Latest = bearishTd9?.latest ?? null;
   const spyExtension = dashboard?.market_health?.spy_extension ?? null;
   const spyLatest = spyExtension?.latest ?? null;
 
@@ -138,6 +140,31 @@ export function DashboardPage() {
             <p className="card-meta">
               {spyLatest ? `As of ${spyLatest.time}` : "Waiting for market data."}
               {spyExtension?.data_source ? ` · Source ${spyExtension.data_source}` : ""}
+            </p>
+          </article>
+
+          <article className="metric-card">
+            <div className="metric-card-head">
+              <h3>{bearishTd9?.ticker ?? "SPY"} TD9</h3>
+              <span className={`accent-mark accent-${td9Latest ? "down" : "up"}`} />
+            </div>
+            <p className="card-meta">Bearish TD Sequential setup on daily bars.</p>
+            <div className="metric-value">
+              {td9Latest?.label ?? "No Signal"} <span>{td9SignalSubLabel(td9Latest)}</span>
+            </div>
+            <p className="card-meta">
+              {td9Latest
+                ? `Signal ${td9Latest.signal_date} · Setup ${td9Latest.setup_count}/9 · Close ${formatPrice(td9Latest.signal_close)}`
+                : "No active bearish TD9 on latest SPY daily bar."}
+            </p>
+            <p className="card-meta">
+              {td9Latest
+                ? `Compare close[4] ${formatPrice(td9Latest.comparison_close)} · Stretch ${formatPercentSigned(td9Latest.distance_from_compare_pct)}`
+                : ""}
+            </p>
+            <p className="card-meta">{td9Latest?.explanation ?? ""}</p>
+            <p className="card-meta">
+              {bearishTd9?.data_source ? `Source ${bearishTd9.data_source}` : ""}
             </p>
           </article>
         </div>
@@ -248,6 +275,13 @@ function rsiSignalSubLabel(latest: DashboardResponse["market_health"]["rsi_diver
     return `RSI >= ${latest.overbought_threshold}`;
   }
   return "Watch closely";
+}
+
+function td9SignalSubLabel(latest: DashboardResponse["market_health"]["bearish_td9"]["latest"] | null | undefined) {
+  if (!latest) {
+    return "Normal";
+  }
+  return "Exhaustion watch";
 }
 
 const MARKET_MATRIX_CELLS: Array<{

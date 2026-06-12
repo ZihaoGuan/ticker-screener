@@ -11,6 +11,7 @@ import type { AdHocScreenResponse, AdminTickerListStatusResponse, CandlePoint, C
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
   ema21: true,
+  sma50: true,
   weeklyEma8: true,
   ipoVwap: true,
   marketExtension: true,
@@ -314,6 +315,7 @@ export function ChartsPage() {
   const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
     { key: "ema8", label: "EMA 8" },
     { key: "ema21", label: "EMA 21" },
+    { key: "sma50", label: "SMA 50" },
     { key: "weeklyEma8", label: "Weekly 8 EMA" },
     { key: "ipoVwap", label: "IPO VWAP" },
     { key: "marketExtension", label: "10W extension" },

@@ -48,6 +48,10 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(rsi_divergence["ticker"], "SPY")
         self.assertEqual(rsi_divergence["data_source"], "database")
 
+        bearish_td9 = payload["market_health"]["bearish_td9"]
+        self.assertEqual(bearish_td9["ticker"], "SPY")
+        self.assertEqual(bearish_td9["data_source"], "database")
+
         spy_extension = payload["market_health"]["spy_extension"]
         self.assertEqual(spy_extension["ticker"], "SPY")
         self.assertEqual(spy_extension["label"], "10W SMA")
@@ -71,10 +75,13 @@ class DashboardServiceTests(unittest.TestCase):
         spy_extension = payload["market_health"]["spy_extension"]
         regime = payload["market_health"]["regime"]
         rsi_divergence = payload["market_health"]["rsi_divergence"]
+        bearish_td9 = payload["market_health"]["bearish_td9"]
         self.assertEqual(regime["data_source"], "unavailable")
         self.assertIsNone(regime["latest"])
         self.assertEqual(rsi_divergence["data_source"], "unavailable")
         self.assertIsNone(rsi_divergence["latest"])
+        self.assertEqual(bearish_td9["data_source"], "unavailable")
+        self.assertIsNone(bearish_td9["latest"])
         self.assertEqual(spy_extension["data_source"], "unavailable")
         self.assertIsNone(spy_extension["latest"])
 
@@ -137,6 +144,55 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertFalse(latest["daily_downtrend"])
         self.assertEqual(latest["regime"], "bear_market_rally")
         self.assertEqual(latest["regime_label"], "Bear Market Rally")
+
+    def test_get_dashboard_context_includes_bearish_td9_when_latest_bar_completes_setup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
+            index = pd.date_range(start="2026-01-02", periods=20, freq="B")
+            close_values = [
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                99.0,
+                101.0,
+                102.0,
+                103.0,
+                104.0,
+                105.0,
+                106.0,
+                107.0,
+                108.0,
+                109.0,
+            ]
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 0.2 for value in close_values],
+                    "High": [value + 0.8 for value in close_values],
+                    "Low": [value - 0.8 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_000_000.0 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config:
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        latest = payload["market_health"]["bearish_td9"]["latest"]
+        assert latest is not None
+        self.assertEqual(latest["label"], "Bearish TD9")
+        self.assertEqual(latest["signal_date"], "2026-01-29")
+        self.assertEqual(latest["setup_count"], 9)
 
 
 if __name__ == "__main__":
