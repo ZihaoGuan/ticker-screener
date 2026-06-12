@@ -21,9 +21,36 @@ export function DashboardPage() {
 
   const strategyCards = dashboard?.strategy_cards ?? [];
   const watchlistFiles = dashboard?.recent_watchlists ?? [];
+  const spyExtension = dashboard?.market_health?.spy_extension ?? null;
+  const spyLatest = spyExtension?.latest ?? null;
 
   return (
     <div className="page-grid">
+      <Panel title="Market Health" aside={<span className="eyebrow">SPY timing check</span>}>
+        {isLoading ? <LoadingBlock label="Loading market health…" compact /> : null}
+        <div className="card-grid">
+          <article className="metric-card">
+            <div className="metric-card-head">
+              <h3>{spyExtension?.ticker ?? "SPY"}</h3>
+              <span className={`accent-mark accent-${spyLatest?.state === "extreme" ? "down" : spyLatest?.state === "warning" ? "neutral" : "up"}`} />
+            </div>
+            <p className="card-meta">{spyExtension?.label ?? "10W SMA"} extension from weekly trend.</p>
+            <div className="metric-value">
+              {spyLatest ? `${spyLatest.extension_pct.toFixed(2)}%` : "--"} <span>{formatSpyExtensionState(spyLatest?.state)}</span>
+            </div>
+            <p className="card-meta">
+              {spyLatest
+                ? `Dist ${formatPrice(spyLatest.distance)} · Close ${formatPrice(spyLatest.close)} · MA ${formatPrice(spyLatest.moving_average)}`
+                : "No SPY market-health data available."}
+            </p>
+            <p className="card-meta">
+              {spyLatest ? `As of ${spyLatest.time}` : "Waiting for market data."}
+              {spyExtension?.data_source ? ` · Source ${spyExtension.data_source}` : ""}
+            </p>
+          </article>
+        </div>
+      </Panel>
+
       <Panel title="Key Strategy Metrics" aside={<span className="eyebrow">Last 24 hours</span>}>
         {isLoading ? <LoadingBlock label="Loading dashboard metrics…" compact /> : null}
         <div className="card-grid">
@@ -84,4 +111,21 @@ export function DashboardPage() {
       </div>
     </div>
   );
+}
+
+function formatSpyExtensionState(state: "normal" | "warning" | "extreme" | null | undefined) {
+  if (state === "warning") {
+    return "Overextended";
+  }
+  if (state === "extreme") {
+    return "Extreme";
+  }
+  if (state === "normal") {
+    return "Normal";
+  }
+  return "Unavailable";
+}
+
+function formatPrice(value: number | null | undefined) {
+  return value == null ? "--" : `$${value.toFixed(2)}`;
 }

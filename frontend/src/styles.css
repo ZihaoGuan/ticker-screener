@@ -491,6 +491,10 @@ a {
   background: #f59e0b;
 }
 
+.accent-down {
+  background: #f43f5e;
+}
+
 .card-meta,
 .panel-copy,
 .file-meta,

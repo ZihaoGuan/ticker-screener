@@ -156,6 +156,26 @@ export type DashboardResponse = {
     latest_sync_at: string | null;
     screen_run_count: number | null;
   };
+  market_health: {
+    spy_extension: {
+      ticker: string;
+      label: string;
+      timeframe: "weekly";
+      ma_type: "sma" | "ema";
+      length: number;
+      warning_pct: number;
+      extreme_pct: number;
+      data_source: string;
+      latest: {
+        time: string;
+        state: "normal" | "warning" | "extreme";
+        close: number;
+        moving_average: number;
+        distance: number;
+        extension_pct: number;
+      } | null;
+    };
+  };
   recent_watchlists: WatchlistFile[];
   strategy_cards: StrategyCard[];
 };
