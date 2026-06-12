@@ -192,6 +192,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("macd_dead_cross", action_ids)
         self.assertIn("rsi_ma_bb_bullish", action_ids)
         self.assertIn("rsi_ma_bb_bearish", action_ids)
+        self.assertIn("bb_squeeze", action_ids)
         self.assertIn("rti", action_ids)
         self.assertIn("vcs_setup_stage", action_ids)
         self.assertIn("vcs_critical_tightness", action_ids)

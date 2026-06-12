@@ -342,6 +342,33 @@ export type WatchlistChartResponse = {
   ema21: Array<{ time: string; value: number }>;
   weekly_ema8: Array<{ time: string; value: number }>;
   ipo_vwap: Array<{ time: string; value: number }>;
+  market_extension: {
+    config: {
+      timeframe: "weekly";
+      ma_type: "sma" | "ema";
+      length: number;
+      warning_pct: number;
+      extreme_pct: number;
+      label: string;
+    };
+    line: Array<{ time: string; value: number }>;
+    signals: Array<{
+      time: string;
+      state: "warning" | "extreme";
+      close: number;
+      moving_average: number;
+      distance: number;
+      extension_pct: number;
+    }>;
+    latest: {
+      time: string;
+      state: "normal" | "warning" | "extreme";
+      close: number;
+      moving_average: number;
+      distance: number;
+      extension_pct: number;
+    } | null;
+  };
   rs_line: Array<{ time: string; value: number }>;
   daily_rs_rating?: Array<{ time: string; value: number }>;
   weekly_rs_rating?: Array<{ time: string; value: number }>;

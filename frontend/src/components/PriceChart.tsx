@@ -9,6 +9,7 @@ export type ChartVisibility = {
   ema21: boolean;
   weeklyEma8: boolean;
   ipoVwap: boolean;
+  marketExtension: boolean;
   maStack: boolean;
   gapZones: boolean;
   htfBox: boolean;
@@ -22,7 +23,7 @@ type PriceChartProps = {
   candles: CandlePoint[];
   overlays?: Pick<
     WatchlistChartResponse,
-    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "rs_line" | "rs_markers" | "setup_markers" | "benchmark_ticker" | "fearzone_panel"
+    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "market_extension" | "rs_line" | "rs_markers" | "setup_markers" | "benchmark_ticker" | "fearzone_panel"
   >;
   annotations?: ChartAnnotations;
   extraAnnotations?: ChartAnnotations[];
@@ -79,6 +80,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     ema21: true,
     weeklyEma8: true,
     ipoVwap: true,
+    marketExtension: true,
     maStack: true,
     gapZones: true,
     htfBox: true,
@@ -94,6 +96,16 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
   const ema21 = useMemo(() => overlays?.ema21 ?? buildExponentialMovingAverage(candles, 21), [candles, overlays?.ema21]);
   const weeklyEma8 = useMemo(() => overlays?.weekly_ema8 ?? [], [overlays?.weekly_ema8]);
   const ipoVwap = useMemo(() => overlays?.ipo_vwap ?? [], [overlays?.ipo_vwap]);
+  const marketExtension = useMemo(
+    () =>
+      overlays?.market_extension ?? {
+        config: { timeframe: "weekly" as const, ma_type: "sma" as const, length: 10, warning_pct: 11, extreme_pct: 15, label: "10W SMA" },
+        line: [],
+        signals: [],
+        latest: null,
+      },
+    [overlays?.market_extension],
+  );
   const rsLine = useMemo(() => overlays?.rs_line ?? [], [overlays?.rs_line]);
   const rsMarkers = useMemo(() => overlays?.rs_markers ?? [], [overlays?.rs_markers]);
   const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
@@ -204,6 +216,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     const ema21Series = priceChart.addLineSeries({ color: "#f59e0b", lineWidth: 2, priceLineVisible: false });
     const weeklyEma8Series = priceChart.addLineSeries({ color: "#4ade80", lineWidth: 2, priceLineVisible: false });
     const ipoVwapSeries = priceChart.addLineSeries({ color: "#f472b6", lineWidth: 2, priceLineVisible: false });
+    const marketExtensionSeries = priceChart.addLineSeries({ color: "rgba(96, 165, 250, 0.95)", lineWidth: 2, lineStyle: LineStyle.Dashed, priceLineVisible: false });
     const ma20Series = priceChart.addLineSeries({ color: "rgba(56, 189, 248, 0.35)", lineWidth: 1, priceLineVisible: false });
     const ma50Series = priceChart.addLineSeries({ color: "rgba(251, 146, 60, 0.45)", lineWidth: 1, priceLineVisible: false });
     const ma200Series = priceChart.addLineSeries({ color: "rgba(167, 139, 250, 0.52)", lineWidth: 1, priceLineVisible: false });
@@ -271,6 +284,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     ema21Series.setData(options.ema21 ? ema21 : []);
     weeklyEma8Series.setData(options.weeklyEma8 ? weeklyEma8 : []);
     ipoVwapSeries.setData(options.ipoVwap ? ipoVwap : []);
+    marketExtensionSeries.setData(options.marketExtension ? marketExtension.line : []);
     ma20Series.setData(options.maStack ? ma20 : []);
     ma50Series.setData(options.maStack ? ma50 : []);
     ma200Series.setData(options.maStack ? ma200 : []);
@@ -348,6 +362,16 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         color: marker.color,
         shape: marker.shape,
       });
+    }
+    if (options.marketExtension) {
+      for (const marker of marketExtension.signals) {
+        priceMarkers.push({
+          time: marker.time,
+          position: "aboveBar" as const,
+          color: marker.state === "extreme" ? "#ef4444" : "#f59e0b",
+          shape: marker.state === "extreme" ? "square" as const : "circle" as const,
+        });
+      }
     }
     if (options.flexSr) {
       for (const anchor of flexibleSrOverlay?.resistance?.anchors ?? []) {
@@ -484,6 +508,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     ema8,
     ema21,
     ipoVwap,
+    marketExtension,
     ma20,
     ma50,
     ma200,
@@ -494,6 +519,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     options.ema21,
     options.weeklyEma8,
     options.ipoVwap,
+    options.marketExtension,
     options.maStack,
     options.gapZones,
     options.htfBox,

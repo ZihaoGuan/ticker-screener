@@ -51,6 +51,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("hve_{date_label}.json",),
         "legacy_summary_templates": ("hve_run_summary_{date_label}.json",),
     },
+    "bb_squeeze": {
+        "stem_template": "bb_squeeze_{date_label}",
+        "legacy_watchlist_templates": ("bb_squeeze_{date_label}.json",),
+        "legacy_raw_templates": ("bb_squeeze_{date_label}.json",),
+        "legacy_summary_templates": ("bb_squeeze_run_summary_{date_label}.json",),
+    },
     "rti": {
         "stem_template": "rti_{date_label}",
         "legacy_watchlist_templates": ("rti_{date_label}.json",),
@@ -254,6 +260,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("inside_dryup", "inside_dryup"),
     ("htf_8w_runup", "htf_8w_runup"),
     ("hve", "hve"),
+    ("bb_squeeze", "bb_squeeze"),
     ("rti", "rti"),
     ("vcs_setup_stage", "vcs_setup_stage"),
     ("vcs_critical_tightness", "vcs_critical_tightness"),

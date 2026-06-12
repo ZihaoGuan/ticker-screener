@@ -1,0 +1,44 @@
+//@version=6
+indicator("Market Overextended Monitor", shorttitle="Mkt Overextended", overlay=true, max_labels_count=500)
+
+maType = input.string("SMA", "Moving average type", options=["SMA", "EMA"])
+maLength = input.int(10, "MA length", minval=1)
+warningPct = input.float(11.0, "Warning threshold %", minval=0.1, step=0.1)
+extremePct = input.float(15.0, "Extreme threshold %", minval=0.1, step=0.1)
+showLabels = input.bool(true, "Show labels")
+showBackground = input.bool(true, "Show bar highlight")
+showDistanceLine = input.bool(true, "Show extension line")
+priceSource = input.source(close, "Price source")
+
+maValue = maType == "EMA" ? ta.ema(priceSource, maLength) : ta.sma(priceSource, maLength)
+extensionPct = maValue != 0.0 ? ((priceSource / maValue) - 1.0) * 100.0 : na
+
+isWarning = extensionPct >= warningPct
+isExtreme = extensionPct >= extremePct
+isPeak = extensionPct > extensionPct[1] and extensionPct >= extensionPct[1] and extensionPct >= extensionPct[2]
+
+maColor = isExtreme ? color.red : isWarning ? color.orange : color.new(color.silver, 0)
+plot(maValue, "Reference MA", color=maColor, linewidth=2)
+
+extensionAnchor = showDistanceLine and (isWarning or isExtreme) ? maValue : na
+extensionTop = showDistanceLine and (isWarning or isExtreme) ? high : na
+plot(extensionAnchor, "Extension Anchor", color=color.new(color.blue, 100), display=display.none)
+plot(extensionTop, "Extension Top", color=color.new(color.blue, 100), display=display.none)
+fill(plot(extensionAnchor), plot(extensionTop), color=color.new(isExtreme ? color.red : color.blue, 82))
+
+barcolor(showBackground ? (isExtreme ? color.rgb(180, 35, 35) : isWarning ? color.rgb(196, 128, 22) : na) : na)
+bgcolor(showBackground ? (isExtreme ? color.new(color.red, 90) : isWarning ? color.new(color.orange, 92) : na) : na)
+
+if showLabels and (isWarning or isExtreme) and isPeak
+    label.new(
+        bar_index,
+        high,
+        str.tostring(close - maValue, format.mintick) + " (" + str.tostring(extensionPct, "#.##") + "%)",
+        style=label.style_label_down,
+        textcolor=color.black,
+        color=isExtreme ? color.new(color.red, 0) : color.new(color.orange, 0),
+        size=size.small
+    )
+
+alertcondition(isWarning, "Market warning extension", "Price is above warning extension threshold.")
+alertcondition(isExtreme, "Market extreme extension", "Price is above extreme extension threshold.")

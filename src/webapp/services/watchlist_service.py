@@ -18,6 +18,7 @@ import yfinance as yf
 from ...config import AppConfig
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
+from ...market_extension import compute_extension_frame, resample_to_weekly
 from ...market_data_access import (
     db_frame_has_recent_coverage,
     load_many_ticker_windows_for_range,
@@ -162,6 +163,8 @@ class WatchlistService:
         weekly_ema8 = weekly_close.ewm(span=8, adjust=False).mean()
         frame["weekly_ema8"] = weekly_ema8.reindex(frame.index, method="ffill")
         frame["ipo_vwap"] = _compute_ipo_vwap(frame)
+        visible_dates = {pd.Timestamp(index).date().isoformat() for index in visible_frame.index}
+        market_extension = _compute_market_extension_overlay(frame, visible_dates=visible_dates)
 
         rs_line: pd.Series | None = None
         rs_new_high: pd.Series | None = None
@@ -170,12 +173,12 @@ class WatchlistService:
         weekly_rs_rating: pd.Series | None = None
         fearzone_panel = _filter_fearzone_panel(
             _compute_fearzone_panel(frame),
-            visible_dates={pd.Timestamp(index).date().isoformat() for index in visible_frame.index},
+            visible_dates=visible_dates,
         )
         vcs_snapshot = latest_vcs_snapshot(frame)
         setup_markers = _compute_ftd_sweep_markers(
             frame=frame,
-            visible_dates={pd.Timestamp(index).date().isoformat() for index in visible_frame.index},
+            visible_dates=visible_dates,
             ticker=normalized_ticker,
             benchmark_ticker=self.benchmark_ticker,
         )
@@ -281,6 +284,7 @@ class WatchlistService:
             "ema21": ema21,
             "weekly_ema8": weekly_ema8_points,
             "ipo_vwap": ipo_vwap,
+            "market_extension": market_extension,
             "rs_line": rs_points,
             "daily_rs_rating": daily_rs_rating_points,
             "weekly_rs_rating": weekly_rs_rating_points,
@@ -531,6 +535,19 @@ def _empty_chart_payload(
         "ema21": [],
         "weekly_ema8": [],
         "ipo_vwap": [],
+        "market_extension": {
+            "config": {
+                "timeframe": "weekly",
+                "ma_type": "sma",
+                "length": 10,
+                "warning_pct": 11.0,
+                "extreme_pct": 15.0,
+                "label": "10W SMA",
+            },
+            "line": [],
+            "signals": [],
+            "latest": None,
+        },
         "rs_line": [],
         "daily_rs_rating": [],
         "weekly_rs_rating": [],
@@ -1258,6 +1275,88 @@ def _filter_fearzone_panel(panel: dict[str, Any], *, visible_dates: set[str]) ->
             for row in panel.get("rows", [])
         ],
         "signals": [signal for signal in panel.get("signals", []) if signal.get("time") in visible_dates],
+    }
+
+
+def _compute_market_extension_overlay(frame: pd.DataFrame, *, visible_dates: set[str]) -> dict[str, Any]:
+    config = {
+        "timeframe": "weekly",
+        "ma_type": "sma",
+        "length": 10,
+        "warning_pct": 11.0,
+        "extreme_pct": 15.0,
+        "label": "10W SMA",
+    }
+    if frame.empty:
+        return {"config": config, "line": [], "signals": [], "latest": None}
+
+    weekly_frame = resample_to_weekly(frame[["Open", "High", "Low", "Close", "Volume"]])
+    enriched = compute_extension_frame(
+        weekly_frame,
+        length=int(config["length"]),
+        ma_type=str(config["ma_type"]),
+        warning_pct=float(config["warning_pct"]),
+        extreme_pct=float(config["extreme_pct"]),
+    )
+    if enriched.empty:
+        return {"config": config, "line": [], "signals": [], "latest": None}
+
+    market_extension_ma = enriched["moving_average"].reindex(frame.index, method="ffill")
+    line = [
+        {
+            "time": pd.Timestamp(index).date().isoformat(),
+            "value": float(value),
+        }
+        for index, value in market_extension_ma.items()
+        if pd.notna(value) and pd.Timestamp(index).date().isoformat() in visible_dates
+    ]
+
+    extension_series = enriched["extension_pct"]
+    signals: list[dict[str, Any]] = []
+    for idx in range(1, len(enriched) - 1):
+        current = extension_series.iloc[idx]
+        if pd.isna(current):
+            continue
+        if current < extension_series.iloc[idx - 1] or current < extension_series.iloc[idx + 1]:
+            continue
+        state = str(enriched["threshold_state"].iloc[idx])
+        if state == "normal":
+            continue
+        row = enriched.iloc[idx]
+        moving_average = row.get("moving_average")
+        signal_time = enriched.index[idx].date().isoformat()
+        if signal_time not in visible_dates or pd.isna(moving_average):
+            continue
+        signals.append(
+            {
+                "time": signal_time,
+                "state": state,
+                "close": round(float(row["Close"]), 2),
+                "moving_average": round(float(moving_average), 2),
+                "distance": round(float(row["Close"] - moving_average), 2),
+                "extension_pct": round(float(current), 2),
+            }
+        )
+
+    latest_valid = enriched.dropna(subset=["moving_average", "extension_pct"]).tail(1)
+    latest: dict[str, Any] | None = None
+    if not latest_valid.empty:
+        row = latest_valid.iloc[0]
+        moving_average = float(row["moving_average"])
+        latest = {
+            "time": latest_valid.index[-1].date().isoformat(),
+            "state": str(row["threshold_state"]),
+            "close": round(float(row["Close"]), 2),
+            "moving_average": round(moving_average, 2),
+            "distance": round(float(row["Close"]) - moving_average, 2),
+            "extension_pct": round(float(row["extension_pct"]), 2),
+        }
+
+    return {
+        "config": config,
+        "line": line,
+        "signals": signals,
+        "latest": latest,
     }
 
 

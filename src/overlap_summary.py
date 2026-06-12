@@ -84,6 +84,11 @@ PIPELINES = (
         "filename": "fearzone_zeiierman_{date}.json",
     },
     {
+        "id": "bb_squeeze",
+        "label": "BB Squeeze",
+        "filename": "bb_squeeze_{date}.json",
+    },
+    {
         "id": "rti",
         "label": "RTI",
         "filename": "rti_{date}.json",
@@ -150,6 +155,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "inside_dryup": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "ftd_sweep": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "fearzone_zeiierman": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "bb_squeeze": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "rti": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcs_setup_stage": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcs_critical_tightness": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

@@ -64,6 +64,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["latest_available_date"], "2026-05-29")
         self.assertEqual(payload["candles"][-1]["time"], "2026-05-29")
         self.assertEqual(payload["data_source"], "internet")
+        self.assertIn("market_extension", payload)
         self.assertIn("vcs", payload)
 
     def test_get_chart_payload_coerces_decimal_db_values(self) -> None:
@@ -90,6 +91,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["data_source"], "database")
         self.assertEqual(payload["candles"][-1]["close"], 103.0)
         self.assertTrue(len(payload["ipo_vwap"]) > 0)
+        self.assertEqual(payload["market_extension"]["config"]["label"], "10W SMA")
 
     def test_get_chart_payload_falls_back_to_internet_for_missing_benchmark(self) -> None:
         ticker_frame = pd.DataFrame(
@@ -172,6 +174,36 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["data_source"], "internet")
         self.assertEqual(payload["candles"][0]["time"], "2026-06-04")
         self.assertEqual(payload["candles"][-1]["time"], "2026-06-05")
+
+    def test_get_chart_payload_includes_market_extension_overlay(self) -> None:
+        index = pd.date_range(start="2026-01-05", periods=90, freq="B")
+        close_values = [100.0 + (idx * 0.8) for idx in range(len(index) - 8)]
+        close_values.extend([176.0, 181.0, 187.0, 194.0, 201.0, 208.0, 214.0, 210.0])
+        frame = pd.DataFrame(
+            {
+                "Open": [value - 1.0 for value in close_values],
+                "High": [value + 2.0 for value in close_values],
+                "Low": [value - 2.0 for value in close_values],
+                "Close": close_values,
+                "Volume": [1_500_000 for _ in close_values],
+            },
+            index=index,
+        )
+
+        def fake_download(*, tickers: str, **_: object):
+            if tickers in {"SPY", "QQQ"}:
+                return frame.copy()
+            return pd.DataFrame()
+
+        with patch("src.webapp.services.watchlist_service.yf.download", side_effect=fake_download):
+            payload = self.service.get_chart_payload("SPY", as_of_date=dt.date(2026, 5, 8))
+
+        self.assertGreater(len(payload["market_extension"]["line"]), 0)
+        self.assertIsNotNone(payload["market_extension"]["latest"])
+        latest = payload["market_extension"]["latest"]
+        assert latest is not None
+        self.assertIn(latest["state"], {"warning", "extreme"})
+        self.assertGreater(latest["extension_pct"], 11.0)
 
     def test_get_chart_insider_payload_filters_recent_rows(self) -> None:
         insider_dir = Path(self.temp_dir.name) / "raw" / "insider"

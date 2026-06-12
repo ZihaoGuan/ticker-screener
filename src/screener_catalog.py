@@ -4,6 +4,7 @@ from dataclasses import asdict
 import datetime as dt
 from typing import Callable
 
+from .bb_squeeze_screen import find_recent_bb_squeeze_hit
 from .config import AppConfig
 from .base_detection_screen import find_active_base_detection_hit
 from .cup_detection_screen import find_active_cup_detection_hit
@@ -182,6 +183,27 @@ def _run_rsi_ma_bb_bearish(bundle: ScreenerInputBundle) -> ScreenerEvaluationRes
     return ScreenerEvaluationResult(
         passed=True,
         metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "direction": payload["direction"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_bb_squeeze(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_bb_squeeze_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "signal_kind": payload["signal_kind"],
+            "bb_squeeze_ratio": payload["bb_squeeze_ratio"],
+        },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
     )
@@ -614,6 +636,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=120,
             warmup_trading_days=20,
             evaluator=_run_rsi_ma_bb_bearish,
+        ),
+        "bb_squeeze": ScreenerSpec(
+            id="bb_squeeze",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=90,
+            warmup_trading_days=20,
+            evaluator=_run_bb_squeeze,
         ),
         "rti": ScreenerSpec(
             id="rti",

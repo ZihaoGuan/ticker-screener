@@ -13,6 +13,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema21: true,
   weeklyEma8: true,
   ipoVwap: true,
+  marketExtension: true,
   maStack: true,
   gapZones: true,
   htfBox: true,
@@ -20,7 +21,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   rsSignals: true,
   flexSr: false,
 };
-const CHART_CACHE_PREFIX = "chart-screen-cache-v3";
+const CHART_CACHE_PREFIX = "chart-screen-cache-v4";
 const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "fundamentals" | "insider", number> = {
   payload: 10 * 60 * 1000,
   fundamentals: 60 * 60 * 1000,
@@ -275,6 +276,8 @@ export function ChartsPage() {
   const adr14InRange = adr14Pct != null ? adr14Pct >= 3 && adr14Pct <= 10 : null;
   const atr14 = useMemo(() => computeAtr(chartData, 14), [chartData]);
   const latestMa50 = payload?.ma50?.[payload.ma50.length - 1]?.value ?? null;
+  const latestMarketExtension = payload?.market_extension?.latest ?? null;
+  const marketExtensionLabel = payload?.market_extension?.config?.label ?? "10W SMA";
   const atrMultipleFrom50Ma =
     atr14 != null && latestMa50 != null && Number.isFinite(lastClose ?? NaN)
       ? ((lastClose ?? 0) - latestMa50) / atr14
@@ -308,6 +311,7 @@ export function ChartsPage() {
     { key: "ema21", label: "EMA 21" },
     { key: "weeklyEma8", label: "Weekly 8 EMA" },
     { key: "ipoVwap", label: "IPO VWAP" },
+    { key: "marketExtension", label: "10W extension" },
     { key: "maStack", label: "MA stack" },
     { key: "gapZones", label: "Gap zones" },
     { key: "htfBox", label: "HTF box" },
@@ -449,7 +453,7 @@ export function ChartsPage() {
               </button>
             </div>
           ) : null}
-          {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, MA stack, gap zones, HTF box, and fearzone panel.</p>}
+          {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, MA stack, 10W extension overlay, gap zones, HTF box, and fearzone panel.</p>}
           {canManageExclusions && requestedTicker ? (
             <p className="panel-copy">
               {isTickerListLoading
@@ -472,6 +476,16 @@ export function ChartsPage() {
           <div>
             <span className="eyebrow">As Of</span>
             <strong>{payload?.resolved_as_of_date ?? "Latest trading day"}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">{marketExtensionLabel}</span>
+            <strong>{formatPercent(latestMarketExtension?.extension_pct)}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">10W State</span>
+            <strong className={latestMarketExtension ? `status-pill ${marketExtensionStateClass(latestMarketExtension.state)}` : undefined}>
+              {formatMarketExtensionState(latestMarketExtension?.state)}
+            </strong>
           </div>
           <div>
             <span className="eyebrow">Bars</span>
@@ -776,6 +790,14 @@ export function ChartsPage() {
                 </span>
               ) : null}
               {payload?.data_source ? <span className="chart-pill chart-pill-setup">Source {payload.data_source}</span> : null}
+              {latestMarketExtension ? (
+                <span className={`chart-pill ${marketExtensionChartPillClass(latestMarketExtension.state)}`}>
+                  {marketExtensionLabel} {formatPercent(latestMarketExtension.extension_pct)}
+                </span>
+              ) : null}
+              {latestMarketExtension?.distance != null ? (
+                <span className="chart-pill chart-pill-setup">Dist {formatPrice(latestMarketExtension.distance)}</span>
+              ) : null}
               {vcs ? <span className={`chart-pill ${vcsChartPillClass(vcs.stage)}`}>VCS {formatScore(vcs.score)} {vcs.stage_label}</span> : null}
               {historicalSetupMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{historicalSetupMarkers.length} old FTD sweep marker(s)</span> : null}
               {atr14 != null ? <span className="chart-pill chart-pill-setup">ATR14 {formatPrice(atr14)}</span> : null}
@@ -849,6 +871,36 @@ function vcsChartPillClass(stage: "critical" | "setup" | "base"): string {
   }
   if (stage === "setup") {
     return "chart-pill chart-pill-rs";
+  }
+  return "chart-pill chart-pill-setup";
+}
+
+function formatMarketExtensionState(state: "normal" | "warning" | "extreme" | null | undefined): string {
+  if (state === "warning") {
+    return "Overextended";
+  }
+  if (state === "extreme") {
+    return "Extreme";
+  }
+  return "Normal";
+}
+
+function marketExtensionStateClass(state: "normal" | "warning" | "extreme"): string {
+  if (state === "extreme") {
+    return "status-failed";
+  }
+  if (state === "warning") {
+    return "status-queued";
+  }
+  return "status-success";
+}
+
+function marketExtensionChartPillClass(state: "normal" | "warning" | "extreme"): string {
+  if (state === "extreme") {
+    return "chart-pill chart-pill-event";
+  }
+  if (state === "warning") {
+    return "chart-pill chart-pill-trigger";
   }
   return "chart-pill chart-pill-setup";
 }
