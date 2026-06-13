@@ -50,6 +50,28 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(job["progress_percent"], 40)
         self.assertEqual(job["progress_label"], "4/10 screening")
 
+    def test_update_progress_uses_stage_markers_when_batch_progress_not_available(self) -> None:
+        job = {
+            "success_count": 0,
+            "progress_current": None,
+            "progress_total": None,
+            "progress_percent": None,
+            "progress_label": None,
+        }
+
+        self.service._update_progress(
+            job,
+            [
+                "running: /opt/python scripts/sync_finviz_fundamentals.py --as-of-date 2026-06-13",
+                "Stage 2/3: Build Sector Rating Baselines",
+            ],
+        )
+
+        self.assertIsNone(job["progress_current"])
+        self.assertIsNone(job["progress_total"])
+        self.assertEqual(job["progress_percent"], 33)
+        self.assertEqual(job["progress_label"], "Stage 2/3 · Build Sector Rating Baselines")
+
     def test_load_summary_metadata_reads_passed_tickers_and_watchlist_file(self) -> None:
         summary_path = self.project_root / "artifacts" / "raw" / "summary.json"
         summary_path.parent.mkdir(parents=True, exist_ok=True)

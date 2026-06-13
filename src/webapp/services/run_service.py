@@ -50,6 +50,7 @@ class RunField:
 class RunService:
     _progress_pattern = re.compile(r"\[(\d{1,6})/(\d{1,6})\]")
     _passed_pattern = re.compile(r"passed=(\d{1,6})")
+    _stage_pattern = re.compile(r"^Stage (\d{1,2})/(\d{1,2}): (.+)$")
     _summary_path_pattern = re.compile(r"Wrote run summary to (.+)$")
     _watchlist_path_pattern = re.compile(r"Wrote watchlist to (.+)$")
     _filter_catalog_cache: dict[str, dict[str, list[str]]] = {}
@@ -138,28 +139,28 @@ class RunService:
         "delay_min_seconds",
         "Delay Min Seconds",
         "number",
-        placeholder="3",
-        help_text="Minimum delay between Finviz ticker scrapes.",
+        placeholder="0.75",
+        help_text="Minimum delay between Finviz ticker scrapes. API-first defaults are tuned faster than the old browser path.",
     )
     _delay_max_seconds_field = RunField(
         "delay_max_seconds",
         "Delay Max Seconds",
         "number",
-        placeholder="6",
-        help_text="Maximum delay between Finviz ticker scrapes.",
+        placeholder="1.5",
+        help_text="Maximum delay between Finviz ticker scrapes. Raise this if Finviz starts throttling.",
     )
     _batch_size_before_rest_field = RunField(
         "batch_size_before_rest",
         "Batch Before Rest",
         "number",
-        placeholder="75",
+        placeholder="200",
         help_text="How many tickers to scrape before a longer rest.",
     )
     _rest_seconds_field = RunField(
         "rest_seconds",
         "Rest Seconds",
         "number",
-        placeholder="45",
+        placeholder="15",
         help_text="Longer sleep between Finviz scrape batches.",
     )
     _min_sector_peers_field = RunField(
@@ -1502,6 +1503,9 @@ class RunService:
         if progress["success_count"] is not None:
             job["success_count"] = progress["success_count"]
         if progress["current"] is None or progress["total"] is None or progress["total"] <= 0:
+            if progress["percent"] is not None or progress["label"] is not None:
+                job["progress_percent"] = progress["percent"]
+                job["progress_label"] = progress["label"]
             return
         job["progress_current"] = progress["current"]
         job["progress_total"] = progress["total"]
@@ -1513,24 +1517,42 @@ class RunService:
         total = None
         last_line = ""
         success_count = None
+        stage_current = None
+        stage_total = None
+        stage_label = None
         for line in reversed(log_lines):
-            match = self._progress_pattern.search(line)
+            if current is None:
+                match = self._progress_pattern.search(line)
+            else:
+                match = None
             if match:
                 current = int(match.group(1))
                 total = int(match.group(2))
                 last_line = line
+            if stage_current is None:
+                stage_match = self._stage_pattern.search(line.strip())
+                if stage_match:
+                    stage_current = int(stage_match.group(1))
+                    stage_total = int(stage_match.group(2))
+                    stage_label = stage_match.group(3).strip()
             if success_count is None:
                 passed_match = self._passed_pattern.search(line)
                 if passed_match:
                     success_count = int(passed_match.group(1))
-            if current is not None and total is not None and success_count is not None:
+            if current is not None and total is not None and success_count is not None and stage_current is not None:
                 break
         percent = None
         label = None
         if current is not None and total is not None and total > 0:
             percent = max(0, min(100, round((current / total) * 100)))
-            detail = "screening" if "screening" in last_line.lower() else "processing"
-            label = f"{current}/{total} {detail}"
+            if stage_current is not None and stage_total is not None and stage_label:
+                label = f"Stage {stage_current}/{stage_total} · {current}/{total} {stage_label.lower()}"
+            else:
+                detail = "screening" if "screening" in last_line.lower() else "processing"
+                label = f"{current}/{total} {detail}"
+        elif stage_current is not None and stage_total is not None and stage_total > 0 and stage_label:
+            percent = max(0, min(99, round(((stage_current - 1) / stage_total) * 100)))
+            label = f"Stage {stage_current}/{stage_total} · {stage_label}"
         return {
             "current": current,
             "total": total,

@@ -19,10 +19,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--tickers", nargs="+")
     parser.add_argument("--resume-from", default="")
-    parser.add_argument("--delay-min-seconds", type=float, default=3.0)
-    parser.add_argument("--delay-max-seconds", type=float, default=6.0)
-    parser.add_argument("--batch-size-before-rest", type=int, default=75)
-    parser.add_argument("--rest-seconds", type=float, default=45.0)
+    parser.add_argument("--delay-min-seconds", type=float, default=0.75)
+    parser.add_argument("--delay-max-seconds", type=float, default=1.5)
+    parser.add_argument("--batch-size-before-rest", type=int, default=200)
+    parser.add_argument("--rest-seconds", type=float, default=15.0)
     parser.add_argument("--overwrite-policy", default="replace-date", choices=("latest-date", "replace-date", "skip-existing"))
     parser.add_argument("--min-sector-peers", type=int, default=20)
     parser.add_argument("--min-category-metrics", type=float, default=1.0)
@@ -63,8 +63,11 @@ def main() -> int:
             str(args.overwrite_policy),
         ]
     )
+    print("Stage 1/3: Sync Finviz Fundamentals", flush=True)
     _run(sync_command)
+    print("Stage 2/3: Build Sector Rating Baselines", flush=True)
     _run([sys.executable, "scripts/build_sector_rating_baselines.py", *shared])
+    print("Stage 3/3: Build Ticker Ratings", flush=True)
     _run(
         [
             sys.executable,
