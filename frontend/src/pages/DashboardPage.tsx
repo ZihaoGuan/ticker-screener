@@ -122,6 +122,12 @@ export function DashboardPage() {
                 ? `Current RSI ${rsiLatest.current_rsi.toFixed(2)} · Daily 21EMA ${formatPrice(rsiLatest.current_ema21)}`
                 : ""}
             </p>
+            <p className="card-meta">
+              {rsiLatest
+                ? `E = lift after enough closes below daily 21EMA · R = lift after RSI resets below ${rsiLatest.reset_rsi_threshold}`
+                : "E = lift after enough closes below daily 21EMA · R = lift after RSI reset below 45"}
+            </p>
+            <p className="card-meta">{rsiLiftDetail(rsiLatest)}</p>
             <p className="card-meta">{rsiLatest?.explanation ?? ""}</p>
             <p className="card-meta">
               {rsiDivergence?.data_source ? `Source ${rsiDivergence.data_source}` : ""}
@@ -317,6 +323,28 @@ function rsiSignalAccent(
     return "up";
   }
   return "up";
+}
+
+function rsiLiftDetail(latest: DashboardResponse["market_health"]["rsi_divergence"]["latest"] | null | undefined) {
+  if (!latest) {
+    return "";
+  }
+  if (latest.lift_reason === "below_ema21") {
+    return `E active: top warning lifted because price spent enough time below daily 21EMA.`;
+  }
+  if (latest.lift_reason === "rsi_reset") {
+    return `R active: top warning lifted because RSI reset below ${latest.reset_rsi_threshold}.`;
+  }
+  if (latest.lift_reason === "expired") {
+    return "Signal expired: warning aged out of active window.";
+  }
+  if (latest.state === "invalidated") {
+    return "I logic active: price and RSI both pushed above the old top, so divergence failed.";
+  }
+  if (latest.state === "fresh_top_warning" || latest.state === "active_top_warning") {
+    return "No lift yet: warning still active until E or R clears it, or breakout invalidates it.";
+  }
+  return "";
 }
 
 function td9SignalSubLabel(latest: DashboardResponse["market_health"]["bearish_td9"]["latest"] | null | undefined) {
