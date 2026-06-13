@@ -1439,5 +1439,20 @@ function buildScheduleOptionsTemplate(actionId: string): string {
       2,
     );
   }
+  if (actionId === "reload_postgres_market_data_date") {
+    return JSON.stringify(
+      {
+        trade_date: "{{local_date}}",
+        chunk_size: 100,
+        max_retries: 4,
+        retry_base_seconds: 2,
+        chunk_sleep_seconds: 1,
+        single_ticker_sleep_seconds: 0.5,
+        batch_size: 5000,
+      },
+      null,
+      2,
+    );
+  }
   return JSON.stringify(sharedUniverseTemplate, null, 2);
 }

@@ -34,6 +34,12 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertEqual(len(jobs), 1)
         self.assertEqual(jobs[0]["options"]["limit"], 25)
 
+    def test_available_actions_include_reload_postgres_market_data_date(self) -> None:
+        actions = {item["id"] for item in self.service.get_context()["available_actions"]}
+
+        self.assertIn("reload_postgres_market_data_date", actions)
+        self.assertNotIn("sync_postgres_market_data", actions)
+
     def test_template_resolution_expands_date_tokens(self) -> None:
         local_now = dt.datetime(2026, 6, 6, 8, 15)
 

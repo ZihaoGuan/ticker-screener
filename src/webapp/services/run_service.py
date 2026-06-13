@@ -88,6 +88,12 @@ class RunService:
         "date",
         help_text="Optional historical replay date.",
     )
+    _trade_date_field = RunField(
+        "trade_date",
+        "Trade Date",
+        "date",
+        help_text="Required trade date to delete and reload from Postgres daily_bars.",
+    )
     _source_field = RunField(
         "source",
         "Source",
@@ -110,6 +116,23 @@ class RunService:
     )
     _start_date_field = RunField("start_date", "Start Date", "date")
     _end_date_field = RunField("end_date", "End Date", "date")
+    _chunk_size_field = RunField("chunk_size", "Chunk Size", "number", placeholder="100")
+    _max_retries_field = RunField("max_retries", "Max Retries", "number", placeholder="4")
+    _retry_base_seconds_field = RunField("retry_base_seconds", "Retry Base Seconds", "number", placeholder="2")
+    _chunk_sleep_seconds_field = RunField("chunk_sleep_seconds", "Chunk Sleep Seconds", "number", placeholder="1")
+    _single_ticker_sleep_seconds_field = RunField(
+        "single_ticker_sleep_seconds",
+        "Single Ticker Sleep",
+        "number",
+        placeholder="0.5",
+    )
+    _batch_size_field = RunField("batch_size", "DB Batch Size", "number", placeholder="5000")
+    _ensure_schema_field = RunField(
+        "ensure_schema",
+        "Ensure Schema",
+        "boolean",
+        help_text="Apply sql/postgres_app_schema.sql before the reload run.",
+    )
     _strategy_ids_field = RunField(
         "strategy_ids",
         "Screeners",
@@ -284,6 +307,22 @@ class RunService:
                 _tickers_field,
             ),
             visible_in_runs=False,
+        ),
+        "reload_postgres_market_data_date": RunAction(
+            "reload_postgres_market_data_date",
+            "Reload Postgres Market Data Date",
+            "scripts/reload_postgres_market_data_date.py",
+            supports_limit=False,
+            fields=(
+                _trade_date_field,
+                _chunk_size_field,
+                _max_retries_field,
+                _retry_base_seconds_field,
+                _chunk_sleep_seconds_field,
+                _single_ticker_sleep_seconds_field,
+                _batch_size_field,
+                _ensure_schema_field,
+            ),
         ),
         "backfill_trendline_snapshots": RunAction(
             "backfill_trendline_snapshots",
@@ -1450,6 +1489,11 @@ class RunService:
         if normalized_options.get("tickers"):
             command.append("--tickers")
             command.extend(normalized_options["tickers"])
+        if action_id == "reload_postgres_market_data_date":
+            trade_date = str(normalized_options.get("trade_date") or "").strip()
+            if not trade_date:
+                raise ValueError("Trade Date is required.")
+            command.append(trade_date)
         if normalized_options.get("date_label"):
             command.extend(["--date-label", str(normalized_options["date_label"])])
         if normalized_options.get("as_of_date"):
@@ -1464,12 +1508,24 @@ class RunService:
             command.extend(["--end-date", str(normalized_options["end_date"])])
         if normalized_options.get("chunk_size") is not None:
             command.extend(["--chunk-size", str(normalized_options["chunk_size"])])
+        if normalized_options.get("max_retries") is not None:
+            command.extend(["--max-retries", str(normalized_options["max_retries"])])
+        if normalized_options.get("retry_base_seconds") is not None:
+            command.extend(["--retry-base-seconds", str(normalized_options["retry_base_seconds"])])
+        if normalized_options.get("chunk_sleep_seconds") is not None:
+            command.extend(["--chunk-sleep-seconds", str(normalized_options["chunk_sleep_seconds"])])
+        if normalized_options.get("single_ticker_sleep_seconds") is not None:
+            command.extend(["--single-ticker-sleep-seconds", str(normalized_options["single_ticker_sleep_seconds"])])
+        if normalized_options.get("batch_size") is not None:
+            command.extend(["--batch-size", str(normalized_options["batch_size"])])
         if normalized_options.get("resume_from"):
             command.extend(["--resume-from", str(normalized_options["resume_from"])])
         if normalized_options.get("retry_failed_from_manifest"):
             command.append("--retry-failed-from-manifest")
         if action_id == "sync_postgres_market_data" and normalized_options.get("include_excluded_tickers"):
             command.append("--include-excluded-tickers")
+        if normalized_options.get("ensure_schema"):
+            command.append("--ensure-schema")
         if normalized_options.get("strategy_ids_json"):
             command.extend(["--strategy-ids-json", str(normalized_options["strategy_ids_json"])])
         if normalized_options.get("overwrite_policy"):
@@ -1552,6 +1608,7 @@ class RunService:
         for key in (
             "date_label",
             "as_of_date",
+            "trade_date",
             "reference_date",
             "source",
             "filter_precedence",
@@ -1568,8 +1625,13 @@ class RunService:
             value = options.get(key)
             if isinstance(value, str) and value.strip():
                 normalized[key] = value.strip()
+        if "trade_date" in normalized:
+            try:
+                dt.date.fromisoformat(str(normalized["trade_date"]))
+            except ValueError as exc:
+                raise ValueError("Trade Date must be YYYY-MM-DD.") from exc
 
-        for key in ("chunk_size", "candidate_threshold", "entry_signal_threshold", "max_parallel"):
+        for key in ("chunk_size", "max_retries", "batch_size", "candidate_threshold", "entry_signal_threshold", "max_parallel"):
             value = options.get(key)
             if value in (None, ""):
                 continue
@@ -1577,7 +1639,7 @@ class RunService:
                 normalized[key] = int(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{key.replace('_', ' ').title()} must be an integer.") from exc
-        for key in ("delay_min_seconds", "delay_max_seconds", "rest_seconds", "min_category_metrics"):
+        for key in ("delay_min_seconds", "delay_max_seconds", "rest_seconds", "min_category_metrics", "retry_base_seconds", "chunk_sleep_seconds", "single_ticker_sleep_seconds"):
             value = options.get(key)
             if value in (None, ""):
                 continue
@@ -1600,6 +1662,8 @@ class RunService:
             normalized["include_excluded_tickers"] = bool(options.get("include_excluded_tickers"))
         if "retry_failed_from_manifest" in options:
             normalized["retry_failed_from_manifest"] = bool(options.get("retry_failed_from_manifest"))
+        if "ensure_schema" in options:
+            normalized["ensure_schema"] = bool(options.get("ensure_schema"))
 
         for key in (
             "include_sectors",
@@ -2080,7 +2144,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data", "sync_finviz_fundamentals", "build_sector_rating_baselines", "build_ticker_ratings", "run_finviz_ratings_pipeline"}:
+        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "build_sector_rating_baselines", "build_ticker_ratings", "run_finviz_ratings_pipeline"}:
             return "admin_sync"
         return "screen_run"
 
@@ -2109,7 +2173,7 @@ class RunService:
         if str(job.get("status")) != "success":
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "build_sector_rating_baselines", "build_ticker_ratings", "overlap_backtest_v1"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "build_sector_rating_baselines", "build_ticker_ratings", "overlap_backtest_v1"}:
             return
         summary_file = str(job.get("summary_file") or "").strip()
         if not summary_file:
@@ -2222,6 +2286,9 @@ class RunService:
         as_of_date = str(options.get("as_of_date") or "").strip()
         if as_of_date:
             return as_of_date
+        trade_date = str(options.get("trade_date") or "").strip()
+        if trade_date:
+            return trade_date
         date_label = str(options.get("date_label") or "").strip()
         if date_label:
             return date_label

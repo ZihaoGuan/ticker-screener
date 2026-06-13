@@ -286,6 +286,37 @@ class RunServiceTests(unittest.TestCase):
         tickers_index = command.index("--tickers")
         self.assertEqual(command[tickers_index + 1 : tickers_index + 3], ["AAPL", "NVDA"])
 
+    def test_build_command_supports_reload_postgres_market_data_date(self) -> None:
+        command = self.service.build_command(
+            "reload_postgres_market_data_date",
+            {
+                "trade_date": "2026-06-13",
+                "chunk_size": "25",
+                "max_retries": "5",
+                "retry_base_seconds": "3",
+                "chunk_sleep_seconds": "2",
+                "single_ticker_sleep_seconds": "1",
+                "batch_size": "4000",
+                "ensure_schema": True,
+            },
+        )
+
+        self.assertEqual(command[1], "scripts/reload_postgres_market_data_date.py")
+        self.assertEqual(command[2], "2026-06-13")
+        self.assertIn("--chunk-size", command)
+        self.assertIn("25", command)
+        self.assertIn("--max-retries", command)
+        self.assertIn("5", command)
+        self.assertIn("--retry-base-seconds", command)
+        self.assertIn("3.0", command)
+        self.assertIn("--chunk-sleep-seconds", command)
+        self.assertIn("2.0", command)
+        self.assertIn("--single-ticker-sleep-seconds", command)
+        self.assertIn("1.0", command)
+        self.assertIn("--batch-size", command)
+        self.assertIn("4000", command)
+        self.assertIn("--ensure-schema", command)
+
     def test_list_actions_includes_fearzone(self) -> None:
         action_ids = {item["id"] for item in self.service.list_actions()}
         self.assertIn("fearzone", action_ids)
@@ -317,6 +348,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("build_ticker_ratings", action_ids)
         self.assertIn("run_finviz_ratings_pipeline", action_ids)
         self.assertIn("backfill_trendline_snapshots", action_ids)
+        self.assertIn("reload_postgres_market_data_date", action_ids)
 
     def test_launch_finviz_ratings_pipeline_includes_custom_options(self) -> None:
         captured: dict[str, object] = {}
