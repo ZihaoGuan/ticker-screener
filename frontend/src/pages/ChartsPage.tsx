@@ -39,6 +39,7 @@ export function ChartsPage() {
     { id: "weekly_htf_pullback", label: "Weekly HTF Pullback" },
     { id: "htf_8w_runup", label: "HTF 8W Runup" },
     { id: "vcp", label: "VCP" },
+    { id: "sepa_vcp", label: "SEPA VCP" },
   ] as const;
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTicker = (searchParams.get("ticker") ?? "").trim().toUpperCase();
@@ -66,6 +67,7 @@ export function ChartsPage() {
     weekly_htf_pullback: false,
     htf_8w_runup: false,
     vcp: false,
+    sepa_vcp: false,
   });
   const [tickerListStatus, setTickerListStatus] = useState<AdminTickerListStatusResponse | null>(null);
   const [isTickerListLoading, setIsTickerListLoading] = useState(false);
@@ -286,6 +288,7 @@ export function ChartsPage() {
       : null;
   const hasTrimWarning = atrMultipleFrom50Ma != null ? atrMultipleFrom50Ma >= 3 : false;
   const vcs = payload?.vcs ?? null;
+  const sepaDashboard = payload?.sepa_dashboard ?? null;
   const earningsRows = fundamentalsPayload?.earnings_eps_history ?? [];
   const setupAnnotations = useMemo<ChartAnnotations[]>(() => {
     return (setupPayload?.screeners ?? [])
@@ -461,7 +464,7 @@ export function ChartsPage() {
               </button>
             </div>
           ) : null}
-          {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, MA stack, 10W extension overlay, gap zones, HTF box, and fearzone panel.</p>}
+          {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, MA stack, 10W extension overlay, gap zones, HTF box, fearzone panel, and SEPA dashboard snapshot.</p>}
           {canManageExclusions && requestedTicker ? (
             <p className="panel-copy">
               {isTickerListLoading
@@ -516,6 +519,30 @@ export function ChartsPage() {
           <div>
             <span className="eyebrow">ATR x 50MA</span>
             <strong>{formatAtrMultiple(atrMultipleFrom50Ma)}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">TPR</span>
+            <strong className={sepaDashboard ? `status-pill ${sepaDashboard.tpr_pass ? "status-success" : "status-unknown"}` : undefined}>{sepaDashboard?.tpr_status ?? "-"}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">Buy Risk</span>
+            <strong>{sepaDashboard?.buy_risk_status ?? "-"}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">Pressure</span>
+            <strong>{sepaDashboard?.pressure_status ?? "-"}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">RPR</span>
+            <strong>{formatScore(sepaDashboard?.rpr_score)}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">5D VCP</span>
+            <strong>{sepaDashboard?.vcp_status ?? "-"}</strong>
+          </div>
+          <div>
+            <span className="eyebrow">Recent Squeeze</span>
+            <strong>{sepaDashboard?.recent_vcp_signal_date ?? "-"}</strong>
           </div>
           <div>
             <span className="eyebrow">Trim Warn</span>
@@ -1347,6 +1374,20 @@ function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAn
         entryLabel: "Pivot",
         stopPrice: readNumber(hit.support_price),
         stopLabel: "Support",
+      };
+    case "sepa_vcp":
+      return {
+        setupLabel: "SEPA VCP",
+        eventDate: readString(hit.signal_date),
+        eventLabel: "5D squeeze",
+        triggerPrice: readNumber(hit.trigger_price),
+        triggerLabel: "Squeeze high",
+        entryPrice: readNumber(hit.trigger_price),
+        entryLabel: "Breakout",
+        secondaryEntryPrice: readNumber(hit.ma50),
+        secondaryEntryLabel: "50D MA",
+        stopPrice: readNumber(hit.stop_price),
+        stopLabel: "Squeeze low",
       };
     default:
       return null;

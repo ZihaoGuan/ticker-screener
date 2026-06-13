@@ -816,6 +816,44 @@ def _bb_squeeze_frame(*, squeeze: bool, positive_cci: bool) -> pd.DataFrame:
     )
 
 
+def _sepa_vcp_stock_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2024-01-02", periods=320, freq="B")
+    close_values: list[float] = []
+    for idx in range(len(index)):
+        if idx < 315:
+            close_values.append(80.0 + (idx * 0.35))
+        else:
+            close_values.extend([189.2, 189.8, 190.1, 189.9, 190.3])
+            break
+    return pd.DataFrame(
+        {
+            "Open": [value - 0.35 for value in close_values],
+            "High": [value + 0.85 for value in close_values],
+            "Low": [value - 0.95 for value in close_values],
+            "Close": close_values,
+            "Adj Close": close_values,
+            "Volume": [1_200_000.0 for _ in close_values],
+        },
+        index=index,
+    )
+
+
+def _sepa_vcp_benchmark_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2024-01-02", periods=320, freq="B")
+    close_values = [100.0 + (idx * 0.05) for idx in range(len(index))]
+    return pd.DataFrame(
+        {
+            "Open": [value - 0.1 for value in close_values],
+            "High": [value + 0.4 for value in close_values],
+            "Low": [value - 0.4 for value in close_values],
+            "Close": close_values,
+            "Adj Close": close_values,
+            "Volume": [2_000_000.0 for _ in close_values],
+        },
+        index=index,
+    )
+
+
 def _vcs_frame(*, compressed: bool, variant: int = 0) -> pd.DataFrame:
     index = pd.date_range(start="2025-01-02", periods=90, freq="B")
     close_values: list[float] = []
@@ -1464,6 +1502,30 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "bb_squeeze")
         self.assertEqual(payload["screeners"][0]["hit"]["signal_kind"], "positive_cci")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_sepa_vcp_catalog_entry(self) -> None:
+        ticker_frame = _sepa_vcp_stock_frame()
+        benchmark_frame = _sepa_vcp_benchmark_frame()
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 3, 24),
+                screener_ids=["sepa_vcp"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "sepa_vcp")
+        self.assertEqual(payload["screeners"][0]["hit"]["tpr_status"], "PASSED")
+        self.assertEqual(payload["screeners"][0]["hit"]["buy_risk_status"], "Low Risk")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_supports_vcs_setup_stage_catalog_entry(self) -> None:

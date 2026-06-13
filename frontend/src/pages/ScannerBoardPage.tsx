@@ -8,6 +8,7 @@ import type { ScannerBoardCard, ScannerBoardResponse } from "../lib/types";
 const CARD_ART: Record<string, string> = {
   weekly_rs: "M24 110 L78 82 L118 92 L166 58 L220 72 L276 36",
   sean_gap_up: "M24 122 L96 64 L142 88 L188 42 L188 84 L276 84",
+  sepa_vcp: "M24 120 L82 118 L126 116 L168 114 L210 98 L246 84 L276 52",
   fearzone: "M24 60 C72 20, 116 20, 156 62 S236 116, 276 92",
   td9_bullish: "M24 98 L82 122 L126 112 L178 78 L222 88 L276 50",
 };
@@ -68,7 +69,7 @@ export function ScannerBoardPage() {
         <div className="scanner-board-console-row">
           <div>
             <span className="eyebrow">Board logic</span>
-            <p className="panel-copy">Weekly RS New High, Sean Gap Up, Fearzone, and TD9 Bullish only in v1.</p>
+            <p className="panel-copy">Weekly RS New High, Sean Gap Up, SEPA VCP, Fearzone, and TD9 Bullish.</p>
           </div>
           <div>
             <span className="eyebrow">Navigation</span>

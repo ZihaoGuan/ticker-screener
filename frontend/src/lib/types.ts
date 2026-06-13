@@ -517,6 +517,33 @@ export type WatchlistChartResponse = {
     days_tight: number;
     is_higher_low: boolean;
   } | null;
+  sepa_dashboard?: {
+    snapshot_date: string;
+    benchmark_ticker: string;
+    ma50: number;
+    ma150: number;
+    ma200: number;
+    high_52wk: number;
+    low_52wk: number;
+    tpr_pass: boolean;
+    tpr_status: string;
+    buy_risk_status: string;
+    buy_risk_distance_pct: number;
+    pressure_status: string;
+    pressure_buying: boolean;
+    buy_volume_20d: number;
+    sell_volume_20d: number;
+    rpr_score: number;
+    rpr_status: string;
+    vcp_status: string;
+    vcp_trigger: boolean;
+    vcp_range_pct: number;
+    recent_vcp_signal: boolean;
+    recent_vcp_signal_date?: string | null;
+    recent_vcp_signal_high?: number | null;
+    recent_vcp_signal_low?: number | null;
+    recent_vcp_signal_close?: number | null;
+  } | null;
 };
 
 export type ChartFundamentalsResponse = {

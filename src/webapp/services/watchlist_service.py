@@ -28,7 +28,8 @@ from ...market_data_access import (
 )
 from ...ratings.repository import RatingsRepository
 from ...rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
-from ...ticker_filters import normalize_ticker_symbol
+from ...sepa_vcp_screen import build_sepa_dashboard_snapshot
+from ...ticker_filters import is_excluded_ticker, load_excluded_tickers, normalize_ticker_symbol
 from ...universe import UniverseTicker, load_universe
 from ...vcs_indicator import latest_vcs_snapshot
 from ...config import load_app_config
@@ -77,6 +78,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "amber",
     },
     {
+        "id": "sepa_vcp",
+        "strategy_id": "sepa_vcp",
+        "label": "SEPA VCP",
+        "description": "Recent 5D squeeze names with Minervini trend, risk, pressure, and RS dashboard context persisted together.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+    },
+    {
         "id": "fearzone",
         "strategy_id": "fearzone",
         "label": "Fearzone",
@@ -111,6 +120,7 @@ class WatchlistService:
         self.database_url = resolve_database_url(database_url)
         self.market_data_source = resolve_market_data_source(market_data_source)
         self.benchmark_ticker = str(benchmark_ticker or "SPY").strip().upper() or "SPY"
+        self._excluded_tickers: set[str] | None = None
 
     def list_recent(self) -> list[dict[str, Any]]:
         return self.repository.list_recent_watchlists(limit=50)
@@ -127,7 +137,9 @@ class WatchlistService:
                 strategy_id=config["strategy_id"],
                 target_date=target_trading_date,
             )
-            entries = self.repository.load_watchlist(str(selected_meta.get("stem") or "")) if selected_meta else []
+            entries = self._filter_excluded_entries(
+                self.repository.load_watchlist(str(selected_meta.get("stem") or "")) if selected_meta else []
+            )
             preview_tickers = [
                 str(item.get("ticker") or "").strip().upper()
                 for item in entries
@@ -141,7 +153,7 @@ class WatchlistService:
                     "description": config["description"],
                     "timeframe": config["timeframe"],
                     "accent": config["accent"],
-                    "available": selected_meta is not None,
+                    "available": selected_meta is not None and len(entries) > 0,
                     "stem": str(selected_meta.get("stem") or "") if selected_meta else "",
                     "group_label": str(selected_meta.get("group_label") or "") if selected_meta else "",
                     "captured_at": str(selected_meta.get("captured_at") or "") if selected_meta else "",
@@ -178,7 +190,7 @@ class WatchlistService:
         if selected_meta is None and weekly_files:
             selected_meta = weekly_files[0]
         selected_stem = str(selected_meta.get("stem") or "") if isinstance(selected_meta, dict) else ""
-        entries = self._enrich_entries(self.repository.load_watchlist(selected_stem)) if selected_stem else []
+        entries = self._enrich_entries(self._filter_excluded_entries(self.repository.load_watchlist(selected_stem))) if selected_stem else []
         board_entries: list[dict[str, Any]] = []
         for raw_entry in entries:
             entry = dict(raw_entry)
@@ -198,7 +210,7 @@ class WatchlistService:
         }
 
     def get_watchlist_detail(self, stem: str) -> dict[str, Any]:
-        entries = self._enrich_entries(self.repository.load_watchlist(stem))
+        entries = self._enrich_entries(self._filter_excluded_entries(self.repository.load_watchlist(stem)))
         return {
             "stem": stem,
             "entry_count": len(entries),
@@ -287,6 +299,15 @@ class WatchlistService:
                 price_reference=frame["High"].reindex(rs_line.index),
                 lookback=250,
             )
+        sepa_dashboard = (
+            build_sepa_dashboard_snapshot(
+                frame,
+                benchmark_frame if benchmark_frame is not None else pd.DataFrame(),
+                benchmark_ticker=self.benchmark_ticker,
+            )
+            if benchmark_frame is not None and not benchmark_frame.empty
+            else None
+        )
 
         candles: list[dict[str, Any]] = []
         volume: list[dict[str, Any]] = []
@@ -385,6 +406,7 @@ class WatchlistService:
             "setup_markers": setup_markers,
             "fearzone_panel": fearzone_panel,
             "vcs": vcs_snapshot.to_dict() if vcs_snapshot is not None else None,
+            "sepa_dashboard": sepa_dashboard.to_dict() if sepa_dashboard is not None else None,
         }
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
@@ -604,6 +626,30 @@ class WatchlistService:
             logger.warning("Watchlist theme enrichment unavailable; continuing without ETF catalog: %s", exc)
             self._theme_catalog = []
         return self._theme_catalog
+
+    def _get_excluded_tickers(self) -> set[str]:
+        if self._excluded_tickers is not None:
+            return self._excluded_tickers
+        try:
+            self._excluded_tickers = load_excluded_tickers(load_app_config())
+        except Exception as exc:
+            logger.warning("Watchlist exclusion filter unavailable; continuing without exclusions: %s", exc)
+            self._excluded_tickers = set()
+        return self._excluded_tickers
+
+    def _filter_excluded_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        excluded = self._get_excluded_tickers()
+        if not excluded:
+            return [item for item in entries if isinstance(item, dict)]
+        filtered: list[dict[str, Any]] = []
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            ticker = normalize_ticker_symbol(str(item.get("ticker") or ""))
+            if not ticker or is_excluded_ticker(ticker, excluded):
+                continue
+            filtered.append(item)
+        return filtered
 
 
 def _empty_chart_payload(

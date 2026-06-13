@@ -199,8 +199,13 @@ export function WatchlistsPage() {
                   </div>
                 </div>
                 <div className="ticker-chip-row">
-                  <div className="ticker-tag">RS Rank: {Number(item.rs_rank ?? item.score ?? 0)}</div>
+                  {resolveRankValue(item) != null ? <div className="ticker-tag">RS Rank: {resolveRankValue(item)}</div> : null}
                   {typeof item.setup_label === "string" && item.setup_label ? <div className="ticker-tag">{item.setup_label}</div> : null}
+                  {normalizeStringList(item.signal_badges).slice(0, 3).map((badge) => (
+                    <div key={`${String(item.ticker ?? "--")}-${badge}`} className="ticker-tag">
+                      {badge}
+                    </div>
+                  ))}
                   {typeof item.industry === "string" && item.industry ? <div className="ticker-tag muted">{item.industry}</div> : null}
                 </div>
                 <div className="ticker-card-meta">
@@ -263,6 +268,15 @@ function resolveDisplayPrice(entry: Record<string, unknown> | null | undefined):
     }
   }
   return null;
+}
+
+function resolveRankValue(entry: Record<string, unknown> | null | undefined): number | null {
+  const rsRank = toNullableNumber(entry?.rs_rank);
+  if (rsRank != null) {
+    return rsRank;
+  }
+  const score = toNullableNumber(entry?.score);
+  return score != null && score > 0 ? score : null;
 }
 
 function resolveDisplayChangePct(entry: Record<string, unknown> | null | undefined): number | null {

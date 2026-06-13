@@ -35,6 +35,26 @@ class WatchlistServiceTests(unittest.TestCase):
 
         os.utime(path, (timestamp, timestamp))
 
+    def _long_price_frame(self) -> pd.DataFrame:
+        index = pd.date_range(start="2024-01-02", periods=320, freq="B")
+        close_values: list[float] = []
+        for idx in range(len(index)):
+            if idx < 315:
+                close_values.append(80.0 + (idx * 0.35))
+            else:
+                close_values.extend([189.2, 189.8, 190.1, 189.9, 190.3])
+                break
+        return pd.DataFrame(
+            {
+                "Open": [value - 0.35 for value in close_values],
+                "High": [value + 0.85 for value in close_values],
+                "Low": [value - 0.95 for value in close_values],
+                "Close": close_values,
+                "Volume": [1_200_000.0 for _ in close_values],
+            },
+            index=index,
+        )
+
     def test_get_watchlist_detail_fails_open_when_universe_load_errors(self) -> None:
         with patch("src.webapp.services.watchlist_service.load_universe", side_effect=RuntimeError("nasdaq offline")), patch(
             "src.webapp.services.watchlist_service.load_etf_catalog",
@@ -42,6 +62,9 @@ class WatchlistServiceTests(unittest.TestCase):
         ), patch(
             "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
             return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.load_excluded_tickers",
+            return_value=set(),
         ):
             payload = self.service.get_watchlist_detail("weekly_htf_pullback_2026-05-31")
 
@@ -75,9 +98,10 @@ class WatchlistServiceTests(unittest.TestCase):
             modified_at=dt.datetime(2026, 6, 8, 0, 0, tzinfo=dt.timezone.utc),
         )
 
-        payload = self.service.get_scanner_board(
-            now=dt.datetime(2026, 6, 12, 20, 30, tzinfo=dt.timezone.utc)
-        )
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()):
+            payload = self.service.get_scanner_board(
+                now=dt.datetime(2026, 6, 12, 20, 30, tzinfo=dt.timezone.utc)
+            )
 
         self.assertEqual(payload["target_trading_date"], "2026-06-11")
         cards = {item["id"]: item for item in payload["cards"]}
@@ -109,9 +133,10 @@ class WatchlistServiceTests(unittest.TestCase):
             modified_at=dt.datetime(2026, 6, 8, 0, 0, tzinfo=dt.timezone.utc),
         )
 
-        payload = self.service.get_scanner_board(
-            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
-        )
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()):
+            payload = self.service.get_scanner_board(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+            )
 
         self.assertEqual(payload["target_trading_date"], "2026-06-12")
         cards = {item["id"]: item for item in payload["cards"]}
@@ -148,6 +173,57 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["data_source"], "internet")
         self.assertIn("market_extension", payload)
         self.assertIn("vcs", payload)
+
+    def test_get_watchlist_detail_filters_excluded_tickers(self) -> None:
+        watchlists_dir = Path(self.temp_dir.name) / "watchlists"
+        (watchlists_dir / "fearzone_2026-06-13.json").write_text(
+            '[{"ticker":"NVDA"},{"ticker":"TSLA"}]',
+            encoding="utf-8",
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value={"TSLA"}), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ):
+            payload = self.service.get_watchlist_detail("fearzone_2026-06-13")
+
+        self.assertEqual(payload["entry_count"], 1)
+        self.assertEqual(payload["entries"][0]["ticker"], "NVDA")
+
+    def test_get_scanner_board_filters_excluded_tickers_from_counts_and_previews(self) -> None:
+        self._write_watchlist(
+            "sepa_vcp_2026-06-12",
+            tickers=["NVDA", "TSLA"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 30, tzinfo=dt.timezone.utc),
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value={"TSLA"}):
+            payload = self.service.get_scanner_board(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+            )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["sepa_vcp"]["entry_count"], 1)
+        self.assertEqual(cards["sepa_vcp"]["preview_tickers"], ["NVDA"])
+
+    def test_get_scanner_board_marks_card_unavailable_when_all_results_excluded(self) -> None:
+        self._write_watchlist(
+            "sepa_vcp_2026-06-12",
+            tickers=["TSLA"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 30, tzinfo=dt.timezone.utc),
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value={"TSLA"}):
+            payload = self.service.get_scanner_board(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+            )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertFalse(cards["sepa_vcp"]["available"])
+        self.assertEqual(cards["sepa_vcp"]["entry_count"], 0)
 
     def test_get_chart_payload_coerces_decimal_db_values(self) -> None:
         frame = pd.DataFrame(
@@ -286,6 +362,38 @@ class WatchlistServiceTests(unittest.TestCase):
         assert latest is not None
         self.assertIn(latest["state"], {"warning", "extreme"})
         self.assertGreater(latest["extension_pct"], 11.0)
+
+    def test_get_chart_payload_includes_sepa_dashboard_snapshot(self) -> None:
+        ticker_frame = self._long_price_frame()
+        benchmark_frame = pd.DataFrame(
+            {
+                "Open": [100.0 + (idx * 0.05) for idx in range(len(ticker_frame.index))],
+                "High": [100.4 + (idx * 0.05) for idx in range(len(ticker_frame.index))],
+                "Low": [99.6 + (idx * 0.05) for idx in range(len(ticker_frame.index))],
+                "Close": [100.0 + (idx * 0.05) for idx in range(len(ticker_frame.index))],
+                "Volume": [2_000_000.0 for _ in range(len(ticker_frame.index))],
+            },
+            index=ticker_frame.index,
+        )
+
+        def fake_download(*, tickers: str, **_: object):
+            if tickers == "NVDA":
+                return ticker_frame.copy()
+            if tickers == "SPY":
+                return benchmark_frame.copy()
+            return pd.DataFrame()
+
+        with patch("src.webapp.services.watchlist_service.yf.download", side_effect=fake_download):
+            payload = self.service.get_chart_payload("NVDA", as_of_date=dt.date(2025, 3, 24))
+
+        self.assertIn("sepa_dashboard", payload)
+        self.assertIsNotNone(payload["sepa_dashboard"])
+        dashboard = payload["sepa_dashboard"]
+        assert dashboard is not None
+        self.assertEqual(dashboard["tpr_status"], "PASSED")
+        self.assertEqual(dashboard["buy_risk_status"], "Low Risk")
+        self.assertEqual(dashboard["pressure_status"], "Buying")
+        self.assertEqual(dashboard["recent_vcp_signal_date"], "2025-03-24")
 
     def test_get_chart_fundamentals_payload_includes_rating_bundle(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
