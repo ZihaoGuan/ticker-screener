@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 from src.market_data_access import resolve_database_url
 
+from .constants import RATING_STATUS_SCRAPE_FAILED
 from .models import FundamentalsSnapshot, RatingSnapshot, SectorMetricBaseline
 
 
@@ -268,15 +269,16 @@ class RatingsRepository:
             return []
         normalized_sectors = _normalize_text_values(sectors)
         sql = """
-            SELECT ticker, as_of_date, sector, industry, source, source_url, parse_status, parse_error,
-                   scraped_at, updated_at, market_cap, enterprise_value, forward_pe, peg_ratio_5y,
-                   price_to_sales, price_to_book, price_to_fcf, profit_margin_pct, operating_margin_pct,
-                   gross_margin_pct, roa_pct, roe_pct, eps_this_y_pct, eps_next_y_pct, eps_next_5y_pct,
-                   sales_qq_pct, eps_qq_pct, perf_month_pct, perf_quarter_pct, perf_half_pct, perf_year_pct,
-                   perf_ytd_pct, volatility_week_pct, volatility_month_pct
+            SELECT fs.ticker, fs.as_of_date, COALESCE(fs.sector, tm.sector) AS sector,
+                   COALESCE(fs.industry, tm.industry) AS industry, fs.source, fs.source_url, fs.parse_status, fs.parse_error,
+                   fs.scraped_at, fs.updated_at, fs.market_cap, fs.enterprise_value, fs.forward_pe, fs.peg_ratio_5y,
+                   fs.price_to_sales, fs.price_to_book, fs.price_to_fcf, fs.profit_margin_pct, fs.operating_margin_pct,
+                   fs.gross_margin_pct, fs.roa_pct, fs.roe_pct, fs.eps_this_y_pct, fs.eps_next_y_pct, fs.eps_next_5y_pct,
+                   fs.sales_qq_pct, fs.eps_qq_pct, fs.perf_month_pct, fs.perf_quarter_pct, fs.perf_half_pct, fs.perf_year_pct,
+                   fs.perf_ytd_pct, fs.volatility_week_pct, fs.volatility_month_pct
             FROM ticker_fundamentals_snapshots fs
             LEFT JOIN ticker_metadata tm ON tm.ticker = fs.ticker
-            WHERE as_of_date = %s
+            WHERE fs.as_of_date = %s
         """
         params: list[Any] = [as_of_date]
         if normalized_sectors:
@@ -285,7 +287,7 @@ class RatingsRepository:
             """
             params.append(normalized_sectors)
         sql += """
-            ORDER BY ticker ASC
+            ORDER BY fs.ticker ASC
         """
         with connection:
             with connection.cursor() as cursor:
@@ -512,6 +514,35 @@ class RatingsRepository:
         for ticker, as_of_date in rows:
             if isinstance(as_of_date, dt.date):
                 result[str(ticker).upper()] = as_of_date
+        return result
+
+    def load_latest_fundamentals_statuses(self, tickers: Iterable[str]) -> dict[str, dict[str, Any]]:
+        normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
+        if not normalized:
+            return {}
+        connection = self._connect()
+        if connection is None:
+            return {}
+        sql = """
+            SELECT DISTINCT ON (ticker) ticker, as_of_date, parse_status
+            FROM ticker_fundamentals_snapshots
+            WHERE ticker = ANY(%s)
+            ORDER BY ticker, as_of_date DESC, updated_at DESC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized,))
+                rows = cursor.fetchall()
+        result: dict[str, dict[str, Any]] = {}
+        for ticker, as_of_date, parse_status in rows:
+            ticker_key = str(ticker).upper()
+            if not isinstance(as_of_date, dt.date):
+                continue
+            status_value = str(parse_status or "").strip() or RATING_STATUS_SCRAPE_FAILED
+            result[ticker_key] = {
+                "as_of_date": as_of_date,
+                "parse_status": status_value,
+            }
         return result
 
 

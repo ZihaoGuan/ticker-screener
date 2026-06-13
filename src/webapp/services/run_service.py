@@ -171,6 +171,19 @@ class RunService:
         placeholder="5",
         help_text="Longer sleep between Finviz scrape batches.",
     )
+    _retry_failed_from_manifest_field = RunField(
+        "retry_failed_from_manifest",
+        "Retry Manifest",
+        "boolean",
+        help_text="Retry only failed or blocked tickers from the Finviz manifest for this as-of date.",
+    )
+    _circuit_breaker_consecutive_503_field = RunField(
+        "circuit_breaker_consecutive_503",
+        "503 Breaker",
+        "number",
+        placeholder="25",
+        help_text="Stop early after this many consecutive HTTP 503 scrape failures. Set 0 to disable.",
+    )
     _min_sector_peers_field = RunField(
         "min_sector_peers",
         "Min Sector Peers",
@@ -300,6 +313,8 @@ class RunService:
                 _batch_size_before_rest_field,
                 _rest_seconds_field,
                 _overwrite_policy_field,
+                _retry_failed_from_manifest_field,
+                _circuit_breaker_consecutive_503_field,
             ),
         ),
         "build_sector_rating_baselines": RunAction(
@@ -345,6 +360,8 @@ class RunService:
                 _batch_size_before_rest_field,
                 _rest_seconds_field,
                 _overwrite_policy_field,
+                _retry_failed_from_manifest_field,
+                _circuit_breaker_consecutive_503_field,
                 _min_sector_peers_field,
                 _min_category_metrics_field,
             ),
@@ -1449,6 +1466,8 @@ class RunService:
             command.extend(["--chunk-size", str(normalized_options["chunk_size"])])
         if normalized_options.get("resume_from"):
             command.extend(["--resume-from", str(normalized_options["resume_from"])])
+        if normalized_options.get("retry_failed_from_manifest"):
+            command.append("--retry-failed-from-manifest")
         if action_id == "sync_postgres_market_data" and normalized_options.get("include_excluded_tickers"):
             command.append("--include-excluded-tickers")
         if normalized_options.get("strategy_ids_json"):
@@ -1469,6 +1488,8 @@ class RunService:
             command.extend(["--max-parallel", str(normalized_options["max_parallel"])])
         if normalized_options.get("batch_size_before_rest") is not None:
             command.extend(["--batch-size-before-rest", str(normalized_options["batch_size_before_rest"])])
+        if normalized_options.get("circuit_breaker_consecutive_503") is not None:
+            command.extend(["--circuit-breaker-consecutive-503", str(normalized_options["circuit_breaker_consecutive_503"])])
         if normalized_options.get("entry_signal_threshold") is not None:
             command.extend(["--entry-signal-threshold", str(normalized_options["entry_signal_threshold"])])
         if normalized_options.get("min_sector_peers") is not None:
@@ -1564,7 +1585,7 @@ class RunService:
                 normalized[key] = float(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{key.replace('_', ' ').title()} must be a number.") from exc
-        for key in ("batch_size_before_rest", "min_sector_peers"):
+        for key in ("batch_size_before_rest", "min_sector_peers", "circuit_breaker_consecutive_503"):
             value = options.get(key)
             if value in (None, ""):
                 continue
@@ -1577,6 +1598,8 @@ class RunService:
 
         if "include_excluded_tickers" in options:
             normalized["include_excluded_tickers"] = bool(options.get("include_excluded_tickers"))
+        if "retry_failed_from_manifest" in options:
+            normalized["retry_failed_from_manifest"] = bool(options.get("retry_failed_from_manifest"))
 
         for key in (
             "include_sectors",

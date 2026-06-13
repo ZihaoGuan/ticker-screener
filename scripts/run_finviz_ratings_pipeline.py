@@ -26,6 +26,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size-before-rest", type=int, default=500)
     parser.add_argument("--rest-seconds", type=float, default=5.0)
     parser.add_argument("--overwrite-policy", default="skip-existing", choices=("latest-date", "replace-date", "skip-existing"))
+    parser.add_argument("--retry-failed-from-manifest", action="store_true")
+    parser.add_argument("--circuit-breaker-consecutive-503", type=int, default=25)
     parser.add_argument("--min-sector-peers", type=int, default=20)
     parser.add_argument("--min-category-metrics", type=float, default=1.0)
     parser.add_argument("--database-url", default="")
@@ -75,6 +77,8 @@ def main() -> int:
         sync_command.extend(args.include_sectors)
     if args.resume_from:
         sync_command.extend(["--resume-from", args.resume_from])
+    if args.retry_failed_from_manifest:
+        sync_command.append("--retry-failed-from-manifest")
     sync_command.extend(
         [
             "--delay-min-seconds",
@@ -87,6 +91,8 @@ def main() -> int:
             str(args.rest_seconds),
             "--overwrite-policy",
             str(args.overwrite_policy),
+            "--circuit-breaker-consecutive-503",
+            str(args.circuit_breaker_consecutive_503),
         ]
     )
     pipeline_started = time.monotonic()

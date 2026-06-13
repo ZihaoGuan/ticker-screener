@@ -338,6 +338,8 @@ class RunServiceTests(unittest.TestCase):
                 "delay_max_seconds": "7",
                 "batch_size_before_rest": "80",
                 "rest_seconds": "50",
+                "retry_failed_from_manifest": True,
+                "circuit_breaker_consecutive_503": "12",
                 "min_sector_peers": "25",
             },
         )
@@ -359,6 +361,9 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("80", command)
         self.assertIn("--rest-seconds", command)
         self.assertIn("50.0", command)
+        self.assertIn("--retry-failed-from-manifest", command)
+        self.assertIn("--circuit-breaker-consecutive-503", command)
+        self.assertIn("12", command)
         self.assertIn("--min-sector-peers", command)
         self.assertIn("25", command)
 

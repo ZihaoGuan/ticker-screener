@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import datetime as dt
 from argparse import Namespace
+import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -81,6 +84,228 @@ class RatingPipelineScriptTests(unittest.TestCase):
             )
 
         self.assertEqual([item.symbol for item in universe], ["AAPL"])
+
+    def test_sync_finviz_fundamentals_does_not_skip_existing_failed_snapshot(self) -> None:
+        import scripts.sync_finviz_fundamentals as script
+
+        repository = MagicMock()
+        repository.load_latest_fundamentals_statuses.return_value = {
+            "AAPL": {"as_of_date": dt.date(2026, 6, 13), "parse_status": "scrape_failed"}
+        }
+        snapshot = FundamentalsSnapshot(
+            ticker="AAPL",
+            as_of_date=dt.date(2026, 6, 13),
+            sector="Technology",
+            industry="Consumer Electronics",
+            parse_status="ok",
+        )
+        with patch.object(
+            script,
+            "parse_args",
+            return_value=Namespace(
+                config="",
+                as_of_date="2026-06-13",
+                limit=None,
+                tickers=["AAPL"],
+                resume_from="",
+                delay_min_seconds=0.0,
+                delay_max_seconds=0.0,
+                batch_size_before_rest=500,
+                rest_seconds=0.0,
+                overwrite_policy="skip-existing",
+                include_sectors=None,
+                database_url="postgres://example",
+                manifest_path="",
+                retry_failed_from_manifest=False,
+                circuit_breaker_consecutive_503=25,
+            ),
+        ), patch.object(script, "load_webapp_config", return_value=Namespace(database_url="postgres://example")), patch.object(
+            script, "RatingsRepository", return_value=repository
+        ), patch.object(
+            script,
+            "_load_target_universe",
+            return_value=[script.UniverseTicker(symbol="AAPL", sector="Technology", industry="Consumer Electronics")],
+        ), patch.object(
+            script,
+            "fetch_finviz_api_snapshot",
+            return_value=snapshot,
+        ), patch.object(script, "snapshot_needs_fallback", return_value=False), patch.object(
+            script, "_write_manifest"
+        ), patch.object(script, "_sleep_with_jitter"):
+            result = script.main()
+
+        self.assertEqual(result, 0)
+        repository.upsert_fundamentals_snapshots.assert_called_once()
+
+    def test_sync_finviz_fundamentals_skips_existing_ok_snapshot(self) -> None:
+        import scripts.sync_finviz_fundamentals as script
+
+        repository = MagicMock()
+        repository.load_latest_fundamentals_statuses.return_value = {
+            "AAPL": {"as_of_date": dt.date(2026, 6, 13), "parse_status": "ok"}
+        }
+        with patch.object(
+            script,
+            "parse_args",
+            return_value=Namespace(
+                config="",
+                as_of_date="2026-06-13",
+                limit=None,
+                tickers=["AAPL"],
+                resume_from="",
+                delay_min_seconds=0.0,
+                delay_max_seconds=0.0,
+                batch_size_before_rest=500,
+                rest_seconds=0.0,
+                overwrite_policy="skip-existing",
+                include_sectors=None,
+                database_url="postgres://example",
+                manifest_path="",
+                retry_failed_from_manifest=False,
+                circuit_breaker_consecutive_503=25,
+            ),
+        ), patch.object(script, "load_webapp_config", return_value=Namespace(database_url="postgres://example")), patch.object(
+            script, "RatingsRepository", return_value=repository
+        ), patch.object(
+            script,
+            "_load_target_universe",
+            return_value=[script.UniverseTicker(symbol="AAPL", sector="Technology", industry="Consumer Electronics")],
+        ), patch.object(script, "_write_manifest"):
+            result = script.main()
+
+        self.assertEqual(result, 0)
+        repository.upsert_fundamentals_snapshots.assert_not_called()
+
+    def test_sync_finviz_fundamentals_retry_failed_from_manifest_uses_failed_and_blocked_tickers(self) -> None:
+        import scripts.sync_finviz_fundamentals as script
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "failed_tickers": [{"ticker": "AAPL", "reason": "Unexpected HTTP status: 503"}],
+                        "blocked_tickers": ["MSFT"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            repository = MagicMock()
+            repository.load_latest_fundamentals_statuses.return_value = {}
+            snapshot = FundamentalsSnapshot(
+                ticker="AAPL",
+                as_of_date=dt.date(2026, 6, 13),
+                sector="Technology",
+                industry="Consumer Electronics",
+                parse_status="ok",
+            )
+            snapshot_msft = FundamentalsSnapshot(
+                ticker="MSFT",
+                as_of_date=dt.date(2026, 6, 13),
+                sector="Technology",
+                industry="Software",
+                parse_status="ok",
+            )
+            snapshots = {"AAPL": snapshot, "MSFT": snapshot_msft}
+
+            with patch.object(
+                script,
+                "parse_args",
+                return_value=Namespace(
+                    config="",
+                    as_of_date="2026-06-13",
+                    limit=None,
+                    tickers=None,
+                    resume_from="",
+                    delay_min_seconds=0.0,
+                    delay_max_seconds=0.0,
+                    batch_size_before_rest=500,
+                    rest_seconds=0.0,
+                    overwrite_policy="skip-existing",
+                    include_sectors=None,
+                    database_url="postgres://example",
+                    manifest_path=str(manifest_path),
+                    retry_failed_from_manifest=True,
+                    circuit_breaker_consecutive_503=25,
+                ),
+            ), patch.object(script, "load_webapp_config", return_value=Namespace(database_url="postgres://example")), patch.object(
+                script, "RatingsRepository", return_value=repository
+            ), patch.object(
+                script,
+                "fetch_finviz_api_snapshot",
+                side_effect=lambda ticker, **kwargs: snapshots[ticker],
+            ), patch.object(script, "snapshot_needs_fallback", return_value=False), patch.object(
+                script, "_write_manifest"
+            ), patch.object(script, "_sleep_with_jitter"):
+                result = script.main()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(repository.upsert_fundamentals_snapshots.call_count, 2)
+
+    def test_sync_finviz_fundamentals_stops_after_consecutive_503_threshold(self) -> None:
+        import scripts.sync_finviz_fundamentals as script
+
+        repository = MagicMock()
+        repository.load_latest_fundamentals_statuses.return_value = {}
+        fail_a = FundamentalsSnapshot(
+            ticker="AAPL",
+            as_of_date=dt.date(2026, 6, 13),
+            sector=None,
+            industry=None,
+            parse_status="scrape_failed",
+            parse_error="Unexpected HTTP status: 503",
+        )
+        fail_b = FundamentalsSnapshot(
+            ticker="MSFT",
+            as_of_date=dt.date(2026, 6, 13),
+            sector=None,
+            industry=None,
+            parse_status="scrape_failed",
+            parse_error="Unexpected HTTP status: 503",
+        )
+        later_ok = FundamentalsSnapshot(
+            ticker="NVDA",
+            as_of_date=dt.date(2026, 6, 13),
+            sector="Technology",
+            industry="Semiconductors",
+            parse_status="ok",
+        )
+        snapshots = {"AAPL": fail_a, "MSFT": fail_b, "NVDA": later_ok}
+
+        with patch.object(
+            script,
+            "parse_args",
+            return_value=Namespace(
+                config="",
+                as_of_date="2026-06-13",
+                limit=None,
+                tickers=["AAPL", "MSFT", "NVDA"],
+                resume_from="",
+                delay_min_seconds=0.0,
+                delay_max_seconds=0.0,
+                batch_size_before_rest=500,
+                rest_seconds=0.0,
+                overwrite_policy="replace-date",
+                include_sectors=None,
+                database_url="postgres://example",
+                manifest_path="",
+                retry_failed_from_manifest=False,
+                circuit_breaker_consecutive_503=2,
+            ),
+        ), patch.object(script, "load_webapp_config", return_value=Namespace(database_url="postgres://example")), patch.object(
+            script, "RatingsRepository", return_value=repository
+        ), patch.object(
+            script,
+            "fetch_finviz_api_snapshot",
+            side_effect=lambda ticker, **kwargs: snapshots[ticker],
+        ), patch.object(script, "snapshot_needs_fallback", return_value=False), patch.object(
+            script, "_write_manifest"
+        ) as write_manifest, patch.object(script, "_sleep_with_jitter"):
+            result = script.main()
+
+        self.assertEqual(result, 1)
+        self.assertEqual(repository.upsert_fundamentals_snapshots.call_count, 2)
+        self.assertTrue(write_manifest.called)
 
 
 if __name__ == "__main__":
