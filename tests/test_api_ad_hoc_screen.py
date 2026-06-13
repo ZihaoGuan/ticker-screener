@@ -146,6 +146,34 @@ class _FakeWatchlistService:
     def list_recent(self):
         return []
 
+    def get_scanner_board(self):
+        return {
+            "generated_at": "2026-06-13T03:00:00Z",
+            "reference_now_new_york": "2026-06-12T23:00:00-04:00",
+            "target_trading_date": "2026-06-12",
+            "cutoff_time_label": "20:30 America/New_York",
+            "latest_update_at": "2026-06-13T01:00:00+00:00",
+            "latest_signal_date": "2026-06-12",
+            "cards": [
+                {
+                    "id": "weekly_rs",
+                    "strategy_id": "weekly_rs",
+                    "label": "Weekly RS New High",
+                    "description": "Leaders",
+                    "timeframe": "Weekly",
+                    "accent": "violet",
+                    "available": True,
+                    "stem": "weekly_rs_new_high_2026-06-12",
+                    "group_label": "Weekly RS",
+                    "captured_at": "2026-06-13T01:00:00+00:00",
+                    "sort_date": "2026-06-12",
+                    "entry_count": 6,
+                    "preview_tickers": ["NVDA", "MSFT"],
+                    "list_href": "/watchlists?stem=weekly_rs_new_high_2026-06-12",
+                }
+            ],
+        }
+
     def get_watchlist_detail(self, stem: str):
         return {"stem": stem, "entry_count": 0, "entries": []}
 
@@ -503,6 +531,16 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["ticker"], "NVDA")
         self.assertEqual(payload["requested_as_of_date"], "2026-05-31")
         self.assertEqual(payload["resolved_as_of_date"], "2026-05-30")
+
+    def test_get_scanner_board(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: premium_principal()
+
+        response = self.client.get("/api/scanner-board")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["target_trading_date"], "2026-06-12")
+        self.assertEqual(payload["cards"][0]["id"], "weekly_rs")
+        self.assertEqual(payload["cards"][0]["entry_count"], 6)
 
     def test_get_chart_fundamentals(self) -> None:
         response = self.client.get("/api/chart-fundamentals/nvda?earningsLimit=1")

@@ -554,6 +554,14 @@ def watchlists_data(
     return JSONResponse({"watchlists": service.list_recent()})
 
 
+@router.get("/scanner-board", response_class=JSONResponse)
+def scanner_board_data(
+    service: WatchlistService = Depends(get_watchlist_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    return JSONResponse(service.get_scanner_board())
+
+
 @router.get("/watchlists/weekly", response_class=JSONResponse)
 def weekly_watchlist_data(
     stem: str | None = Query(default=None),

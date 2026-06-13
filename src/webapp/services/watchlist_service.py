@@ -9,6 +9,7 @@ import re
 import subprocess
 from typing import Any
 import logging
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -55,6 +56,43 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_playwright.mjs"
 _YAHOO_OPTIONS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_options_playwright.mjs"
 _INSIDER_CACHE_TTL_HOURS = 12
+_NEW_YORK_TZ = ZoneInfo("America/New_York")
+_SCANNER_BOARD_CUTOFF_HOUR = 20
+_SCANNER_BOARD_CUTOFF_MINUTE = 30
+_SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
+    {
+        "id": "weekly_rs",
+        "strategy_id": "weekly_rs",
+        "label": "Weekly RS New High",
+        "description": "Relative-strength leaders holding leadership while price still has room to catch up.",
+        "timeframe": "Weekly",
+        "accent": "violet",
+    },
+    {
+        "id": "sean_gap_up",
+        "strategy_id": "sean_peg",
+        "label": "Sean Gap Up",
+        "description": "Post-earnings gap leaders with HVE or HV1 volume, tight structure, and continuation context.",
+        "timeframe": "Daily",
+        "accent": "amber",
+    },
+    {
+        "id": "fearzone",
+        "strategy_id": "fearzone",
+        "label": "Fearzone",
+        "description": "High-velocity dislocation setups where panic can create asymmetric snapback entries.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+    },
+    {
+        "id": "td9_bullish",
+        "strategy_id": "td9_bullish",
+        "label": "TD9 Bullish",
+        "description": "Bullish TD Sequential exhaustion names where downside pressure may be finishing.",
+        "timeframe": "Daily",
+        "accent": "lime",
+    },
+)
 
 
 class WatchlistService:
@@ -76,6 +114,60 @@ class WatchlistService:
 
     def list_recent(self) -> list[dict[str, Any]]:
         return self.repository.list_recent_watchlists(limit=50)
+
+    def get_scanner_board(self, *, now: dt.datetime | None = None) -> dict[str, Any]:
+        reference_now = _normalize_scanner_now(now)
+        target_trading_date = _latest_completed_trading_day(reference_now)
+        recent_watchlists = self.repository.list_recent_watchlists(limit=400)
+        cards: list[dict[str, Any]] = []
+
+        for config in _SCANNER_BOARD_CONFIG:
+            selected_meta = _select_scanner_board_watchlist(
+                recent_watchlists,
+                strategy_id=config["strategy_id"],
+                target_date=target_trading_date,
+            )
+            entries = self.repository.load_watchlist(str(selected_meta.get("stem") or "")) if selected_meta else []
+            preview_tickers = [
+                str(item.get("ticker") or "").strip().upper()
+                for item in entries
+                if isinstance(item, dict) and str(item.get("ticker") or "").strip()
+            ][:6]
+            cards.append(
+                {
+                    "id": config["id"],
+                    "strategy_id": config["strategy_id"],
+                    "label": config["label"],
+                    "description": config["description"],
+                    "timeframe": config["timeframe"],
+                    "accent": config["accent"],
+                    "available": selected_meta is not None,
+                    "stem": str(selected_meta.get("stem") or "") if selected_meta else "",
+                    "group_label": str(selected_meta.get("group_label") or "") if selected_meta else "",
+                    "captured_at": str(selected_meta.get("captured_at") or "") if selected_meta else "",
+                    "sort_date": str(selected_meta.get("sort_date") or "") if selected_meta else "",
+                    "entry_count": len(entries),
+                    "preview_tickers": preview_tickers,
+                    "list_href": (
+                        f"/watchlists?stem={selected_meta.get('stem')}"
+                        if selected_meta and selected_meta.get("stem")
+                        else None
+                    ),
+                }
+            )
+
+        available_cards = [item for item in cards if item["available"]]
+        latest_update_at = max((str(item["captured_at"] or "") for item in available_cards), default="")
+        latest_signal_date = max((str(item["sort_date"] or "") for item in available_cards), default="")
+        return {
+            "generated_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "reference_now_new_york": reference_now.astimezone(_NEW_YORK_TZ).isoformat(),
+            "target_trading_date": target_trading_date.isoformat(),
+            "cutoff_time_label": "20:30 America/New_York",
+            "latest_update_at": latest_update_at,
+            "latest_signal_date": latest_signal_date,
+            "cards": cards,
+        }
 
     def get_weekly_watchlist_board(self, stem: str | None = None) -> dict[str, Any]:
         weekly_files = [item for item in self.repository.list_recent_watchlists(limit=200) if item.get("group_key") == "weekly_rs"]
@@ -1052,6 +1144,84 @@ def _build_weekly_signal_badges(entry: dict[str, Any]) -> list[str]:
             pass
 
     return badges
+
+
+def _normalize_scanner_now(now: dt.datetime | None) -> dt.datetime:
+    if now is None:
+        return dt.datetime.now(dt.timezone.utc)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=dt.timezone.utc)
+    return now
+
+
+def _previous_weekday(value: dt.date) -> dt.date:
+    current = value
+    while current.weekday() >= 5:
+        current -= dt.timedelta(days=1)
+    return current
+
+
+def _latest_completed_trading_day(now: dt.datetime) -> dt.date:
+    local_now = now.astimezone(_NEW_YORK_TZ)
+    local_date = local_now.date()
+    weekday = local_date.weekday()
+    if weekday >= 5:
+        return _previous_weekday(local_date)
+    if local_now.time() >= dt.time(hour=_SCANNER_BOARD_CUTOFF_HOUR, minute=_SCANNER_BOARD_CUTOFF_MINUTE):
+        return local_date
+    return _previous_weekday(local_date - dt.timedelta(days=1))
+
+
+def _select_scanner_board_watchlist(
+    watchlists: list[dict[str, Any]],
+    *,
+    strategy_id: str,
+    target_date: dt.date,
+) -> dict[str, Any] | None:
+    eligible: list[dict[str, Any]] = []
+    fallback: list[dict[str, Any]] = []
+    for item in watchlists:
+        if _strategy_id_for_watchlist_meta(item) != strategy_id:
+            continue
+        fallback.append(item)
+        sort_date_raw = str(item.get("sort_date") or "").strip()
+        if not sort_date_raw:
+            continue
+        try:
+            sort_date = dt.date.fromisoformat(sort_date_raw)
+        except ValueError:
+            continue
+        if sort_date <= target_date:
+            eligible.append(item)
+
+    candidates = eligible if eligible else fallback
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda item: (
+            str(item.get("sort_date") or ""),
+            str(item.get("captured_at") or ""),
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
+def _strategy_id_for_watchlist_meta(item: dict[str, Any]) -> str:
+    stem = str(item.get("stem") or "").strip()
+    if not stem:
+        return ""
+    if stem.startswith("weekly_rs_new_high_"):
+        return "weekly_rs"
+    if stem.startswith("fearzone_zeiierman_"):
+        return "fearzone_zeiierman"
+    return _stem_strategy_id(stem)
+
+
+def _stem_strategy_id(stem: str) -> str:
+    from ...artifact_paths import strategy_id_from_legacy_stem
+
+    return strategy_id_from_legacy_stem(stem)
 
 
 def _normalize_html_text(value: str) -> str:

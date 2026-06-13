@@ -15,6 +15,7 @@ import { PortfolioPage } from "./pages/PortfolioPage";
 import { ChartsPage } from "./pages/ChartsPage";
 import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
+import { ScannerBoardPage } from "./pages/ScannerBoardPage";
 import { WarmupPage } from "./pages/WarmupPage";
 import { WeeklyWatchlistPage } from "./pages/WeeklyWatchlistPage";
 import { WatchlistsPage } from "./pages/WatchlistsPage";
@@ -35,6 +36,14 @@ export default function App() {
         />
         <Route path="/charts" element={<ChartsPage />} />
         <Route path="/earnings" element={<EarningsPage />} />
+        <Route
+          path="/scanner"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <ScannerBoardPage />
+            </RoleRoute>
+          }
+        />
         <Route
           path="/screeners"
           element={

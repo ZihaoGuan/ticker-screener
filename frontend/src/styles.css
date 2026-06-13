@@ -2758,6 +2758,221 @@ a {
   text-transform: uppercase;
 }
 
+.scanner-board {
+  gap: 20px;
+}
+
+.scanner-board-hero {
+  position: relative;
+  overflow: hidden;
+}
+
+.scanner-board-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top right, rgba(251, 191, 36, 0.12), transparent 34%),
+    radial-gradient(circle at bottom left, rgba(96, 165, 250, 0.1), transparent 28%);
+  pointer-events: none;
+}
+
+.scanner-board-metrics {
+  position: relative;
+  z-index: 1;
+}
+
+.scanner-board-console {
+  display: grid;
+  gap: 14px;
+}
+
+.scanner-board-console-row {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.scanner-board-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.scanner-idea-card {
+  display: grid;
+  gap: 18px;
+  min-height: 100%;
+  padding: 24px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(24, 24, 27, 0.96), rgba(10, 10, 13, 0.96)),
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 30%);
+  color: inherit;
+  text-decoration: none;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.28);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.scanner-idea-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(245, 158, 11, 0.45);
+  box-shadow: 0 24px 52px rgba(0, 0, 0, 0.34);
+}
+
+.scanner-idea-card.is-disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.scanner-idea-card.is-disabled:hover {
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.28);
+}
+
+.scanner-card-topline,
+.scanner-card-footer,
+.scanner-card-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.scanner-card-topline {
+  justify-content: space-between;
+}
+
+.scanner-card-chip,
+.scanner-card-count,
+.scanner-card-pill {
+  border-radius: 999px;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.scanner-card-chip {
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.scanner-card-count {
+  padding: 6px 10px;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+}
+
+.scanner-card-art {
+  min-height: 150px;
+  padding: 10px 0 4px;
+}
+
+.scanner-card-art svg {
+  width: 100%;
+  height: auto;
+}
+
+.scanner-card-gridline {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 4;
+  stroke-dasharray: 6 10;
+}
+
+.scanner-card-trace {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.scanner-card-trace.accent-amber,
+.scanner-card-chip.accent-amber {
+  stroke: #f6c28b;
+  color: #f6c28b;
+}
+
+.scanner-card-trace.accent-violet,
+.scanner-card-chip.accent-violet {
+  stroke: #b4b4ff;
+  color: #b4b4ff;
+}
+
+.scanner-card-trace.accent-cyan,
+.scanner-card-chip.accent-cyan {
+  stroke: #8ecae6;
+  color: #8ecae6;
+}
+
+.scanner-card-trace.accent-lime,
+.scanner-card-chip.accent-lime {
+  stroke: #d6d84f;
+  color: #d6d84f;
+}
+
+.scanner-card-body {
+  display: grid;
+  gap: 10px;
+}
+
+.scanner-card-body h2 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+}
+
+.scanner-card-description {
+  margin: 0;
+  color: #c7c7d2;
+  line-height: 1.55;
+}
+
+.scanner-card-pill {
+  padding: 5px 10px;
+  color: #f4f4f5;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.scanner-card-pill.muted {
+  color: #a1a1aa;
+}
+
+.scanner-card-footer {
+  margin-top: auto;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.scanner-card-footer > div {
+  display: grid;
+  gap: 4px;
+}
+
+.scanner-card-footer strong {
+  font-size: 13px;
+}
+
+.scanner-card-cta {
+  color: #f7b35f;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 1400px) {
   .earnings-board-hero {
     grid-template-columns: 1fr;
@@ -2770,6 +2985,10 @@ a {
 
 @media (max-width: 1080px) {
   .earnings-filter-console-row {
+    grid-template-columns: 1fr;
+  }
+
+  .scanner-board-console-row {
     grid-template-columns: 1fr;
   }
 
@@ -2826,5 +3045,13 @@ a {
 
   .earnings-command-grid {
     grid-template-columns: 1fr;
+  }
+
+  .scanner-idea-card {
+    padding: 18px;
+  }
+
+  .scanner-card-body h2 {
+    font-size: 26px;
   }
 }

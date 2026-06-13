@@ -25,6 +25,16 @@ class WatchlistServiceTests(unittest.TestCase):
         )
         self.service = WatchlistService(artifacts_dir=artifacts_dir)
 
+    def _write_watchlist(self, stem: str, *, tickers: list[str], modified_at: dt.datetime) -> None:
+        path = Path(self.temp_dir.name) / "watchlists" / f"{stem}.json"
+        payload = [{"ticker": ticker} for ticker in tickers]
+        path.write_text(str(payload).replace("'", '"'), encoding="utf-8")
+        timestamp = modified_at.timestamp()
+        path.touch()
+        import os
+
+        os.utime(path, (timestamp, timestamp))
+
     def test_get_watchlist_detail_fails_open_when_universe_load_errors(self) -> None:
         with patch("src.webapp.services.watchlist_service.load_universe", side_effect=RuntimeError("nasdaq offline")), patch(
             "src.webapp.services.watchlist_service.load_etf_catalog",
@@ -37,6 +47,78 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["entry_count"], 1)
         self.assertEqual(payload["entries"][0]["ticker"], "NVDA")
+
+    def test_get_scanner_board_uses_previous_trading_day_before_new_york_cutoff(self) -> None:
+        self._write_watchlist(
+            "sean_peg_earnings_gap_2026-06-11",
+            tickers=["APP", "NVDA"],
+            modified_at=dt.datetime(2026, 6, 12, 0, 30, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "sean_peg_earnings_gap_2026-06-12",
+            tickers=["PLTR"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 30, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "fearzone_2026-06-11",
+            tickers=["TSLA"],
+            modified_at=dt.datetime(2026, 6, 12, 1, 0, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "td9_bullish_2026-06-11",
+            tickers=["SHOP"],
+            modified_at=dt.datetime(2026, 6, 12, 1, 5, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "weekly_rs_new_high_2026-06-06",
+            tickers=["MSFT", "META"],
+            modified_at=dt.datetime(2026, 6, 8, 0, 0, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 12, 20, 30, tzinfo=dt.timezone.utc)
+        )
+
+        self.assertEqual(payload["target_trading_date"], "2026-06-11")
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-11")
+        self.assertEqual(cards["sean_gap_up"]["entry_count"], 2)
+        self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-11")
+        self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-11")
+        self.assertEqual(cards["weekly_rs"]["stem"], "weekly_rs_new_high_2026-06-06")
+
+    def test_get_scanner_board_uses_same_day_after_new_york_cutoff(self) -> None:
+        self._write_watchlist(
+            "sean_peg_earnings_gap_2026-06-12",
+            tickers=["PLTR"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 30, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "fearzone_2026-06-12",
+            tickers=["TSLA", "HOOD"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "td9_bullish_2026-06-12",
+            tickers=["SHOP"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 45, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "weekly_rs_new_high_2026-06-06",
+            tickers=["MSFT"],
+            modified_at=dt.datetime(2026, 6, 8, 0, 0, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        self.assertEqual(payload["target_trading_date"], "2026-06-12")
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-12")
+        self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-12")
+        self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-12")
+        self.assertEqual(cards["fearzone"]["preview_tickers"], ["TSLA", "HOOD"])
 
     def test_get_chart_payload_snaps_to_latest_available_trading_day(self) -> None:
         frame = pd.DataFrame(

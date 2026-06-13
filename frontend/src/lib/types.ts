@@ -105,6 +105,33 @@ export type WatchlistFile = {
   sort_date?: string | null;
 };
 
+export type ScannerBoardCard = {
+  id: string;
+  strategy_id: string;
+  label: string;
+  description: string;
+  timeframe: string;
+  accent: "amber" | "cyan" | "lime" | "violet" | string;
+  available: boolean;
+  stem: string;
+  group_label: string;
+  captured_at: string;
+  sort_date: string;
+  entry_count: number;
+  preview_tickers: string[];
+  list_href?: string | null;
+};
+
+export type ScannerBoardResponse = {
+  generated_at: string;
+  reference_now_new_york: string;
+  target_trading_date: string;
+  cutoff_time_label: string;
+  latest_update_at: string;
+  latest_signal_date: string;
+  cards: ScannerBoardCard[];
+};
+
 export type WatchlistTicker = {
   ticker: string;
   company?: string;
