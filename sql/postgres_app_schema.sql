@@ -169,6 +169,18 @@ CREATE INDEX IF NOT EXISTS idx_job_runs_job_type_started_at
 CREATE INDEX IF NOT EXISTS idx_job_runs_parent_started_at
   ON job_runs(parent_job_run_id, started_at DESC);
 
+CREATE TABLE IF NOT EXISTS remote_workers (
+  worker_name TEXT PRIMARY KEY,
+  current_job_run_id BIGINT REFERENCES job_runs(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'idle',
+  last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_remote_workers_last_heartbeat
+  ON remote_workers(last_heartbeat_at DESC);
+
 CREATE TABLE IF NOT EXISTS screen_runs (
   id BIGSERIAL PRIMARY KEY,
   strategy_id TEXT NOT NULL,

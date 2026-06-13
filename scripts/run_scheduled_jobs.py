@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.webapp.services.run_service import RunService
 from src.webapp.services.scheduled_job_service import ScheduledJobService
+from src.webapp.config import load_webapp_config
 
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
@@ -138,9 +139,15 @@ def _resolve_template_value(value: object, *, local_now: dt.datetime) -> object:
 
 
 def main() -> int:
-    run_service = RunService(project_root=PROJECT_ROOT)
+    run_service = RunService(project_root=PROJECT_ROOT, database_url=load_webapp_config().database_url)
     schedule_service = ScheduledJobService(project_root=PROJECT_ROOT, run_service=run_service)
     max_parallel_jobs = schedule_service.get_max_parallel_jobs()
+    recovery = run_service.recover_remote_jobs(max_local_fallbacks=max_parallel_jobs)
+    if recovery["requeued"] or recovery["local_fallback_started"]:
+        print(
+            f"remote recovery: requeued={recovery['requeued']} "
+            f"local_fallback_started={recovery['local_fallback_started']}"
+        )
     actions = {
         action.action_id: action
         for action in run_service._actions.values()
@@ -174,6 +181,17 @@ def main() -> int:
         if artifact_path:
             env["TICKER_SCREENER_STATUS_ARTIFACT"] = artifact_path
         resolved_options = _resolve_template_value(job.get("options") or {}, local_now=local_now)
+        if isinstance(resolved_options, dict) and str(resolved_options.get("execution_mode") or "local").strip().lower() == "remote":
+            job_id = run_service.launch(action_id, options=resolved_options, trigger_source="scheduler")
+            _write_scheduler_status(
+                job_id=str(job["job_id"]),
+                job_label=str(job["job_label"]),
+                status="queued",
+                message=f"Queued remote job {job_id} for worker execution.",
+                artifact_file=str(env.get("TICKER_SCREENER_STATUS_ARTIFACT") or ""),
+            )
+            print(f"queued scheduled remote job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")
+            continue
         command_tail = run_service.build_command(action_id, resolved_options if isinstance(resolved_options, dict) else {})
         if os.path.exists("/.dockerenv"):
             command = [

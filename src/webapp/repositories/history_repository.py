@@ -9,6 +9,8 @@ from src.market_data_access import resolve_database_url
 
 
 class HistoryRepository:
+    DEFAULT_REMOTE_WORKER_STALE_SECONDS = 90
+
     def __init__(self, database_url: str = "", artifacts_dir: Path | None = None) -> None:
         self.database_url = resolve_database_url(database_url)
         self.artifacts_dir = artifacts_dir
@@ -105,6 +107,320 @@ class HistoryRepository:
                     ),
                 )
             connection.commit()
+
+    def patch_job_run_result(
+        self,
+        job_run_id: int | None,
+        *,
+        result_payload_patch: dict[str, Any],
+        status: str | None = None,
+        artifact_path: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        if job_run_id is None:
+            return
+        connection = self._connect()
+        if connection is None:
+            return
+        sql = """
+            UPDATE job_runs
+            SET status = COALESCE(%s, status),
+                result_payload = COALESCE(result_payload, '{}'::jsonb) || %s::jsonb,
+                artifact_path = COALESCE(%s, artifact_path),
+                finished_at = COALESCE(%s::timestamptz, finished_at)
+            WHERE id = %s
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql,
+                    (
+                        status,
+                        json.dumps(result_payload_patch or {}),
+                        artifact_path,
+                        finished_at,
+                        job_run_id,
+                    ),
+                )
+            connection.commit()
+
+    def get_job_run(self, job_run_id: int | None) -> dict[str, Any] | None:
+        if job_run_id is None:
+            return None
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            SELECT id, parent_job_run_id, job_type, job_name, status, trigger_source,
+                   request_payload, result_payload, artifact_path, started_at, finished_at, created_at
+            FROM job_runs
+            WHERE id = %s
+            LIMIT 1
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (job_run_id,))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+        return rows[0] if rows else None
+
+    def list_remote_job_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        sql = """
+            SELECT id, parent_job_run_id, job_type, job_name, status, trigger_source,
+                   request_payload, result_payload, artifact_path, started_at, finished_at, created_at
+            FROM job_runs
+            WHERE COALESCE(request_payload->>'execution_mode', 'local') = 'remote'
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (max(1, int(limit)),))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def heartbeat_remote_worker(
+        self,
+        *,
+        worker_name: str,
+        status: str,
+        current_job_run_id: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        clean_name = str(worker_name or "").strip()
+        if not clean_name:
+            return
+        connection = self._connect()
+        if connection is None:
+            return
+        sql = """
+            INSERT INTO remote_workers (worker_name, current_job_run_id, status, last_heartbeat_at, updated_at, metadata_json)
+            VALUES (%s, %s, %s, NOW(), NOW(), %s::jsonb)
+            ON CONFLICT (worker_name)
+            DO UPDATE SET
+              current_job_run_id = EXCLUDED.current_job_run_id,
+              status = EXCLUDED.status,
+              last_heartbeat_at = NOW(),
+              updated_at = NOW(),
+              metadata_json = COALESCE(remote_workers.metadata_json, '{}'::jsonb) || EXCLUDED.metadata_json
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql,
+                    (
+                        clean_name,
+                        current_job_run_id,
+                        str(status or "idle"),
+                        json.dumps(metadata or {}),
+                    ),
+                )
+            connection.commit()
+
+    def list_remote_workers(self, *, stale_after_seconds: int | None = None) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        threshold_seconds = max(1, int(stale_after_seconds or self.DEFAULT_REMOTE_WORKER_STALE_SECONDS))
+        sql = """
+            SELECT
+              worker_name,
+              current_job_run_id,
+              status,
+              last_heartbeat_at,
+              updated_at,
+              metadata_json,
+              last_heartbeat_at >= (NOW() - (%s * INTERVAL '1 second')) AS is_healthy
+            FROM remote_workers
+            ORDER BY worker_name ASC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (threshold_seconds,))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def healthy_remote_worker_count(self, *, stale_after_seconds: int | None = None) -> int:
+        connection = self._connect()
+        if connection is None:
+            return 0
+        threshold_seconds = max(1, int(stale_after_seconds or self.DEFAULT_REMOTE_WORKER_STALE_SECONDS))
+        sql = """
+            SELECT COUNT(*)
+            FROM remote_workers
+            WHERE last_heartbeat_at >= (NOW() - (%s * INTERVAL '1 second'))
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (threshold_seconds,))
+                row = cursor.fetchone()
+        return int(row[0] or 0) if row else 0
+
+    def claim_remote_job_run(self, *, worker_name: str) -> dict[str, Any] | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            WITH candidate AS (
+                SELECT id
+                FROM job_runs
+                WHERE status = 'queued'
+                  AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote'
+                  AND (
+                    COALESCE(request_payload->>'target_worker', '') = ''
+                    OR request_payload->>'target_worker' = %s
+                  )
+                ORDER BY created_at ASC, id ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE job_runs AS job
+            SET status = 'running',
+                result_payload = COALESCE(job.result_payload, '{}'::jsonb) || %s::jsonb
+            FROM candidate
+            WHERE job.id = candidate.id
+            RETURNING job.id, job.parent_job_run_id, job.job_type, job.job_name, job.status, job.trigger_source,
+                      job.request_payload, job.result_payload, job.artifact_path, job.started_at, job.finished_at, job.created_at
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql,
+                    (
+                        worker_name,
+                        json.dumps(
+                            {
+                                "worker_name": worker_name,
+                                "message": f"Claimed by worker {worker_name}.",
+                            }
+                        ),
+                    ),
+                )
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows[0] if rows else None
+
+    def requeue_stale_remote_job_runs(self, *, stale_after_seconds: int | None = None) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        threshold_seconds = max(1, int(stale_after_seconds or self.DEFAULT_REMOTE_WORKER_STALE_SECONDS))
+        sql = """
+            WITH stale_jobs AS (
+                SELECT job.id
+                FROM job_runs AS job
+                WHERE job.status = 'running'
+                  AND COALESCE(job.request_payload->>'execution_mode', 'local') = 'remote'
+                  AND COALESCE((job.result_payload->>'worker_heartbeat_at')::timestamptz, job.started_at)
+                        < (NOW() - (%s * INTERVAL '1 second'))
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE job_runs AS job
+            SET status = 'queued',
+                result_payload = COALESCE(job.result_payload, '{}'::jsonb) || %s::jsonb
+            FROM stale_jobs
+            WHERE job.id = stale_jobs.id
+            RETURNING job.id, job.parent_job_run_id, job.job_type, job.job_name, job.status, job.trigger_source,
+                      job.request_payload, job.result_payload, job.artifact_path, job.started_at, job.finished_at, job.created_at
+        """
+        patch = {
+            "cancel_requested": False,
+            "progress_label": "Queued after stale worker recovery",
+            "message": f"Recovered from stale remote worker after {threshold_seconds}s without heartbeat.",
+        }
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (threshold_seconds, json.dumps(patch)))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows
+
+    def claim_remote_job_run_for_local_fallback(self) -> dict[str, Any] | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            WITH candidate AS (
+                SELECT id
+                FROM job_runs
+                WHERE status = 'queued'
+                  AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote'
+                ORDER BY created_at ASC, id ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE job_runs AS job
+            SET status = 'running',
+                request_payload = jsonb_set(job.request_payload, '{execution_mode}', '"local"'::jsonb, true),
+                result_payload = COALESCE(job.result_payload, '{}'::jsonb) || %s::jsonb
+            FROM candidate
+            WHERE job.id = candidate.id
+            RETURNING job.id, job.parent_job_run_id, job.job_type, job.job_name, job.status, job.trigger_source,
+                      job.request_payload, job.result_payload, job.artifact_path, job.started_at, job.finished_at, job.created_at
+        """
+        patch = {
+            "execution_mode": "local",
+            "progress_label": "Falling back to local runner",
+            "message": "No healthy remote workers detected. Falling back to local execution.",
+        }
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (json.dumps(patch),))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows[0] if rows else None
+
+    def request_remote_job_cancel(self, job_run_id: int | None) -> dict[str, Any] | None:
+        if job_run_id is None:
+            return None
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            UPDATE job_runs
+            SET status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,
+                result_payload = COALESCE(result_payload, '{}'::jsonb) || %s::jsonb,
+                finished_at = CASE WHEN status = 'queued' THEN NOW() ELSE finished_at END
+            WHERE id = %s
+              AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote'
+            RETURNING id, parent_job_run_id, job_type, job_name, status, trigger_source,
+                      request_payload, result_payload, artifact_path, started_at, finished_at, created_at
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql,
+                    (
+                        json.dumps(
+                            {
+                                "cancel_requested": True,
+                                "message": "Cancellation requested.",
+                            }
+                        ),
+                        job_run_id,
+                    ),
+                )
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows[0] if rows else None
+
+    def is_remote_job_cancel_requested(self, job_run_id: int | None) -> bool:
+        if job_run_id is None:
+            return False
+        connection = self._connect()
+        if connection is None:
+            return False
+        sql = """
+            SELECT COALESCE((result_payload->>'cancel_requested')::boolean, FALSE)
+            FROM job_runs
+            WHERE id = %s
+            LIMIT 1
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (job_run_id,))
+                row = cursor.fetchone()
+        return bool(row[0]) if row else False
 
     def upsert_screen_run(
         self,

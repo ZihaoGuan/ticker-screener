@@ -19,6 +19,7 @@ from src.webapp.config import load_webapp_config
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build per-sector rating baselines from Finviz fundamentals snapshots.")
     parser.add_argument("--as-of-date", default=today_label())
+    parser.add_argument("--include-sectors", nargs="+", help="Only rebuild baselines for the selected sectors.")
     parser.add_argument("--database-url", default="")
     return parser.parse_args()
 
@@ -30,12 +31,16 @@ def main() -> int:
         raise RuntimeError("No Postgres connection string configured. Pass --database-url or set TICKER_SCREENER_DATABASE_URL.")
     as_of_date = dt.date.fromisoformat(str(args.as_of_date))
     repository = RatingsRepository(database_url)
-    print(f"loading_fundamentals as_of_date={as_of_date.isoformat()}", flush=True)
-    snapshots = repository.load_fundamentals_for_date(as_of_date)
+    selected_sectors = tuple(str(item).strip() for item in (args.include_sectors or []) if str(item).strip())
+    print(
+        f"loading_fundamentals as_of_date={as_of_date.isoformat()} include_sectors={','.join(selected_sectors) or '-'}",
+        flush=True,
+    )
+    snapshots = repository.load_fundamentals_for_date(as_of_date, sectors=selected_sectors or None)
     print(f"fundamentals_loaded={len(snapshots)}", flush=True)
     baselines = build_sector_baselines(snapshots, as_of_date=as_of_date)
     print(f"sector_baselines_built={len(baselines)}", flush=True)
-    count = repository.replace_sector_metric_baselines(as_of_date, baselines)
+    count = repository.replace_sector_metric_baselines(as_of_date, baselines, sectors=selected_sectors or None)
     print(f"sector_metric_baselines={count}", flush=True)
     return 0
 

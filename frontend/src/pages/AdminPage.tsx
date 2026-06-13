@@ -49,6 +49,8 @@ const EMPTY_RATINGS_RESPONSE: RatingsAdminStatusResponse = {
   diagnostics_count: 0,
   diagnostic_category_counts: {},
   diagnostics: [],
+  healthy_remote_worker_count: 0,
+  remote_workers: [],
   notes: [],
 };
 
@@ -542,6 +544,11 @@ export function AdminPage() {
               <div className="metric-value">{formatCount(ratingsStatus.tickers_with_latest_ok_rating)}</div>
               <div className="panel-copy">of {formatCount(ratingsStatus.target_universe_count)} target tickers</div>
             </article>
+            <article className="metric-card">
+              <h3>Healthy Workers</h3>
+              <div className="metric-value">{formatCount(ratingsStatus.healthy_remote_worker_count)}</div>
+              <div className="panel-copy">{formatCount(ratingsStatus.remote_workers.length)} registered remote workers</div>
+            </article>
           </div>
 
           <div className="data-table-responsive">
@@ -578,6 +585,21 @@ export function AdminPage() {
           {ratingsStatus.notes.length > 0 ? <div className="panel-copy">{ratingsStatus.notes.join(" ")}</div> : null}
 
           <div className="admin-sample-grid">
+            <div>
+              <div className="eyebrow">Remote Workers</div>
+              <div className="pill-list">
+                {ratingsStatus.remote_workers.length === 0 ? (
+                  <span className="panel-copy">No remote workers have heartbeated yet.</span>
+                ) : (
+                  ratingsStatus.remote_workers.map((worker) => (
+                    <span key={worker.worker_name} className="symbol-pill">
+                      {worker.worker_name}: {worker.is_healthy ? "healthy" : "stale"}{worker.current_job_run_id ? ` · job ${worker.current_job_run_id}` : ""}
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
             <div>
               <div className="eyebrow">Latest Fundamentals Parse Status</div>
               <div className="pill-list">

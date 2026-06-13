@@ -19,6 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--as-of-date", default=today_label())
     parser.add_argument("--limit", type=int)
     parser.add_argument("--tickers", nargs="+")
+    parser.add_argument("--include-sectors", nargs="+")
     parser.add_argument("--resume-from", default="")
     parser.add_argument("--delay-min-seconds", type=float, default=0.75)
     parser.add_argument("--delay-max-seconds", type=float, default=1.5)
@@ -69,6 +70,9 @@ def main() -> int:
     if args.tickers:
         sync_command.append("--tickers")
         sync_command.extend(args.tickers)
+    if args.include_sectors:
+        sync_command.append("--include-sectors")
+        sync_command.extend(args.include_sectors)
     if args.resume_from:
         sync_command.extend(["--resume-from", args.resume_from])
     sync_command.extend(
@@ -87,20 +91,28 @@ def main() -> int:
     )
     pipeline_started = time.monotonic()
     _run_stage(1, 3, "Sync Finviz Fundamentals", sync_command)
-    _run_stage(2, 3, "Build Sector Rating Baselines", [sys.executable, "scripts/build_sector_rating_baselines.py", *shared])
+    baseline_command = [sys.executable, "scripts/build_sector_rating_baselines.py", *shared]
+    if args.include_sectors:
+        baseline_command.append("--include-sectors")
+        baseline_command.extend(args.include_sectors)
+    _run_stage(2, 3, "Build Sector Rating Baselines", baseline_command)
+    rating_command = [
+        sys.executable,
+        "scripts/build_ticker_ratings.py",
+        *shared,
+        "--min-sector-peers",
+        str(args.min_sector_peers),
+        "--min-category-metrics",
+        str(args.min_category_metrics),
+    ]
+    if args.include_sectors:
+        rating_command.append("--include-sectors")
+        rating_command.extend(args.include_sectors)
     _run_stage(
         3,
         3,
         "Build Ticker Ratings",
-        [
-            sys.executable,
-            "scripts/build_ticker_ratings.py",
-            *shared,
-            "--min-sector-peers",
-            str(args.min_sector_peers),
-            "--min-category-metrics",
-            str(args.min_category_metrics),
-        ],
+        rating_command,
     )
     print(f"Pipeline complete · elapsed={_format_elapsed(time.monotonic() - pipeline_started)}", flush=True)
     return 0

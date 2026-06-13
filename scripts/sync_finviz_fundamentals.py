@@ -25,6 +25,12 @@ from src.universe import UniverseTicker, load_universe
 from src.webapp.config import load_webapp_config
 
 
+def _normalize_sector_values(values: list[str] | None) -> tuple[str, ...]:
+    if not values:
+        return ()
+    return tuple(normalized for normalized in (str(item).strip().lower() for item in values) if normalized)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Scrape Finviz fundamentals into Postgres snapshots.")
     parser.add_argument("--config", default="", help="Optional app config path.")
@@ -37,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size-before-rest", type=int, default=200)
     parser.add_argument("--rest-seconds", type=float, default=15.0)
     parser.add_argument("--overwrite-policy", default="skip-existing", choices=("latest-date", "replace-date", "skip-existing"))
+    parser.add_argument("--include-sectors", nargs="+", help="Only sync tickers from the selected sectors.")
     parser.add_argument("--database-url", default="", help="Optional Postgres connection string.")
     parser.add_argument("--manifest-path", default="", help="Optional explicit manifest path.")
     return parser.parse_args()
@@ -58,7 +65,13 @@ def _load_target_universe(args: argparse.Namespace) -> list[UniverseTicker]:
     if args.tickers:
         return _manual_tickers(args.tickers)
     config = load_app_config(args.config or None)
-    return load_universe(config, limit=args.limit)
+    universe = load_universe(config, limit=None)
+    include_sectors = set(_normalize_sector_values(args.include_sectors))
+    if include_sectors:
+        universe = [item for item in universe if str(item.sector or "").strip().lower() in include_sectors]
+    if args.limit is not None:
+        return universe[: args.limit]
+    return universe
 
 
 def _manifest_path(args: argparse.Namespace) -> Path:
@@ -89,6 +102,7 @@ def _write_manifest(
             "batch_size_before_rest": args.batch_size_before_rest,
             "rest_seconds": args.rest_seconds,
             "overwrite_policy": args.overwrite_policy,
+            "include_sectors": args.include_sectors or [],
         },
         "completed_tickers": completed,
         "failed_tickers": failed,
@@ -144,7 +158,8 @@ def main() -> int:
         f"delay_max_seconds={args.delay_max_seconds} "
         f"batch_size_before_rest={args.batch_size_before_rest} "
         f"rest_seconds={args.rest_seconds} "
-        f"overwrite_policy={args.overwrite_policy}",
+        f"overwrite_policy={args.overwrite_policy} "
+        f"include_sectors={','.join(args.include_sectors or []) or '-'}",
         flush=True,
     )
 

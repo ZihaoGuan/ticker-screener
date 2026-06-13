@@ -18,12 +18,14 @@ from src.exclusion_registry import (
 from src.market_data_access import resolve_database_url
 from src.ticker_filters import normalize_ticker_symbol
 from src.universe import load_universe
+from src.webapp.repositories.history_repository import HistoryRepository
 
 
 class AdminService:
     def __init__(self, database_url: str = "", *, artifacts_dir: Path | None = None) -> None:
         self.database_url = resolve_database_url(database_url)
         self.artifacts_dir = artifacts_dir or (Path(__file__).resolve().parents[3] / "artifacts")
+        self.history_repository = HistoryRepository(database_url=self.database_url, artifacts_dir=self.artifacts_dir)
 
     def get_context(self, *, coverage_start: str = "2020-01-01") -> dict[str, Any]:
         excluded = self._load_exclusions()
@@ -56,6 +58,8 @@ class AdminService:
             "diagnostics_count": 0,
             "diagnostic_category_counts": {},
             "diagnostics": [],
+            "healthy_remote_worker_count": 0,
+            "remote_workers": [],
             "notes": [],
         }
         if not self.database_url:
@@ -72,6 +76,25 @@ class AdminService:
             return status
 
         status.update(query_payload)
+        try:
+            remote_workers = self.history_repository.list_remote_workers(
+                stale_after_seconds=HistoryRepository.DEFAULT_REMOTE_WORKER_STALE_SECONDS
+            )
+            status["remote_workers"] = [
+                {
+                    "worker_name": str(item.get("worker_name") or ""),
+                    "status": str(item.get("status") or "unknown"),
+                    "is_healthy": bool(item.get("is_healthy")),
+                    "current_job_run_id": int(item["current_job_run_id"]) if item.get("current_job_run_id") is not None else None,
+                    "last_heartbeat_at": self._to_iso(item.get("last_heartbeat_at")),
+                    "updated_at": self._to_iso(item.get("updated_at")),
+                }
+                for item in remote_workers
+            ]
+            status["healthy_remote_worker_count"] = sum(1 for item in status["remote_workers"] if item["is_healthy"])
+        except Exception:
+            status["remote_workers"] = []
+            status["healthy_remote_worker_count"] = 0
         if not target_tickers:
             status["notes"] = ["Universe loader returned 0 tickers."]
         elif not status["diagnostics"]:

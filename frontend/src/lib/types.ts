@@ -311,6 +311,9 @@ export type JobsResponse = {
     screen_run_id?: number | null;
     backtest_run_id?: number | null;
     cancel_requested: boolean;
+    execution_mode?: "local" | "remote";
+    worker_name?: string;
+    target_worker?: string;
     duration_seconds: number;
     child_job_summary: {
       total: number;
@@ -909,6 +912,15 @@ export type RatingsAdminStatusResponse = {
   diagnostics_count: number;
   diagnostic_category_counts: Record<string, number>;
   diagnostics: RatingsAdminDiagnostic[];
+  healthy_remote_worker_count: number;
+  remote_workers: Array<{
+    worker_name: string;
+    status: string;
+    is_healthy: boolean;
+    current_job_run_id: number | null;
+    last_heartbeat_at: string | null;
+    updated_at: string | null;
+  }>;
   notes: string[];
 };
 

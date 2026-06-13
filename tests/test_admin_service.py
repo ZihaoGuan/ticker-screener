@@ -91,6 +91,19 @@ class AdminServiceTests(unittest.TestCase):
                     {"ticker": "NVDA", "category": "scrape_failed", "reason": "Finviz block/captcha detected."},
                 ],
             },
+        ), patch.object(
+            service.history_repository,
+            "list_remote_workers",
+            return_value=[
+                {
+                    "worker_name": "worker-a",
+                    "status": "idle",
+                    "is_healthy": True,
+                    "current_job_run_id": None,
+                    "last_heartbeat_at": "2026-06-13T10:10:00+00:00",
+                    "updated_at": "2026-06-13T10:10:00+00:00",
+                }
+            ],
         ):
             payload = service.get_ratings_status()
 
@@ -100,6 +113,8 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(payload["diagnostics_count"], 2)
         self.assertEqual(payload["diagnostic_category_counts"], {"missing_metrics": 1, "scrape_failed": 1})
         self.assertEqual(payload["diagnostics"][0]["ticker"], "MSFT")
+        self.assertEqual(payload["healthy_remote_worker_count"], 1)
+        self.assertEqual(payload["remote_workers"][0]["worker_name"], "worker-a")
 
     def test_build_missing_ranges_combines_edge_windows_and_internal_gaps(self) -> None:
         payload = _build_missing_ranges(

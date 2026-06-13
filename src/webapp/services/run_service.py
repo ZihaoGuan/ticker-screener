@@ -49,6 +49,13 @@ class RunField:
 
 
 class RunService:
+    REMOTE_WORKER_STALE_SECONDS = 90
+    _remote_execution_action_ids = {
+        "sync_finviz_fundamentals",
+        "build_sector_rating_baselines",
+        "build_ticker_ratings",
+        "run_finviz_ratings_pipeline",
+    }
     _progress_pattern = re.compile(r"\[(\d{1,6})/(\d{1,6})\]")
     _passed_pattern = re.compile(r"passed=(\d{1,6})")
     _stage_pattern = re.compile(r"^Stage (\d{1,2})/(\d{1,2}): (.+)$")
@@ -192,6 +199,20 @@ class RunService:
         placeholder="[5, 10]",
         help_text="Trading-day hold list as JSON array.",
     )
+    _execution_mode_field = RunField(
+        "execution_mode",
+        "Execution Mode",
+        "select",
+        help_text="Run locally on this server, or queue for a remote worker.",
+        options=(("local", "Local"), ("remote", "Remote Worker Queue")),
+    )
+    _target_worker_field = RunField(
+        "target_worker",
+        "Target Worker",
+        "text",
+        placeholder="worker-a",
+        help_text="Optional worker name. Leave blank to let any worker claim the queued job.",
+    )
     _filter_precedence_field = RunField(
         "filter_precedence",
         "Filter Precedence",
@@ -258,6 +279,9 @@ class RunService:
             fields=(
                 _limit_field,
                 _tickers_field,
+                _include_sectors_field,
+                _execution_mode_field,
+                _target_worker_field,
                 _as_of_date_field,
                 _resume_from_field,
                 _delay_min_seconds_field,
@@ -274,6 +298,9 @@ class RunService:
             supports_limit=False,
             fields=(
                 _as_of_date_field,
+                _include_sectors_field,
+                _execution_mode_field,
+                _target_worker_field,
             ),
         ),
         "build_ticker_ratings": RunAction(
@@ -283,6 +310,9 @@ class RunService:
             supports_limit=False,
             fields=(
                 _as_of_date_field,
+                _include_sectors_field,
+                _execution_mode_field,
+                _target_worker_field,
                 _min_sector_peers_field,
                 _min_category_metrics_field,
             ),
@@ -294,6 +324,9 @@ class RunService:
             fields=(
                 _limit_field,
                 _tickers_field,
+                _include_sectors_field,
+                _execution_mode_field,
+                _target_worker_field,
                 _as_of_date_field,
                 _resume_from_field,
                 _delay_min_seconds_field,
@@ -1053,14 +1086,21 @@ class RunService:
     def list_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._jobs_lock:
             jobs = [self._serialize_job(item) for item in self._jobs[:limit]]
+        jobs.extend(self._list_remote_jobs(limit=limit))
+        jobs = self._sort_jobs(jobs)[:limit]
         return self._attach_child_jobs(jobs)
 
     def get_job(self, job_id: str) -> dict[str, Any]:
         with self._jobs_lock:
             job = self._jobs_by_id.get(job_id)
-            if job is None:
-                raise ValueError(f"Unknown job: {job_id}")
+        if job is not None:
             jobs = [self._serialize_job(job)]
+            enriched = self._attach_child_jobs(jobs)
+            return enriched[0]
+        remote_job = self._load_remote_job(job_id)
+        if remote_job is None:
+            raise ValueError(f"Unknown job: {job_id}")
+        jobs = [remote_job]
         enriched = self._attach_child_jobs(jobs)
         return enriched[0]
 
@@ -1154,6 +1194,14 @@ class RunService:
         }
 
     def cancel(self, job_id: str) -> dict[str, Any]:
+        remote_job = self._load_remote_job(job_id)
+        if remote_job is not None:
+            if str(remote_job.get("status") or "") not in {"queued", "running"}:
+                raise ValueError(f"Job is not running: {job_id}")
+            updated_row = self.history_repository.request_remote_job_cancel(remote_job.get("job_run_id"))
+            if updated_row is None:
+                raise ValueError(f"Unknown job: {job_id}")
+            return self._serialize_remote_job_run(updated_row)
         with self._jobs_lock:
             job = self._jobs_by_id.get(job_id)
             if job is None:
@@ -1166,38 +1214,132 @@ class RunService:
             self._terminate_process(process)
             return self._serialize_job(job)
 
-    def launch(self, action_id: str, *, options: dict[str, Any] | None = None) -> str:
+    def launch(self, action_id: str, *, options: dict[str, Any] | None = None, trigger_source: str = "manual") -> str:
         action = self._actions.get(action_id)
         if action is None:
             raise ValueError(f"Unknown run action: {action_id}")
 
         normalized = self._normalize_options(action, options or {})
-        request_payload = {"action_id": action_id, "options": normalized}
+        execution_mode = str(normalized.get("execution_mode") or "local").strip().lower() or "local"
+        if execution_mode not in {"local", "remote"}:
+            raise ValueError("Execution mode must be local or remote.")
+        if execution_mode == "remote" and action_id not in self._remote_execution_action_ids:
+            raise ValueError("Remote worker execution is currently supported only for Finviz rating sync actions.")
+        if execution_mode == "remote" and not self.has_healthy_remote_workers():
+            execution_mode = "local"
+            normalized["execution_mode"] = "local"
+            normalized["_remote_fallback_reason"] = "No healthy remote workers detected at launch time."
+        request_payload = {
+            "action_id": action_id,
+            "execution_mode": execution_mode,
+            "target_worker": str(normalized.get("target_worker") or ""),
+            "options": normalized,
+        }
+        initial_status = "queued" if execution_mode == "remote" else "running"
         job_run_id = self.history_repository.create_job_run(
             job_type=self._job_type_for_action(action_id),
             job_name=action.label,
-            status="running",
-            trigger_source="manual",
+            status=initial_status,
+            trigger_source=trigger_source,
             request_payload=request_payload,
             parent_job_run_id=None,
         )
+        if execution_mode == "remote" and job_run_id is None:
+            raise ValueError("Remote worker queue requires a configured database connection.")
         if job_run_id is not None:
             normalized["job_run_id"] = job_run_id
-        job_id = uuid.uuid4().hex[:12]
-        started_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
         command = self.build_command(action_id, normalized, normalized=True)
+        if execution_mode == "remote":
+            self.history_repository.patch_job_run_result(
+                job_run_id,
+                result_payload_patch={
+                    "job_id": self._remote_job_id(job_run_id),
+                    "execution_mode": "remote",
+                    "target_worker": str(normalized.get("target_worker") or ""),
+                    "command": " ".join(command),
+                    "progress_label": "Queued for remote worker",
+                    "message": "Queued for remote worker claim.",
+                },
+                status="queued",
+            )
+            return self._remote_job_id(job_run_id)
 
+        return self._start_local_job(
+            action_id,
+            action.label,
+            command,
+            normalized,
+            job_run_id=job_run_id,
+        )
+
+    def has_healthy_remote_workers(self) -> bool:
+        return self.history_repository.healthy_remote_worker_count(stale_after_seconds=self.REMOTE_WORKER_STALE_SECONDS) > 0
+
+    def recover_remote_jobs(self, *, max_local_fallbacks: int = 1) -> dict[str, int]:
+        recovered = self.history_repository.requeue_stale_remote_job_runs(
+            stale_after_seconds=self.REMOTE_WORKER_STALE_SECONDS
+        )
+        fallback_started = 0
+        if not self.has_healthy_remote_workers():
+            while fallback_started < max(1, int(max_local_fallbacks)):
+                row = self.history_repository.claim_remote_job_run_for_local_fallback()
+                if row is None:
+                    break
+                self.resume_remote_job_locally(row)
+                fallback_started += 1
+        return {"requeued": len(recovered), "local_fallback_started": fallback_started}
+
+    def resume_remote_job_locally(self, row: dict[str, Any]) -> str:
+        request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
+        result_payload = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
+        options = dict(request_payload.get("options") or {}) if isinstance(request_payload.get("options"), dict) else {}
+        action_id = str(request_payload.get("action_id") or "")
+        action = self._actions.get(action_id)
+        if action is None:
+            raise ValueError(f"Unknown run action: {action_id}")
+        normalized = self._normalize_options(action, options)
+        normalized["execution_mode"] = "local"
+        normalized["_remote_fallback_reason"] = str(
+            result_payload.get("message") or "Recovered remote job is now running locally."
+        )
+        normalized["job_run_id"] = int(row["id"])
+        command = self.build_command(action_id, normalized, normalized=True)
+        return self._start_local_job(
+            action_id,
+            action.label,
+            command,
+            normalized,
+            job_id=self._remote_job_id(int(row["id"])),
+            job_run_id=int(row["id"]),
+        )
+
+    def _start_local_job(
+        self,
+        action_id: str,
+        label: str,
+        command: list[str],
+        normalized: dict[str, Any],
+        *,
+        job_id: str | None = None,
+        job_run_id: int | None = None,
+    ) -> str:
+        local_job_id = str(job_id or uuid.uuid4().hex[:12])
+        started_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+        initial_log = "Starting...\n"
+        fallback_reason = str(normalized.get("_remote_fallback_reason") or "").strip()
+        if fallback_reason:
+            initial_log = f"{fallback_reason}\n{initial_log}"
         job = {
-            "job_id": job_id,
+            "job_id": local_job_id,
             "action_id": action_id,
             "job_run_id": job_run_id,
-            "label": action.label,
+            "label": label,
             "status": "running",
             "command": " ".join(command),
             "started_at": started_at,
             "finished_at": "",
             "return_code": None,
-            "log_tail": "Starting...\n",
+            "log_tail": initial_log,
             "progress_current": None,
             "progress_total": None,
             "progress_percent": None,
@@ -1207,12 +1349,14 @@ class RunService:
             "summary_file": "",
             "cancel_requested": False,
             "options": normalized,
+            "execution_mode": "local",
             "_started_monotonic": time.monotonic(),
         }
 
         with self._jobs_lock:
+            self._jobs = [item for item in self._jobs if str(item.get("job_id") or "") != local_job_id]
             self._jobs.insert(0, job)
-            self._jobs_by_id[job_id] = job
+            self._jobs_by_id[local_job_id] = job
             del self._jobs[50:]
 
         env = os.environ.copy()
@@ -1220,9 +1364,9 @@ class RunService:
             env["TICKER_SCREENER_MARKET_DATA_SOURCE"] = str(normalized["market_data_source"])
         if self.database_url:
             env["TICKER_SCREENER_DATABASE_URL"] = self.database_url
-        thread = threading.Thread(target=self._run_job, args=(job_id, command, env), daemon=True)
+        thread = threading.Thread(target=self._run_job, args=(local_job_id, command, env), daemon=True)
         thread.start()
-        return job_id
+        return local_job_id
 
     def build_command(self, action_id: str, options: dict[str, Any] | None = None, *, normalized: bool = False) -> list[str]:
         action = self._actions.get(action_id)
@@ -1345,6 +1489,8 @@ class RunService:
             "signal_cache_policy",
             "market_data_mode",
             "resume_from",
+            "execution_mode",
+            "target_worker",
         ):
             value = options.get(key)
             if isinstance(value, str) and value.strip():
@@ -1638,6 +1784,9 @@ class RunService:
             "screen_run_id": job.get("screen_run_id"),
             "backtest_run_id": job.get("backtest_run_id"),
             "cancel_requested": bool(job.get("cancel_requested")),
+            "execution_mode": str(job.get("execution_mode") or "local"),
+            "worker_name": str(job.get("worker_name") or ""),
+            "target_worker": str(options.get("target_worker") or ""),
             "duration_seconds": duration_seconds,
             "child_jobs": [],
             "child_job_summary": {"total": 0, "running": 0, "success": 0, "failed": 0, "cancelled": 0},
@@ -1657,6 +1806,93 @@ class RunService:
         log_lines.append(line)
         log_lines = log_lines[-80:]
         job["log_tail"] = "\n".join(log_lines)
+
+    def _list_remote_jobs(self, *, limit: int) -> list[dict[str, Any]]:
+        rows = self.history_repository.list_remote_job_runs(limit=max(limit * 2, 20))
+        return [self._serialize_remote_job_run(row) for row in rows]
+
+    def _load_remote_job(self, job_id: str) -> dict[str, Any] | None:
+        remote_job_run_id = self._remote_job_run_id(job_id)
+        if remote_job_run_id is None:
+            return None
+        row = self.history_repository.get_job_run(remote_job_run_id)
+        if row is None:
+            return None
+        request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
+        if str(request_payload.get("execution_mode") or request_payload.get("options", {}).get("execution_mode") or "local") != "remote":
+            return None
+        return self._serialize_remote_job_run(row)
+
+    def _serialize_remote_job_run(self, row: dict[str, Any]) -> dict[str, Any]:
+        request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
+        result_payload = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
+        options = request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {}
+        action_id = str(request_payload.get("action_id") or "")
+        started_at = self._stringify_timestamp(row.get("started_at"))
+        finished_at = self._stringify_timestamp(row.get("finished_at"))
+        command = str(result_payload.get("command") or "")
+        if not command and action_id:
+            try:
+                command = " ".join(self.build_command(action_id, options, normalized=True))
+            except Exception:
+                command = ""
+        job_run_id = int(row["id"])
+        watchlist_file = str(result_payload.get("watchlist_file") or "")
+        watchlist_stem = self._watchlist_stem_from_path(watchlist_file)
+        return {
+            "job_id": self._remote_job_id(job_run_id),
+            "action_id": action_id,
+            "label": str(row.get("job_name") or ""),
+            "status": str(row.get("status") or "failed"),
+            "command": command,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "return_code": result_payload.get("return_code"),
+            "log_tail": str(result_payload.get("log_tail") or ""),
+            "progress_current": result_payload.get("progress_current"),
+            "progress_total": result_payload.get("progress_total"),
+            "progress_percent": result_payload.get("progress_percent"),
+            "progress_label": result_payload.get("progress_label"),
+            "success_count": int(result_payload.get("success_count") or 0),
+            "watchlist_file": watchlist_file,
+            "watchlist_stem": watchlist_stem,
+            "watchlist_url": f"/watchlists?stem={watchlist_stem}" if watchlist_stem else "",
+            "summary_file": str(result_payload.get("summary_file") or ""),
+            "raw_results_file": str(result_payload.get("raw_results_file") or ""),
+            "scan_target": self._describe_job_scan_target(action_id, options),
+            "job_run_id": job_run_id,
+            "screen_run_id": result_payload.get("screen_run_id"),
+            "backtest_run_id": result_payload.get("backtest_run_id"),
+            "cancel_requested": bool(result_payload.get("cancel_requested")),
+            "execution_mode": "remote",
+            "worker_name": str(result_payload.get("worker_name") or ""),
+            "target_worker": str(options.get("target_worker") or ""),
+            "duration_seconds": self._duration_seconds_from_iso(started_at, finished_at),
+            "child_jobs": [],
+            "child_job_summary": {"total": 0, "running": 0, "success": 0, "failed": 0, "cancelled": 0},
+        }
+
+    def _sort_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        def sort_key(job: dict[str, Any]) -> tuple[int, str, str]:
+            status = str(job.get("status") or "")
+            running_rank = 2 if status == "running" else (1 if status == "queued" else 0)
+            started = str(job.get("started_at") or "")
+            finished = str(job.get("finished_at") or "")
+            return (running_rank, max(started, finished), str(job.get("job_id") or ""))
+
+        return sorted(jobs, key=sort_key, reverse=True)
+
+    def _remote_job_id(self, job_run_id: int | None) -> str:
+        return f"remote-{int(job_run_id)}" if job_run_id is not None else ""
+
+    def _remote_job_run_id(self, job_id: str) -> int | None:
+        text = str(job_id or "").strip()
+        if not text.startswith("remote-"):
+            return None
+        try:
+            return int(text.split("-", 1)[1])
+        except (TypeError, ValueError):
+            return None
 
     def _now_iso(self) -> str:
         return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()

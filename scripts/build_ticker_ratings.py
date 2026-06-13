@@ -20,6 +20,7 @@ from src.webapp.config import load_webapp_config
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build ticker ratings from fundamentals snapshots and sector baselines.")
     parser.add_argument("--as-of-date", default=today_label())
+    parser.add_argument("--include-sectors", nargs="+", help="Only rebuild ratings for tickers in the selected sectors.")
     parser.add_argument("--min-sector-peers", type=int, default=MIN_SECTOR_PEERS_DEFAULT)
     parser.add_argument("--min-category-metrics", type=float, default=1.0)
     parser.add_argument("--database-url", default="")
@@ -33,10 +34,14 @@ def main() -> int:
         raise RuntimeError("No Postgres connection string configured. Pass --database-url or set TICKER_SCREENER_DATABASE_URL.")
     as_of_date = dt.date.fromisoformat(str(args.as_of_date))
     repository = RatingsRepository(database_url)
-    print(f"loading_fundamentals as_of_date={as_of_date.isoformat()}", flush=True)
-    snapshots = repository.load_fundamentals_for_date(as_of_date)
+    selected_sectors = tuple(str(item).strip() for item in (args.include_sectors or []) if str(item).strip())
+    print(
+        f"loading_fundamentals as_of_date={as_of_date.isoformat()} include_sectors={','.join(selected_sectors) or '-'}",
+        flush=True,
+    )
+    snapshots = repository.load_fundamentals_for_date(as_of_date, sectors=selected_sectors or None)
     print(f"fundamentals_loaded={len(snapshots)}", flush=True)
-    baselines = repository.load_sector_baselines_for_date(as_of_date)
+    baselines = repository.load_sector_baselines_for_date(as_of_date, sectors=selected_sectors or None)
     print(f"sector_baseline_groups={len(baselines)}", flush=True)
     total = len(snapshots)
     ratings = []
@@ -51,7 +56,11 @@ def main() -> int:
         if rating.rating_status == "ok":
             ok_count += 1
         print(f"[{index}/{total}] rating {snapshot.ticker} status={rating.rating_status}", flush=True)
-    count = repository.replace_rating_snapshots(as_of_date, ratings)
+    count = repository.replace_rating_snapshots(
+        as_of_date,
+        ratings,
+        tickers=[snapshot.ticker for snapshot in snapshots],
+    )
     print(f"ticker_ratings={count}", flush=True)
     print(f"ticker_ratings_ok={ok_count}", flush=True)
     return 0

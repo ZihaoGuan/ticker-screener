@@ -143,14 +143,31 @@ class RatingsRepository:
             connection.commit()
         return len(rows)
 
-    def replace_sector_metric_baselines(self, as_of_date: dt.date, baselines: Iterable[SectorMetricBaseline]) -> int:
+    def replace_sector_metric_baselines(
+        self,
+        as_of_date: dt.date,
+        baselines: Iterable[SectorMetricBaseline],
+        *,
+        sectors: Iterable[str] | None = None,
+    ) -> int:
         rows = list(baselines)
         connection = self._connect()
         if connection is None:
             return 0
+        normalized_sectors = _normalize_text_values(sectors)
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute("DELETE FROM sector_metric_baselines WHERE as_of_date = %s", (as_of_date,))
+                if normalized_sectors:
+                    cursor.execute(
+                        """
+                        DELETE FROM sector_metric_baselines
+                        WHERE as_of_date = %s
+                          AND LOWER(COALESCE(sector, '')) = ANY(%s)
+                        """,
+                        (as_of_date, normalized_sectors),
+                    )
+                else:
+                    cursor.execute("DELETE FROM sector_metric_baselines WHERE as_of_date = %s", (as_of_date,))
                 if rows:
                     cursor.executemany(
                         """
@@ -178,14 +195,31 @@ class RatingsRepository:
             connection.commit()
         return len(rows)
 
-    def replace_rating_snapshots(self, as_of_date: dt.date, ratings: Iterable[RatingSnapshot]) -> int:
+    def replace_rating_snapshots(
+        self,
+        as_of_date: dt.date,
+        ratings: Iterable[RatingSnapshot],
+        *,
+        tickers: Iterable[str] | None = None,
+    ) -> int:
         rows = list(ratings)
         connection = self._connect()
         if connection is None:
             return 0
+        normalized_tickers = tuple(str(item).strip().upper() for item in (tickers or []) if str(item).strip())
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute("DELETE FROM ticker_rating_snapshots WHERE as_of_date = %s", (as_of_date,))
+                if normalized_tickers:
+                    cursor.execute(
+                        """
+                        DELETE FROM ticker_rating_snapshots
+                        WHERE as_of_date = %s
+                          AND ticker = ANY(%s)
+                        """,
+                        (as_of_date, normalized_tickers),
+                    )
+                else:
+                    cursor.execute("DELETE FROM ticker_rating_snapshots WHERE as_of_date = %s", (as_of_date,))
                 if rows:
                     cursor.executemany(
                         """
@@ -223,10 +257,16 @@ class RatingsRepository:
             connection.commit()
         return len(rows)
 
-    def load_fundamentals_for_date(self, as_of_date: dt.date) -> list[FundamentalsSnapshot]:
+    def load_fundamentals_for_date(
+        self,
+        as_of_date: dt.date,
+        *,
+        sectors: Iterable[str] | None = None,
+    ) -> list[FundamentalsSnapshot]:
         connection = self._connect()
         if connection is None:
             return []
+        normalized_sectors = _normalize_text_values(sectors)
         sql = """
             SELECT ticker, as_of_date, sector, industry, source, source_url, parse_status, parse_error,
                    scraped_at, updated_at, market_cap, enterprise_value, forward_pe, peg_ratio_5y,
@@ -234,38 +274,65 @@ class RatingsRepository:
                    gross_margin_pct, roa_pct, roe_pct, eps_this_y_pct, eps_next_y_pct, eps_next_5y_pct,
                    sales_qq_pct, eps_qq_pct, perf_month_pct, perf_quarter_pct, perf_half_pct, perf_year_pct,
                    perf_ytd_pct, volatility_week_pct, volatility_month_pct
-            FROM ticker_fundamentals_snapshots
+            FROM ticker_fundamentals_snapshots fs
+            LEFT JOIN ticker_metadata tm ON tm.ticker = fs.ticker
             WHERE as_of_date = %s
+        """
+        params: list[Any] = [as_of_date]
+        if normalized_sectors:
+            sql += """
+              AND LOWER(COALESCE(fs.sector, tm.sector, '')) = ANY(%s)
+            """
+            params.append(normalized_sectors)
+        sql += """
             ORDER BY ticker ASC
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (as_of_date,))
+                cursor.execute(sql, tuple(params))
                 rows = cursor.fetchall()
         snapshots: list[FundamentalsSnapshot] = []
         for row in rows:
             snapshots.append(FundamentalsSnapshot(*row))
         return snapshots
 
-    def load_sector_baselines_for_date(self, as_of_date: dt.date) -> dict[str, dict[str, SectorMetricBaseline]]:
+    def load_sector_baselines_for_date(
+        self,
+        as_of_date: dt.date,
+        *,
+        sectors: Iterable[str] | None = None,
+    ) -> dict[str, dict[str, SectorMetricBaseline]]:
         connection = self._connect()
         if connection is None:
             return {}
+        normalized_sectors = _normalize_text_values(sectors)
         sql = """
             SELECT as_of_date, sector, metric_name, sample_size, filtered_sample_size,
                    median_value, pct10_value, pct90_value, std_value, std_step_value
             FROM sector_metric_baselines
             WHERE as_of_date = %s
         """
+        params: list[Any] = [as_of_date]
+        if normalized_sectors:
+            sql += """
+              AND LOWER(COALESCE(sector, '')) = ANY(%s)
+            """
+            params.append(normalized_sectors)
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (as_of_date,))
+                cursor.execute(sql, tuple(params))
                 rows = cursor.fetchall()
         grouped: dict[str, dict[str, SectorMetricBaseline]] = {}
         for row in rows:
             item = SectorMetricBaseline(*row)
             grouped.setdefault(item.sector, {})[item.metric_name] = item
         return grouped
+
+
+def _normalize_text_values(values: Iterable[str] | None) -> tuple[str, ...]:
+    if not values:
+        return ()
+    return tuple(normalized for normalized in (str(item).strip().lower() for item in values) if normalized)
 
     def load_latest_ticker_rating_bundle(self, ticker: str) -> dict[str, Any] | None:
         connection = self._connect()

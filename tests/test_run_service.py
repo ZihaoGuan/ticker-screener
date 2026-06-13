@@ -307,6 +307,7 @@ class RunServiceTests(unittest.TestCase):
             options={
                 "as_of_date": "2026-06-13",
                 "tickers": "NVDA",
+                "include_sectors": ["Technology"],
                 "delay_min_seconds": "4",
                 "delay_max_seconds": "7",
                 "batch_size_before_rest": "80",
@@ -322,6 +323,8 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("2026-06-13", command)
         self.assertIn("--tickers", command)
         self.assertIn("NVDA", command)
+        self.assertIn("--include-sectors", command)
+        self.assertIn("Technology", command)
         self.assertIn("--delay-min-seconds", command)
         self.assertIn("4.0", command)
         self.assertIn("--delay-max-seconds", command)
@@ -354,6 +357,162 @@ class RunServiceTests(unittest.TestCase):
         command = captured["command"]
         overwrite_index = command.index("--overwrite-policy")
         self.assertEqual(command[overwrite_index + 1], "skip-existing")
+
+    def test_launch_remote_finviz_pipeline_queues_db_job_and_skips_local_runner(self) -> None:
+        captured_patch: dict[str, object] = {}
+
+        def fake_patch_job_run_result(job_run_id: int | None, **kwargs: object) -> None:
+            captured_patch["job_run_id"] = job_run_id
+            captured_patch["kwargs"] = kwargs
+
+        self.service.history_repository.create_job_run = lambda **kwargs: 901  # type: ignore[method-assign]
+        self.service.history_repository.patch_job_run_result = fake_patch_job_run_result  # type: ignore[method-assign]
+        self.service.history_repository.healthy_remote_worker_count = lambda stale_after_seconds=None: 1  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "run_finviz_ratings_pipeline",
+            options={
+                "as_of_date": "2026-06-13",
+                "execution_mode": "remote",
+                "target_worker": "worker-a",
+            },
+        )
+
+        self.assertEqual(job_id, "remote-901")
+        self.assertEqual(captured_patch["job_run_id"], 901)
+        kwargs = captured_patch["kwargs"]
+        self.assertEqual(kwargs["status"], "queued")
+        self.assertEqual(kwargs["result_payload_patch"]["target_worker"], "worker-a")
+        self.assertEqual(kwargs["result_payload_patch"]["execution_mode"], "remote")
+
+    def test_launch_remote_falls_back_to_local_when_no_healthy_workers(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+        self.service.history_repository.create_job_run = lambda **kwargs: 777  # type: ignore[method-assign]
+        self.service.history_repository.healthy_remote_worker_count = lambda stale_after_seconds=None: 0  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "run_finviz_ratings_pipeline",
+            options={
+                "as_of_date": "2026-06-13",
+                "execution_mode": "remote",
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        job = self.service.get_job(job_id)
+        self.assertEqual(job["job_run_id"], 777)
+        self.assertEqual(job["execution_mode"], "local")
+        self.assertIn("No healthy remote workers detected", job["log_tail"])
+
+    def test_launch_remote_rejects_unsupported_action(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Remote worker execution"):
+            self.service.launch("rs", options={"execution_mode": "remote"})
+
+    def test_cancel_remote_job_uses_repository_cancel(self) -> None:
+        remote_row = {
+            "id": 915,
+            "parent_job_run_id": None,
+            "job_type": "admin_sync",
+            "job_name": "Run Finviz Ratings Pipeline",
+            "status": "running",
+            "trigger_source": "manual",
+            "request_payload": {
+                "action_id": "run_finviz_ratings_pipeline",
+                "options": {"as_of_date": "2026-06-13", "execution_mode": "remote"},
+            },
+            "result_payload": {
+                "command": "python scripts/run_finviz_ratings_pipeline.py --as-of-date 2026-06-13",
+                "progress_label": "Stage 1/3",
+                "cancel_requested": True,
+            },
+            "artifact_path": "",
+            "started_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
+            "finished_at": None,
+            "created_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
+        }
+        self.service.history_repository.get_job_run = lambda job_run_id: remote_row if job_run_id == 915 else None  # type: ignore[method-assign]
+        self.service.history_repository.request_remote_job_cancel = lambda job_run_id: remote_row if job_run_id == 915 else None  # type: ignore[method-assign]
+
+        payload = self.service.cancel("remote-915")
+
+        self.assertEqual(payload["job_id"], "remote-915")
+        self.assertTrue(payload["cancel_requested"])
+        self.assertEqual(payload["execution_mode"], "remote")
+
+    def test_list_jobs_includes_remote_queue_jobs(self) -> None:
+        self.service.history_repository.list_remote_job_runs = lambda limit=20: [  # type: ignore[method-assign]
+            {
+                "id": 930,
+                "parent_job_run_id": None,
+                "job_type": "admin_sync",
+                "job_name": "Sync Finviz Fundamentals",
+                "status": "queued",
+                "trigger_source": "scheduler",
+                "request_payload": {
+                    "action_id": "sync_finviz_fundamentals",
+                    "options": {"as_of_date": "2026-06-13", "execution_mode": "remote", "target_worker": "worker-b"},
+                },
+                "result_payload": {"progress_label": "Queued for remote worker", "worker_name": ""},
+                "artifact_path": "",
+                "started_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
+                "finished_at": None,
+                "created_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
+            }
+        ]
+
+        payload = self.service.list_jobs(limit=10)
+
+        self.assertEqual(payload[0]["job_id"], "remote-930")
+        self.assertEqual(payload[0]["status"], "queued")
+        self.assertEqual(payload[0]["target_worker"], "worker-b")
+        self.assertEqual(payload[0]["execution_mode"], "remote")
+
+    def test_recover_remote_jobs_starts_local_fallback_when_workers_are_down(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+        self.service.history_repository.requeue_stale_remote_job_runs = lambda stale_after_seconds=None: [  # type: ignore[method-assign]
+            {"id": 901}
+        ]
+        self.service.history_repository.healthy_remote_worker_count = lambda stale_after_seconds=None: 0  # type: ignore[method-assign]
+        fallback_row = {
+            "id": 915,
+            "parent_job_run_id": None,
+            "job_type": "admin_sync",
+            "job_name": "Run Finviz Ratings Pipeline",
+            "status": "running",
+            "trigger_source": "scheduler",
+            "request_payload": {
+                "action_id": "run_finviz_ratings_pipeline",
+                "options": {"as_of_date": "2026-06-13", "execution_mode": "remote"},
+            },
+            "result_payload": {
+                "message": "No healthy remote workers detected. Falling back to local execution.",
+            },
+            "artifact_path": "",
+            "started_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
+            "finished_at": None,
+            "created_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
+        }
+        claims = [fallback_row, None]
+        self.service.history_repository.claim_remote_job_run_for_local_fallback = lambda: claims.pop(0)  # type: ignore[method-assign]
+
+        result = self.service.recover_remote_jobs()
+
+        self.assertEqual(result["requeued"], 1)
+        self.assertEqual(result["local_fallback_started"], 1)
+        self.assertEqual(captured["job_id"], "remote-915")
 
     def test_launch_earnings_weekly_criteria_includes_reference_date(self) -> None:
         captured: dict[str, object] = {}
