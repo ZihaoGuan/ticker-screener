@@ -679,6 +679,14 @@ def exclusions_data(
     return JSONResponse(service.get_context(coverage_start=coverage_start))
 
 
+@router.get("/admin/ratings-status", response_class=JSONResponse)
+def ratings_status_data(
+    service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    return JSONResponse(service.get_ratings_status())
+
+
 @router.get("/admin/ticker-lists/{ticker}", response_class=JSONResponse)
 def ticker_list_status(
     ticker: str,

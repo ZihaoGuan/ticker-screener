@@ -207,6 +207,51 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("weekly_rs_before_price", action_ids)
         self.assertNotIn("weekly_rs", action_ids)
         self.assertIn("earnings_weekly_criteria", action_ids)
+        self.assertIn("sync_finviz_fundamentals", action_ids)
+        self.assertIn("build_sector_rating_baselines", action_ids)
+        self.assertIn("build_ticker_ratings", action_ids)
+        self.assertIn("run_finviz_ratings_pipeline", action_ids)
+
+    def test_launch_finviz_ratings_pipeline_includes_custom_options(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "run_finviz_ratings_pipeline",
+            options={
+                "as_of_date": "2026-06-13",
+                "tickers": "NVDA",
+                "delay_min_seconds": "4",
+                "delay_max_seconds": "7",
+                "batch_size_before_rest": "80",
+                "rest_seconds": "50",
+                "min_sector_peers": "25",
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        self.assertIn("scripts/run_finviz_ratings_pipeline.py", command)
+        self.assertIn("--as-of-date", command)
+        self.assertIn("2026-06-13", command)
+        self.assertIn("--tickers", command)
+        self.assertIn("NVDA", command)
+        self.assertIn("--delay-min-seconds", command)
+        self.assertIn("4.0", command)
+        self.assertIn("--delay-max-seconds", command)
+        self.assertIn("7.0", command)
+        self.assertIn("--batch-size-before-rest", command)
+        self.assertIn("80", command)
+        self.assertIn("--rest-seconds", command)
+        self.assertIn("50.0", command)
+        self.assertIn("--min-sector-peers", command)
+        self.assertIn("25", command)
 
     def test_launch_earnings_weekly_criteria_includes_reference_date(self) -> None:
         captured: dict[str, object] = {}

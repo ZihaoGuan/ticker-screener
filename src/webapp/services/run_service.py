@@ -127,6 +127,55 @@ class RunService:
         placeholder="5",
         help_text="How many screener sub-jobs to run at once for warm batch.",
     )
+    _resume_from_field = RunField(
+        "resume_from",
+        "Resume From",
+        "text",
+        placeholder="NVDA",
+        help_text="Optional ticker to resume a fundamentals scrape batch from.",
+    )
+    _delay_min_seconds_field = RunField(
+        "delay_min_seconds",
+        "Delay Min Seconds",
+        "number",
+        placeholder="3",
+        help_text="Minimum delay between Finviz ticker scrapes.",
+    )
+    _delay_max_seconds_field = RunField(
+        "delay_max_seconds",
+        "Delay Max Seconds",
+        "number",
+        placeholder="6",
+        help_text="Maximum delay between Finviz ticker scrapes.",
+    )
+    _batch_size_before_rest_field = RunField(
+        "batch_size_before_rest",
+        "Batch Before Rest",
+        "number",
+        placeholder="75",
+        help_text="How many tickers to scrape before a longer rest.",
+    )
+    _rest_seconds_field = RunField(
+        "rest_seconds",
+        "Rest Seconds",
+        "number",
+        placeholder="45",
+        help_text="Longer sleep between Finviz scrape batches.",
+    )
+    _min_sector_peers_field = RunField(
+        "min_sector_peers",
+        "Min Sector Peers",
+        "number",
+        placeholder="20",
+        help_text="Minimum filtered peer count required per sector metric baseline.",
+    )
+    _min_category_metrics_field = RunField(
+        "min_category_metrics",
+        "Min Category Metrics",
+        "number",
+        placeholder="1.0",
+        help_text="Current ratings pipeline expects 1.0 for full category coverage.",
+    )
     _entry_signal_threshold_field = RunField(
         "entry_signal_threshold",
         "Entry Threshold",
@@ -199,6 +248,60 @@ class RunService:
                 _tickers_field,
             ),
             visible_in_runs=False,
+        ),
+        "sync_finviz_fundamentals": RunAction(
+            "sync_finviz_fundamentals",
+            "Sync Finviz Fundamentals",
+            "scripts/sync_finviz_fundamentals.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _as_of_date_field,
+                _resume_from_field,
+                _delay_min_seconds_field,
+                _delay_max_seconds_field,
+                _batch_size_before_rest_field,
+                _rest_seconds_field,
+                _overwrite_policy_field,
+            ),
+        ),
+        "build_sector_rating_baselines": RunAction(
+            "build_sector_rating_baselines",
+            "Build Sector Rating Baselines",
+            "scripts/build_sector_rating_baselines.py",
+            supports_limit=False,
+            fields=(
+                _as_of_date_field,
+            ),
+        ),
+        "build_ticker_ratings": RunAction(
+            "build_ticker_ratings",
+            "Build Ticker Ratings",
+            "scripts/build_ticker_ratings.py",
+            supports_limit=False,
+            fields=(
+                _as_of_date_field,
+                _min_sector_peers_field,
+                _min_category_metrics_field,
+            ),
+        ),
+        "run_finviz_ratings_pipeline": RunAction(
+            "run_finviz_ratings_pipeline",
+            "Run Finviz Ratings Pipeline",
+            "scripts/run_finviz_ratings_pipeline.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _as_of_date_field,
+                _resume_from_field,
+                _delay_min_seconds_field,
+                _delay_max_seconds_field,
+                _batch_size_before_rest_field,
+                _rest_seconds_field,
+                _overwrite_policy_field,
+                _min_sector_peers_field,
+                _min_category_metrics_field,
+            ),
         ),
         "earnings_weekly_criteria": RunAction(
             "earnings_weekly_criteria",
@@ -1146,20 +1249,34 @@ class RunService:
             command.extend(["--end-date", str(normalized_options["end_date"])])
         if normalized_options.get("chunk_size") is not None:
             command.extend(["--chunk-size", str(normalized_options["chunk_size"])])
+        if normalized_options.get("resume_from"):
+            command.extend(["--resume-from", str(normalized_options["resume_from"])])
         if action_id == "sync_postgres_market_data" and normalized_options.get("include_excluded_tickers"):
             command.append("--include-excluded-tickers")
         if normalized_options.get("strategy_ids_json"):
             command.extend(["--strategy-ids-json", str(normalized_options["strategy_ids_json"])])
         if normalized_options.get("overwrite_policy"):
             command.extend(["--overwrite-policy", str(normalized_options["overwrite_policy"])])
+        if normalized_options.get("delay_min_seconds") is not None:
+            command.extend(["--delay-min-seconds", str(normalized_options["delay_min_seconds"])])
+        if normalized_options.get("delay_max_seconds") is not None:
+            command.extend(["--delay-max-seconds", str(normalized_options["delay_max_seconds"])])
+        if normalized_options.get("rest_seconds") is not None:
+            command.extend(["--rest-seconds", str(normalized_options["rest_seconds"])])
         if normalized_options.get("scope_json"):
             command.extend(["--scope-json", str(normalized_options["scope_json"])])
         if normalized_options.get("candidate_threshold") is not None:
             command.extend(["--candidate-threshold", str(normalized_options["candidate_threshold"])])
         if normalized_options.get("max_parallel") is not None:
             command.extend(["--max-parallel", str(normalized_options["max_parallel"])])
+        if normalized_options.get("batch_size_before_rest") is not None:
+            command.extend(["--batch-size-before-rest", str(normalized_options["batch_size_before_rest"])])
         if normalized_options.get("entry_signal_threshold") is not None:
             command.extend(["--entry-signal-threshold", str(normalized_options["entry_signal_threshold"])])
+        if normalized_options.get("min_sector_peers") is not None:
+            command.extend(["--min-sector-peers", str(normalized_options["min_sector_peers"])])
+        if normalized_options.get("min_category_metrics") is not None:
+            command.extend(["--min-category-metrics", str(normalized_options["min_category_metrics"])])
         if normalized_options.get("hold_periods_json"):
             command.extend(["--hold-periods-json", str(normalized_options["hold_periods_json"])])
         if normalized_options.get("entry_rule_json"):
@@ -1223,12 +1340,29 @@ class RunService:
             "overwrite_policy",
             "signal_cache_policy",
             "market_data_mode",
+            "resume_from",
         ):
             value = options.get(key)
             if isinstance(value, str) and value.strip():
                 normalized[key] = value.strip()
 
         for key in ("chunk_size", "candidate_threshold", "entry_signal_threshold", "max_parallel"):
+            value = options.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                normalized[key] = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{key.replace('_', ' ').title()} must be an integer.") from exc
+        for key in ("delay_min_seconds", "delay_max_seconds", "rest_seconds", "min_category_metrics"):
+            value = options.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                normalized[key] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{key.replace('_', ' ').title()} must be a number.") from exc
+        for key in ("batch_size_before_rest", "min_sector_peers"):
             value = options.get(key)
             if value in (None, ""):
                 continue
@@ -1501,7 +1635,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data"}:
+        if action_id in {"sync_postgres_market_data", "sync_finviz_fundamentals", "build_sector_rating_baselines", "build_ticker_ratings", "run_finviz_ratings_pipeline"}:
             return "admin_sync"
         return "screen_run"
 
@@ -1530,7 +1664,7 @@ class RunService:
         if str(job.get("status")) != "success":
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "overlap_backtest_v1"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "build_sector_rating_baselines", "build_ticker_ratings", "overlap_backtest_v1"}:
             return
         summary_file = str(job.get("summary_file") or "").strip()
         if not summary_file:

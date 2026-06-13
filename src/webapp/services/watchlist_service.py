@@ -25,6 +25,7 @@ from ...market_data_access import (
     resolve_database_url,
     resolve_market_data_source,
 )
+from ...ratings.repository import RatingsRepository
 from ...rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
 from ...ticker_filters import normalize_ticker_symbol
 from ...universe import UniverseTicker, load_universe
@@ -301,6 +302,7 @@ class WatchlistService:
             earnings_limit=earnings_limit,
         )
         implied_move, options_diagnostics = _load_yahoo_implied_move_playwright(normalized_ticker)
+        ratings_bundle = RatingsRepository(self.database_url).load_latest_ticker_rating_bundle(normalized_ticker) if self.database_url else None
         return {
             "ticker": normalized_ticker,
             "earnings_eps_history": earnings_rows,
@@ -308,6 +310,9 @@ class WatchlistService:
             "revenue_yoy_pct": revenue_yoy_pct,
             "earnings_yoy_pct": earnings_yoy_pct,
             "implied_move": implied_move,
+            "fundamentals_snapshot": ratings_bundle.get("fundamentals_snapshot") if ratings_bundle else None,
+            "rating_snapshot": ratings_bundle.get("rating_snapshot") if ratings_bundle else None,
+            "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
             "diagnostics": {
                 "earnings": browser_diagnostics["earnings"],
                 "holders": browser_diagnostics["holders"],

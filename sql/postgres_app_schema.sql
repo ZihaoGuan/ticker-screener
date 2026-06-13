@@ -39,6 +39,95 @@ CREATE INDEX IF NOT EXISTS idx_daily_bars_trade_date
 CREATE INDEX IF NOT EXISTS idx_daily_bars_ticker_trade_date_desc
   ON daily_bars(ticker, trade_date DESC);
 
+CREATE TABLE IF NOT EXISTS ticker_fundamentals_snapshots (
+  ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
+  as_of_date DATE NOT NULL,
+  sector TEXT,
+  industry TEXT,
+  market_cap NUMERIC(24,6),
+  enterprise_value NUMERIC(24,6),
+  forward_pe NUMERIC(18,6),
+  peg_ratio_5y NUMERIC(18,6),
+  price_to_sales NUMERIC(18,6),
+  price_to_book NUMERIC(18,6),
+  price_to_fcf NUMERIC(18,6),
+  profit_margin_pct NUMERIC(18,6),
+  operating_margin_pct NUMERIC(18,6),
+  gross_margin_pct NUMERIC(18,6),
+  roa_pct NUMERIC(18,6),
+  roe_pct NUMERIC(18,6),
+  eps_this_y_pct NUMERIC(18,6),
+  eps_next_y_pct NUMERIC(18,6),
+  eps_next_5y_pct NUMERIC(18,6),
+  sales_qq_pct NUMERIC(18,6),
+  eps_qq_pct NUMERIC(18,6),
+  perf_month_pct NUMERIC(18,6),
+  perf_quarter_pct NUMERIC(18,6),
+  perf_half_pct NUMERIC(18,6),
+  perf_year_pct NUMERIC(18,6),
+  perf_ytd_pct NUMERIC(18,6),
+  volatility_week_pct NUMERIC(18,6),
+  volatility_month_pct NUMERIC(18,6),
+  source TEXT NOT NULL DEFAULT 'finviz',
+  source_url TEXT NOT NULL,
+  parse_status TEXT NOT NULL,
+  parse_error TEXT,
+  scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (ticker, as_of_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_fundamentals_snapshots_date_ticker
+  ON ticker_fundamentals_snapshots(as_of_date, ticker);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_fundamentals_snapshots_date_sector
+  ON ticker_fundamentals_snapshots(as_of_date, sector);
+
+CREATE TABLE IF NOT EXISTS sector_metric_baselines (
+  as_of_date DATE NOT NULL,
+  sector TEXT NOT NULL,
+  metric_name TEXT NOT NULL,
+  sample_size INTEGER NOT NULL,
+  filtered_sample_size INTEGER NOT NULL,
+  median_value NUMERIC(18,6),
+  pct10_value NUMERIC(18,6),
+  pct90_value NUMERIC(18,6),
+  std_value NUMERIC(18,6),
+  std_step_value NUMERIC(18,6),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (as_of_date, sector, metric_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sector_metric_baselines_date_sector
+  ON sector_metric_baselines(as_of_date, sector);
+
+CREATE TABLE IF NOT EXISTS ticker_rating_snapshots (
+  ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
+  as_of_date DATE NOT NULL,
+  sector TEXT,
+  valuation_score NUMERIC(18,6),
+  profitability_score NUMERIC(18,6),
+  growth_score NUMERIC(18,6),
+  performance_score NUMERIC(18,6),
+  overall_rating NUMERIC(18,6),
+  valuation_grade TEXT,
+  profitability_grade TEXT,
+  growth_grade TEXT,
+  performance_grade TEXT,
+  rating_status TEXT NOT NULL,
+  rating_status_reason TEXT,
+  missing_metric_names JSONB NOT NULL DEFAULT '[]'::jsonb,
+  insufficient_baseline_metrics JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (ticker, as_of_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_rating_snapshots_date_status
+  ON ticker_rating_snapshots(as_of_date, rating_status);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_rating_snapshots_date_overall
+  ON ticker_rating_snapshots(as_of_date, overall_rating DESC);
+
 CREATE TABLE IF NOT EXISTS earnings_events (
   ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
   earnings_date DATE NOT NULL,

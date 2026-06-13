@@ -8,7 +8,7 @@ if ! command -v node >/dev/null 2>&1 || ! command -v chromium >/dev/null 2>&1; t
 fi
 
 cd /app
-pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
+pip install --no-cache-dir -r requirements.txt -r requirements-web.txt -r requirements-finviz.txt
 
 if [ "$#" -eq 0 ]; then
   exec uvicorn web.app:app --host 0.0.0.0 --port 8000

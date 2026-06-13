@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections import Counter
 import json
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,51 @@ class AdminService:
             "included_count": len(included),
             "database_status": status,
         }
+
+    def get_ratings_status(self) -> dict[str, Any]:
+        status: dict[str, Any] = {
+            "database_configured": bool(self.database_url),
+            "target_universe_count": 0,
+            "latest_fundamentals_as_of_date": None,
+            "latest_fundamentals_updated_at": None,
+            "latest_baselines_as_of_date": None,
+            "latest_baselines_updated_at": None,
+            "latest_ratings_as_of_date": None,
+            "latest_ratings_updated_at": None,
+            "latest_fundamentals_snapshot_count": 0,
+            "latest_rating_snapshot_count": 0,
+            "latest_fundamentals_parse_status_counts": {},
+            "latest_rating_status_counts": {},
+            "tickers_with_any_fundamentals": 0,
+            "tickers_with_latest_ok_rating": 0,
+            "diagnostics_count": 0,
+            "diagnostic_category_counts": {},
+            "diagnostics": [],
+            "notes": [],
+        }
+        if not self.database_url:
+            status["notes"] = ["TICKER_SCREENER_DATABASE_URL not set."]
+            return status
+
+        target_tickers = self._load_target_tickers()
+        status["target_universe_count"] = len(target_tickers)
+
+        try:
+            query_payload = self._query_ratings_status(target_tickers=target_tickers)
+        except Exception as exc:
+            status["notes"] = [f"Ratings status query failed: {exc}"]
+            return status
+
+        status.update(query_payload)
+        if not target_tickers:
+            status["notes"] = ["Universe loader returned 0 tickers."]
+        elif not status["diagnostics"]:
+            status["notes"] = ["All target tickers currently have an OK latest rating."]
+        else:
+            status["notes"] = [
+                f"{status['tickers_with_latest_ok_rating']}/{len(target_tickers)} target tickers have an OK latest rating."
+            ]
+        return status
 
     def add_exclusion(self, *, ticker: str, reason: str) -> dict[str, Any]:
         config = load_app_config()
@@ -345,6 +391,210 @@ class AdminService:
             "missing_ranges": ranges,
             "missing_date_count": len(missing_dates),
             "sample_missing_dates": [self._to_iso(item) for item in missing_dates[:20]],
+        }
+
+    def _query_ratings_status(self, *, target_tickers: list[str]) -> dict[str, Any]:
+        import psycopg
+
+        latest_fundamentals_date: dt.date | None = None
+        latest_fundamentals_updated_at: object = None
+        latest_baselines_date: dt.date | None = None
+        latest_baselines_updated_at: object = None
+        latest_ratings_date: dt.date | None = None
+        latest_ratings_updated_at: object = None
+        latest_fundamentals_snapshot_count = 0
+        latest_rating_snapshot_count = 0
+        latest_fundamentals_parse_status_counts: dict[str, int] = {}
+        latest_rating_status_counts: dict[str, int] = {}
+        latest_fundamentals_by_ticker: dict[str, dict[str, Any]] = {}
+        latest_ratings_by_ticker: dict[str, dict[str, Any]] = {}
+
+        with psycopg.connect(self.database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT MAX(as_of_date), MAX(updated_at) FROM ticker_fundamentals_snapshots")
+                latest_fundamentals_date, latest_fundamentals_updated_at = cursor.fetchone() or (None, None)
+
+                cursor.execute("SELECT MAX(as_of_date), MAX(updated_at) FROM sector_metric_baselines")
+                latest_baselines_date, latest_baselines_updated_at = cursor.fetchone() or (None, None)
+
+                cursor.execute("SELECT MAX(as_of_date), MAX(updated_at) FROM ticker_rating_snapshots")
+                latest_ratings_date, latest_ratings_updated_at = cursor.fetchone() or (None, None)
+
+                if latest_fundamentals_date is not None:
+                    cursor.execute(
+                        """
+                        SELECT parse_status, COUNT(*)
+                        FROM ticker_fundamentals_snapshots
+                        WHERE as_of_date = %s
+                        GROUP BY parse_status
+                        """,
+                        (latest_fundamentals_date,),
+                    )
+                    latest_fundamentals_parse_status_counts = {
+                        str(parse_status or "unknown"): int(count or 0)
+                        for parse_status, count in cursor.fetchall()
+                    }
+                    latest_fundamentals_snapshot_count = int(sum(latest_fundamentals_parse_status_counts.values()))
+
+                if latest_ratings_date is not None:
+                    cursor.execute(
+                        """
+                        SELECT rating_status, COUNT(*)
+                        FROM ticker_rating_snapshots
+                        WHERE as_of_date = %s
+                        GROUP BY rating_status
+                        """,
+                        (latest_ratings_date,),
+                    )
+                    latest_rating_status_counts = {
+                        str(rating_status or "unknown"): int(count or 0)
+                        for rating_status, count in cursor.fetchall()
+                    }
+                    latest_rating_snapshot_count = int(sum(latest_rating_status_counts.values()))
+
+                cursor.execute(
+                    """
+                    WITH latest_fundamentals AS (
+                      SELECT DISTINCT ON (ticker)
+                        ticker,
+                        as_of_date,
+                        parse_status,
+                        parse_error,
+                        sector,
+                        industry,
+                        updated_at
+                      FROM ticker_fundamentals_snapshots
+                      ORDER BY ticker, as_of_date DESC
+                    )
+                    SELECT ticker, as_of_date, parse_status, parse_error, sector, industry, updated_at
+                    FROM latest_fundamentals
+                    """
+                )
+                for ticker, as_of_date, parse_status, parse_error, sector, industry, updated_at in cursor.fetchall():
+                    latest_fundamentals_by_ticker[str(ticker).upper()] = {
+                        "as_of_date": self._to_iso(as_of_date),
+                        "parse_status": str(parse_status or ""),
+                        "parse_error": str(parse_error or "") or None,
+                        "sector": str(sector or "") or None,
+                        "industry": str(industry or "") or None,
+                        "updated_at": self._to_iso(updated_at),
+                    }
+
+                cursor.execute(
+                    """
+                    WITH latest_ratings AS (
+                      SELECT DISTINCT ON (ticker)
+                        ticker,
+                        as_of_date,
+                        rating_status,
+                        rating_status_reason,
+                        missing_metric_names,
+                        insufficient_baseline_metrics,
+                        overall_rating,
+                        updated_at
+                      FROM ticker_rating_snapshots
+                      ORDER BY ticker, as_of_date DESC
+                    )
+                    SELECT
+                      ticker,
+                      as_of_date,
+                      rating_status,
+                      rating_status_reason,
+                      missing_metric_names,
+                      insufficient_baseline_metrics,
+                      overall_rating,
+                      updated_at
+                    FROM latest_ratings
+                    """
+                )
+                for (
+                    ticker,
+                    as_of_date,
+                    rating_status,
+                    rating_status_reason,
+                    missing_metric_names,
+                    insufficient_baseline_metrics,
+                    overall_rating,
+                    updated_at,
+                ) in cursor.fetchall():
+                    latest_ratings_by_ticker[str(ticker).upper()] = {
+                        "as_of_date": self._to_iso(as_of_date),
+                        "rating_status": str(rating_status or ""),
+                        "rating_status_reason": str(rating_status_reason or "") or None,
+                        "missing_metric_names": list(missing_metric_names or []),
+                        "insufficient_baseline_metrics": list(insufficient_baseline_metrics or []),
+                        "overall_rating": float(overall_rating) if overall_rating is not None else None,
+                        "updated_at": self._to_iso(updated_at),
+                    }
+
+        diagnostics: list[dict[str, Any]] = []
+        tickers_with_ok_rating = 0
+        tickers_with_any_fundamentals = 0
+        target_set = {item.upper() for item in target_tickers}
+
+        for ticker in sorted(target_set):
+            fundamentals = latest_fundamentals_by_ticker.get(ticker)
+            rating = latest_ratings_by_ticker.get(ticker)
+            if fundamentals is not None:
+                tickers_with_any_fundamentals += 1
+            category = ""
+            reason = ""
+            if fundamentals is None:
+                category = "missing_fundamentals"
+                reason = "No fundamentals snapshot found for this ticker."
+            elif str(fundamentals.get("parse_status") or "") != "ok":
+                category = str(fundamentals.get("parse_status") or "scrape_failed")
+                reason = str(fundamentals.get("parse_error") or "Fundamentals sync did not complete successfully.")
+            elif rating is None:
+                category = "missing_rating"
+                reason = "No rating snapshot found for the latest fundamentals snapshot."
+            elif str(rating.get("as_of_date") or "") != str(fundamentals.get("as_of_date") or ""):
+                category = "stale_rating"
+                reason = "Latest rating snapshot date does not match latest fundamentals snapshot date."
+            elif str(rating.get("rating_status") or "") != "ok":
+                category = str(rating.get("rating_status") or "missing_rating")
+                reason = str(rating.get("rating_status_reason") or "Rating snapshot is not OK.")
+            else:
+                tickers_with_ok_rating += 1
+
+            if not category:
+                continue
+            diagnostics.append(
+                {
+                    "ticker": ticker,
+                    "category": category,
+                    "reason": reason,
+                    "fundamentals_as_of_date": fundamentals.get("as_of_date") if fundamentals else None,
+                    "rating_as_of_date": rating.get("as_of_date") if rating else None,
+                    "parse_status": fundamentals.get("parse_status") if fundamentals else None,
+                    "rating_status": rating.get("rating_status") if rating else None,
+                    "sector": fundamentals.get("sector") if fundamentals else None,
+                    "industry": fundamentals.get("industry") if fundamentals else None,
+                    "overall_rating": rating.get("overall_rating") if rating else None,
+                    "missing_metric_names": list(rating.get("missing_metric_names") or []) if rating else [],
+                    "insufficient_baseline_metrics": list(rating.get("insufficient_baseline_metrics") or []) if rating else [],
+                }
+            )
+
+        diagnostics.sort(key=lambda item: (str(item.get("category") or ""), str(item.get("ticker") or "")))
+        diagnostic_category_counts = dict(sorted(Counter(str(item.get("category") or "unknown") for item in diagnostics).items()))
+
+        return {
+            "latest_fundamentals_as_of_date": self._to_iso(latest_fundamentals_date),
+            "latest_fundamentals_updated_at": self._to_iso(latest_fundamentals_updated_at),
+            "latest_baselines_as_of_date": self._to_iso(latest_baselines_date),
+            "latest_baselines_updated_at": self._to_iso(latest_baselines_updated_at),
+            "latest_ratings_as_of_date": self._to_iso(latest_ratings_date),
+            "latest_ratings_updated_at": self._to_iso(latest_ratings_updated_at),
+            "latest_fundamentals_snapshot_count": latest_fundamentals_snapshot_count,
+            "latest_rating_snapshot_count": latest_rating_snapshot_count,
+            "latest_fundamentals_parse_status_counts": dict(sorted(latest_fundamentals_parse_status_counts.items())),
+            "latest_rating_status_counts": dict(sorted(latest_rating_status_counts.items())),
+            "tickers_with_any_fundamentals": tickers_with_any_fundamentals,
+            "tickers_with_latest_ok_rating": tickers_with_ok_rating,
+            "diagnostics_count": len(diagnostics),
+            "diagnostic_category_counts": diagnostic_category_counts,
+            "diagnostics": diagnostics,
         }
 
     def _to_date(self, value: object) -> dt.date | None:

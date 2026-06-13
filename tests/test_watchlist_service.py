@@ -205,6 +205,29 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertIn(latest["state"], {"warning", "extreme"})
         self.assertGreater(latest["extension_pct"], 11.0)
 
+    def test_get_chart_fundamentals_payload_includes_rating_bundle(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        with patch(
+            "src.webapp.services.watchlist_service._load_yahoo_earnings_and_holders_playwright",
+            return_value=([], None, None, None, {"earnings": {}, "holders": {}, "statistics": {}}),
+        ), patch(
+            "src.webapp.services.watchlist_service._load_yahoo_implied_move_playwright",
+            return_value=(None, {}),
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_ticker_rating_bundle",
+            return_value={
+                "fundamentals_snapshot": {"as_of_date": "2026-06-13", "sector": "Technology"},
+                "rating_snapshot": {"overall_rating": 88.5, "rating_status": "ok"},
+                "rating_diagnostics": {"missing_metric_names": [], "insufficient_baseline_metrics": []},
+            },
+        ):
+            payload = service.get_chart_fundamentals_payload("NVDA")
+
+        self.assertEqual(payload["ticker"], "NVDA")
+        self.assertEqual(payload["fundamentals_snapshot"]["sector"], "Technology")
+        self.assertEqual(payload["rating_snapshot"]["overall_rating"], 88.5)
+        self.assertEqual(payload["rating_diagnostics"]["missing_metric_names"], [])
+
     def test_get_chart_insider_payload_filters_recent_rows(self) -> None:
         insider_dir = Path(self.temp_dir.name) / "raw" / "insider"
         insider_dir.mkdir(parents=True, exist_ok=True)

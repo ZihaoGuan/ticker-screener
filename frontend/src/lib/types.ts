@@ -876,6 +876,42 @@ export type AdminResponse = {
   };
 };
 
+export type RatingsAdminDiagnostic = {
+  ticker: string;
+  category: string;
+  reason: string;
+  fundamentals_as_of_date: string | null;
+  rating_as_of_date: string | null;
+  parse_status: string | null;
+  rating_status: string | null;
+  sector: string | null;
+  industry: string | null;
+  overall_rating: number | null;
+  missing_metric_names: string[];
+  insufficient_baseline_metrics: string[];
+};
+
+export type RatingsAdminStatusResponse = {
+  database_configured: boolean;
+  target_universe_count: number;
+  latest_fundamentals_as_of_date: string | null;
+  latest_fundamentals_updated_at: string | null;
+  latest_baselines_as_of_date: string | null;
+  latest_baselines_updated_at: string | null;
+  latest_ratings_as_of_date: string | null;
+  latest_ratings_updated_at: string | null;
+  latest_fundamentals_snapshot_count: number;
+  latest_rating_snapshot_count: number;
+  latest_fundamentals_parse_status_counts: Record<string, number>;
+  latest_rating_status_counts: Record<string, number>;
+  tickers_with_any_fundamentals: number;
+  tickers_with_latest_ok_rating: number;
+  diagnostics_count: number;
+  diagnostic_category_counts: Record<string, number>;
+  diagnostics: RatingsAdminDiagnostic[];
+  notes: string[];
+};
+
 export type AdminTickerListStatusResponse = {
   ticker: string;
   is_excluded: boolean;

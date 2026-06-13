@@ -1,0 +1,5 @@
+lxml>=5.2
+cssselect>=1.2
+aiohttp>=3.9
+tenacity>=8.2
+tqdm>=4.66

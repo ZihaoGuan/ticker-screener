@@ -58,6 +58,49 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(db["sample_missing_tickers"], [{"ticker": "NVDA"}])
         self.assertEqual(db["sample_partial_tickers"], [{"ticker": "MSFT"}])
 
+    def test_get_ratings_status_reports_missing_database_url(self) -> None:
+        service = AdminService(database_url="")
+
+        payload = service.get_ratings_status()
+
+        self.assertFalse(payload["database_configured"])
+        self.assertIn("DATABASE_URL", payload["notes"][0])
+
+    def test_get_ratings_status_summarizes_non_ok_tickers(self) -> None:
+        service = AdminService(database_url="postgres://example")
+        with patch.object(service, "_load_target_tickers", return_value=["AAPL", "MSFT", "NVDA"]), patch.object(
+            service,
+            "_query_ratings_status",
+            return_value={
+                "latest_fundamentals_as_of_date": "2026-06-13",
+                "latest_fundamentals_updated_at": "2026-06-13T10:00:00+00:00",
+                "latest_baselines_as_of_date": "2026-06-13",
+                "latest_baselines_updated_at": "2026-06-13T10:05:00+00:00",
+                "latest_ratings_as_of_date": "2026-06-13",
+                "latest_ratings_updated_at": "2026-06-13T10:06:00+00:00",
+                "latest_fundamentals_snapshot_count": 3,
+                "latest_rating_snapshot_count": 2,
+                "latest_fundamentals_parse_status_counts": {"ok": 2, "scrape_failed": 1},
+                "latest_rating_status_counts": {"missing_metrics": 1, "ok": 1},
+                "tickers_with_any_fundamentals": 3,
+                "tickers_with_latest_ok_rating": 1,
+                "diagnostics_count": 2,
+                "diagnostic_category_counts": {"missing_metrics": 1, "scrape_failed": 1},
+                "diagnostics": [
+                    {"ticker": "MSFT", "category": "missing_metrics", "reason": "One or more required rating metrics are missing."},
+                    {"ticker": "NVDA", "category": "scrape_failed", "reason": "Finviz block/captcha detected."},
+                ],
+            },
+        ):
+            payload = service.get_ratings_status()
+
+        self.assertTrue(payload["database_configured"])
+        self.assertEqual(payload["target_universe_count"], 3)
+        self.assertEqual(payload["tickers_with_latest_ok_rating"], 1)
+        self.assertEqual(payload["diagnostics_count"], 2)
+        self.assertEqual(payload["diagnostic_category_counts"], {"missing_metrics": 1, "scrape_failed": 1})
+        self.assertEqual(payload["diagnostics"][0]["ticker"], "MSFT")
+
     def test_build_missing_ranges_combines_edge_windows_and_internal_gaps(self) -> None:
         payload = _build_missing_ranges(
             coverage_start=dt.date(2020, 1, 1),
