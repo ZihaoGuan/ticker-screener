@@ -328,12 +328,6 @@ class RatingsRepository:
             grouped.setdefault(item.sector, {})[item.metric_name] = item
         return grouped
 
-
-def _normalize_text_values(values: Iterable[str] | None) -> tuple[str, ...]:
-    if not values:
-        return ()
-    return tuple(normalized for normalized in (str(item).strip().lower() for item in values) if normalized)
-
     def load_latest_ticker_rating_bundle(self, ticker: str) -> dict[str, Any] | None:
         connection = self._connect()
         if connection is None:
@@ -519,3 +513,9 @@ def _normalize_text_values(values: Iterable[str] | None) -> tuple[str, ...]:
             if isinstance(as_of_date, dt.date):
                 result[str(ticker).upper()] = as_of_date
         return result
+
+
+def _normalize_text_values(values: Iterable[str] | None) -> tuple[str, ...]:
+    if not values:
+        return ()
+    return tuple(normalized for normalized in (str(item).strip().lower() for item in values) if normalized)

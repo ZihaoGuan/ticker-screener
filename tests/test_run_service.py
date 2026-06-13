@@ -474,6 +474,39 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(payload[0]["target_worker"], "worker-b")
         self.assertEqual(payload[0]["execution_mode"], "remote")
 
+    def test_list_jobs_includes_persisted_local_jobs_when_memory_is_empty(self) -> None:
+        self.service.history_repository.list_local_job_runs = lambda limit=20: [  # type: ignore[method-assign]
+            {
+                "id": 941,
+                "parent_job_run_id": None,
+                "job_type": "admin_sync",
+                "job_name": "Run Finviz Ratings Pipeline",
+                "status": "running",
+                "trigger_source": "manual",
+                "request_payload": {
+                    "action_id": "run_finviz_ratings_pipeline",
+                    "execution_mode": "local",
+                    "options": {"as_of_date": "2026-06-13"},
+                },
+                "result_payload": {
+                    "job_id": "job-local-941",
+                    "command": "python scripts/run_finviz_ratings_pipeline.py --as-of-date 2026-06-13",
+                    "progress_label": "Stage 1/3",
+                    "log_tail": "[9/3621] ABBV fundamentals_ok sector=Health Care",
+                },
+                "artifact_path": "",
+                "started_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
+                "finished_at": None,
+                "created_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
+            }
+        ]
+
+        payload = self.service.list_jobs(limit=10)
+
+        self.assertEqual(payload[0]["job_id"], "job-local-941")
+        self.assertEqual(payload[0]["status"], "running")
+        self.assertEqual(payload[0]["execution_mode"], "local")
+
     def test_recover_remote_jobs_starts_local_fallback_when_workers_are_down(self) -> None:
         captured: dict[str, object] = {}
 

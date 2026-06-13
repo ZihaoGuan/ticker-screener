@@ -163,6 +163,27 @@ class HistoryRepository:
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
         return rows[0] if rows else None
 
+    def get_job_run_by_result_job_id(self, result_job_id: str) -> dict[str, Any] | None:
+        clean_job_id = str(result_job_id or "").strip()
+        if not clean_job_id:
+            return None
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            SELECT id, parent_job_run_id, job_type, job_name, status, trigger_source,
+                   request_payload, result_payload, artifact_path, started_at, finished_at, created_at
+            FROM job_runs
+            WHERE result_payload->>'job_id' = %s
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (clean_job_id,))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+        return rows[0] if rows else None
+
     def list_remote_job_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
         connection = self._connect()
         if connection is None:
@@ -172,6 +193,23 @@ class HistoryRepository:
                    request_payload, result_payload, artifact_path, started_at, finished_at, created_at
             FROM job_runs
             WHERE COALESCE(request_payload->>'execution_mode', 'local') = 'remote'
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (max(1, int(limit)),))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def list_local_job_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        sql = """
+            SELECT id, parent_job_run_id, job_type, job_name, status, trigger_source,
+                   request_payload, result_payload, artifact_path, started_at, finished_at, created_at
+            FROM job_runs
+            WHERE COALESCE(request_payload->>'execution_mode', 'local') <> 'remote'
             ORDER BY created_at DESC, id DESC
             LIMIT %s
         """

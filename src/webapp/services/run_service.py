@@ -1086,8 +1086,9 @@ class RunService:
     def list_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._jobs_lock:
             jobs = [self._serialize_job(item) for item in self._jobs[:limit]]
+        jobs.extend(self._list_local_persisted_jobs(limit=limit))
         jobs.extend(self._list_remote_jobs(limit=limit))
-        jobs = self._sort_jobs(jobs)[:limit]
+        jobs = self._dedupe_jobs(self._sort_jobs(jobs))[:limit]
         return self._attach_child_jobs(jobs)
 
     def get_job(self, job_id: str) -> dict[str, Any]:
@@ -1098,9 +1099,14 @@ class RunService:
             enriched = self._attach_child_jobs(jobs)
             return enriched[0]
         remote_job = self._load_remote_job(job_id)
-        if remote_job is None:
+        if remote_job is not None:
+            jobs = [remote_job]
+            enriched = self._attach_child_jobs(jobs)
+            return enriched[0]
+        local_job = self._load_persisted_local_job(job_id)
+        if local_job is None:
             raise ValueError(f"Unknown job: {job_id}")
-        jobs = [remote_job]
+        jobs = [local_job]
         enriched = self._attach_child_jobs(jobs)
         return enriched[0]
 
@@ -1358,6 +1364,18 @@ class RunService:
             self._jobs.insert(0, job)
             self._jobs_by_id[local_job_id] = job
             del self._jobs[50:]
+        if job_run_id is not None:
+            self.history_repository.patch_job_run_result(
+                job_run_id,
+                result_payload_patch={
+                    "job_id": local_job_id,
+                    "execution_mode": "local",
+                    "command": " ".join(command),
+                    "progress_label": "Starting…",
+                    "log_tail": initial_log.rstrip(),
+                },
+                status="running",
+            )
 
         env = os.environ.copy()
         if normalized.get("market_data_source"):
@@ -1626,6 +1644,25 @@ class RunService:
                 job["log_tail"] = "\n".join(log_lines)
                 self._update_progress(job, log_lines)
                 self._update_artifacts(job, line.rstrip())
+                snapshot = {
+                    "job_id": str(job.get("job_id") or ""),
+                    "execution_mode": "local",
+                    "log_tail": str(job.get("log_tail") or ""),
+                    "progress_current": job.get("progress_current"),
+                    "progress_total": job.get("progress_total"),
+                    "progress_percent": job.get("progress_percent"),
+                    "progress_label": job.get("progress_label"),
+                    "success_count": int(job.get("success_count") or 0),
+                    "summary_file": str(job.get("summary_file") or ""),
+                    "watchlist_file": str(job.get("watchlist_file") or ""),
+                    "raw_results_file": str(job.get("raw_results_file") or ""),
+                    "job_run_id": job.get("job_run_id"),
+                }
+            self.history_repository.patch_job_run_result(
+                snapshot.get("job_run_id"),
+                result_payload_patch=snapshot,
+                artifact_path=str(snapshot.get("summary_file") or snapshot.get("watchlist_file") or "") or None,
+            )
 
         return_code = process.wait()
         finished_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
@@ -1811,6 +1848,24 @@ class RunService:
         rows = self.history_repository.list_remote_job_runs(limit=max(limit * 2, 20))
         return [self._serialize_remote_job_run(row) for row in rows]
 
+    def _list_local_persisted_jobs(self, *, limit: int) -> list[dict[str, Any]]:
+        rows = self.history_repository.list_local_job_runs(limit=max(limit * 2, 20))
+        jobs: list[dict[str, Any]] = []
+        for row in rows:
+            serialized = self._serialize_persisted_local_job_run(row)
+            if serialized is not None:
+                jobs.append(serialized)
+        return jobs
+
+    def _load_persisted_local_job(self, job_id: str) -> dict[str, Any] | None:
+        row = self.history_repository.get_job_run_by_result_job_id(job_id)
+        if row is None:
+            return None
+        request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
+        if str(request_payload.get("execution_mode") or request_payload.get("options", {}).get("execution_mode") or "local") == "remote":
+            return None
+        return self._serialize_persisted_local_job_run(row)
+
     def _load_remote_job(self, job_id: str) -> dict[str, Any] | None:
         remote_job_run_id = self._remote_job_run_id(job_id)
         if remote_job_run_id is None:
@@ -1872,6 +1927,56 @@ class RunService:
             "child_job_summary": {"total": 0, "running": 0, "success": 0, "failed": 0, "cancelled": 0},
         }
 
+    def _serialize_persisted_local_job_run(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
+        result_payload = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
+        action_id = str(request_payload.get("action_id") or "")
+        if not action_id:
+            return None
+        options = request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {}
+        started_at = self._stringify_timestamp(row.get("started_at"))
+        finished_at = self._stringify_timestamp(row.get("finished_at"))
+        command = str(result_payload.get("command") or "")
+        if not command:
+            try:
+                command = " ".join(self.build_command(action_id, options, normalized=True))
+            except Exception:
+                command = ""
+        watchlist_file = str(result_payload.get("watchlist_file") or "")
+        watchlist_stem = self._watchlist_stem_from_path(watchlist_file)
+        return {
+            "job_id": str(result_payload.get("job_id") or ""),
+            "action_id": action_id,
+            "label": str(row.get("job_name") or ""),
+            "status": str(row.get("status") or "failed"),
+            "command": command,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "return_code": result_payload.get("return_code"),
+            "log_tail": str(result_payload.get("log_tail") or ""),
+            "progress_current": result_payload.get("progress_current"),
+            "progress_total": result_payload.get("progress_total"),
+            "progress_percent": result_payload.get("progress_percent"),
+            "progress_label": result_payload.get("progress_label"),
+            "success_count": int(result_payload.get("success_count") or 0),
+            "watchlist_file": watchlist_file,
+            "watchlist_stem": watchlist_stem,
+            "watchlist_url": f"/watchlists?stem={watchlist_stem}" if watchlist_stem else "",
+            "summary_file": str(result_payload.get("summary_file") or ""),
+            "raw_results_file": str(result_payload.get("raw_results_file") or ""),
+            "scan_target": self._describe_job_scan_target(action_id, options),
+            "job_run_id": int(row["id"]),
+            "screen_run_id": result_payload.get("screen_run_id"),
+            "backtest_run_id": result_payload.get("backtest_run_id"),
+            "cancel_requested": bool(result_payload.get("cancel_requested")),
+            "execution_mode": "local",
+            "worker_name": "",
+            "target_worker": "",
+            "duration_seconds": self._duration_seconds_from_iso(started_at, finished_at),
+            "child_jobs": [],
+            "child_job_summary": {"total": 0, "running": 0, "success": 0, "failed": 0, "cancelled": 0},
+        }
+
     def _sort_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         def sort_key(job: dict[str, Any]) -> tuple[int, str, str]:
             status = str(job.get("status") or "")
@@ -1881,6 +1986,17 @@ class RunService:
             return (running_rank, max(started, finished), str(job.get("job_id") or ""))
 
         return sorted(jobs, key=sort_key, reverse=True)
+
+    def _dedupe_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for job in jobs:
+            job_id = str(job.get("job_id") or "").strip()
+            if not job_id or job_id in seen:
+                continue
+            seen.add(job_id)
+            deduped.append(job)
+        return deduped
 
     def _remote_job_id(self, job_run_id: int | None) -> str:
         return f"remote-{int(job_run_id)}" if job_run_id is not None else ""
