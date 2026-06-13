@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import datetime as dt
 import unittest
+from unittest.mock import patch
 
-from src.ratings.finviz_api import parse_finviz_stock_data, snapshot_needs_fallback
+from src.ratings.finviz_api import FinvizApiError, fetch_finviz_api_snapshot, parse_finviz_stock_data, snapshot_needs_fallback
 
 
 class FinvizApiParserTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        from src.ratings import finviz_api
+
+        finviz_api._load_finviz_get_stock.cache_clear()
+        finviz_api._select_finviz_python.cache_clear()
+
     def test_parse_stock_data_maps_required_rating_metrics(self) -> None:
         snapshot = parse_finviz_stock_data(
             {
@@ -56,6 +63,28 @@ class FinvizApiParserTests(unittest.TestCase):
         )
 
         self.assertTrue(snapshot_needs_fallback(snapshot))
+
+    def test_fetch_snapshot_uses_in_process_finviz_when_available(self) -> None:
+        with patch("src.ratings.finviz_api._load_finviz_get_stock", return_value=lambda ticker: {"Ticker": ticker, "Sector": "Technology", "Forward P/E": "16.44"}), patch(
+            "src.ratings.finviz_api._fetch_finviz_api_snapshot_via_subprocess"
+        ) as subprocess_fetch:
+            snapshot = fetch_finviz_api_snapshot("NVDA", as_of_date=dt.date(2026, 6, 13))
+
+        self.assertEqual(snapshot.ticker, "NVDA")
+        self.assertEqual(snapshot.source, "finviz-api")
+        self.assertEqual(snapshot.forward_pe, 16.44)
+        subprocess_fetch.assert_not_called()
+
+    def test_fetch_snapshot_falls_back_to_subprocess_when_in_process_import_fails(self) -> None:
+        with patch("src.ratings.finviz_api._load_finviz_get_stock", side_effect=FinvizApiError("import failed")), patch(
+            "src.ratings.finviz_api._fetch_finviz_api_snapshot_via_subprocess",
+            return_value={"Ticker": "ARM", "Sector": "Technology", "Forward P/E": "55.10"},
+        ) as subprocess_fetch:
+            snapshot = fetch_finviz_api_snapshot("ARM", as_of_date=dt.date(2026, 6, 13))
+
+        self.assertEqual(snapshot.ticker, "ARM")
+        self.assertEqual(snapshot.forward_pe, 55.10)
+        subprocess_fetch.assert_called_once_with("ARM")
 
 
 if __name__ == "__main__":

@@ -33,18 +33,25 @@ def main() -> int:
         raise RuntimeError("No Postgres connection string configured. Pass --database-url or set TICKER_SCREENER_DATABASE_URL.")
     as_of_date = dt.date.fromisoformat(str(args.as_of_date))
     repository = RatingsRepository(database_url)
+    print(f"loading_fundamentals as_of_date={as_of_date.isoformat()}", flush=True)
     snapshots = repository.load_fundamentals_for_date(as_of_date)
+    print(f"fundamentals_loaded={len(snapshots)}", flush=True)
     baselines = repository.load_sector_baselines_for_date(as_of_date)
-    ratings = [
-        build_ticker_rating(
+    print(f"sector_baseline_groups={len(baselines)}", flush=True)
+    total = len(snapshots)
+    ratings = []
+    ok_count = 0
+    for index, snapshot in enumerate(snapshots, start=1):
+        rating = build_ticker_rating(
             snapshot,
             baselines_by_metric=baselines.get(str(snapshot.sector or ""), {}),
             min_sector_peers=args.min_sector_peers,
         )
-        for snapshot in snapshots
-    ]
+        ratings.append(rating)
+        if rating.rating_status == "ok":
+            ok_count += 1
+        print(f"[{index}/{total}] rating {snapshot.ticker} status={rating.rating_status}", flush=True)
     count = repository.replace_rating_snapshots(as_of_date, ratings)
-    ok_count = len([item for item in ratings if item.rating_status == "ok"])
     print(f"ticker_ratings={count}", flush=True)
     print(f"ticker_ratings_ok={ok_count}", flush=True)
     return 0

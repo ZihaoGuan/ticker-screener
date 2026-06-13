@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--delay-max-seconds", type=float, default=1.5)
     parser.add_argument("--batch-size-before-rest", type=int, default=200)
     parser.add_argument("--rest-seconds", type=float, default=15.0)
-    parser.add_argument("--overwrite-policy", default="replace-date", choices=("latest-date", "replace-date", "skip-existing"))
+    parser.add_argument("--overwrite-policy", default="skip-existing", choices=("latest-date", "replace-date", "skip-existing"))
     parser.add_argument("--database-url", default="", help="Optional Postgres connection string.")
     parser.add_argument("--manifest-path", default="", help="Optional explicit manifest path.")
     return parser.parse_args()
@@ -104,6 +104,12 @@ def _sleep_with_jitter(min_seconds: float, max_seconds: float) -> None:
     time.sleep(random.uniform(lower, upper))
 
 
+def _should_write_manifest(index: int, total: int, *, force: bool = False) -> bool:
+    if force or index >= total:
+        return True
+    return index % 25 == 0
+
+
 def _build_failed_snapshot(ticker: str, as_of_date: dt.date, message: str) -> FundamentalsSnapshot:
     return FundamentalsSnapshot(
         ticker=ticker,
@@ -131,6 +137,16 @@ def main() -> int:
     repository = RatingsRepository(database_url)
     manifest_path = _manifest_path(args)
     latest_dates = repository.load_latest_fundamentals_dates([item.symbol for item in universe])
+    print(
+        "sync_config "
+        f"tickers={len(universe)} "
+        f"delay_min_seconds={args.delay_min_seconds} "
+        f"delay_max_seconds={args.delay_max_seconds} "
+        f"batch_size_before_rest={args.batch_size_before_rest} "
+        f"rest_seconds={args.rest_seconds} "
+        f"overwrite_policy={args.overwrite_policy}",
+        flush=True,
+    )
 
     completed: list[str] = []
     failed: list[dict[str, str]] = []
@@ -144,27 +160,29 @@ def main() -> int:
             completed.append(ticker)
             print(f"[{index}/{len(universe)}] {ticker} skipped_existing as_of_date={as_of_date.isoformat()}", flush=True)
             next_resume = universe[index].symbol if index < len(universe) else None
-            _write_manifest(
-                manifest_path,
-                args=args,
-                completed=completed,
-                failed=failed,
-                blocked=blocked,
-                next_resume_ticker=next_resume,
-            )
+            if _should_write_manifest(index, len(universe)):
+                _write_manifest(
+                    manifest_path,
+                    args=args,
+                    completed=completed,
+                    failed=failed,
+                    blocked=blocked,
+                    next_resume_ticker=next_resume,
+                )
             continue
         if args.overwrite_policy == "latest-date" and existing_date is not None and existing_date >= as_of_date:
             completed.append(ticker)
             print(f"[{index}/{len(universe)}] {ticker} skipped_latest existing_date={existing_date.isoformat()}", flush=True)
             next_resume = universe[index].symbol if index < len(universe) else None
-            _write_manifest(
-                manifest_path,
-                args=args,
-                completed=completed,
-                failed=failed,
-                blocked=blocked,
-                next_resume_ticker=next_resume,
-            )
+            if _should_write_manifest(index, len(universe)):
+                _write_manifest(
+                    manifest_path,
+                    args=args,
+                    completed=completed,
+                    failed=failed,
+                    blocked=blocked,
+                    next_resume_ticker=next_resume,
+                )
             continue
         snapshot: FundamentalsSnapshot | None = None
         failure_message: str | None = None
@@ -248,17 +266,26 @@ def main() -> int:
             print(f"[{index}/{len(universe)}] {ticker} fundamentals_ok sector={snapshot.sector or '-'}", flush=True)
 
         next_resume = universe[index].symbol if index < len(universe) else None
-        _write_manifest(
-            manifest_path,
-            args=args,
-            completed=completed,
-            failed=failed,
-            blocked=blocked,
-            next_resume_ticker=next_resume,
-        )
+        if _should_write_manifest(index, len(universe), force=blocked_this_ticker or snapshot.parse_status == RATING_STATUS_SCRAPE_FAILED):
+            _write_manifest(
+                manifest_path,
+                args=args,
+                completed=completed,
+                failed=failed,
+                blocked=blocked,
+                next_resume_ticker=next_resume,
+            )
 
         if blocked_this_ticker and consecutive_blocked >= 3:
             print("finviz_blocked=stop consecutive=3", flush=True)
+            _write_manifest(
+                manifest_path,
+                args=args,
+                completed=completed,
+                failed=failed,
+                blocked=blocked,
+                next_resume_ticker=next_resume,
+            )
             return 1
 
         if index < len(universe):
@@ -268,6 +295,14 @@ def main() -> int:
 
     print(f"fundamentals_completed={len(completed)}", flush=True)
     print(f"fundamentals_failed={len(failed)}", flush=True)
+    _write_manifest(
+        manifest_path,
+        args=args,
+        completed=completed,
+        failed=failed,
+        blocked=blocked,
+        next_resume_ticker=None,
+    )
     return 0
 
 

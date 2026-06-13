@@ -1429,5 +1429,15 @@ function buildScheduleOptionsTemplate(actionId: string): string {
       2,
     );
   }
+  if (actionId === "sync_finviz_fundamentals" || actionId === "run_finviz_ratings_pipeline") {
+    return JSON.stringify(
+      {
+        as_of_date: "{{local_date}}",
+        overwrite_policy: "skip-existing",
+      },
+      null,
+      2,
+    );
+  }
   return JSON.stringify(sharedUniverseTemplate, null, 2);
 }

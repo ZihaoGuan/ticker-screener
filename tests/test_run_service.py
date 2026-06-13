@@ -5,14 +5,16 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.webapp.services import run_service as run_service_module
 from src.webapp.services.run_service import RunService
 
 
 class _DummyProcess:
-    def __init__(self) -> None:
+    def __init__(self, *, pid: int | None = None) -> None:
         self.terminated = False
+        self.pid = pid
 
     def terminate(self) -> None:
         self.terminated = True
@@ -71,6 +73,28 @@ class RunServiceTests(unittest.TestCase):
         self.assertIsNone(job["progress_total"])
         self.assertEqual(job["progress_percent"], 33)
         self.assertEqual(job["progress_label"], "Stage 2/3 · Build Sector Rating Baselines")
+
+    def test_update_progress_combines_stage_markers_with_rating_loop_progress(self) -> None:
+        job = {
+            "success_count": 0,
+            "progress_current": None,
+            "progress_total": None,
+            "progress_percent": None,
+            "progress_label": None,
+        }
+
+        self.service._update_progress(
+            job,
+            [
+                "Stage 3/3: Build Ticker Ratings",
+                "[125/3621] rating ARM status=ok",
+            ],
+        )
+
+        self.assertEqual(job["progress_current"], 125)
+        self.assertEqual(job["progress_total"], 3621)
+        self.assertEqual(job["progress_percent"], 3)
+        self.assertEqual(job["progress_label"], "Stage 3/3 · 125/3621 build ticker ratings")
 
     def test_load_summary_metadata_reads_passed_tickers_and_watchlist_file(self) -> None:
         summary_path = self.project_root / "artifacts" / "raw" / "summary.json"
@@ -171,6 +195,40 @@ class RunServiceTests(unittest.TestCase):
         self.assertTrue(payload["cancel_requested"])
         self.assertEqual(payload["job_id"], "job-1")
         self.assertIn("Cancellation requested", job["log_tail"])
+
+    def test_cancel_terminates_process_group_when_pid_available(self) -> None:
+        process = _DummyProcess(pid=43210)
+        job = {
+            "job_id": "job-2",
+            "action_id": "run_finviz_ratings_pipeline",
+            "label": "Run Finviz Ratings Pipeline",
+            "status": "running",
+            "command": "python scripts/run_finviz_ratings_pipeline.py",
+            "started_at": "2026-06-13T00:00:00+00:00",
+            "finished_at": "",
+            "return_code": None,
+            "log_tail": "",
+            "progress_current": None,
+            "progress_total": None,
+            "progress_percent": None,
+            "progress_label": "Stage 1/3",
+            "success_count": 0,
+            "watchlist_file": "",
+            "summary_file": "",
+            "cancel_requested": False,
+            "_started_monotonic": 10.0,
+            "_process": process,
+        }
+        RunService._jobs = [job]
+        RunService._jobs_by_id = {"job-2": job}
+
+        with patch.object(run_service_module.os, "getpgid", return_value=43210), patch.object(run_service_module.os, "killpg") as killpg:
+            payload = self.service.cancel("job-2")
+
+        killpg.assert_called_once_with(43210, run_service_module.signal.SIGTERM)
+        self.assertFalse(process.terminated)
+        self.assertTrue(job["cancel_requested"])
+        self.assertTrue(payload["cancel_requested"])
 
     def test_launch_sync_job_applies_start_date_end_date_chunk_size_and_tickers(self) -> None:
         captured: dict[str, object] = {}
@@ -274,6 +332,28 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("50.0", command)
         self.assertIn("--min-sector-peers", command)
         self.assertIn("25", command)
+
+    def test_launch_finviz_ratings_pipeline_defaults_to_skip_existing(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "run_finviz_ratings_pipeline",
+            options={
+                "as_of_date": "2026-06-13",
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        overwrite_index = command.index("--overwrite-policy")
+        self.assertEqual(command[overwrite_index + 1], "skip-existing")
 
     def test_launch_earnings_weekly_criteria_includes_reference_date(self) -> None:
         captured: dict[str, object] = {}

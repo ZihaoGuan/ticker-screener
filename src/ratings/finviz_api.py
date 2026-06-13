@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from functools import lru_cache
+import importlib
 import json
 import os
 from pathlib import Path
@@ -52,6 +53,26 @@ def _finviz_pythonpath() -> str:
     if existing:
         entries.append(existing)
     return os.pathsep.join(entries)
+
+
+@lru_cache(maxsize=1)
+def _load_finviz_get_stock() -> Any:
+    original_sys_path = list(sys.path)
+    added_paths: list[str] = []
+    for candidate in (str(_LOCAL_PYTHON_DEPS), str(_LOCAL_FINVIZ_ROOT)):
+        if candidate not in sys.path:
+            sys.path.insert(0, candidate)
+            added_paths.append(candidate)
+    try:
+        module = importlib.import_module("finviz")
+        get_stock = getattr(module, "get_stock", None)
+        if not callable(get_stock):
+            raise FinvizApiError("Local finviz package does not expose get_stock.")
+        return get_stock
+    except Exception as exc:
+        if added_paths:
+            sys.path[:] = original_sys_path
+        raise FinvizApiError(f"Unable to import local finviz package in-process: {exc}") from exc
 
 
 @lru_cache(maxsize=1)
@@ -136,6 +157,23 @@ def fetch_finviz_api_snapshot(
     normalized = str(ticker or "").strip().upper()
     if not normalized:
         raise FinvizApiError("Missing ticker.")
+    try:
+        stock_data = _load_finviz_get_stock()(normalized)
+    except Exception:
+        stock_data = _fetch_finviz_api_snapshot_via_subprocess(normalized)
+    if not isinstance(stock_data, dict) or not stock_data:
+        raise FinvizApiError(f"finviz.get_stock returned no data for {normalized}.")
+    snapshot = parse_finviz_stock_data(
+        stock_data,
+        ticker=normalized,
+        as_of_date=as_of_date,
+        fallback_sector=fallback_sector,
+        fallback_industry=fallback_industry,
+    )
+    return snapshot
+
+
+def _fetch_finviz_api_snapshot_via_subprocess(normalized: str) -> dict[str, Any]:
     env = os.environ.copy()
     env["PYTHONPATH"] = _finviz_pythonpath()
     try:
@@ -157,16 +195,9 @@ def fetch_finviz_api_snapshot(
         stock_data = json.loads((result.stdout or "").strip())
     except json.JSONDecodeError as exc:
         raise FinvizApiError(f"finviz.get_stock returned invalid JSON for {normalized}: {exc}") from exc
-    if not isinstance(stock_data, dict) or not stock_data:
-        raise FinvizApiError(f"finviz.get_stock returned no data for {normalized}.")
-    snapshot = parse_finviz_stock_data(
-        stock_data,
-        ticker=normalized,
-        as_of_date=as_of_date,
-        fallback_sector=fallback_sector,
-        fallback_industry=fallback_industry,
-    )
-    return snapshot
+    if not isinstance(stock_data, dict):
+        raise FinvizApiError(f"finviz.get_stock returned invalid payload for {normalized}.")
+    return stock_data
 
 
 def snapshot_needs_fallback(snapshot: FundamentalsSnapshot) -> bool:

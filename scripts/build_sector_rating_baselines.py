@@ -30,8 +30,11 @@ def main() -> int:
         raise RuntimeError("No Postgres connection string configured. Pass --database-url or set TICKER_SCREENER_DATABASE_URL.")
     as_of_date = dt.date.fromisoformat(str(args.as_of_date))
     repository = RatingsRepository(database_url)
+    print(f"loading_fundamentals as_of_date={as_of_date.isoformat()}", flush=True)
     snapshots = repository.load_fundamentals_for_date(as_of_date)
+    print(f"fundamentals_loaded={len(snapshots)}", flush=True)
     baselines = build_sector_baselines(snapshots, as_of_date=as_of_date)
+    print(f"sector_baselines_built={len(baselines)}", flush=True)
     count = repository.replace_sector_metric_baselines(as_of_date, baselines)
     print(f"sector_metric_baselines={count}", flush=True)
     return 0

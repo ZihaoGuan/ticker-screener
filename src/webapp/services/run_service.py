@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -112,7 +113,7 @@ class RunService:
         "overwrite_policy",
         "Overwrite Policy",
         "select",
-        options=(("skip_existing", "Skip Existing"), ("overwrite", "Overwrite")),
+        options=(("skip-existing", "Skip Existing"), ("replace-date", "Replace Same Date"), ("latest-date", "Skip Newer Or Same")),
     )
     _candidate_threshold_field = RunField(
         "candidate_threshold",
@@ -1162,7 +1163,7 @@ class RunService:
                 raise ValueError(f"Job is not running: {job_id}")
             job["cancel_requested"] = True
             self._append_log_line(job, f"Cancellation requested at {self._now_iso()}")
-            process.terminate()
+            self._terminate_process(process)
             return self._serialize_job(job)
 
     def launch(self, action_id: str, *, options: dict[str, Any] | None = None) -> str:
@@ -1308,6 +1309,8 @@ class RunService:
 
     def _normalize_options(self, action: RunAction, options: dict[str, Any]) -> dict[str, Any]:
         normalized: dict[str, Any] = {}
+        if action.action_id in {"sync_finviz_fundamentals", "run_finviz_ratings_pipeline"}:
+            normalized["overwrite_policy"] = "skip-existing"
         if action.supports_limit:
             raw_limit = options.get("limit")
             if raw_limit not in (None, ""):
@@ -1461,6 +1464,7 @@ class RunService:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            start_new_session=True,
         )
 
         log_lines: list[str] = []
@@ -1497,6 +1501,16 @@ class RunService:
             elif job.get("progress_percent") is None:
                 job["progress_label"] = "Failed"
         self._persist_completed_job(job_id)
+
+    def _terminate_process(self, process: Any) -> None:
+        pid = getattr(process, "pid", None)
+        if isinstance(pid, int) and pid > 0:
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+                return
+            except Exception:
+                pass
+        process.terminate()
 
     def _update_progress(self, job: dict[str, Any], log_lines: list[str]) -> None:
         progress = self._extract_progress(log_lines)
