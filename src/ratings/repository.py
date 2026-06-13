@@ -207,7 +207,7 @@ class RatingsRepository:
         connection = self._connect()
         if connection is None:
             return 0
-        normalized_tickers = tuple(str(item).strip().upper() for item in (tickers or []) if str(item).strip())
+        normalized_tickers = [str(item).strip().upper() for item in (tickers or []) if str(item).strip()]
         with connection:
             with connection.cursor() as cursor:
                 if normalized_tickers:
@@ -546,7 +546,7 @@ class RatingsRepository:
         return result
 
 
-def _normalize_text_values(values: Iterable[str] | None) -> tuple[str, ...]:
+def _normalize_text_values(values: Iterable[str] | None) -> list[str]:
     if not values:
-        return ()
-    return tuple(normalized for normalized in (str(item).strip().lower() for item in values) if normalized)
+        return []
+    return [normalized for normalized in (str(item).strip().lower() for item in values) if normalized]

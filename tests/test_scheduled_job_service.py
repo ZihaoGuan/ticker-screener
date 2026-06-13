@@ -40,6 +40,19 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertIn("reload_postgres_market_data_date", actions)
         self.assertNotIn("sync_postgres_market_data", actions)
 
+    def test_upsert_reload_postgres_market_data_date_accepts_local_date_template(self) -> None:
+        job = self.service.upsert_job(
+            job_id="reload_one_day",
+            job_label="Reload One Day",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 16 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            options={"trade_date": "{{local_date}}", "chunk_size": 25},
+        )
+
+        self.assertEqual(job["options"]["trade_date"], "{{local_date}}")
+
     def test_template_resolution_expands_date_tokens(self) -> None:
         local_now = dt.datetime(2026, 6, 6, 8, 15)
 

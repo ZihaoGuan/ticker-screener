@@ -1136,6 +1136,11 @@ class RunService:
     _jobs: list[dict[str, Any]] = []
     _jobs_by_id: dict[str, dict[str, Any]] = {}
 
+    @staticmethod
+    def _is_template_token(value: str) -> bool:
+        stripped = str(value or "").strip()
+        return stripped.startswith("{{") and stripped.endswith("}}")
+
     def __init__(self, project_root: Path, *, database_url: str = "", artifacts_dir: Path | None = None) -> None:
         self.project_root = project_root
         self.database_url = database_url
@@ -1626,10 +1631,12 @@ class RunService:
             if isinstance(value, str) and value.strip():
                 normalized[key] = value.strip()
         if "trade_date" in normalized:
-            try:
-                dt.date.fromisoformat(str(normalized["trade_date"]))
-            except ValueError as exc:
-                raise ValueError("Trade Date must be YYYY-MM-DD.") from exc
+            trade_date_value = str(normalized["trade_date"])
+            if not self._is_template_token(trade_date_value):
+                try:
+                    dt.date.fromisoformat(trade_date_value)
+                except ValueError as exc:
+                    raise ValueError("Trade Date must be YYYY-MM-DD.") from exc
 
         for key in ("chunk_size", "max_retries", "batch_size", "candidate_threshold", "entry_signal_threshold", "max_parallel"):
             value = options.get(key)
