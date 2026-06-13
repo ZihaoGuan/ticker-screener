@@ -147,28 +147,28 @@ class RunService:
         "delay_min_seconds",
         "Delay Min Seconds",
         "number",
-        placeholder="0.75",
+        placeholder="0.15",
         help_text="Minimum delay between Finviz ticker scrapes. API-first defaults are tuned faster than the old browser path.",
     )
     _delay_max_seconds_field = RunField(
         "delay_max_seconds",
         "Delay Max Seconds",
         "number",
-        placeholder="1.5",
+        placeholder="0.4",
         help_text="Maximum delay between Finviz ticker scrapes. Raise this if Finviz starts throttling.",
     )
     _batch_size_before_rest_field = RunField(
         "batch_size_before_rest",
         "Batch Before Rest",
         "number",
-        placeholder="200",
+        placeholder="500",
         help_text="How many tickers to scrape before a longer rest.",
     )
     _rest_seconds_field = RunField(
         "rest_seconds",
         "Rest Seconds",
         "number",
-        placeholder="15",
+        placeholder="5",
         help_text="Longer sleep between Finviz scrape batches.",
     )
     _min_sector_peers_field = RunField(
