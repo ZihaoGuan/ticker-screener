@@ -11,6 +11,8 @@ def _format_note(hit: PegHit) -> str:
         f"PEG low {hit.peg_low:.2f}",
         f"Gap-day high {hit.gdh:.2f}",
     ]
+    if hit.peg_volume_signal_kind:
+        note_parts.append(hit.peg_volume_signal_kind)
     if hit.strategy_profile == "sean-peg":
         if hit.strategy_inside_day_at_ema21:
             note_parts.insert(1, "Sean inside day at 21 EMA")
@@ -83,6 +85,7 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
             setup_text = "Breakout watch" if hit.strategy_breakout_ready else "8 DEMA support watch"
             summary = (
                 f"PEG event {hit.peg_date}. {setup_text}. "
+                f"Gap-day volume signal {hit.peg_volume_signal_kind or 'none'}. "
                 f"Age {hit.strategy_peg_age_days or 0} bars since gap. "
                 f"ADR20 {hit.strategy_adr_pct_20:.2f}%. "
                 f"Avg vol20 {hit.strategy_avg_volume_20:,.0f}. "
@@ -94,6 +97,7 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
         else:
             summary = (
                 f"PEG event {hit.peg_date}. {status_text}. "
+                f"Gap-day volume signal {hit.peg_volume_signal_kind or 'none'}. "
                 f"Entry distance {hit.entry_distance_pct * 100:.1f}% from PEG low. "
                 f"Close position {hit.close_position_ratio:.2f}. "
                 f"Volume ratio {hit.volume_ratio:.2f}x."

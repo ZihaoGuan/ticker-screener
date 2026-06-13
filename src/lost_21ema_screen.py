@@ -6,7 +6,10 @@ import datetime as dt
 import pandas as pd
 
 from .config import AppConfig
+from .cookstock_bridge import freeze_cookstock_today
 from .cookstock_bridge import load_configured_cookstock
+from .market_data_access import load_many_ticker_windows, resolve_database_url
+from .trendline_snapshots import load_latest_trendline_snapshot_map, load_trendline_snapshot_history_map
 from .universe import UniverseTicker
 
 
@@ -151,11 +154,14 @@ def _to_hit(
     )
 
 
-def run_lost_21ema_screen(config: AppConfig, tickers: list[UniverseTicker]) -> Lost21EmaScreenResult:
-    cookstock = load_configured_cookstock(config)
-    hits: list[Lost21EmaHit] = []
-    failures: list[dict[str, str]] = []
+def run_lost_21ema_screen(
+    config: AppConfig,
+    tickers: list[UniverseTicker],
+    *,
+    as_of_date: dt.date | None = None,
+) -> Lost21EmaScreenResult:
     total_tickers = len(tickers)
+    run_date = as_of_date or dt.date.today()
 
     print(
         "starting lost-21EMA screen: "
@@ -166,113 +172,127 @@ def run_lost_21ema_screen(config: AppConfig, tickers: list[UniverseTicker]) -> L
         f"leader_distance_from_high<={MAX_DISTANCE_FROM_YEAR_HIGH_PCT:.1f}%"
     )
 
-    for position, ticker in enumerate(tickers, start=1):
-        print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
-        try:
-            financials = cookstock.cookFinancials(
-                ticker.symbol,
-                benchmarkTicker=config.benchmark_ticker,
-                historyLookbackDays=PRICE_HISTORY_DAYS,
-            )
-            price_rows = financials._get_clean_price_data()
-            closes = [float(item["close"]) for item in price_rows if item.get("close") is not None]
-            if len(closes) < SMA_LONG:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: insufficient price history | passed={len(hits)}")
-                continue
+    database_url = resolve_database_url("")
+    db_result = _run_lost_21ema_screen_from_db(
+        config,
+        tickers,
+        as_of_date=run_date,
+        database_url=database_url,
+    )
+    if db_result is not None:
+        return db_result
 
-            close_series = pd.Series(closes, dtype=float)
-            ema21_series = close_series.ewm(span=EMA_FAST, adjust=False).mean()
-            current_price = float(close_series.iloc[-1])
-            ema21 = float(ema21_series.iloc[-1])
-            sma50 = _sma(closes, SMA_MEDIUM)
-            sma200 = _sma(closes, SMA_LONG)
-            if sma50 is None or sma200 is None:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing moving averages | passed={len(hits)}")
-                continue
-            if current_price >= ema21:
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"current {current_price:.2f} >= 21 EMA {ema21:.2f} | passed={len(hits)}"
+    cookstock = load_configured_cookstock(config)
+    hits: list[Lost21EmaHit] = []
+    failures: list[dict[str, str]] = []
+    with freeze_cookstock_today(cookstock, as_of_date):
+        for position, ticker in enumerate(tickers, start=1):
+            print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
+            try:
+                financials = cookstock.cookFinancials(
+                    ticker.symbol,
+                    benchmarkTicker=config.benchmark_ticker,
+                    historyLookbackDays=PRICE_HISTORY_DAYS,
                 )
-                continue
-            if not (ema21 > sma50 > sma200):
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"trend stack failed (21EMA {ema21:.2f}, 50D {sma50:.2f}, 200D {sma200:.2f}) | passed={len(hits)}"
-                )
-                continue
-            if current_price <= sma200:
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"current {current_price:.2f} <= 200D {sma200:.2f} | passed={len(hits)}"
-                )
-                continue
+                price_rows = financials._get_clean_price_data()
+                closes = [float(item["close"]) for item in price_rows if item.get("close") is not None]
+                if len(closes) < SMA_LONG:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: insufficient price history | passed={len(hits)}")
+                    continue
 
-            days_since_lost_ema21 = _days_since_recent_cross_under(closes, ema21_series, RECENT_LOSS_LOOKBACK_DAYS)
-            if days_since_lost_ema21 is None:
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"no recent 21 EMA cross-under in last {RECENT_LOSS_LOOKBACK_DAYS}d | passed={len(hits)}"
+                close_series = pd.Series(closes, dtype=float)
+                ema21_series = close_series.ewm(span=EMA_FAST, adjust=False).mean()
+                current_price = float(close_series.iloc[-1])
+                ema21 = float(ema21_series.iloc[-1])
+                sma50 = _sma(closes, SMA_MEDIUM)
+                sma200 = _sma(closes, SMA_LONG)
+                if sma50 is None or sma200 is None:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing moving averages | passed={len(hits)}")
+                    continue
+                if current_price >= ema21:
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"current {current_price:.2f} >= 21 EMA {ema21:.2f} | passed={len(hits)}"
+                    )
+                    continue
+                if not (ema21 > sma50 > sma200):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"trend stack failed (21EMA {ema21:.2f}, 50D {sma50:.2f}, 200D {sma200:.2f}) | passed={len(hits)}"
+                    )
+                    continue
+                if current_price <= sma200:
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"current {current_price:.2f} <= 200D {sma200:.2f} | passed={len(hits)}"
+                    )
+                    continue
+
+                days_since_lost_ema21 = _days_since_recent_cross_under(closes, ema21_series, RECENT_LOSS_LOOKBACK_DAYS)
+                if days_since_lost_ema21 is None:
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"no recent 21 EMA cross-under in last {RECENT_LOSS_LOOKBACK_DAYS}d | passed={len(hits)}"
+                    )
+                    continue
+
+                distance_to_sma50_pct = _pct_from_level(current_price, sma50)
+                if distance_to_sma50_pct > MAX_DISTANCE_TO_SMA50_ABOVE_PCT or distance_to_sma50_pct < -MAX_DISTANCE_TO_SMA50_BELOW_PCT:
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"{distance_to_sma50_pct:+.2f}% vs 50D MA | passed={len(hits)}"
+                    )
+                    continue
+
+                rs_summary = financials.get_rs_new_high_before_price_summary(
+                    sectorName=ticker.sector,
+                    benchmarkTicker=config.benchmark_ticker,
+                    signalProfile="weekly",
                 )
-                continue
+                if not rs_summary:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing RS summary | passed={len(hits)}")
+                    continue
+                distance_from_year_high_pct = float(rs_summary.get("distance_from_year_high_pct", 999.0))
+                weekly_rs_new_high_recent = bool(rs_summary.get("weekly_rs_new_high_recent"))
+                is_strong_rs = bool(rs_summary.get("is_strong_rs"))
+                if not (weekly_rs_new_high_recent or is_strong_rs or distance_from_year_high_pct <= MAX_DISTANCE_FROM_YEAR_HIGH_PCT):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"not a recent leader (weekly_rs_recent={weekly_rs_new_high_recent}, strong_rs={is_strong_rs}, "
+                        f"distance_from_high={distance_from_year_high_pct:.2f}%) | passed={len(hits)}"
+                    )
+                    continue
 
-            distance_to_sma50_pct = _pct_from_level(current_price, sma50)
-            if distance_to_sma50_pct > MAX_DISTANCE_TO_SMA50_ABOVE_PCT or distance_to_sma50_pct < -MAX_DISTANCE_TO_SMA50_BELOW_PCT:
-                print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"{distance_to_sma50_pct:+.2f}% vs 50D MA | passed={len(hits)}"
+                avg_volume_20 = float(financials._get_average_volume(20))
+                avg_dollar_volume_20 = float(financials._get_average_dollar_volume(20))
+                recent_rows = price_rows[-RECENT_RANGE_LOOKBACK_DAYS:]
+                recent_low = min(float(item["low"]) for item in recent_rows if item.get("low") is not None)
+                recent_high = max(float(item["high"]) for item in recent_rows if item.get("high") is not None)
+
+                hit = _to_hit(
+                    ticker,
+                    config.benchmark_ticker,
+                    current_price=current_price,
+                    ema21=ema21,
+                    sma50=sma50,
+                    sma200=sma200,
+                    distance_from_year_high_pct=distance_from_year_high_pct,
+                    avg_volume_20=avg_volume_20,
+                    avg_dollar_volume_20=avg_dollar_volume_20,
+                    recent_low=recent_low,
+                    recent_high=recent_high,
+                    days_since_lost_ema21=days_since_lost_ema21,
+                    weekly_rs_new_high_recent=weekly_rs_new_high_recent,
+                    is_strong_rs=is_strong_rs,
                 )
-                continue
-
-            rs_summary = financials.get_rs_new_high_before_price_summary(
-                sectorName=ticker.sector,
-                benchmarkTicker=config.benchmark_ticker,
-                signalProfile="weekly",
-            )
-            if not rs_summary:
-                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing RS summary | passed={len(hits)}")
-                continue
-            distance_from_year_high_pct = float(rs_summary.get("distance_from_year_high_pct", 999.0))
-            weekly_rs_new_high_recent = bool(rs_summary.get("weekly_rs_new_high_recent"))
-            is_strong_rs = bool(rs_summary.get("is_strong_rs"))
-            if not (weekly_rs_new_high_recent or is_strong_rs or distance_from_year_high_pct <= MAX_DISTANCE_FROM_YEAR_HIGH_PCT):
+                hits.append(hit)
                 print(
-                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
-                    f"not a recent leader (weekly_rs_recent={weekly_rs_new_high_recent}, strong_rs={is_strong_rs}, "
-                    f"distance_from_high={distance_from_year_high_pct:.2f}%) | passed={len(hits)}"
+                    f"[{position}/{total_tickers}] {ticker.symbol} passed: "
+                    f"{hit.support_state}, {hit.distance_to_sma50_pct:+.2f}% vs 50D, lost 21 EMA {hit.days_since_lost_ema21}d ago | passed={len(hits)}"
                 )
-                continue
-
-            avg_volume_20 = float(financials._get_average_volume(20))
-            avg_dollar_volume_20 = float(financials._get_average_dollar_volume(20))
-            recent_rows = price_rows[-RECENT_RANGE_LOOKBACK_DAYS:]
-            recent_low = min(float(item["low"]) for item in recent_rows if item.get("low") is not None)
-            recent_high = max(float(item["high"]) for item in recent_rows if item.get("high") is not None)
-
-            hit = _to_hit(
-                ticker,
-                config.benchmark_ticker,
-                current_price=current_price,
-                ema21=ema21,
-                sma50=sma50,
-                sma200=sma200,
-                distance_from_year_high_pct=distance_from_year_high_pct,
-                avg_volume_20=avg_volume_20,
-                avg_dollar_volume_20=avg_dollar_volume_20,
-                recent_low=recent_low,
-                recent_high=recent_high,
-                days_since_lost_ema21=days_since_lost_ema21,
-                weekly_rs_new_high_recent=weekly_rs_new_high_recent,
-                is_strong_rs=is_strong_rs,
-            )
-            hits.append(hit)
-            print(
-                f"[{position}/{total_tickers}] {ticker.symbol} passed: "
-                f"{hit.support_state}, {hit.distance_to_sma50_pct:+.2f}% vs 50D, lost 21 EMA {hit.days_since_lost_ema21}d ago | passed={len(hits)}"
-            )
-        except Exception as exc:
-            failures.append({"ticker": ticker.symbol, "error": str(exc)})
-            print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+            except Exception as exc:
+                failures.append({"ticker": ticker.symbol, "error": str(exc)})
+                print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
 
     hits.sort(
         key=lambda item: (
@@ -288,10 +308,199 @@ def run_lost_21ema_screen(config: AppConfig, tickers: list[UniverseTicker]) -> L
     )
 
     return Lost21EmaScreenResult(
-        run_date=dt.date.today().isoformat(),
+        run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
         total_tickers=total_tickers,
         passed_tickers=len(hits),
         failed_tickers=failures,
         hits=hits,
     )
+
+
+def _run_lost_21ema_screen_from_db(
+    config: AppConfig,
+    tickers: list[UniverseTicker],
+    *,
+    as_of_date: dt.date,
+    database_url: str,
+) -> Lost21EmaScreenResult | None:
+    snapshot_map = load_latest_trendline_snapshot_map(
+        [item.symbol for item in tickers],
+        as_of_date=as_of_date,
+        database_url=database_url,
+    )
+    if not snapshot_map:
+        return None
+
+    history_map = load_trendline_snapshot_history_map(
+        [item.symbol for item in tickers],
+        start_date=as_of_date - dt.timedelta(days=14),
+        end_date=as_of_date,
+        database_url=database_url,
+    )
+    frame_map = load_many_ticker_windows(
+        [item.symbol for item in tickers],
+        as_of_date,
+        max(SMA_LONG, 252),
+        database_url=database_url,
+    )
+    cookstock = load_configured_cookstock(config)
+    hits: list[Lost21EmaHit] = []
+    failures: list[dict[str, str]] = []
+    total_tickers = len(tickers)
+
+    with freeze_cookstock_today(cookstock, as_of_date):
+        for position, ticker in enumerate(tickers, start=1):
+            print(f"[{position}/{total_tickers}] screening {ticker.symbol} from trendline snapshots | passed={len(hits)}")
+            try:
+                snapshot = snapshot_map.get(ticker.symbol.upper())
+                history = history_map.get(ticker.symbol.upper(), [])
+                frame = frame_map.get(ticker.symbol.upper())
+                if snapshot is None or not history or frame is None or getattr(frame, "empty", False):
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing trendline snapshot history or bars | passed={len(hits)}")
+                    continue
+
+                current_price = float(snapshot["close"])
+                ema21 = _float_or_none(snapshot.get("daily_ema21"))
+                sma50 = _float_or_none(snapshot.get("daily_sma50"))
+                sma200 = _float_or_none(snapshot.get("daily_sma200"))
+                if ema21 is None or sma50 is None or sma200 is None:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing trendline levels | passed={len(hits)}")
+                    continue
+                if current_price >= ema21:
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"current {current_price:.2f} >= 21 EMA {ema21:.2f} | passed={len(hits)}"
+                    )
+                    continue
+                if not (ema21 > sma50 > sma200):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"trend stack failed (21EMA {ema21:.2f}, 50D {sma50:.2f}, 200D {sma200:.2f}) | passed={len(hits)}"
+                    )
+                    continue
+                if current_price <= sma200:
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"current {current_price:.2f} <= 200D {sma200:.2f} | passed={len(hits)}"
+                    )
+                    continue
+
+                days_since_lost_ema21 = _days_since_recent_cross_under_from_history(history, RECENT_LOSS_LOOKBACK_DAYS)
+                if days_since_lost_ema21 is None:
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"no recent 21 EMA cross-under in last {RECENT_LOSS_LOOKBACK_DAYS}d | passed={len(hits)}"
+                    )
+                    continue
+
+                distance_to_sma50_pct = _pct_from_level(current_price, sma50)
+                if distance_to_sma50_pct > MAX_DISTANCE_TO_SMA50_ABOVE_PCT or distance_to_sma50_pct < -MAX_DISTANCE_TO_SMA50_BELOW_PCT:
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"{distance_to_sma50_pct:+.2f}% vs 50D MA | passed={len(hits)}"
+                    )
+                    continue
+
+                financials = cookstock.cookFinancials(
+                    ticker.symbol,
+                    benchmarkTicker=config.benchmark_ticker,
+                    historyLookbackDays=PRICE_HISTORY_DAYS,
+                )
+                rs_summary = financials.get_rs_new_high_before_price_summary(
+                    sectorName=ticker.sector,
+                    benchmarkTicker=config.benchmark_ticker,
+                    signalProfile="weekly",
+                )
+                if not rs_summary:
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing RS summary | passed={len(hits)}")
+                    continue
+
+                distance_from_year_high_pct = float(rs_summary.get("distance_from_year_high_pct", 999.0))
+                weekly_rs_new_high_recent = bool(rs_summary.get("weekly_rs_new_high_recent"))
+                is_strong_rs = bool(rs_summary.get("is_strong_rs"))
+                if not (weekly_rs_new_high_recent or is_strong_rs or distance_from_year_high_pct <= MAX_DISTANCE_FROM_YEAR_HIGH_PCT):
+                    print(
+                        f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                        f"not a recent leader (weekly_rs_recent={weekly_rs_new_high_recent}, strong_rs={is_strong_rs}, "
+                        f"distance_from_high={distance_from_year_high_pct:.2f}%) | passed={len(hits)}"
+                    )
+                    continue
+
+                recent_frame = frame.tail(RECENT_RANGE_LOOKBACK_DAYS)
+                recent_low = float(recent_frame["Low"].min())
+                recent_high = float(recent_frame["High"].max())
+                volume_window = frame.tail(20)
+                avg_volume_20 = float(volume_window["Volume"].mean())
+                avg_dollar_volume_20 = float((volume_window["Close"] * volume_window["Volume"]).mean())
+
+                hit = _to_hit(
+                    ticker,
+                    config.benchmark_ticker,
+                    current_price=current_price,
+                    ema21=ema21,
+                    sma50=sma50,
+                    sma200=sma200,
+                    distance_from_year_high_pct=distance_from_year_high_pct,
+                    avg_volume_20=avg_volume_20,
+                    avg_dollar_volume_20=avg_dollar_volume_20,
+                    recent_low=recent_low,
+                    recent_high=recent_high,
+                    days_since_lost_ema21=days_since_lost_ema21,
+                    weekly_rs_new_high_recent=weekly_rs_new_high_recent,
+                    is_strong_rs=is_strong_rs,
+                )
+                hits.append(hit)
+                print(
+                    f"[{position}/{total_tickers}] {ticker.symbol} passed: "
+                    f"{hit.support_state}, {hit.distance_to_sma50_pct:+.2f}% vs 50D, lost 21 EMA {hit.days_since_lost_ema21}d ago | passed={len(hits)}"
+                )
+            except Exception as exc:
+                failures.append({"ticker": ticker.symbol, "error": str(exc)})
+                print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+
+    hits.sort(
+        key=lambda item: (
+            0 if item.support_state == "testing_50d_support" else 1,
+            item.days_since_lost_ema21,
+            abs(item.distance_to_sma50_pct),
+            0 if item.weekly_rs_new_high_recent else 1,
+            0 if item.is_strong_rs else 1,
+            item.distance_from_year_high_pct,
+            -item.avg_dollar_volume_20,
+            item.ticker,
+        )
+    )
+    return Lost21EmaScreenResult(
+        run_date=as_of_date.isoformat(),
+        benchmark_ticker=config.benchmark_ticker,
+        total_tickers=total_tickers,
+        passed_tickers=len(hits),
+        failed_tickers=failures,
+        hits=hits,
+    )
+
+
+def _days_since_recent_cross_under_from_history(history: list[dict[str, object]], lookback_days: int) -> int | None:
+    crosses: list[int] = []
+    for index in range(1, len(history)):
+        prev_close = _float_or_none(history[index - 1].get("close"))
+        prev_ema21 = _float_or_none(history[index - 1].get("daily_ema21"))
+        current_close = _float_or_none(history[index].get("close"))
+        current_ema21 = _float_or_none(history[index].get("daily_ema21"))
+        if None in {prev_close, prev_ema21, current_close, current_ema21}:
+            continue
+        if current_close < current_ema21 and prev_close >= prev_ema21:
+            crosses.append(index)
+    if not crosses:
+        return None
+    last_cross_index = crosses[-1]
+    days_since = len(history) - 1 - last_cross_index
+    return days_since if days_since <= max(0, int(lookback_days)) else None
+
+
+def _float_or_none(value: object) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None

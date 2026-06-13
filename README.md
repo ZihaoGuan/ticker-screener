@@ -78,6 +78,24 @@ python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/sync_postgres_market_
   --end-date 2024-03-31
 ```
 
+Backfill stored trendline snapshots after market-data sync:
+
+```bash
+python3 /Users/Zihao.Guan/Personal/ticker-screener/scripts/backfill_trendline_snapshots.py \
+  --ensure-schema \
+  --start-date 2020-01-01 \
+  --end-date 2026-06-13
+```
+
+This writes per-ticker daily snapshots for:
+
+- daily `EMA9`
+- daily `EMA21`
+- daily `SMA50`
+- daily `SMA200`
+- weekly `EMA8`
+- weekly `SMA200`
+
 For the next-week earnings growth screener, install the extra provider dependencies:
 
 ```bash

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import datetime as dt
+import math
 
 from .config import AppConfig
 from .cookstock_bridge import freeze_cookstock_today, load_configured_cookstock
@@ -50,6 +51,7 @@ class PegHit:
     earnings_actual_eps: float | None
     earnings_estimated_eps: float | None
     earnings_surprise_pct: float | None
+    peg_volume_signal_kind: str | None
     primary_entry_label: str | None
     primary_entry: float | None
     secondary_entry_label: str | None
@@ -144,12 +146,171 @@ def _event_age_days(peg_date: object, as_of_date: dt.date) -> int | None:
     return (as_of_date - event_date).days
 
 
+@dataclass(frozen=True)
+class PegEventQualityAssessment:
+    qualifies: bool
+    peg_event_age_days: int | None
+    volume_signal_kind: str | None
+    avg_volume_20: float | None
+    adr_pct_20: float | None
+    ema_50: float | None
+    price_above_ema50: bool
+    notes: list[str]
+
+
+def _safe_float(value: object) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(parsed):
+        return None
+    return parsed
+
+
+def _classify_peg_volume_signal(
+    price_data: list[dict[str, object]],
+    peg_index: int,
+    *,
+    lookback_days: int,
+) -> str | None:
+    if peg_index < 0 or peg_index >= len(price_data):
+        return None
+
+    current_volume = _safe_float(price_data[peg_index].get("volume"))
+    if current_volume is None or current_volume <= 0:
+        return None
+
+    volumes_to_date = [
+        volume
+        for volume in (_safe_float(item.get("volume")) for item in price_data[: peg_index + 1])
+        if volume is not None
+    ]
+    if not volumes_to_date:
+        return None
+
+    highest_volume_ever = max(volumes_to_date)
+    if current_volume >= highest_volume_ever:
+        return "HVE"
+
+    window_size = max(1, int(lookback_days))
+    window_start = max(0, peg_index - window_size + 1)
+    window_volumes = [
+        volume
+        for volume in (_safe_float(item.get("volume")) for item in price_data[window_start : peg_index + 1])
+        if volume is not None
+    ]
+    if window_volumes and current_volume >= max(window_volumes):
+        return "HV1"
+    return None
+
+
+def assess_peg_event_quality(
+    financials: object,
+    peg_date: str | None,
+    *,
+    as_of_date: dt.date,
+    config: AppConfig,
+) -> PegEventQualityAssessment:
+    price_data = financials._get_clean_price_data()  # type: ignore[attr-defined]
+    if not price_data or not peg_date:
+        return PegEventQualityAssessment(
+            qualifies=False,
+            peg_event_age_days=None,
+            volume_signal_kind=None,
+            avg_volume_20=None,
+            adr_pct_20=None,
+            ema_50=None,
+            price_above_ema50=False,
+            notes=["missing clean price data or PEG date"],
+        )
+
+    peg_index = None
+    for idx, item in enumerate(price_data):
+        if item.get("formatted_date") == peg_date:
+            peg_index = idx
+            break
+    if peg_index is None:
+        return PegEventQualityAssessment(
+            qualifies=False,
+            peg_event_age_days=None,
+            volume_signal_kind=None,
+            avg_volume_20=None,
+            adr_pct_20=None,
+            ema_50=None,
+            price_above_ema50=False,
+            notes=["PEG date missing from clean price data"],
+        )
+
+    current_close = _safe_float(price_data[-1].get("close"))
+    ema_50 = _safe_float(financials._get_latest_ema_value(50))  # type: ignore[attr-defined]
+    price_above_ema50 = bool(
+        current_close is not None
+        and ema_50 is not None
+        and ema_50 > 0
+        and current_close > ema_50
+    )
+
+    recent_bars = price_data[max(0, len(price_data) - 20) :]
+    valid_recent_volumes = [
+        volume
+        for volume in (_safe_float(item.get("volume")) for item in recent_bars)
+        if volume is not None
+    ]
+    avg_volume_20 = (
+        sum(valid_recent_volumes) / len(valid_recent_volumes)
+        if valid_recent_volumes
+        else None
+    )
+
+    adr_values: list[float] = []
+    for item in recent_bars:
+        high = _safe_float(item.get("high"))
+        low = _safe_float(item.get("low"))
+        close = _safe_float(item.get("close"))
+        if high is None or low is None or close is None or close <= 0:
+            continue
+        adr_values.append(((high - low) / close) * 100.0)
+    adr_pct_20 = sum(adr_values) / len(adr_values) if adr_values else None
+
+    peg_event_age_days = _event_age_days(peg_date, as_of_date)
+    volume_signal_kind = _classify_peg_volume_signal(
+        price_data,
+        peg_index,
+        lookback_days=int(config.peg_volume_signal_lookback_days),
+    )
+
+    notes: list[str] = []
+    if peg_event_age_days is None or peg_event_age_days > int(config.peg_event_lookback_days):
+        notes.append("PEG event older than configured lookback window")
+    if volume_signal_kind is None:
+        notes.append("PEG gap bar is not HVE/HV1")
+    if adr_pct_20 is None or adr_pct_20 <= float(config.peg_min_adr_pct):
+        notes.append("ADR below PEG threshold")
+    if avg_volume_20 is None or avg_volume_20 <= int(config.peg_min_avg_volume):
+        notes.append("average volume below PEG threshold")
+    if not price_above_ema50:
+        notes.append("price not above 50 EMA")
+
+    return PegEventQualityAssessment(
+        qualifies=not notes,
+        peg_event_age_days=peg_event_age_days,
+        volume_signal_kind=volume_signal_kind,
+        avg_volume_20=avg_volume_20,
+        adr_pct_20=adr_pct_20,
+        ema_50=ema_50,
+        price_above_ema50=price_above_ema50,
+        notes=notes,
+    )
+
+
 def _to_hit(
     event: EarningsEvent,
     benchmark_ticker: str,
     peg_setup: dict[str, object],
     trade_plan: dict[str, object] | None,
     strategy_assessment: SeanPegAssessment | None,
+    quality_assessment: PegEventQualityAssessment,
     as_of_date: dt.date,
     *,
     has_peg_event: bool,
@@ -187,6 +348,7 @@ def _to_hit(
         earnings_actual_eps=_optional_float(peg_setup.get("earnings_actual_eps")),
         earnings_estimated_eps=_optional_float(peg_setup.get("earnings_estimated_eps")),
         earnings_surprise_pct=_optional_float(peg_setup.get("earnings_surprise_pct")),
+        peg_volume_signal_kind=quality_assessment.volume_signal_kind,
         primary_entry_label=str(trade_plan["primary_entry_label"]) if trade_plan and trade_plan.get("primary_entry_label") is not None else None,
         primary_entry=_optional_float(trade_plan.get("primary_entry")) if trade_plan else None,
         secondary_entry_label=str(trade_plan["secondary_entry_label"]) if trade_plan and trade_plan.get("secondary_entry_label") is not None else None,
@@ -248,7 +410,9 @@ def run_peg_screen(
                     event.ticker,
                     benchmarkTicker=config.benchmark_ticker,
                 )
-                recent_peg_event = financials.find_recent_power_earnings_gap_event(recency_days=30)
+                recent_peg_event = financials.find_recent_power_earnings_gap_event(
+                    recency_days=int(config.peg_event_lookback_days)
+                )
                 peg_setup = financials.find_recent_power_earnings_gap()
                 if recent_peg_event:
                     event_trade_plan = financials.get_peg_trade_plan(recent_peg_event)
@@ -258,18 +422,26 @@ def run_peg_screen(
                         bool(event_trade_plan.get("distribution_warning")) if event_trade_plan else False,
                         config,
                     )
-                    recent_event_hit = _to_hit(
-                        event,
-                        config.benchmark_ticker,
-                        recent_peg_event,
-                        event_trade_plan,
-                        event_strategy_assessment,
-                        run_date,
-                        has_peg_event=True,
-                        actionable_now=peg_setup is not None and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")),
+                    event_quality_assessment = assess_peg_event_quality(
+                        financials,
+                        str(recent_peg_event.get("peg_date")) if recent_peg_event.get("peg_date") else None,
+                        as_of_date=run_date,
+                        config=config,
                     )
-                    recent_events.append(recent_event_hit)
-                    hits.append(recent_event_hit)
+                    if event_quality_assessment.qualifies:
+                        recent_event_hit = _to_hit(
+                            event,
+                            config.benchmark_ticker,
+                            recent_peg_event,
+                            event_trade_plan,
+                            event_strategy_assessment,
+                            event_quality_assessment,
+                            run_date,
+                            has_peg_event=True,
+                            actionable_now=peg_setup is not None and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")),
+                        )
+                        recent_events.append(recent_event_hit)
+                        hits.append(recent_event_hit)
                 if not peg_setup:
                     continue
                 if recent_peg_event and str(peg_setup.get("peg_date")) == str(recent_peg_event.get("peg_date")):
@@ -281,6 +453,14 @@ def run_peg_screen(
                     bool(trade_plan.get("distribution_warning")) if trade_plan else False,
                     config,
                 )
+                quality_assessment = assess_peg_event_quality(
+                    financials,
+                    str(peg_setup.get("peg_date")) if peg_setup.get("peg_date") else None,
+                    as_of_date=run_date,
+                    config=config,
+                )
+                if not quality_assessment.qualifies:
+                    continue
                 hits.append(
                     _to_hit(
                         event,
@@ -288,6 +468,7 @@ def run_peg_screen(
                         peg_setup,
                         trade_plan,
                         strategy_assessment,
+                        quality_assessment,
                         run_date,
                         has_peg_event=True,
                         actionable_now=True,

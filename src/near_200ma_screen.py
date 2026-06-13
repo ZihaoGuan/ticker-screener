@@ -6,6 +6,8 @@ import datetime as dt
 from .config import AppConfig
 from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches
 from .cookstock_bridge import load_configured_cookstock
+from .market_data_access import load_many_ticker_windows, resolve_database_url
+from .trendline_snapshots import load_latest_trendline_snapshot_map
 from .universe import UniverseTicker
 
 
@@ -133,9 +135,6 @@ def run_near_200ma_screen(
     *,
     as_of_date: dt.date | None = None,
 ) -> Near200MaScreenResult:
-    cookstock = load_configured_cookstock(config)
-    hits: list[Near200MaHit] = []
-    failures: list[dict[str, str]] = []
     run_date = as_of_date or dt.date.today()
     total_tickers = len(tickers)
 
@@ -147,6 +146,19 @@ def run_near_200ma_screen(
         "market_cap_filter=post-screen > $1B"
     )
 
+    database_url = resolve_database_url("")
+    db_result = _run_near_200ma_screen_from_db(
+        config,
+        tickers,
+        as_of_date=run_date,
+        database_url=database_url,
+    )
+    if db_result is not None:
+        return db_result
+
+    cookstock = load_configured_cookstock(config)
+    hits: list[Near200MaHit] = []
+    failures: list[dict[str, str]] = []
     with freeze_cookstock_today(cookstock, as_of_date):
         position = 0
         for ticker_batch in iter_prefetched_cookstock_batches(
@@ -240,6 +252,122 @@ def run_near_200ma_screen(
 
     return Near200MaScreenResult(
         run_date=run_date.isoformat(),
+        benchmark_ticker=config.benchmark_ticker,
+        total_tickers=total_tickers,
+        passed_tickers=len(hits),
+        failed_tickers=failures,
+        hits=hits,
+    )
+
+
+def _run_near_200ma_screen_from_db(
+    config: AppConfig,
+    tickers: list[UniverseTicker],
+    *,
+    as_of_date: dt.date,
+    database_url: str,
+) -> Near200MaScreenResult | None:
+    snapshot_map = load_latest_trendline_snapshot_map(
+        [item.symbol for item in tickers],
+        as_of_date=as_of_date,
+        database_url=database_url,
+    )
+    if not snapshot_map:
+        return None
+
+    frame_map = load_many_ticker_windows(
+        [item.symbol for item in tickers],
+        as_of_date,
+        max(MA_SHORT, RANGE_LOOKBACK_DAYS),
+        database_url=database_url,
+    )
+    hits: list[Near200MaHit] = []
+    failures: list[dict[str, str]] = []
+    total_tickers = len(tickers)
+
+    for position, ticker in enumerate(tickers, start=1):
+        print(f"[{position}/{total_tickers}] screening {ticker.symbol} from trendline snapshots | passed={len(hits)}")
+        try:
+            snapshot = snapshot_map.get(ticker.symbol.upper())
+            frame = frame_map.get(ticker.symbol.upper())
+            if snapshot is None or frame is None or getattr(frame, "empty", False):
+                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing trendline snapshot or bars | passed={len(hits)}")
+                continue
+
+            closes = [float(value) for value in frame["Close"].tail(MA_SHORT).tolist()]
+            if len(closes) < MA_SHORT:
+                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: insufficient DB window | passed={len(hits)}")
+                continue
+
+            current_price = float(snapshot["close"])
+            ma20 = _sma(closes, MA_SHORT)
+            ma50 = float(snapshot["daily_sma50"]) if snapshot.get("daily_sma50") is not None else None
+            ma200 = float(snapshot["daily_sma200"]) if snapshot.get("daily_sma200") is not None else None
+            if ma20 is None or ma50 is None or ma200 is None:
+                print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: missing trendline levels | passed={len(hits)}")
+                continue
+
+            distance_to_ma200_pct = _pct_from_level(current_price, ma200)
+            if abs(distance_to_ma200_pct) > MAX_DISTANCE_TO_MA200_PCT:
+                print(
+                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                    f"{distance_to_ma200_pct:+.2f}% vs MA200 | passed={len(hits)}"
+                )
+                continue
+
+            recent_frame = frame.tail(RANGE_LOOKBACK_DAYS)
+            recent_low = float(recent_frame["Low"].min())
+            recent_high = float(recent_frame["High"].max())
+            volume_window = frame.tail(MA_SHORT)
+            avg_volume_20 = float(volume_window["Volume"].mean())
+            avg_dollar_volume_20 = float((volume_window["Close"] * volume_window["Volume"]).mean())
+
+            case_group: str | None = None
+            if current_price < ma200 and current_price > ma20 > ma50:
+                case_group = "bull"
+            elif current_price > ma200 and current_price < ma20 < ma50:
+                case_group = "bear"
+
+            if case_group is None:
+                print(
+                    f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                    f"no bull/bear 200D setup (price {current_price:.2f}, ma20 {ma20:.2f}, ma50 {ma50:.2f}, ma200 {ma200:.2f}) "
+                    f"| passed={len(hits)}"
+                )
+                continue
+
+            hit = _to_hit(
+                ticker,
+                config.benchmark_ticker,
+                case_group=case_group,
+                current_price=current_price,
+                ma20=ma20,
+                ma50=ma50,
+                ma200=ma200,
+                avg_volume_20=avg_volume_20,
+                avg_dollar_volume_20=avg_dollar_volume_20,
+                recent_low=recent_low,
+                recent_high=recent_high,
+            )
+            hits.append(hit)
+            print(
+                f"[{position}/{total_tickers}] {ticker.symbol} passed: "
+                f"{hit.case_group} case, {hit.distance_to_ma200_pct:+.2f}% vs MA200 | passed={len(hits)}"
+            )
+        except Exception as exc:
+            failures.append({"ticker": ticker.symbol, "error": str(exc)})
+            print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+
+    hits.sort(
+        key=lambda item: (
+            0 if item.case_group == "bull" else 1,
+            abs(item.distance_to_ma200_pct),
+            -item.avg_dollar_volume_20,
+            item.ticker,
+        )
+    )
+    return Near200MaScreenResult(
+        run_date=as_of_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,
         total_tickers=total_tickers,
         passed_tickers=len(hits),

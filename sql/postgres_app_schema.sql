@@ -39,6 +39,26 @@ CREATE INDEX IF NOT EXISTS idx_daily_bars_trade_date
 CREATE INDEX IF NOT EXISTS idx_daily_bars_ticker_trade_date_desc
   ON daily_bars(ticker, trade_date DESC);
 
+CREATE TABLE IF NOT EXISTS ticker_trendline_snapshots (
+  ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
+  trade_date DATE NOT NULL,
+  close NUMERIC(24,6),
+  daily_ema9 NUMERIC(24,6),
+  daily_ema21 NUMERIC(24,6),
+  daily_sma50 NUMERIC(24,6),
+  daily_sma200 NUMERIC(24,6),
+  weekly_ema8 NUMERIC(24,6),
+  weekly_sma200 NUMERIC(24,6),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (ticker, trade_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_trendline_snapshots_trade_date
+  ON ticker_trendline_snapshots(trade_date);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_trendline_snapshots_ticker_trade_date_desc
+  ON ticker_trendline_snapshots(ticker, trade_date DESC);
+
 CREATE TABLE IF NOT EXISTS ticker_fundamentals_snapshots (
   ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
   as_of_date DATE NOT NULL,

@@ -162,6 +162,30 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(payload["watchlist_stem"], "weekly_rs_new_high_dell-2026-05-31")
         self.assertEqual(payload["watchlist_url"], "/watchlists?stem=weekly_rs_new_high_dell-2026-05-31")
 
+    def test_build_command_supports_trendline_snapshot_backfill(self) -> None:
+        command = self.service.build_command(
+            "backfill_trendline_snapshots",
+            {
+                "tickers": ["AAPL", "NVDA"],
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-13",
+            },
+        )
+
+        self.assertEqual(command[1], "scripts/backfill_trendline_snapshots.py")
+        self.assertEqual(
+            command[2:],
+            [
+                "--tickers",
+                "AAPL",
+                "NVDA",
+                "--start-date",
+                "2026-06-01",
+                "--end-date",
+                "2026-06-13",
+            ],
+        )
+
     def test_cancel_marks_job_and_terminates_process(self) -> None:
         process = _DummyProcess()
         job = {
@@ -291,6 +315,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("build_sector_rating_baselines", action_ids)
         self.assertIn("build_ticker_ratings", action_ids)
         self.assertIn("run_finviz_ratings_pipeline", action_ids)
+        self.assertIn("backfill_trendline_snapshots", action_ids)
 
     def test_launch_finviz_ratings_pipeline_includes_custom_options(self) -> None:
         captured: dict[str, object] = {}

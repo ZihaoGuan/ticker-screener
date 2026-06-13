@@ -272,6 +272,17 @@ class RunService:
             ),
             visible_in_runs=False,
         ),
+        "backfill_trendline_snapshots": RunAction(
+            "backfill_trendline_snapshots",
+            "Backfill Trendline Snapshots",
+            "scripts/backfill_trendline_snapshots.py",
+            supports_limit=False,
+            fields=(
+                _tickers_field,
+                _start_date_field,
+                _end_date_field,
+            ),
+        ),
         "sync_finviz_fundamentals": RunAction(
             "sync_finviz_fundamentals",
             "Sync Finviz Fundamentals",
@@ -962,6 +973,7 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _date_label_field,
+                _as_of_date_field,
                 _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,
@@ -982,6 +994,7 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _date_label_field,
+                _as_of_date_field,
                 _market_data_source_field,
                 _filter_precedence_field,
                 _include_sectors_field,

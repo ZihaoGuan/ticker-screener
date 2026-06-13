@@ -102,6 +102,10 @@ class AppConfig:
     peg_secondary_entry_slow_ema: int = 21
     peg_distribution_lookback_days: int = 10
     peg_distribution_volume_ratio: float = 1.5
+    peg_event_lookback_days: int = 30
+    peg_volume_signal_lookback_days: int = 252
+    peg_min_adr_pct: float = 2.0
+    peg_min_avg_volume: int = 500_000
     peg_sean_min_setup_age_days: int = 2
     peg_sean_min_adr_pct: float = 2.0
     peg_sean_min_avg_volume: int = 500_000
