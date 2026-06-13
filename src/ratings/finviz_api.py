@@ -4,7 +4,6 @@ import datetime as dt
 from functools import lru_cache
 import importlib
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -16,8 +15,6 @@ from .finviz_parser import _coerce_number, _parse_volatility
 from .models import FundamentalsSnapshot
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_LOCAL_FINVIZ_ROOT = PROJECT_ROOT / "finviz"
-_LOCAL_PYTHON_DEPS = PROJECT_ROOT / ".python_deps"
 _FINVIZ_FETCH_SNIPPET = (
     "import json; "
     "from finviz import get_stock; "
@@ -47,51 +44,32 @@ def _python_candidates() -> list[str]:
     return ordered
 
 
-def _finviz_pythonpath() -> str:
-    entries = [str(_LOCAL_PYTHON_DEPS), str(_LOCAL_FINVIZ_ROOT)]
-    existing = str(os.environ.get("PYTHONPATH") or "").strip()
-    if existing:
-        entries.append(existing)
-    return os.pathsep.join(entries)
-
-
 @lru_cache(maxsize=1)
 def _load_finviz_get_stock() -> Any:
-    original_sys_path = list(sys.path)
-    added_paths: list[str] = []
-    for candidate in (str(_LOCAL_PYTHON_DEPS), str(_LOCAL_FINVIZ_ROOT)):
-        if candidate not in sys.path:
-            sys.path.insert(0, candidate)
-            added_paths.append(candidate)
     try:
         module = importlib.import_module("finviz")
         get_stock = getattr(module, "get_stock", None)
         if not callable(get_stock):
-            raise FinvizApiError("Local finviz package does not expose get_stock.")
+            raise FinvizApiError("Installed finviz package does not expose get_stock.")
         return get_stock
     except Exception as exc:
-        if added_paths:
-            sys.path[:] = original_sys_path
-        raise FinvizApiError(f"Unable to import local finviz package in-process: {exc}") from exc
+        raise FinvizApiError(f"Unable to import installed finviz package in-process: {exc}") from exc
 
 
 @lru_cache(maxsize=1)
 def _select_finviz_python() -> str:
     for candidate in _python_candidates():
-        env = os.environ.copy()
-        env["PYTHONPATH"] = _finviz_pythonpath()
         result = subprocess.run(
             [candidate, "-c", "from finviz import get_stock; print('ok')"],
             cwd=str(PROJECT_ROOT),
             capture_output=True,
             text=True,
             check=False,
-            env=env,
             timeout=20,
         )
         if result.returncode == 0 and "ok" in (result.stdout or ""):
             return candidate
-    raise FinvizApiError("Unable to find a Python interpreter that can import the local finviz package.")
+    raise FinvizApiError("Unable to find a Python interpreter that can import the installed finviz package.")
 
 
 def _has_complete_rating_inputs(snapshot: FundamentalsSnapshot) -> bool:
@@ -174,8 +152,6 @@ def fetch_finviz_api_snapshot(
 
 
 def _fetch_finviz_api_snapshot_via_subprocess(normalized: str) -> dict[str, Any]:
-    env = os.environ.copy()
-    env["PYTHONPATH"] = _finviz_pythonpath()
     try:
         result = subprocess.run(
             [_select_finviz_python(), "-c", _FINVIZ_FETCH_SNIPPET.format(ticker=normalized)],
@@ -183,7 +159,6 @@ def _fetch_finviz_api_snapshot_via_subprocess(normalized: str) -> dict[str, Any]
             capture_output=True,
             text=True,
             check=False,
-            env=env,
             timeout=45,
         )
     except Exception as exc:

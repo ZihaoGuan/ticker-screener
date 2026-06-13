@@ -1,3 +1,4 @@
+finviz>=1.4.6
 lxml>=5.2
 cssselect>=1.2
 aiohttp>=3.9
