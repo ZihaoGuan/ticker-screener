@@ -10,7 +10,7 @@ import yfinance as yf
 from ...config import load_app_config
 from ...market_data_access import load_daily_bars_frame_from_db
 from ...market_extension import build_moving_average, compute_extension_frame, resample_to_weekly
-from ...rsi_divergence import find_latest_regular_bearish_rsi_divergence
+from ...rsi_divergence import find_latest_bearish_rsi_divergence_top
 from ...td_sequential_screen import find_recent_td_sequential_hit
 from ...universe import UniverseTicker
 from ..repositories.dashboard_repository import DashboardRepository
@@ -206,22 +206,16 @@ def _build_regime_payload(*, frame: pd.DataFrame, weekly: pd.DataFrame, ticker: 
 
 
 def _build_rsi_divergence_payload(*, frame: pd.DataFrame, ticker: str, data_source: str) -> dict[str, Any]:
-    signal = find_latest_regular_bearish_rsi_divergence(frame)
+    signal = find_latest_bearish_rsi_divergence_top(frame)
     if signal is None:
         return {"ticker": ticker, "data_source": data_source, "latest": None}
 
-    state = "overbought_warning" if signal.is_overbought else "bearish_divergence"
-    label = "Overbought Warning" if signal.is_overbought else "Bearish Divergence"
-    explanation = (
-        "Filtered regular bearish RSI divergence from attached script logic. Hidden and ghost divergences ignored."
-    )
+    explanation = "Daily RSI divergence top from Charles Edwards style pivot logic, with fresh, active, lifted, and invalidated states."
     return {
         "ticker": ticker,
         "data_source": data_source,
         "latest": {
             **signal.to_dict(),
-            "state": state,
-            "label": label,
             "explanation": explanation,
         },
     }

@@ -4,12 +4,12 @@ import unittest
 
 import pandas as pd
 
-from src.rsi_divergence import find_latest_regular_bearish_rsi_divergence
+from src.rsi_divergence import find_latest_bearish_rsi_divergence_top
 
 
-def _bearish_divergence_frame() -> pd.DataFrame:
+def _bearish_divergence_top_frame() -> pd.DataFrame:
     index = pd.date_range(start="2026-01-02", periods=80, freq="B")
-    high_values = [
+    close_values = [
         100, 102, 104, 106, 108, 110, 112, 114, 116, 118,
         120, 122, 124, 126, 128, 130, 132, 134, 136, 138,
         140, 138, 136, 134, 132, 130, 128, 126, 124, 122,
@@ -19,33 +19,30 @@ def _bearish_divergence_frame() -> pd.DataFrame:
         153, 154, 155, 156, 157, 158, 159, 160, 161, 162,
         163, 164, 165, 166, 167, 168, 167, 166, 165, 164,
     ]
-    close_values = [value - 2 for value in high_values]
-    open_values = [value - 3 for value in high_values]
-    low_values = [value - 5 for value in high_values]
-    volume_values = [1_000_000 for _ in high_values]
     return pd.DataFrame(
         {
-            "Open": open_values,
-            "High": high_values,
-            "Low": low_values,
+            "Open": [value - 1.0 for value in close_values],
+            "High": [value + 2.0 for value in close_values],
+            "Low": [value - 2.0 for value in close_values],
             "Close": close_values,
-            "Volume": volume_values,
+            "Volume": [1_000_000 for _ in close_values],
         },
         index=index,
     )
 
 
 class RsiDivergenceTests(unittest.TestCase):
-    def test_find_latest_regular_bearish_rsi_divergence_returns_signal(self) -> None:
-        signal = find_latest_regular_bearish_rsi_divergence(_bearish_divergence_frame())
+    def test_find_latest_bearish_rsi_divergence_top_returns_active_signal(self) -> None:
+        signal = find_latest_bearish_rsi_divergence_top(_bearish_divergence_top_frame())
 
         self.assertIsNotNone(signal)
         assert signal is not None
         self.assertGreater(signal.signal_price, signal.previous_signal_price)
         self.assertLess(signal.signal_rsi, signal.previous_signal_rsi)
-        self.assertGreaterEqual(signal.bars_apart, 6)
+        self.assertIn(signal.state, {"fresh_top_warning", "active_top_warning"})
+        self.assertGreaterEqual(signal.bars_apart, 1)
 
-    def test_find_latest_regular_bearish_rsi_divergence_returns_none_without_pattern(self) -> None:
+    def test_find_latest_bearish_rsi_divergence_top_returns_none_without_pattern(self) -> None:
         index = pd.date_range(start="2026-01-02", periods=80, freq="B")
         frame = pd.DataFrame(
             {
@@ -58,7 +55,7 @@ class RsiDivergenceTests(unittest.TestCase):
             index=index,
         )
 
-        signal = find_latest_regular_bearish_rsi_divergence(frame)
+        signal = find_latest_bearish_rsi_divergence_top(frame)
 
         self.assertIsNone(signal)
 

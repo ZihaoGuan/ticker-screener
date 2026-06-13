@@ -47,6 +47,8 @@ class DashboardServiceTests(unittest.TestCase):
         rsi_divergence = payload["market_health"]["rsi_divergence"]
         self.assertEqual(rsi_divergence["ticker"], "SPY")
         self.assertEqual(rsi_divergence["data_source"], "database")
+        if rsi_divergence["latest"] is not None:
+            self.assertIn(rsi_divergence["latest"]["state"], {"fresh_top_warning", "active_top_warning", "lifted", "invalidated"})
 
         bearish_td9 = payload["market_health"]["bearish_td9"]
         self.assertEqual(bearish_td9["ticker"], "SPY")
@@ -193,6 +195,42 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(latest["label"], "Bearish TD9")
         self.assertEqual(latest["signal_date"], "2026-01-29")
         self.assertEqual(latest["setup_count"], 9)
+
+    def test_get_dashboard_context_includes_new_rsi_top_warning_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
+            index = pd.date_range(start="2026-01-02", periods=80, freq="B")
+            close_values = [
+                100, 102, 104, 106, 108, 110, 112, 114, 116, 118,
+                120, 122, 124, 126, 128, 130, 132, 134, 136, 138,
+                140, 138, 136, 134, 132, 130, 128, 126, 124, 122,
+                124, 126, 128, 130, 132, 134, 136, 138, 140, 142,
+                144, 146, 148, 150, 152, 154, 156, 158, 160, 162,
+                161, 160, 159, 158, 157, 156, 155, 154, 153, 152,
+                153, 154, 155, 156, 157, 158, 159, 160, 161, 162,
+                163, 164, 165, 166, 167, 168, 167, 166, 165, 164,
+            ]
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_000_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config:
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        latest = payload["market_health"]["rsi_divergence"]["latest"]
+        assert latest is not None
+        self.assertIn(latest["state"], {"fresh_top_warning", "active_top_warning"})
+        self.assertIn(latest["label"], {"Fresh Top Warning", "Active Top Warning"})
 
 
 if __name__ == "__main__":

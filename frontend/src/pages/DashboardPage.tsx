@@ -100,21 +100,26 @@ export function DashboardPage() {
 
           <article className="metric-card">
             <div className="metric-card-head">
-              <h3>{rsiDivergence?.ticker ?? "SPY"} RSI Div</h3>
-              <span className={`accent-mark accent-${rsiLatest?.state === "overbought_warning" ? "down" : rsiLatest ? "neutral" : "up"}`} />
+              <h3>{rsiDivergence?.ticker ?? "SPY"} RSI Top</h3>
+              <span className={`accent-mark accent-${rsiSignalAccent(rsiLatest?.state)}`} />
             </div>
-            <p className="card-meta">Regular bearish RSI divergence only. Hidden and ghost divergences ignored.</p>
+            <p className="card-meta">Daily bearish RSI divergence top using Charles Edwards style pivot logic.</p>
             <div className="metric-value">
               {rsiLatest?.label ?? "No Signal"} <span>{rsiSignalSubLabel(rsiLatest)}</span>
             </div>
             <p className="card-meta">
               {rsiLatest
-                ? `Signal ${rsiLatest.signal_date} · RSI ${rsiLatest.signal_rsi.toFixed(2)} vs prev ${rsiLatest.previous_signal_rsi.toFixed(2)}`
-                : "No recent filtered regular bearish divergence."}
+                ? `Signal ${rsiLatest.signal_date} · ${rsiLatest.bars_since_signal} bars ago · RSI ${rsiLatest.signal_rsi.toFixed(2)} vs prev ${rsiLatest.previous_signal_rsi.toFixed(2)}`
+                : "No recent daily bearish RSI divergence top."}
             </p>
             <p className="card-meta">
               {rsiLatest
-                ? `High ${formatPrice(rsiLatest.signal_price)} vs prev ${formatPrice(rsiLatest.previous_signal_price)} · ${rsiLatest.price_change_pct.toFixed(2)}% move · ${rsiLatest.bars_apart} bars`
+                ? `Top ${formatPrice(rsiLatest.signal_price)} vs prev ${formatPrice(rsiLatest.previous_signal_price)} · Now ${formatPrice(rsiLatest.current_close)} · ${formatPercentSigned(rsiLatest.distance_from_signal_pct)} from top`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {rsiLatest
+                ? `Current RSI ${rsiLatest.current_rsi.toFixed(2)} · Daily 21EMA ${formatPrice(rsiLatest.current_ema21)}`
                 : ""}
             </p>
             <p className="card-meta">{rsiLatest?.explanation ?? ""}</p>
@@ -271,10 +276,47 @@ function rsiSignalSubLabel(latest: DashboardResponse["market_health"]["rsi_diver
   if (!latest) {
     return "Normal";
   }
-  if (latest.state === "overbought_warning") {
-    return `RSI >= ${latest.overbought_threshold}`;
+  if (latest.state === "fresh_top_warning") {
+    return `Fresh <= ${latest.fresh_bars} bars`;
   }
-  return "Watch closely";
+  if (latest.state === "active_top_warning") {
+    return `Active <= ${latest.active_bars} bars`;
+  }
+  if (latest.state === "invalidated") {
+    return "Breakout proved top wrong";
+  }
+  if (latest.lift_reason === "rsi_reset") {
+    return `Lifted: RSI < ${latest.reset_rsi_threshold}`;
+  }
+  if (latest.lift_reason === "below_ema21") {
+    return "Lifted: below daily 21EMA";
+  }
+  if (latest.lift_reason === "expired") {
+    return "Lifted: stale signal";
+  }
+  return "Lifted";
+}
+
+function rsiSignalAccent(
+  state: DashboardResponse["market_health"]["rsi_divergence"]["latest"] extends infer T
+    ? T extends { state: infer S }
+      ? S | null | undefined
+      : null | undefined
+    : null | undefined,
+) {
+  if (state === "fresh_top_warning") {
+    return "down";
+  }
+  if (state === "active_top_warning") {
+    return "neutral";
+  }
+  if (state === "invalidated") {
+    return "up";
+  }
+  if (state === "lifted") {
+    return "up";
+  }
+  return "up";
 }
 
 function td9SignalSubLabel(latest: DashboardResponse["market_health"]["bearish_td9"]["latest"] | null | undefined) {
