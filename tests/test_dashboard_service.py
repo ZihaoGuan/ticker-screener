@@ -29,8 +29,9 @@ class DashboardServiceTests(unittest.TestCase):
             )
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
-                "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+                "src.webapp.services.dashboard_service.db_frame_has_recent_coverage",
+                return_value=True,
+            ), patch("src.webapp.services.dashboard_service.load_app_config") as mock_config:
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 
@@ -87,6 +88,45 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(spy_extension["data_source"], "unavailable")
         self.assertIsNone(spy_extension["latest"])
 
+    def test_get_dashboard_context_falls_back_to_internet_when_db_frame_is_stale_or_too_short(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
+            db_index = pd.date_range(start="2026-01-06", periods=40, freq="B")
+            db_frame = pd.DataFrame(
+                {
+                    "Open": [100.0 + idx for idx in range(len(db_index))],
+                    "High": [101.0 + idx for idx in range(len(db_index))],
+                    "Low": [99.0 + idx for idx in range(len(db_index))],
+                    "Close": [100.5 + idx for idx in range(len(db_index))],
+                    "Volume": [1_000_000 for _ in range(len(db_index))],
+                },
+                index=db_index,
+            )
+            fresh_index = pd.date_range(end="2026-06-12", periods=140, freq="B")
+            fresh_closes = [100.0 + (idx * 0.6) for idx in range(len(fresh_index))]
+            fresh_frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in fresh_closes],
+                    "High": [value + 2.0 for value in fresh_closes],
+                    "Low": [value - 2.0 for value in fresh_closes],
+                    "Close": fresh_closes,
+                    "Volume": [1_500_000 for _ in fresh_closes],
+                },
+                index=fresh_index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=db_frame.copy()), patch(
+                "src.webapp.services.dashboard_service._download_history_frame",
+                return_value=fresh_frame.copy(),
+            ):
+                with patch("src.webapp.services.dashboard_service.load_app_config") as mock_config:
+                    mock_config.return_value.benchmark_ticker = "SPY"
+                    payload = service.get_dashboard_context()
+
+        self.assertEqual(payload["market_health"]["regime"]["data_source"], "internet")
+        self.assertIsNotNone(payload["market_health"]["regime"]["latest"])
+        self.assertIsNotNone(payload["market_health"]["spy_extension"]["latest"])
+
     def test_get_dashboard_context_flags_healthy_chaos_when_weekly_uptrend_but_daily_below_21ema(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
@@ -105,8 +145,9 @@ class DashboardServiceTests(unittest.TestCase):
             )
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
-                "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+                "src.webapp.services.dashboard_service.db_frame_has_recent_coverage",
+                return_value=True,
+            ), patch("src.webapp.services.dashboard_service.load_app_config") as mock_config:
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 
@@ -135,8 +176,9 @@ class DashboardServiceTests(unittest.TestCase):
             )
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
-                "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+                "src.webapp.services.dashboard_service.db_frame_has_recent_coverage",
+                return_value=True,
+            ), patch("src.webapp.services.dashboard_service.load_app_config") as mock_config:
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 
@@ -185,8 +227,9 @@ class DashboardServiceTests(unittest.TestCase):
             )
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
-                "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+                "src.webapp.services.dashboard_service.db_frame_has_recent_coverage",
+                return_value=True,
+            ), patch("src.webapp.services.dashboard_service.load_app_config") as mock_config:
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 
@@ -222,8 +265,9 @@ class DashboardServiceTests(unittest.TestCase):
             )
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
-                "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+                "src.webapp.services.dashboard_service.db_frame_has_recent_coverage",
+                return_value=True,
+            ), patch("src.webapp.services.dashboard_service.load_app_config") as mock_config:
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 

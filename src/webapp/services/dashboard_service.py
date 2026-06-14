@@ -8,7 +8,7 @@ import pandas as pd
 import yfinance as yf
 
 from ...config import load_app_config
-from ...market_data_access import load_daily_bars_frame_from_db
+from ...market_data_access import db_frame_has_recent_coverage, load_daily_bars_frame_from_db
 from ...market_extension import build_moving_average, compute_extension_frame, resample_to_weekly
 from ...rsi_divergence import find_latest_bearish_rsi_divergence_top
 from ...td_sequential_screen import find_recent_td_sequential_hit
@@ -44,7 +44,7 @@ class DashboardService:
         start_date = end_date - dt.timedelta(days=900)
         frame = load_daily_bars_frame_from_db(benchmark, start_date, end_date, database_url=self.dashboard_repository.database_url)
         data_source = "database"
-        if frame is None or frame.empty:
+        if frame is None or frame.empty or not db_frame_has_recent_coverage(frame, end_date, tolerance_days=7):
             frame = _download_history_frame(benchmark, start_date, end_date)
             data_source = "internet" if frame is not None and not frame.empty else "unavailable"
         if frame is None or frame.empty:
@@ -77,40 +77,61 @@ class DashboardService:
                 }
             }
 
-        weekly = resample_to_weekly(frame[["Open", "High", "Low", "Close", "Volume"]])
-        regime = _build_regime_payload(frame=frame, weekly=weekly, ticker=benchmark, data_source=data_source)
-        rsi_divergence = _build_rsi_divergence_payload(frame=frame, ticker=benchmark, data_source=data_source)
-        bearish_td9 = _build_bearish_td9_payload(frame=frame, ticker=benchmark, data_source=data_source)
-        enriched = compute_extension_frame(weekly, length=10, ma_type="sma", warning_pct=11.0, extreme_pct=15.0)
-        latest_valid = enriched.dropna(subset=["moving_average", "extension_pct"]).tail(1)
-        latest = None
-        if not latest_valid.empty:
-            row = latest_valid.iloc[0]
-            moving_average = float(row["moving_average"])
-            latest = {
-                "time": latest_valid.index[-1].date().isoformat(),
-                "state": str(row["threshold_state"]),
-                "close": round(float(row["Close"]), 2),
-                "moving_average": round(moving_average, 2),
-                "distance": round(float(row["Close"]) - moving_average, 2),
-                "extension_pct": round(float(row["extension_pct"]), 2),
-            }
-        return {
-            "regime": regime,
-            "rsi_divergence": rsi_divergence,
-            "bearish_td9": bearish_td9,
-            "spy_extension": {
-                "ticker": benchmark,
-                "label": "10W SMA",
-                "timeframe": "weekly",
-                "ma_type": "sma",
-                "length": 10,
-                "warning_pct": 11.0,
-                "extreme_pct": 15.0,
-                "data_source": data_source,
-                "latest": latest,
-            }
+        payload = _build_market_health_payload(frame=frame, ticker=benchmark, data_source=data_source)
+        if (
+            data_source == "database"
+            and _market_health_payload_has_no_latest(payload)
+        ):
+            fallback_frame = _download_history_frame(benchmark, start_date, end_date)
+            if fallback_frame is not None and not fallback_frame.empty:
+                return _build_market_health_payload(frame=fallback_frame, ticker=benchmark, data_source="internet")
+        return payload
+
+
+def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_source: str) -> dict[str, Any]:
+    weekly = resample_to_weekly(frame[["Open", "High", "Low", "Close", "Volume"]])
+    regime = _build_regime_payload(frame=frame, weekly=weekly, ticker=ticker, data_source=data_source)
+    rsi_divergence = _build_rsi_divergence_payload(frame=frame, ticker=ticker, data_source=data_source)
+    bearish_td9 = _build_bearish_td9_payload(frame=frame, ticker=ticker, data_source=data_source)
+    enriched = compute_extension_frame(weekly, length=10, ma_type="sma", warning_pct=11.0, extreme_pct=15.0)
+    latest_valid = enriched.dropna(subset=["moving_average", "extension_pct"]).tail(1)
+    latest = None
+    if not latest_valid.empty:
+        row = latest_valid.iloc[0]
+        moving_average = float(row["moving_average"])
+        latest = {
+            "time": latest_valid.index[-1].date().isoformat(),
+            "state": str(row["threshold_state"]),
+            "close": round(float(row["Close"]), 2),
+            "moving_average": round(moving_average, 2),
+            "distance": round(float(row["Close"]) - moving_average, 2),
+            "extension_pct": round(float(row["extension_pct"]), 2),
         }
+    return {
+        "regime": regime,
+        "rsi_divergence": rsi_divergence,
+        "bearish_td9": bearish_td9,
+        "spy_extension": {
+            "ticker": ticker,
+            "label": "10W SMA",
+            "timeframe": "weekly",
+            "ma_type": "sma",
+            "length": 10,
+            "warning_pct": 11.0,
+            "extreme_pct": 15.0,
+            "data_source": data_source,
+            "latest": latest,
+        }
+    }
+
+
+def _market_health_payload_has_no_latest(payload: dict[str, Any]) -> bool:
+    market_health = payload or {}
+    regime_latest = ((market_health.get("regime") or {}).get("latest")) if isinstance(market_health.get("regime"), dict) else None
+    rsi_latest = ((market_health.get("rsi_divergence") or {}).get("latest")) if isinstance(market_health.get("rsi_divergence"), dict) else None
+    td9_latest = ((market_health.get("bearish_td9") or {}).get("latest")) if isinstance(market_health.get("bearish_td9"), dict) else None
+    extension_latest = ((market_health.get("spy_extension") or {}).get("latest")) if isinstance(market_health.get("spy_extension"), dict) else None
+    return regime_latest is None and rsi_latest is None and td9_latest is None and extension_latest is None
 
 
 def _download_history_frame(ticker: str, start_date: dt.date, end_date: dt.date) -> pd.DataFrame | None:
