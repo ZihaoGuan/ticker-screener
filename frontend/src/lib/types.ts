@@ -1037,6 +1037,24 @@ export type AdminResponse = {
   };
 };
 
+export type MissingSectorTickerSummary = {
+  ticker: string;
+  exchange: string | null;
+  industry: string | null;
+  source: string | null;
+  updated_at: string | null;
+  suggested_sector: string | null;
+  suggested_industry: string | null;
+};
+
+export type MissingSectorAdminResponse = {
+  database_configured: boolean;
+  missing_count: number;
+  tickers: MissingSectorTickerSummary[];
+  available_sectors: string[];
+  notes: string[];
+};
+
 export type RatingsAdminDiagnostic = {
   ticker: string;
   category: string;

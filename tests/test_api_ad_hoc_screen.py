@@ -12,6 +12,7 @@ if TestClient is not None:
     from web.app import app
     from web.dependencies import (
         get_ad_hoc_screen_service,
+        get_admin_service,
         get_auth_service,
         get_audit_service,
         get_current_principal,
@@ -111,6 +112,103 @@ class _FakeAuditService:
             "offset": 0,
             "has_more": False,
         }
+
+
+class _FakeAdminService:
+    def get_context(self, *, coverage_start: str = "2020-01-01"):
+        return {
+            "excluded_tickers": [],
+            "excluded_count": 0,
+            "included_tickers": [],
+            "included_count": 0,
+            "database_status": {
+                "database_configured": True,
+                "coverage_start": coverage_start,
+                "coverage_end": "2026-06-14",
+                "target_universe_count": 2,
+                "db_ticker_count": 2,
+                "covered_ticker_count": 2,
+                "partial_ticker_count": 0,
+                "missing_ticker_count": 0,
+                "total_bar_rows": 10,
+                "overall_first_trade_date": "2020-01-01",
+                "overall_last_trade_date": "2026-06-14",
+                "latest_metadata_update_at": "2026-06-14T00:00:00+00:00",
+                "stale_ticker_count": 0,
+                "coverage_percent": 100,
+                "sample_missing_tickers": [],
+                "sample_partial_tickers": [],
+                "notes": [],
+            },
+        }
+
+    def get_ratings_status(self):
+        return {
+            "database_configured": True,
+            "target_universe_count": 2,
+            "latest_fundamentals_as_of_date": "2026-06-13",
+            "latest_fundamentals_updated_at": "2026-06-13T00:00:00+00:00",
+            "latest_baselines_as_of_date": "2026-06-13",
+            "latest_baselines_updated_at": "2026-06-13T00:00:00+00:00",
+            "latest_ratings_as_of_date": "2026-06-13",
+            "latest_ratings_updated_at": "2026-06-13T00:00:00+00:00",
+            "latest_fundamentals_snapshot_count": 2,
+            "latest_rating_snapshot_count": 2,
+            "latest_fundamentals_parse_status_counts": {"ok": 2},
+            "latest_rating_status_counts": {"ok": 2},
+            "tickers_with_any_fundamentals": 2,
+            "tickers_with_latest_ok_rating": 2,
+            "diagnostics_count": 0,
+            "diagnostic_category_counts": {},
+            "diagnostics": [],
+            "healthy_remote_worker_count": 0,
+            "remote_workers": [],
+            "notes": [],
+        }
+
+    def get_partial_ticker_detail(self, *, ticker: str, coverage_start: str = "2020-01-01"):
+        return {
+            "ticker": ticker.upper(),
+            "coverage_start": coverage_start,
+            "coverage_end": "2026-06-14",
+            "first_trade_date": "2020-01-01",
+            "last_trade_date": "2026-06-14",
+            "bar_count": 10,
+            "missing_ranges": [],
+            "missing_date_count": 0,
+            "sample_missing_dates": [],
+        }
+
+    def get_ticker_list_status(self, *, ticker: str):
+        return {
+            "ticker": ticker.upper(),
+            "is_excluded": False,
+            "is_included": False,
+            "exclusion_entry": None,
+            "inclusion_entry": None,
+        }
+
+    def get_missing_sector_context(self):
+        return {
+            "database_configured": True,
+            "missing_count": 1,
+            "tickers": [
+                {
+                    "ticker": "NVDA",
+                    "exchange": "NASDAQ",
+                    "industry": "Semiconductors",
+                    "source": "finviz",
+                    "updated_at": "2026-06-13T00:00:00+00:00",
+                    "suggested_sector": "Technology",
+                    "suggested_industry": "Semiconductors",
+                }
+            ],
+            "available_sectors": ["Finance", "Technology"],
+            "notes": ["1 tickers still need sector assignment."],
+        }
+
+    def update_ticker_sector(self, *, ticker: str, sector: str):
+        return {"ticker": ticker.upper(), "sector": sector, "source": "finviz", "updated_at": "2026-06-14T00:00:00+00:00"}
 
 
 class _FakeUserAdminService:
@@ -495,6 +593,7 @@ class _FakePortfolioService:
 class ApiAdHocScreenTests(unittest.TestCase):
     def setUp(self) -> None:
         app.dependency_overrides[get_ad_hoc_screen_service] = lambda: _FakeAdHocService()
+        app.dependency_overrides[get_admin_service] = lambda: _FakeAdminService()
         app.dependency_overrides[get_run_service] = lambda: _FakeRunService()
         app.dependency_overrides[get_screener_history_service] = lambda: _FakeScreenerHistoryService()
         app.dependency_overrides[get_auth_service] = lambda: _FakeAuthService()
@@ -650,6 +749,33 @@ class ApiAdHocScreenTests(unittest.TestCase):
         response = self.client.get("/api/admin/audit-events")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["events"][0]["action"], "admin.user.invite")
+
+    def test_admin_can_access_missing_sector_list(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/missing-sectors")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["missing_count"], 1)
+        self.assertEqual(payload["tickers"][0]["ticker"], "NVDA")
+
+    def test_admin_can_update_ticker_sector(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.post("/api/admin/ticker-sectors/NVDA", json={"sector": "Technology"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["entry"]["ticker"], "NVDA")
+        self.assertEqual(payload["entry"]["sector"], "Technology")
 
     def test_premium_cannot_access_portfolio(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(

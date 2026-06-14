@@ -729,6 +729,14 @@ def ratings_status_data(
     return JSONResponse(service.get_ratings_status())
 
 
+@router.get("/admin/missing-sectors", response_class=JSONResponse)
+def missing_sector_data(
+    service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    return JSONResponse(service.get_missing_sector_context())
+
+
 @router.get("/admin/ticker-lists/{ticker}", response_class=JSONResponse)
 def ticker_list_status(
     ticker: str,
@@ -915,6 +923,37 @@ def add_inclusion(
         resource_label=str(entry.get("ticker") or ""),
         message=f"Added inclusion for {entry.get('ticker')}.",
         metadata={"ticker": entry.get("ticker"), "reason": entry.get("reason"), "removed_from": entry.get("removed_from", [])},
+    )
+    return JSONResponse({"ok": True, "entry": entry})
+
+
+@router.post("/admin/ticker-sectors/{ticker}", response_class=JSONResponse)
+def update_ticker_sector(
+    request: Request,
+    ticker: str,
+    payload: dict[str, object] | None = Body(default=None),
+    service: AdminService = Depends(get_admin_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        entry = service.update_ticker_sector(
+            ticker=ticker,
+            sector=str(request_payload.get("sector") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.ticker_sector.update",
+        resource_type="ticker_metadata",
+        resource_id=str(entry.get("ticker") or ""),
+        resource_label=str(entry.get("ticker") or ""),
+        message=f"Updated sector for {entry.get('ticker')} to {entry.get('sector')}.",
+        metadata={"ticker": entry.get("ticker"), "sector": entry.get("sector")},
     )
     return JSONResponse({"ok": True, "entry": entry})
 

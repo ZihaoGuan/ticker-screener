@@ -177,6 +177,44 @@ class AdminService:
         except Exception as exc:
             raise ValueError(f"Database query failed: {exc}") from exc
 
+    def get_missing_sector_context(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "database_configured": bool(self.database_url),
+            "missing_count": 0,
+            "tickers": [],
+            "available_sectors": list(_DEFAULT_SECTOR_OPTIONS),
+            "notes": [],
+        }
+        if not self.database_url:
+            payload["notes"] = ["TICKER_SCREENER_DATABASE_URL not set."]
+            return payload
+
+        try:
+            tickers, available_sectors = self._query_missing_sector_tickers()
+        except Exception as exc:
+            payload["notes"] = [f"Database query failed: {exc}"]
+            return payload
+
+        payload["missing_count"] = len(tickers)
+        payload["tickers"] = tickers
+        payload["available_sectors"] = available_sectors
+        payload["notes"] = ["All tracked tickers already have sectors."] if not tickers else [f"{len(tickers)} tickers still need sector assignment."]
+        return payload
+
+    def update_ticker_sector(self, *, ticker: str, sector: str) -> dict[str, Any]:
+        normalized_ticker = normalize_ticker_symbol(ticker)
+        if not normalized_ticker:
+            raise ValueError("Ticker is required.")
+        normalized_sector = _normalize_sector_label(sector)
+        if not normalized_sector:
+            raise ValueError("Sector is required.")
+        if not self.database_url:
+            raise ValueError("TICKER_SCREENER_DATABASE_URL not set.")
+        try:
+            return self._update_ticker_sector(ticker=normalized_ticker, sector=normalized_sector)
+        except Exception as exc:
+            raise ValueError(f"Database update failed: {exc}") from exc
+
     def list_scheduled_jobs(self) -> list[dict[str, Any]]:
         status_dir = self.artifacts_dir / "status"
         if not status_dir.exists():
@@ -620,6 +658,104 @@ class AdminService:
             "diagnostics": diagnostics,
         }
 
+    def _query_missing_sector_tickers(self) -> tuple[list[dict[str, Any]], list[str]]:
+        import psycopg
+
+        rows: list[dict[str, Any]] = []
+        available_sector_values: set[str] = set(_DEFAULT_SECTOR_OPTIONS)
+        with psycopg.connect(self.database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                      tm.ticker,
+                      tm.exchange,
+                      tm.industry,
+                      tm.source,
+                      tm.updated_at,
+                      latest_fundamentals.sector AS fundamentals_sector,
+                      latest_fundamentals.industry AS fundamentals_industry
+                    FROM ticker_metadata tm
+                    LEFT JOIN (
+                      SELECT DISTINCT ON (ticker)
+                        ticker,
+                        sector,
+                        industry
+                      FROM ticker_fundamentals_snapshots
+                      ORDER BY ticker, as_of_date DESC
+                    ) AS latest_fundamentals
+                      ON latest_fundamentals.ticker = tm.ticker
+                    WHERE NULLIF(BTRIM(COALESCE(tm.sector, '')), '') IS NULL
+                    ORDER BY tm.ticker ASC
+                    """
+                )
+                for ticker, exchange, industry, source, updated_at, fundamentals_sector, fundamentals_industry in cursor.fetchall():
+                    rows.append(
+                        {
+                            "ticker": str(ticker or "").upper(),
+                            "exchange": str(exchange or "") or None,
+                            "industry": str(industry or "") or None,
+                            "source": str(source or "") or None,
+                            "updated_at": self._to_iso(updated_at),
+                            "suggested_sector": _normalize_sector_label(fundamentals_sector),
+                            "suggested_industry": str(fundamentals_industry or "") or None,
+                        }
+                    )
+
+                cursor.execute(
+                    """
+                    SELECT DISTINCT sector
+                    FROM (
+                      SELECT sector FROM ticker_metadata
+                      UNION
+                      SELECT sector FROM ticker_fundamentals_snapshots
+                    ) sectors
+                    WHERE NULLIF(BTRIM(COALESCE(sector, '')), '') IS NOT NULL
+                    ORDER BY sector ASC
+                    """
+                )
+                for (sector_value,) in cursor.fetchall():
+                    normalized = _normalize_sector_label(sector_value)
+                    if normalized:
+                        available_sector_values.add(normalized)
+
+        return rows, sorted(available_sector_values)
+
+    def _update_ticker_sector(self, *, ticker: str, sector: str) -> dict[str, Any]:
+        import psycopg
+
+        with psycopg.connect(self.database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO ticker_metadata (ticker, sector, source, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (ticker)
+                    DO UPDATE SET
+                      sector = EXCLUDED.sector,
+                      source = CASE
+                        WHEN NULLIF(BTRIM(COALESCE(ticker_metadata.source, '')), '') IS NULL THEN EXCLUDED.source
+                        ELSE ticker_metadata.source
+                      END,
+                      updated_at = NOW()
+                    RETURNING ticker, sector, exchange, industry, source, updated_at
+                    """,
+                    (ticker, sector, "admin_manual_sector"),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+        if row is None:
+            raise ValueError("Ticker sector update did not return a row.")
+        ticker_value, sector_value, exchange, industry, source, updated_at = row
+        return {
+            "ticker": str(ticker_value or "").upper(),
+            "sector": str(sector_value or ""),
+            "exchange": str(exchange or "") or None,
+            "industry": str(industry or "") or None,
+            "source": str(source or "") or None,
+            "updated_at": self._to_iso(updated_at),
+        }
+
     def _to_date(self, value: object) -> dt.date | None:
         if value is None:
             return None
@@ -700,3 +836,25 @@ def _coerce_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+_DEFAULT_SECTOR_OPTIONS: tuple[str, ...] = (
+    "Basic Materials",
+    "Communication Services",
+    "Consumer Discretionary",
+    "Consumer Staples",
+    "Energy",
+    "Finance",
+    "Health Care",
+    "Industrials",
+    "Real Estate",
+    "Technology",
+    "Utilities",
+)
+
+
+def _normalize_sector_label(value: object) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return " ".join(part.capitalize() for part in text.split())

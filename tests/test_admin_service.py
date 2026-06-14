@@ -116,6 +116,60 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(payload["healthy_remote_worker_count"], 1)
         self.assertEqual(payload["remote_workers"][0]["worker_name"], "worker-a")
 
+    def test_get_missing_sector_context_reports_missing_database_url(self) -> None:
+        service = AdminService(database_url="")
+
+        payload = service.get_missing_sector_context()
+
+        self.assertFalse(payload["database_configured"])
+        self.assertIn("DATABASE_URL", payload["notes"][0])
+
+    def test_get_missing_sector_context_returns_rows_and_sector_options(self) -> None:
+        service = AdminService(database_url="postgres://example")
+        with patch.object(
+            service,
+            "_query_missing_sector_tickers",
+            return_value=(
+                [
+                    {
+                        "ticker": "NVDA",
+                        "exchange": "NASDAQ",
+                        "industry": "Semiconductors",
+                        "source": "finviz",
+                        "updated_at": "2026-06-13T10:00:00+00:00",
+                        "suggested_sector": "Technology",
+                        "suggested_industry": "Semiconductors",
+                    }
+                ],
+                ["Finance", "Health Care", "Technology"],
+            ),
+        ):
+            payload = service.get_missing_sector_context()
+
+        self.assertTrue(payload["database_configured"])
+        self.assertEqual(payload["missing_count"], 1)
+        self.assertEqual(payload["tickers"][0]["ticker"], "NVDA")
+        self.assertEqual(payload["available_sectors"], ["Finance", "Health Care", "Technology"])
+
+    def test_update_ticker_sector_requires_database_and_sector(self) -> None:
+        service = AdminService(database_url="")
+        with self.assertRaisesRegex(ValueError, "Sector is required"):
+            service.update_ticker_sector(ticker="NVDA", sector="")
+        with self.assertRaisesRegex(ValueError, "DATABASE_URL"):
+            service.update_ticker_sector(ticker="NVDA", sector="Technology")
+
+    def test_update_ticker_sector_normalizes_inputs(self) -> None:
+        service = AdminService(database_url="postgres://example")
+        with patch.object(
+            service,
+            "_update_ticker_sector",
+            return_value={"ticker": "NVDA", "sector": "Technology"},
+        ) as mocked:
+            payload = service.update_ticker_sector(ticker=" nvda ", sector=" technology ")
+
+        mocked.assert_called_once_with(ticker="NVDA", sector="Technology")
+        self.assertEqual(payload["sector"], "Technology")
+
     def test_build_missing_ranges_combines_edge_windows_and_internal_gaps(self) -> None:
         payload = _build_missing_ranges(
             coverage_start=dt.date(2020, 1, 1),

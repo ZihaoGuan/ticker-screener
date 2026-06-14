@@ -5,7 +5,18 @@ import { Panel } from "../components/Panel";
 import { ProgressBar } from "../components/ProgressBar";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { AccessRequestSummary, AdminResponse, AuditEventSummary, AuditEventsResponse, ExclusionEntry, JobsResponse, PartialTickerDetailResponse, RatingsAdminStatusResponse, RoleName } from "../lib/types";
+import type {
+  AccessRequestSummary,
+  AdminResponse,
+  AuditEventSummary,
+  AuditEventsResponse,
+  ExclusionEntry,
+  JobsResponse,
+  MissingSectorAdminResponse,
+  PartialTickerDetailResponse,
+  RatingsAdminStatusResponse,
+  RoleName,
+} from "../lib/types";
 
 const EMPTY_ADMIN_RESPONSE: AdminResponse = {
   excluded_tickers: [],
@@ -54,6 +65,14 @@ const EMPTY_RATINGS_RESPONSE: RatingsAdminStatusResponse = {
   notes: [],
 };
 
+const EMPTY_MISSING_SECTOR_RESPONSE: MissingSectorAdminResponse = {
+  database_configured: false,
+  missing_count: 0,
+  tickers: [],
+  available_sectors: [],
+  notes: [],
+};
+
 const RATINGS_ACTION_IDS = new Set([
   "run_finviz_ratings_pipeline",
   "sync_finviz_fundamentals",
@@ -66,6 +85,7 @@ type RatingsRunJob = JobsResponse["jobs"][number];
 export function AdminPage() {
   const [payload, setPayload] = useState<AdminResponse>(EMPTY_ADMIN_RESPONSE);
   const [ratingsStatus, setRatingsStatus] = useState<RatingsAdminStatusResponse>(EMPTY_RATINGS_RESPONSE);
+  const [missingSectorPayload, setMissingSectorPayload] = useState<MissingSectorAdminResponse>(EMPTY_MISSING_SECTOR_RESPONSE);
   const [coverageStart, setCoverageStart] = useState("2020-01-01");
   const [syncStartDate, setSyncStartDate] = useState("2020-01-01");
   const [syncEndDate, setSyncEndDate] = useState("");
@@ -103,6 +123,11 @@ export function AdminPage() {
   const [ratingsRunNotice, setRatingsRunNotice] = useState("");
   const [ratingsRunJob, setRatingsRunJob] = useState<RatingsRunJob | null>(null);
   const [isLoadingRatingsRunJob, setIsLoadingRatingsRunJob] = useState(false);
+  const [missingSectorFilter, setMissingSectorFilter] = useState("");
+  const [sectorSelections, setSectorSelections] = useState<Record<string, string>>({});
+  const [isLoadingMissingSectors, setIsLoadingMissingSectors] = useState(true);
+  const [isSavingSector, setIsSavingSector] = useState(false);
+  const [sectorNotice, setSectorNotice] = useState("");
 
   const loadAdmin = (start: string) => {
     setIsLoading(true);
@@ -159,6 +184,28 @@ export function AdminPage() {
       .finally(() => setIsLoadingRatings(false));
   };
 
+  const loadMissingSectors = () => {
+    setIsLoadingMissingSectors(true);
+    void fetchJson<MissingSectorAdminResponse>("/api/admin/missing-sectors")
+      .then((result) => {
+        setMissingSectorPayload(result);
+        setSectorSelections((current) => {
+          const next: Record<string, string> = {};
+          result.tickers.forEach((item) => {
+            next[item.ticker] = current[item.ticker] ?? item.suggested_sector ?? "";
+          });
+          return next;
+        });
+      })
+      .catch(() => {
+        setMissingSectorPayload({
+          ...EMPTY_MISSING_SECTOR_RESPONSE,
+          notes: ["Failed to load missing-sector tickers."],
+        });
+      })
+      .finally(() => setIsLoadingMissingSectors(false));
+  };
+
   const loadRatingsRunJob = (jobId: string) => {
     if (!jobId) {
       return;
@@ -195,6 +242,7 @@ export function AdminPage() {
   useEffect(() => {
     loadAdmin(coverageStart);
     loadRatings();
+    loadMissingSectors();
     loadLatestRatingsRunJob();
     void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
       .then((result) => {
@@ -307,6 +355,19 @@ export function AdminPage() {
       [entry.ticker, entry.reason, entry.reasons.join(" "), entry.sources.join(" ")].join(" ").toLowerCase().includes(query),
     );
   }, [exclusionFilter, payload.excluded_tickers]);
+
+  const filteredMissingSectorTickers = useMemo(() => {
+    const query = missingSectorFilter.trim().toLowerCase();
+    if (!query) {
+      return missingSectorPayload.tickers;
+    }
+    return missingSectorPayload.tickers.filter((entry) =>
+      [entry.ticker, entry.exchange, entry.industry, entry.source, entry.suggested_sector, entry.suggested_industry]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [missingSectorFilter, missingSectorPayload.tickers]);
 
   const db = payload.database_status;
   const ratingDiagnostics = ratingsStatus.diagnostics;
@@ -442,6 +503,30 @@ export function AdminPage() {
       setRatingsRunNotice(error instanceof Error ? error.message : "Failed to launch ratings pipeline.");
     } finally {
       setIsLaunchingRatingsRun(false);
+    }
+  };
+
+  const handleAssignSector = async (ticker: string) => {
+    const sector = (sectorSelections[ticker] || "").trim();
+    if (!sector) {
+      setSectorNotice("Select a sector before saving.");
+      return;
+    }
+    setIsSavingSector(true);
+    setSectorNotice("");
+    try {
+      await fetchJson<{ ok: boolean; entry: { ticker: string; sector: string } }>(`/api/admin/ticker-sectors/${ticker}`, {
+        method: "POST",
+        body: JSON.stringify({ sector }),
+      });
+      setSectorNotice(`${ticker} sector set to ${sector}.`);
+      loadMissingSectors();
+      loadRatings();
+      loadAudit();
+    } catch (error) {
+      setSectorNotice(error instanceof Error ? error.message : "Failed to update sector.");
+    } finally {
+      setIsSavingSector(false);
     }
   };
 
@@ -687,6 +772,105 @@ export function AdminPage() {
                             : item.overall_rating != null
                               ? `rating ${item.overall_rating.toFixed(1)}`
                               : "-"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title="Missing Sector Assignments" aside={<span className="eyebrow">{formatCount(missingSectorPayload.missing_count)} tickers</span>}>
+        {isLoadingMissingSectors ? <LoadingBlock label="Loading missing-sector tickers…" /> : null}
+        <div className="run-toolbar">
+          <div className="run-action-footer">
+            <label className="field" style={{ flex: "1 1 20rem" }}>
+              <span>Filter tickers</span>
+              <input
+                type="text"
+                value={missingSectorFilter}
+                onChange={(event) => setMissingSectorFilter(event.target.value)}
+                placeholder="Ticker, exchange, industry, source"
+              />
+            </label>
+            <button className="ghost-button" type="button" onClick={loadMissingSectors} disabled={isLoadingMissingSectors || isSavingSector}>
+              {isLoadingMissingSectors ? "Refreshing..." : "Refresh Missing Sectors"}
+            </button>
+          </div>
+
+          {missingSectorPayload.notes.length > 0 ? <div className="panel-copy">{missingSectorPayload.notes.join(" ")}</div> : null}
+          {sectorNotice ? <div className="panel-copy">{sectorNotice}</div> : null}
+
+          <div className="pill-list">
+            {missingSectorPayload.available_sectors.map((sector) => (
+              <span key={sector} className="symbol-pill">{sector}</span>
+            ))}
+          </div>
+
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Industry</th>
+                  <th>Suggested</th>
+                  <th>Source</th>
+                  <th>Updated</th>
+                  <th>Assign Sector</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMissingSectorTickers.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>
+                      {isLoadingMissingSectors ? "Loading missing-sector tickers..." : "No tickers missing sector."}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredMissingSectorTickers.map((item) => (
+                    <tr key={item.ticker}>
+                      <td data-label="Ticker">
+                        <div className="admin-job-cell">
+                          <strong>{item.ticker}</strong>
+                          <span className="file-meta">{item.exchange || "-"}</span>
+                        </div>
+                      </td>
+                      <td data-label="Industry" className="file-meta">
+                        {item.industry || item.suggested_industry || "-"}
+                      </td>
+                      <td data-label="Suggested">{item.suggested_sector || "-"}</td>
+                      <td data-label="Source">{item.source || "-"}</td>
+                      <td data-label="Updated">{formatLocalDateTime(item.updated_at)}</td>
+                      <td data-label="Assign Sector">
+                        <div className="button-row">
+                          <select
+                            value={sectorSelections[item.ticker] ?? ""}
+                            onChange={(event) =>
+                              setSectorSelections((current) => ({
+                                ...current,
+                                [item.ticker]: event.target.value,
+                              }))
+                            }
+                            disabled={isSavingSector}
+                          >
+                            <option value="">Select sector</option>
+                            {missingSectorPayload.available_sectors.map((sector) => (
+                              <option key={`${item.ticker}-${sector}`} value={sector}>
+                                {sector}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="table-action-button"
+                            type="button"
+                            onClick={() => void handleAssignSector(item.ticker)}
+                            disabled={isSavingSector || !(sectorSelections[item.ticker] || "").trim()}
+                          >
+                            {isSavingSector ? "Saving..." : "Save"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
