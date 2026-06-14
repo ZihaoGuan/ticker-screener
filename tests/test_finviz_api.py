@@ -55,9 +55,18 @@ class FinvizApiParserTests(unittest.TestCase):
         self.assertEqual(snapshot.volatility_month_pct, 3.58)
         self.assertFalse(snapshot_needs_fallback(snapshot))
 
-    def test_missing_required_metric_triggers_fallback(self) -> None:
+    def test_missing_required_metric_does_not_trigger_fallback_when_classification_exists(self) -> None:
         snapshot = parse_finviz_stock_data(
             {"Ticker": "NVDA", "Sector": "Technology", "Industry": "Semiconductors"},
+            ticker="NVDA",
+            as_of_date=dt.date(2026, 6, 13),
+        )
+
+        self.assertFalse(snapshot_needs_fallback(snapshot))
+
+    def test_missing_sector_or_industry_triggers_fallback(self) -> None:
+        snapshot = parse_finviz_stock_data(
+            {"Ticker": "NVDA", "Sector": "Technology"},
             ticker="NVDA",
             as_of_date=dt.date(2026, 6, 13),
         )

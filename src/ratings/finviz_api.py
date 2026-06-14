@@ -72,8 +72,8 @@ def _select_finviz_python() -> str:
     raise FinvizApiError("Unable to find a Python interpreter that can import the installed finviz package.")
 
 
-def _has_complete_rating_inputs(snapshot: FundamentalsSnapshot) -> bool:
-    return bool(snapshot.sector) and all(getattr(snapshot, metric_name) is not None for metric_name in ALL_RATING_METRICS)
+def _has_minimum_classification_inputs(snapshot: FundamentalsSnapshot) -> bool:
+    return bool(snapshot.sector) and bool(snapshot.industry)
 
 
 def parse_finviz_stock_data(
@@ -178,4 +178,4 @@ def _fetch_finviz_api_snapshot_via_subprocess(normalized: str) -> dict[str, Any]
 def snapshot_needs_fallback(snapshot: FundamentalsSnapshot) -> bool:
     if snapshot.parse_status == RATING_STATUS_SCRAPE_FAILED:
         return True
-    return not _has_complete_rating_inputs(snapshot)
+    return not _has_minimum_classification_inputs(snapshot)
