@@ -113,7 +113,6 @@ class TechnicalSnapshotInput:
     sma20_5d_ago: float | None = None
     sma50_10d_ago: float | None = None
     sma100_10d_ago: float | None = None
-    sma200_20d_ago: float | None = None
     sma50_20d_ago: float | None = None
     sma200_20d_ago: float | None = None
     daily_rs_rating: float | None = None

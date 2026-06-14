@@ -62,6 +62,54 @@ class RatingPipelineScriptTests(unittest.TestCase):
             tickers=["ARM"],
         )
 
+    def test_build_technical_ratings_respects_scope_and_replace_scope(self) -> None:
+        import scripts.build_technical_ratings as script
+
+        technical_rating = MagicMock(technical_status="ok")
+        repository = MagicMock()
+        repository.list_active_tickers.return_value = ["ARM"]
+        benchmark_frame = MagicMock(empty=False)
+        repository.replace_technical_rating_snapshots.return_value = 1
+        with patch.object(
+            script,
+            "parse_args",
+            return_value=Namespace(
+                as_of_date="2026-06-13",
+                tickers=["ARM"],
+                include_sectors=["Technology"],
+                limit=10,
+                benchmark_ticker="SPY",
+                database_url="postgres://example",
+            ),
+        ), patch.object(script, "load_webapp_config", return_value=Namespace(database_url="postgres://example", benchmark_ticker="SPY")), patch.object(
+            script, "RatingsRepository", return_value=repository
+        ), patch.object(
+            script,
+            "load_many_ticker_windows",
+            return_value={"ARM": MagicMock(), "SPY": benchmark_frame},
+        ), patch.object(
+            script,
+            "_build_technical_snapshot_input",
+            return_value=MagicMock(),
+        ), patch.object(
+            script,
+            "build_technical_rating",
+            return_value=technical_rating,
+        ):
+            result = script.main()
+
+        self.assertEqual(result, 0)
+        repository.list_active_tickers.assert_called_once_with(
+            tickers=("ARM",),
+            sectors=("Technology",),
+            limit=10,
+        )
+        repository.replace_technical_rating_snapshots.assert_called_once_with(
+            dt.date(2026, 6, 13),
+            [technical_rating],
+            tickers=["ARM"],
+        )
+
     def test_sync_finviz_fundamentals_filters_universe_before_limit(self) -> None:
         import scripts.sync_finviz_fundamentals as script
 

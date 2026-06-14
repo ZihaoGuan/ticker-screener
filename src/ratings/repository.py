@@ -47,6 +47,46 @@ class RatingsRepository:
                 cursor.execute(sql, (ticker.upper(), sector, industry, source))
             connection.commit()
 
+    def list_active_tickers(
+        self,
+        *,
+        tickers: Iterable[str] | None = None,
+        sectors: Iterable[str] | None = None,
+        limit: int | None = None,
+    ) -> list[str]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        normalized_tickers = [str(item).strip().upper() for item in (tickers or []) if str(item).strip()]
+        normalized_sectors = _normalize_text_values(sectors)
+        sql = """
+            SELECT ticker
+            FROM ticker_metadata
+            WHERE is_active = TRUE
+        """
+        params: list[Any] = []
+        if normalized_tickers:
+            sql += """
+              AND ticker = ANY(%s)
+            """
+            params.append(normalized_tickers)
+        if normalized_sectors:
+            sql += """
+              AND LOWER(COALESCE(sector, '')) = ANY(%s)
+            """
+            params.append(normalized_sectors)
+        sql += """
+            ORDER BY ticker ASC
+        """
+        if limit is not None and int(limit) > 0:
+            sql += " LIMIT %s"
+            params.append(int(limit))
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, tuple(params))
+                rows = cursor.fetchall()
+        return [str(ticker).upper() for (ticker,) in rows]
+
     def upsert_fundamentals_snapshots(self, snapshots: Iterable[FundamentalsSnapshot]) -> int:
         rows = list(snapshots)
         if not rows:

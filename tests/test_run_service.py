@@ -346,6 +346,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("sync_finviz_fundamentals", action_ids)
         self.assertIn("build_sector_rating_baselines", action_ids)
         self.assertIn("build_ticker_ratings", action_ids)
+        self.assertIn("build_technical_ratings", action_ids)
         self.assertIn("run_finviz_ratings_pipeline", action_ids)
         self.assertIn("backfill_trendline_snapshots", action_ids)
         self.assertIn("reload_postgres_market_data_date", action_ids)
