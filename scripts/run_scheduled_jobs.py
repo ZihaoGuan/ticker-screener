@@ -151,7 +151,6 @@ def main() -> int:
     actions = {
         action.action_id: action
         for action in run_service._actions.values()
-        if action.action_id != "sync_postgres_market_data"
     }
     state = _load_state()
     any_run = False

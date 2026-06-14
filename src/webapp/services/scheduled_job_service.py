@@ -141,8 +141,31 @@ class ScheduledJobService:
     def _available_actions(self) -> list[dict[str, Any]]:
         return [
             {"id": item["id"], "label": item["label"], "fields": item.get("fields", [])}
-            for item in self.run_service.list_actions()
-            if str(item.get("id") or "") not in {"sync_postgres_market_data"}
+            for item in (
+                self.run_service.list_actions()
+                + [
+                    {
+                        "id": action.action_id,
+                        "label": action.label,
+                        "fields": [
+                            {
+                                "id": field.field_id,
+                                "label": field.label,
+                                "type": field.field_type,
+                                "placeholder": field.placeholder,
+                                "help_text": field.help_text,
+                                "options": self.run_service._field_options(
+                                    field,
+                                    self.run_service._build_filter_option_catalog(),
+                                ),
+                            }
+                            for field in action.fields
+                        ],
+                    }
+                    for action in self.run_service._actions.values()
+                    if action.action_id == "sync_postgres_market_data"
+                ]
+            )
         ]
 
     def _load_jobs(self) -> dict[str, Any]:
