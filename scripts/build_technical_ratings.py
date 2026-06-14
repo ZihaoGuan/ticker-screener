@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import today_label
+from src.config import load_app_config, today_label
 from src.market_data_access import load_many_ticker_windows
 from src.ratings.calculator import build_technical_rating
 from src.ratings.models import TechnicalSnapshotInput
@@ -201,12 +201,13 @@ def _build_technical_snapshot_input(
 
 def main() -> int:
     args = parse_args()
-    config = load_webapp_config()
-    database_url = (args.database_url or config.database_url).strip()
+    web_config = load_webapp_config()
+    app_config = load_app_config()
+    database_url = (args.database_url or web_config.database_url).strip()
     if not database_url:
         raise RuntimeError("No Postgres connection string configured. Pass --database-url or set TICKER_SCREENER_DATABASE_URL.")
     as_of_date = dt.date.fromisoformat(str(args.as_of_date))
-    benchmark_ticker = str(args.benchmark_ticker or config.benchmark_ticker).strip().upper() or "SPY"
+    benchmark_ticker = str(args.benchmark_ticker or app_config.benchmark_ticker).strip().upper() or "SPY"
     repository = RatingsRepository(database_url)
     selected_tickers = tuple(str(item).strip().upper() for item in (args.tickers or []) if str(item).strip())
     selected_sectors = tuple(str(item).strip() for item in (args.include_sectors or []) if str(item).strip())
