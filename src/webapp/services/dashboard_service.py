@@ -25,9 +25,14 @@ class DashboardService:
     def get_dashboard_context(self) -> dict[str, Any]:
         overview = self.dashboard_repository.get_overview()
         recent_watchlists = self.watchlist_repository.list_recent_watchlists(limit=8)
+        try:
+            market_health = self._build_market_health()
+        except Exception:
+            benchmark = load_app_config().benchmark_ticker.upper()
+            market_health = _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
         return {
             "overview": overview,
-            "market_health": self._build_market_health(),
+            "market_health": market_health,
             "recent_watchlists": recent_watchlists,
             "strategy_cards": [
                 {"id": "rs", "label": "RS", "description": "Daily RS new high before price."},
@@ -42,40 +47,16 @@ class DashboardService:
         benchmark = load_app_config().benchmark_ticker.upper()
         end_date = dt.date.today()
         start_date = end_date - dt.timedelta(days=900)
-        frame = load_daily_bars_frame_from_db(benchmark, start_date, end_date, database_url=self.dashboard_repository.database_url)
+        try:
+            frame = load_daily_bars_frame_from_db(benchmark, start_date, end_date, database_url=self.dashboard_repository.database_url)
+        except Exception:
+            frame = None
         data_source = "database"
         if frame is None or frame.empty or not db_frame_has_recent_coverage(frame, end_date, tolerance_days=7):
             frame = _download_history_frame(benchmark, start_date, end_date)
             data_source = "internet" if frame is not None and not frame.empty else "unavailable"
         if frame is None or frame.empty:
-            return {
-                "regime": {
-                    "ticker": benchmark,
-                    "data_source": data_source,
-                    "latest": None,
-                },
-                "rsi_divergence": {
-                    "ticker": benchmark,
-                    "data_source": data_source,
-                    "latest": None,
-                },
-                "bearish_td9": {
-                    "ticker": benchmark,
-                    "data_source": data_source,
-                    "latest": None,
-                },
-                "spy_extension": {
-                    "ticker": benchmark,
-                    "label": "10W SMA",
-                    "timeframe": "weekly",
-                    "ma_type": "sma",
-                    "length": 10,
-                    "warning_pct": 11.0,
-                    "extreme_pct": 15.0,
-                    "data_source": data_source,
-                    "latest": None,
-                }
-            }
+            return _build_unavailable_market_health(benchmark=benchmark, data_source=data_source)
 
         payload = _build_market_health_payload(frame=frame, ticker=benchmark, data_source=data_source)
         if (
@@ -134,16 +115,50 @@ def _market_health_payload_has_no_latest(payload: dict[str, Any]) -> bool:
     return regime_latest is None and rsi_latest is None and td9_latest is None and extension_latest is None
 
 
+def _build_unavailable_market_health(*, benchmark: str, data_source: str) -> dict[str, Any]:
+    return {
+        "regime": {
+            "ticker": benchmark,
+            "data_source": data_source,
+            "latest": None,
+        },
+        "rsi_divergence": {
+            "ticker": benchmark,
+            "data_source": data_source,
+            "latest": None,
+        },
+        "bearish_td9": {
+            "ticker": benchmark,
+            "data_source": data_source,
+            "latest": None,
+        },
+        "spy_extension": {
+            "ticker": benchmark,
+            "label": "10W SMA",
+            "timeframe": "weekly",
+            "ma_type": "sma",
+            "length": 10,
+            "warning_pct": 11.0,
+            "extreme_pct": 15.0,
+            "data_source": data_source,
+            "latest": None,
+        },
+    }
+
+
 def _download_history_frame(ticker: str, start_date: dt.date, end_date: dt.date) -> pd.DataFrame | None:
-    history = yf.download(
-        tickers=ticker,
-        start=start_date.isoformat(),
-        end=(end_date + dt.timedelta(days=1)).isoformat(),
-        interval="1d",
-        auto_adjust=False,
-        progress=False,
-        threads=False,
-    )
+    try:
+        history = yf.download(
+            tickers=ticker,
+            start=start_date.isoformat(),
+            end=(end_date + dt.timedelta(days=1)).isoformat(),
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+        )
+    except Exception:
+        return None
     if history is None or history.empty:
         return None
     frame = history.copy()
