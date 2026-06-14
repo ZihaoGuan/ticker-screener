@@ -461,6 +461,32 @@ class WatchlistService:
         payload["database_configured"] = True
         return payload
 
+    def get_top_technical_ratings_payload(
+        self,
+        *,
+        as_of_date: dt.date | None = None,
+        limit: int = 100,
+        technical_status: str = "ok",
+    ) -> dict[str, Any]:
+        if not self.database_url:
+            return {
+                "as_of_date": None,
+                "limit": limit,
+                "technical_status": technical_status,
+                "rows": [],
+                "status_counts": {},
+                "database_configured": False,
+            }
+        payload = RatingsRepository(self.database_url).list_top_technical_rating_snapshots(
+            as_of_date=as_of_date,
+            limit=limit,
+            technical_status=technical_status,
+        )
+        payload["limit"] = max(1, min(int(limit), 500))
+        payload["technical_status"] = str(technical_status or "").strip().lower() or "ok"
+        payload["database_configured"] = True
+        return payload
+
     def get_chart_insider_payload(
         self,
         ticker: str,

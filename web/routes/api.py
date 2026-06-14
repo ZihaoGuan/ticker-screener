@@ -629,6 +629,23 @@ def top_ratings_data(
     )
 
 
+@router.get("/ratings/technical/top", response_class=JSONResponse)
+def top_technical_ratings_data(
+    as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
+    limit: int = Query(default=100, ge=1, le=500),
+    technical_status: str = Query(default="ok", alias="technicalStatus"),
+    service: WatchlistService = Depends(get_watchlist_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    return JSONResponse(
+        service.get_top_technical_ratings_payload(
+            as_of_date=as_of_date,
+            limit=limit,
+            technical_status=technical_status,
+        )
+    )
+
+
 @router.get("/chart-insider/{ticker}", response_class=JSONResponse)
 def chart_insider_data(
     ticker: str,

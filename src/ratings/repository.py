@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from src.market_data_access import resolve_database_url
 
 from .constants import RATING_STATUS_SCRAPE_FAILED
-from .models import FundamentalsSnapshot, RatingSnapshot, SectorMetricBaseline
+from .models import FundamentalsSnapshot, RatingSnapshot, SectorMetricBaseline, TechnicalRatingSnapshot
 
 
 class RatingsRepository:
@@ -251,6 +251,64 @@ class RatingsRepository:
                                 item.rating_status_reason,
                                 json.dumps(item.missing_metric_names),
                                 json.dumps(item.insufficient_baseline_metrics),
+                            )
+                            for item in rows
+                        ],
+                    )
+            connection.commit()
+        return len(rows)
+
+    def replace_technical_rating_snapshots(
+        self,
+        as_of_date: dt.date,
+        ratings: Iterable[TechnicalRatingSnapshot],
+        *,
+        tickers: Iterable[str] | None = None,
+    ) -> int:
+        rows = list(ratings)
+        connection = self._connect()
+        if connection is None:
+            return 0
+        normalized_tickers = [str(item).strip().upper() for item in (tickers or []) if str(item).strip()]
+        with connection:
+            with connection.cursor() as cursor:
+                if normalized_tickers:
+                    cursor.execute(
+                        """
+                        DELETE FROM ticker_technical_rating_snapshots
+                        WHERE as_of_date = %s
+                          AND ticker = ANY(%s)
+                        """,
+                        (as_of_date, normalized_tickers),
+                    )
+                else:
+                    cursor.execute("DELETE FROM ticker_technical_rating_snapshots WHERE as_of_date = %s", (as_of_date,))
+                if rows:
+                    cursor.executemany(
+                        """
+                        INSERT INTO ticker_technical_rating_snapshots (
+                          ticker, as_of_date, trend_regime_score, dma_speed_score, divergence_health_score,
+                          leadership_score, structure_volume_score, overall_rating, rating_band, technical_status,
+                          technical_status_reason, flags, missing_metric_names
+                        ) VALUES (
+                          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb
+                        )
+                        """,
+                        [
+                            (
+                                item.ticker.upper(),
+                                item.as_of_date,
+                                item.trend_regime_score,
+                                item.dma_speed_score,
+                                item.divergence_health_score,
+                                item.leadership_score,
+                                item.structure_volume_score,
+                                item.overall_rating,
+                                item.rating_band,
+                                item.technical_status,
+                                item.technical_status_reason,
+                                json.dumps(item.flags),
+                                json.dumps(item.missing_metric_names),
                             )
                             for item in rows
                         ],
@@ -645,6 +703,108 @@ class RatingsRepository:
                     performance_grade,
                     rating_status_value,
                     rating_status_reason,
+                ) in rows
+            ],
+            "status_counts": dict(sorted(status_counts.items())),
+        }
+
+    def list_top_technical_rating_snapshots(
+        self,
+        *,
+        as_of_date: dt.date | None = None,
+        limit: int = 100,
+        technical_status: str = "ok",
+    ) -> dict[str, Any]:
+        connection = self._connect()
+        if connection is None:
+            return {"as_of_date": None, "rows": [], "status_counts": {}}
+        normalized_limit = max(1, min(int(limit), 500))
+        normalized_status = str(technical_status or "").strip().lower()
+        date_sql = """
+            SELECT COALESCE(%s::date, (SELECT MAX(as_of_date) FROM ticker_technical_rating_snapshots))
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(date_sql, (as_of_date,))
+                date_row = cursor.fetchone()
+                target_date = date_row[0] if date_row else None
+                if not isinstance(target_date, dt.date):
+                    return {"as_of_date": None, "rows": [], "status_counts": {}}
+                cursor.execute(
+                    """
+                    SELECT technical_status, COUNT(*)
+                    FROM ticker_technical_rating_snapshots
+                    WHERE as_of_date = %s
+                    GROUP BY technical_status
+                    """,
+                    (target_date,),
+                )
+                status_counts = {
+                    str(status or "unknown"): int(count or 0)
+                    for status, count in cursor.fetchall()
+                }
+                cursor.execute(
+                    """
+                    SELECT
+                      r.ticker,
+                      r.as_of_date,
+                      tm.sector,
+                      tm.industry,
+                      r.overall_rating,
+                      r.trend_regime_score,
+                      r.dma_speed_score,
+                      r.divergence_health_score,
+                      r.leadership_score,
+                      r.structure_volume_score,
+                      r.rating_band,
+                      r.technical_status,
+                      r.technical_status_reason,
+                      r.flags
+                    FROM ticker_technical_rating_snapshots r
+                    LEFT JOIN ticker_metadata tm
+                      ON tm.ticker = r.ticker
+                    WHERE r.as_of_date = %s
+                      AND (%s = '' OR LOWER(COALESCE(r.technical_status, '')) = %s)
+                    ORDER BY r.overall_rating DESC NULLS LAST, r.ticker ASC
+                    LIMIT %s
+                    """,
+                    (target_date, normalized_status, normalized_status, normalized_limit),
+                )
+                rows = cursor.fetchall()
+        return {
+            "as_of_date": target_date.isoformat(),
+            "rows": [
+                {
+                    "ticker": str(ticker or "").upper(),
+                    "as_of_date": snapshot_date.isoformat() if isinstance(snapshot_date, dt.date) else str(snapshot_date),
+                    "sector": sector,
+                    "industry": industry,
+                    "overall_rating": float(overall_rating) if overall_rating is not None else None,
+                    "trend_regime_score": float(trend_regime_score) if trend_regime_score is not None else None,
+                    "dma_speed_score": float(dma_speed_score) if dma_speed_score is not None else None,
+                    "divergence_health_score": float(divergence_health_score) if divergence_health_score is not None else None,
+                    "leadership_score": float(leadership_score) if leadership_score is not None else None,
+                    "structure_volume_score": float(structure_volume_score) if structure_volume_score is not None else None,
+                    "rating_band": rating_band,
+                    "technical_status": technical_status_value,
+                    "technical_status_reason": technical_status_reason,
+                    "flags": list(flags or []),
+                }
+                for (
+                    ticker,
+                    snapshot_date,
+                    sector,
+                    industry,
+                    overall_rating,
+                    trend_regime_score,
+                    dma_speed_score,
+                    divergence_health_score,
+                    leadership_score,
+                    structure_volume_score,
+                    rating_band,
+                    technical_status_value,
+                    technical_status_reason,
+                    flags,
                 ) in rows
             ],
             "status_counts": dict(sorted(status_counts.items())),

@@ -7,6 +7,7 @@ RATING_STATUS_MISSING_SECTOR = "missing_sector"
 RATING_STATUS_MISSING_METRICS = "missing_metrics"
 RATING_STATUS_INSUFFICIENT_SECTOR_PEERS = "insufficient_sector_peers"
 RATING_STATUS_SCRAPE_FAILED = "scrape_failed"
+TECHNICAL_RATING_STATUS_MISSING_METRICS = "missing_metrics"
 
 VALUATION_METRICS = (
     "forward_pe",
@@ -109,3 +110,22 @@ METRIC_LABEL_TO_FIELD: Mapping[str, str] = {
 
 MIN_SECTOR_PEERS_DEFAULT = 20
 MIN_CATEGORY_METRICS_DEFAULT = 1.0
+
+TECHNICAL_REQUIRED_METRICS = (
+    "close",
+    "atr20",
+    "sma20",
+    "sma50",
+    "sma100",
+    "sma200",
+    "sma20_5d_ago",
+    "sma50_10d_ago",
+    "sma100_10d_ago",
+    "sma200_20d_ago",
+    "sma50_20d_ago",
+    "sma200_20d_ago",
+    "daily_rs_rating",
+    "weekly_rs_rating",
+    "high_52w",
+    "low_52w",
+)

@@ -665,6 +665,32 @@ export type TopRatingsResponse = {
   database_configured: boolean;
 };
 
+export type TopTechnicalRatingEntry = {
+  ticker: string;
+  as_of_date: string;
+  sector: string | null;
+  industry: string | null;
+  overall_rating: number | null;
+  trend_regime_score: number | null;
+  dma_speed_score: number | null;
+  divergence_health_score: number | null;
+  leadership_score: number | null;
+  structure_volume_score: number | null;
+  rating_band: string | null;
+  technical_status: string | null;
+  technical_status_reason: string | null;
+  flags: string[];
+};
+
+export type TopTechnicalRatingsResponse = {
+  as_of_date: string | null;
+  limit: number;
+  technical_status: string;
+  rows: TopTechnicalRatingEntry[];
+  status_counts: Record<string, number>;
+  database_configured: boolean;
+};
+
 export type ChartInsiderResponse = {
   ticker: string;
   requested_as_of_date?: string | null;

@@ -78,7 +78,10 @@ export function ScannerBoardPage() {
         </div>
         <div className="weekly-watchlist-actions">
           <Link className="ghost-button" to="/ratings">
-            Open Top Ratings
+            Open Fundamental Ratings
+          </Link>
+          <Link className="ghost-button" to="/ratings?mode=technical">
+            Open Technical Top 100
           </Link>
         </div>
         <p className="panel-copy earnings-console-note">

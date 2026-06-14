@@ -645,7 +645,7 @@ export function ChartsPage() {
         {setupNotice ? <p className="panel-copy">{setupNotice}</p> : null}
       </Panel>
 
-      <Panel title="Ticker Rating" aside={<span className="eyebrow">Latest Finviz-backed rating snapshot</span>}>
+      <Panel title="Ticker Rating" aside={<span className="eyebrow">Latest DB-backed rating snapshot</span>}>
         {!requestedTicker ? <p className="panel-copy">Load ticker to inspect latest rating snapshot and diagnostics.</p> : null}
         {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading ticker rating…" compact /> : null}
         {requestedTicker && !isFundamentalsLoading && !latestRatingSnapshot ? (
@@ -653,6 +653,9 @@ export function ChartsPage() {
         ) : null}
         {latestRatingSnapshot ? (
           <>
+            <p className="panel-copy">
+              Loaded from Postgres rating snapshots and latest fundamentals snapshot, not from the Yahoo scrape block below.
+            </p>
             <p className="panel-copy">
               Status: {latestRatingSnapshot.rating_status || "-"}
               {" · "}
@@ -713,7 +716,7 @@ export function ChartsPage() {
         ) : null}
       </Panel>
 
-      <Panel title="EPS History" aside={<span className="eyebrow">Yahoo scrape experiment for estimate, reported, surprise</span>}>
+      <Panel title="EPS History" aside={<span className="eyebrow">Yahoo internet scrape for estimate, reported, surprise</span>}>
         {!requestedTicker ? <p className="panel-copy">Load ticker to inspect recent earnings EPS rows.</p> : null}
         {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading chart fundamentals…" compact /> : null}
         {requestedTicker ? (

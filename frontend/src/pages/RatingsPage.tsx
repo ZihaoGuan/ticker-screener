@@ -3,7 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate } from "../lib/format";
-import type { TopRatingEntry, TopRatingsResponse } from "../lib/types";
+import type { TopRatingEntry, TopRatingsResponse, TopTechnicalRatingEntry, TopTechnicalRatingsResponse } from "../lib/types";
+
+type RatingsMode = "fundamental" | "technical";
 
 function formatScore(value: number | null | undefined): string {
   if (value == null) {
@@ -12,12 +14,7 @@ function formatScore(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
-function statusOptions(response: TopRatingsResponse | null) {
-  const counts = response?.status_counts ?? {};
-  return ["ok", ...Object.keys(counts).filter((key) => key !== "ok").sort()];
-}
-
-function buildRequestPath(asOfDate: string, limit: number, ratingStatus: string) {
+function buildFundamentalRequestPath(asOfDate: string, limit: number, ratingStatus: string) {
   const query = new URLSearchParams();
   if (asOfDate.trim()) {
     query.set("asOfDate", asOfDate.trim());
@@ -29,43 +26,94 @@ function buildRequestPath(asOfDate: string, limit: number, ratingStatus: string)
   return `/api/ratings/top?${query.toString()}`;
 }
 
+function buildTechnicalRequestPath(asOfDate: string, limit: number, technicalStatus: string) {
+  const query = new URLSearchParams();
+  if (asOfDate.trim()) {
+    query.set("asOfDate", asOfDate.trim());
+  }
+  query.set("limit", String(limit));
+  if (technicalStatus.trim()) {
+    query.set("technicalStatus", technicalStatus.trim());
+  }
+  return `/api/ratings/technical/top?${query.toString()}`;
+}
+
+function statusOptions(response: TopRatingsResponse | TopTechnicalRatingsResponse | null, preferredKey: "ok" = "ok") {
+  const counts = response?.status_counts ?? {};
+  return [preferredKey, ...Object.keys(counts).filter((key) => key !== preferredKey).sort()];
+}
+
+function normalizeMode(value: string | null): RatingsMode {
+  return value === "technical" ? "technical" : "fundamental";
+}
+
 export function RatingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const mode = normalizeMode(searchParams.get("mode"));
   const requestedDate = (searchParams.get("date") ?? "").trim();
   const requestedStatus = (searchParams.get("status") ?? "ok").trim().toLowerCase() || "ok";
   const requestedLimit = Math.min(500, Math.max(1, Number(searchParams.get("limit") ?? "100") || 100));
-  const [payload, setPayload] = useState<TopRatingsResponse | null>(null);
+  const [fundamentalPayload, setFundamentalPayload] = useState<TopRatingsResponse | null>(null);
+  const [technicalPayload, setTechnicalPayload] = useState<TopTechnicalRatingsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
     setIsLoading(true);
     setNotice("");
-    void fetchJson<TopRatingsResponse>(buildRequestPath(requestedDate, requestedLimit, requestedStatus))
-      .then(setPayload)
+    const request =
+      mode === "technical"
+        ? fetchJson<TopTechnicalRatingsResponse>(buildTechnicalRequestPath(requestedDate, requestedLimit, requestedStatus))
+        : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedDate, requestedLimit, requestedStatus));
+    void request
+      .then((response) => {
+        if (mode === "technical") {
+          setTechnicalPayload(response as TopTechnicalRatingsResponse);
+        } else {
+          setFundamentalPayload(response as TopRatingsResponse);
+        }
+      })
       .catch((error) => {
-        setPayload(null);
-        setNotice(error instanceof Error ? error.message : "Failed to load top ratings.");
+        if (mode === "technical") {
+          setTechnicalPayload(null);
+        } else {
+          setFundamentalPayload(null);
+        }
+        setNotice(error instanceof Error ? error.message : `Failed to load ${mode} ratings.`);
       })
       .finally(() => setIsLoading(false));
-  }, [requestedDate, requestedLimit, requestedStatus]);
+  }, [mode, requestedDate, requestedLimit, requestedStatus]);
 
-  const rows = payload?.rows ?? [];
+  const payload = mode === "technical" ? technicalPayload : fundamentalPayload;
+  const rows = mode === "technical" ? (technicalPayload?.rows ?? []) : (fundamentalPayload?.rows ?? []);
   const bestOverall = useMemo(
     () => rows.reduce<number | null>((best, row) => (row.overall_rating != null && (best == null || row.overall_rating > best) ? row.overall_rating : best), null),
     [rows],
   );
   const visibleStatuses = statusOptions(payload);
+  const heroTitle = mode === "technical" ? "Top technical rated tickers" : "Top rated tickers";
+  const heroCopy =
+    mode === "technical"
+      ? "Fast review board for technical leadership snapshots. Focus on trend health, MA behavior, RS leadership, and extension risk."
+      : "Fast review board for the latest ticker ratings snapshots. Open charts from here, inspect grade balance, and sanity-check which names rise to the top.";
+
+  function updateParam(key: string, value: string | null) {
+    const next = new URLSearchParams(searchParams);
+    if (value && value.trim()) {
+      next.set(key, value);
+    } else {
+      next.delete(key);
+    }
+    setSearchParams(next, { replace: true });
+  }
 
   return (
     <div className="page-grid earnings-board weekly-watchlist-board">
       <section className="earnings-board-hero">
         <div className="earnings-board-hero-copy">
           <span className="earnings-board-kicker">Ratings Leaderboard</span>
-          <h1>Top rated tickers</h1>
-          <p className="panel-copy">
-            Fast review board for the latest ticker ratings snapshots. Open charts from here, inspect grade balance, and sanity-check which names rise to the top.
-          </p>
+          <h1>{heroTitle}</h1>
+          <p className="panel-copy">{heroCopy}</p>
         </div>
         <div className="earnings-board-metrics">
           <div className="earnings-metric">
@@ -73,8 +121,8 @@ export function RatingsPage() {
             <strong>{formatLocalDate(payload?.as_of_date)}</strong>
           </div>
           <div className="earnings-metric">
-            <span className="eyebrow">Status Filter</span>
-            <strong>{requestedStatus || "all"}</strong>
+            <span className="eyebrow">Mode</span>
+            <strong>{mode}</strong>
           </div>
           <div className="earnings-metric">
             <span className="eyebrow">Rows</span>
@@ -90,31 +138,19 @@ export function RatingsPage() {
       <section className="panel earnings-filter-console">
         <div className="earnings-filter-console-row weekly-watchlist-console-row">
           <label className="field">
+            <span>Mode</span>
+            <select value={mode} onChange={(event) => updateParam("mode", event.target.value === "fundamental" ? null : event.target.value)}>
+              <option value="fundamental">fundamental</option>
+              <option value="technical">technical</option>
+            </select>
+          </label>
+          <label className="field">
             <span>As Of Date</span>
-            <input
-              type="date"
-              value={requestedDate}
-              onChange={(event) => {
-                const next = new URLSearchParams(searchParams);
-                if (event.target.value) {
-                  next.set("date", event.target.value);
-                } else {
-                  next.delete("date");
-                }
-                setSearchParams(next, { replace: true });
-              }}
-            />
+            <input type="date" value={requestedDate} onChange={(event) => updateParam("date", event.target.value || null)} />
           </label>
           <label className="field">
             <span>Status</span>
-            <select
-              value={requestedStatus}
-              onChange={(event) => {
-                const next = new URLSearchParams(searchParams);
-                next.set("status", event.target.value);
-                setSearchParams(next, { replace: true });
-              }}
-            >
+            <select value={requestedStatus} onChange={(event) => updateParam("status", event.target.value)}>
               {visibleStatuses.map((status) => (
                 <option key={status} value={status}>
                   {status}
@@ -124,14 +160,7 @@ export function RatingsPage() {
           </label>
           <label className="field">
             <span>Limit</span>
-            <select
-              value={String(requestedLimit)}
-              onChange={(event) => {
-                const next = new URLSearchParams(searchParams);
-                next.set("limit", event.target.value);
-                setSearchParams(next, { replace: true });
-              }}
-            >
+            <select value={String(requestedLimit)} onChange={(event) => updateParam("limit", event.target.value)}>
               {[25, 50, 100, 200].map((value) => (
                 <option key={value} value={value}>
                   Top {value}
@@ -158,13 +187,13 @@ export function RatingsPage() {
       <section className="panel earnings-calendar-panel">
         <div className="panel-head earnings-calendar-head">
           <div>
-            <h2>Leaderboard</h2>
+            <h2>{mode === "technical" ? "Technical Leaderboard" : "Leaderboard"}</h2>
             <span className="eyebrow">{rows.length} names</span>
           </div>
         </div>
-        {isLoading ? <LoadingBlock label="Loading top ratings…" /> : null}
-        {!isLoading && rows.length === 0 ? <p className="panel-copy">No ratings found for this date or status filter.</p> : null}
-        {rows.length > 0 ? (
+        {isLoading ? <LoadingBlock label={mode === "technical" ? "Loading top technical ratings…" : "Loading top ratings…"} /> : null}
+        {!isLoading && rows.length === 0 ? <p className="panel-copy">No {mode} ratings found for this date or status filter.</p> : null}
+        {rows.length > 0 && mode === "fundamental" ? (
           <div className="data-table-responsive">
             <table className="data-table">
               <thead>
@@ -181,7 +210,7 @@ export function RatingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row: TopRatingEntry, index) => (
+                {(rows as TopRatingEntry[]).map((row, index) => (
                   <tr key={`${row.ticker}-${row.as_of_date}`}>
                     <td data-label="#">{index + 1}</td>
                     <td data-label="Ticker">
@@ -196,6 +225,50 @@ export function RatingsPage() {
                     <td data-label="Growth">{row.growth_grade ?? "-"} ({formatScore(row.growth_score)})</td>
                     <td data-label="Performance">{row.performance_grade ?? "-"} ({formatScore(row.performance_score)})</td>
                     <td data-label="Status">{row.rating_status ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {rows.length > 0 && mode === "technical" ? (
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Ticker</th>
+                  <th>Sector / Industry</th>
+                  <th>Overall</th>
+                  <th>Band</th>
+                  <th>Trend</th>
+                  <th>DMA Speed</th>
+                  <th>Divergence</th>
+                  <th>Leadership</th>
+                  <th>Structure / Volume</th>
+                  <th>Flags</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(rows as TopTechnicalRatingEntry[]).map((row, index) => (
+                  <tr key={`${row.ticker}-${row.as_of_date}`}>
+                    <td data-label="#">{index + 1}</td>
+                    <td data-label="Ticker">
+                      <Link to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
+                    </td>
+                    <td data-label="Sector / Industry">
+                      {[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}
+                    </td>
+                    <td data-label="Overall">{formatScore(row.overall_rating)}</td>
+                    <td data-label="Band">{row.rating_band ?? "-"}</td>
+                    <td data-label="Trend">{formatScore(row.trend_regime_score)}</td>
+                    <td data-label="DMA Speed">{formatScore(row.dma_speed_score)}</td>
+                    <td data-label="Divergence">{formatScore(row.divergence_health_score)}</td>
+                    <td data-label="Leadership">{formatScore(row.leadership_score)}</td>
+                    <td data-label="Structure / Volume">{formatScore(row.structure_volume_score)}</td>
+                    <td data-label="Flags">{row.flags.length > 0 ? row.flags.join(", ") : "-"}</td>
+                    <td data-label="Status">{row.technical_status ?? "-"}</td>
                   </tr>
                 ))}
               </tbody>

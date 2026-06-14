@@ -98,3 +98,58 @@ class RatingSnapshot:
 
     def to_record(self) -> dict[str, Any]:
         return dict(self.__dict__)
+
+
+@dataclass
+class TechnicalSnapshotInput:
+    ticker: str
+    as_of_date: dt.date
+    close: float | None = None
+    atr20: float | None = None
+    sma20: float | None = None
+    sma50: float | None = None
+    sma100: float | None = None
+    sma200: float | None = None
+    sma20_5d_ago: float | None = None
+    sma50_10d_ago: float | None = None
+    sma100_10d_ago: float | None = None
+    sma200_20d_ago: float | None = None
+    sma50_20d_ago: float | None = None
+    sma200_20d_ago: float | None = None
+    daily_rs_rating: float | None = None
+    weekly_rs_rating: float | None = None
+    rs_line: float | None = None
+    rs_line_sma50: float | None = None
+    rs_line_3m_high: float | None = None
+    rs_line_12m_high: float | None = None
+    high_52w: float | None = None
+    low_52w: float | None = None
+    tr_10d_avg: float | None = None
+    tr_20d_avg: float | None = None
+    close_above_bar_midpoint_count_10d: int | None = None
+    up_down_volume_ratio_20d: float | None = None
+    breakout_volume_ratio: float | None = None
+    distribution_day_count_20d: int | None = None
+
+    def to_record(self) -> dict[str, Any]:
+        return dict(self.__dict__)
+
+
+@dataclass
+class TechnicalRatingSnapshot:
+    ticker: str
+    as_of_date: dt.date
+    trend_regime_score: float | None = None
+    dma_speed_score: float | None = None
+    divergence_health_score: float | None = None
+    leadership_score: float | None = None
+    structure_volume_score: float | None = None
+    overall_rating: float | None = None
+    rating_band: str | None = None
+    technical_status: str = "ok"
+    technical_status_reason: str | None = None
+    flags: list[str] = field(default_factory=list)
+    missing_metric_names: list[str] = field(default_factory=list)
+
+    def to_record(self) -> dict[str, Any]:
+        return dict(self.__dict__)
