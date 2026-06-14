@@ -127,6 +127,37 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertIsNotNone(payload["market_health"]["regime"]["latest"])
         self.assertIsNotNone(payload["market_health"]["spy_extension"]["latest"])
 
+    def test_get_dashboard_context_keeps_latest_db_trading_day_when_internet_fallback_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
+            index = pd.date_range(start="2026-01-05", periods=90, freq="B")
+            close_values = [100.0 + (idx * 0.8) for idx in range(len(index) - 8)]
+            close_values.extend([176.0, 181.0, 187.0, 194.0, 201.0, 208.0, 214.0, 210.0])
+            db_frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=db_frame.copy()), patch(
+                "src.webapp.services.dashboard_service.db_frame_has_recent_coverage",
+                return_value=False,
+            ), patch(
+                "src.webapp.services.dashboard_service._download_history_frame",
+                return_value=None,
+            ), patch("src.webapp.services.dashboard_service.load_app_config") as mock_config:
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        self.assertEqual(payload["market_health"]["regime"]["data_source"], "database")
+        self.assertIsNotNone(payload["market_health"]["regime"]["latest"])
+        self.assertIsNotNone(payload["market_health"]["spy_extension"]["latest"])
+
     def test_get_dashboard_context_flags_healthy_chaos_when_weekly_uptrend_but_daily_below_21ema(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))

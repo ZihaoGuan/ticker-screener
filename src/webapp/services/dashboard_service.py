@@ -48,25 +48,29 @@ class DashboardService:
         end_date = dt.date.today()
         start_date = end_date - dt.timedelta(days=900)
         try:
-            frame = load_daily_bars_frame_from_db(benchmark, start_date, end_date, database_url=self.dashboard_repository.database_url)
+            db_frame = load_daily_bars_frame_from_db(benchmark, start_date, end_date, database_url=self.dashboard_repository.database_url)
         except Exception:
-            frame = None
-        data_source = "database"
-        if frame is None or frame.empty or not db_frame_has_recent_coverage(frame, end_date, tolerance_days=7):
-            frame = _download_history_frame(benchmark, start_date, end_date)
-            data_source = "internet" if frame is not None and not frame.empty else "unavailable"
-        if frame is None or frame.empty:
-            return _build_unavailable_market_health(benchmark=benchmark, data_source=data_source)
+            db_frame = None
 
-        payload = _build_market_health_payload(frame=frame, ticker=benchmark, data_source=data_source)
+        db_payload = _build_payload_if_possible(frame=db_frame, ticker=benchmark, data_source="database")
         if (
-            data_source == "database"
-            and _market_health_payload_has_no_latest(payload)
+            db_payload is not None
+            and db_frame is not None
+            and not db_frame.empty
+            and db_frame_has_recent_coverage(db_frame, end_date, tolerance_days=7)
+            and not _market_health_payload_has_no_latest(db_payload)
         ):
-            fallback_frame = _download_history_frame(benchmark, start_date, end_date)
-            if fallback_frame is not None and not fallback_frame.empty:
-                return _build_market_health_payload(frame=fallback_frame, ticker=benchmark, data_source="internet")
-        return payload
+            return db_payload
+
+        internet_frame = _download_history_frame(benchmark, start_date, end_date)
+        internet_payload = _build_payload_if_possible(frame=internet_frame, ticker=benchmark, data_source="internet")
+        if internet_payload is not None and not _market_health_payload_has_no_latest(internet_payload):
+            return internet_payload
+
+        if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
+            return db_payload
+
+        return _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
 
 
 def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_source: str) -> dict[str, Any]:
@@ -104,6 +108,15 @@ def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_sourc
             "latest": latest,
         }
     }
+
+
+def _build_payload_if_possible(*, frame: pd.DataFrame | None, ticker: str, data_source: str) -> dict[str, Any] | None:
+    if frame is None or frame.empty:
+        return None
+    try:
+        return _build_market_health_payload(frame=frame, ticker=ticker, data_source=data_source)
+    except Exception:
+        return None
 
 
 def _market_health_payload_has_no_latest(payload: dict[str, Any]) -> bool:
