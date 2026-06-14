@@ -545,6 +545,111 @@ class RatingsRepository:
             }
         return result
 
+    def list_top_rating_snapshots(
+        self,
+        *,
+        as_of_date: dt.date | None = None,
+        limit: int = 100,
+        rating_status: str = "ok",
+    ) -> dict[str, Any]:
+        connection = self._connect()
+        if connection is None:
+            return {"as_of_date": None, "rows": [], "status_counts": {}}
+        normalized_limit = max(1, min(int(limit), 500))
+        normalized_status = str(rating_status or "").strip().lower()
+        date_sql = """
+            SELECT COALESCE(%s::date, (SELECT MAX(as_of_date) FROM ticker_rating_snapshots))
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(date_sql, (as_of_date,))
+                date_row = cursor.fetchone()
+                target_date = date_row[0] if date_row else None
+                if not isinstance(target_date, dt.date):
+                    return {"as_of_date": None, "rows": [], "status_counts": {}}
+                cursor.execute(
+                    """
+                    SELECT rating_status, COUNT(*)
+                    FROM ticker_rating_snapshots
+                    WHERE as_of_date = %s
+                    GROUP BY rating_status
+                    """,
+                    (target_date,),
+                )
+                status_counts = {
+                    str(status or "unknown"): int(count or 0)
+                    for status, count in cursor.fetchall()
+                }
+                cursor.execute(
+                    """
+                    SELECT
+                      r.ticker,
+                      r.as_of_date,
+                      COALESCE(r.sector, f.sector) AS sector,
+                      f.industry,
+                      r.overall_rating,
+                      r.valuation_score,
+                      r.profitability_score,
+                      r.growth_score,
+                      r.performance_score,
+                      r.valuation_grade,
+                      r.profitability_grade,
+                      r.growth_grade,
+                      r.performance_grade,
+                      r.rating_status,
+                      r.rating_status_reason
+                    FROM ticker_rating_snapshots r
+                    LEFT JOIN ticker_fundamentals_snapshots f
+                      ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
+                    WHERE r.as_of_date = %s
+                      AND (%s = '' OR LOWER(COALESCE(r.rating_status, '')) = %s)
+                    ORDER BY r.overall_rating DESC NULLS LAST, r.ticker ASC
+                    LIMIT %s
+                    """,
+                    (target_date, normalized_status, normalized_status, normalized_limit),
+                )
+                rows = cursor.fetchall()
+        return {
+            "as_of_date": target_date.isoformat(),
+            "rows": [
+                {
+                    "ticker": str(ticker or "").upper(),
+                    "as_of_date": snapshot_date.isoformat() if isinstance(snapshot_date, dt.date) else str(snapshot_date),
+                    "sector": sector,
+                    "industry": industry,
+                    "overall_rating": float(overall_rating) if overall_rating is not None else None,
+                    "valuation_score": float(valuation_score) if valuation_score is not None else None,
+                    "profitability_score": float(profitability_score) if profitability_score is not None else None,
+                    "growth_score": float(growth_score) if growth_score is not None else None,
+                    "performance_score": float(performance_score) if performance_score is not None else None,
+                    "valuation_grade": valuation_grade,
+                    "profitability_grade": profitability_grade,
+                    "growth_grade": growth_grade,
+                    "performance_grade": performance_grade,
+                    "rating_status": rating_status_value,
+                    "rating_status_reason": rating_status_reason,
+                }
+                for (
+                    ticker,
+                    snapshot_date,
+                    sector,
+                    industry,
+                    overall_rating,
+                    valuation_score,
+                    profitability_score,
+                    growth_score,
+                    performance_score,
+                    valuation_grade,
+                    profitability_grade,
+                    growth_grade,
+                    performance_grade,
+                    rating_status_value,
+                    rating_status_reason,
+                ) in rows
+            ],
+            "status_counts": dict(sorted(status_counts.items())),
+        }
+
 
 def _normalize_text_values(values: Iterable[str] | None) -> list[str]:
     if not values:

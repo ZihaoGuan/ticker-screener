@@ -563,6 +563,57 @@ export type ChartFundamentalsResponse = {
     dollar_move: number | null;
     percent_move: number | null;
   } | null;
+  fundamentals_snapshot?: {
+    as_of_date: string;
+    ticker: string;
+    sector: string | null;
+    industry: string | null;
+    market_cap: number | null;
+    enterprise_value: number | null;
+    forward_pe: number | null;
+    peg_ratio_5y: number | null;
+    price_to_sales: number | null;
+    price_to_book: number | null;
+    price_to_fcf: number | null;
+    profit_margin_pct: number | null;
+    operating_margin_pct: number | null;
+    gross_margin_pct: number | null;
+    roa_pct: number | null;
+    roe_pct: number | null;
+    eps_this_y_pct: number | null;
+    eps_next_y_pct: number | null;
+    eps_next_5y_pct: number | null;
+    sales_qq_pct: number | null;
+    eps_qq_pct: number | null;
+    perf_month_pct: number | null;
+    perf_quarter_pct: number | null;
+    perf_half_pct: number | null;
+    perf_year_pct: number | null;
+    perf_ytd_pct: number | null;
+    volatility_week_pct: number | null;
+    volatility_month_pct: number | null;
+    source: string | null;
+    parse_status: string | null;
+    parse_error: string | null;
+  } | null;
+  rating_snapshot?: {
+    as_of_date: string;
+    valuation_score: number | null;
+    profitability_score: number | null;
+    growth_score: number | null;
+    performance_score: number | null;
+    overall_rating: number | null;
+    valuation_grade: string | null;
+    profitability_grade: string | null;
+    growth_grade: string | null;
+    performance_grade: string | null;
+    rating_status: string | null;
+    rating_status_reason: string | null;
+  } | null;
+  rating_diagnostics?: {
+    missing_metric_names: string[];
+    insufficient_baseline_metrics: string[];
+  } | null;
   diagnostics: {
     earnings: {
       status: string;
@@ -585,6 +636,33 @@ export type ChartFundamentalsResponse = {
       attempts: Array<Record<string, unknown>>;
     };
   };
+};
+
+export type TopRatingEntry = {
+  ticker: string;
+  as_of_date: string;
+  sector: string | null;
+  industry: string | null;
+  overall_rating: number | null;
+  valuation_score: number | null;
+  profitability_score: number | null;
+  growth_score: number | null;
+  performance_score: number | null;
+  valuation_grade: string | null;
+  profitability_grade: string | null;
+  growth_grade: string | null;
+  performance_grade: string | null;
+  rating_status: string | null;
+  rating_status_reason: string | null;
+};
+
+export type TopRatingsResponse = {
+  as_of_date: string | null;
+  limit: number;
+  rating_status: string;
+  rows: TopRatingEntry[];
+  status_counts: Record<string, number>;
+  database_configured: boolean;
 };
 
 export type ChartInsiderResponse = {

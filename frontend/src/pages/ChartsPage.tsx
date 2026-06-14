@@ -6,6 +6,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
+import { formatLocalDate } from "../lib/format";
 import type { AdHocScreenResponse, AdminTickerListStatusResponse, CandlePoint, ChartAnnotations, ChartFundamentalsResponse, ChartInsiderResponse, WatchlistChartResponse } from "../lib/types";
 
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
@@ -290,6 +291,9 @@ export function ChartsPage() {
   const vcs = payload?.vcs ?? null;
   const sepaDashboard = payload?.sepa_dashboard ?? null;
   const earningsRows = fundamentalsPayload?.earnings_eps_history ?? [];
+  const latestFundamentalsSnapshot = fundamentalsPayload?.fundamentals_snapshot ?? null;
+  const latestRatingSnapshot = fundamentalsPayload?.rating_snapshot ?? null;
+  const latestRatingDiagnostics = fundamentalsPayload?.rating_diagnostics ?? null;
   const setupAnnotations = useMemo<ChartAnnotations[]>(() => {
     return (setupPayload?.screeners ?? [])
       .filter((item) => item.passed && item.hit)
@@ -639,6 +643,74 @@ export function ChartsPage() {
         </div>
         {isSetupLoading ? <LoadingBlock label="Loading setup overlays…" compact /> : null}
         {setupNotice ? <p className="panel-copy">{setupNotice}</p> : null}
+      </Panel>
+
+      <Panel title="Ticker Rating" aside={<span className="eyebrow">Latest Finviz-backed rating snapshot</span>}>
+        {!requestedTicker ? <p className="panel-copy">Load ticker to inspect latest rating snapshot and diagnostics.</p> : null}
+        {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading ticker rating…" compact /> : null}
+        {requestedTicker && !isFundamentalsLoading && !latestRatingSnapshot ? (
+          <p className="panel-copy">No latest rating snapshot returned for this ticker yet.</p>
+        ) : null}
+        {latestRatingSnapshot ? (
+          <>
+            <p className="panel-copy">
+              Status: {latestRatingSnapshot.rating_status || "-"}
+              {" · "}
+              Overall: {formatMetric(latestRatingSnapshot.overall_rating)}
+              {" · "}
+              As Of: {formatLocalDate(latestRatingSnapshot.as_of_date)}
+              {" · "}
+              Source: {latestFundamentalsSnapshot?.source || "-"}
+            </p>
+            <div className="data-table-responsive">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Grade</th>
+                    <th>Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Valuation</td>
+                    <td>{latestRatingSnapshot.valuation_grade || "-"}</td>
+                    <td>{formatMetric(latestRatingSnapshot.valuation_score)}</td>
+                  </tr>
+                  <tr>
+                    <td>Profitability</td>
+                    <td>{latestRatingSnapshot.profitability_grade || "-"}</td>
+                    <td>{formatMetric(latestRatingSnapshot.profitability_score)}</td>
+                  </tr>
+                  <tr>
+                    <td>Growth</td>
+                    <td>{latestRatingSnapshot.growth_grade || "-"}</td>
+                    <td>{formatMetric(latestRatingSnapshot.growth_score)}</td>
+                  </tr>
+                  <tr>
+                    <td>Performance</td>
+                    <td>{latestRatingSnapshot.performance_grade || "-"}</td>
+                    <td>{formatMetric(latestRatingSnapshot.performance_score)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="panel-copy">
+              {latestFundamentalsSnapshot
+                ? `${[latestFundamentalsSnapshot.sector, latestFundamentalsSnapshot.industry].filter(Boolean).join(" / ") || "No sector or industry"} · parse ${latestFundamentalsSnapshot.parse_status || "-"}`
+                : "No fundamentals snapshot metadata."}
+            </p>
+            {latestRatingSnapshot.rating_status_reason ? <p className="panel-copy">{latestRatingSnapshot.rating_status_reason}</p> : null}
+            {latestRatingDiagnostics && (latestRatingDiagnostics.missing_metric_names.length > 0 || latestRatingDiagnostics.insufficient_baseline_metrics.length > 0) ? (
+              <details>
+                <summary className="panel-copy">Rating diagnostics</summary>
+                <pre className="panel-copy" style={{ whiteSpace: "pre-wrap" }}>
+                  {JSON.stringify(latestRatingDiagnostics, null, 2)}
+                </pre>
+              </details>
+            ) : null}
+          </>
+        ) : null}
       </Panel>
 
       <Panel title="EPS History" aside={<span className="eyebrow">Yahoo scrape experiment for estimate, reported, surprise</span>}>

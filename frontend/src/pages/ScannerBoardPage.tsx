@@ -73,8 +73,13 @@ export function ScannerBoardPage() {
           </div>
           <div>
             <span className="eyebrow">Navigation</span>
-            <p className="panel-copy">Open any card to jump into the matching ticker list view for that scanner artifact.</p>
+            <p className="panel-copy">Open scanner cards for raw artifacts, or jump to the top-ratings leaderboard for strongest rated names.</p>
           </div>
+        </div>
+        <div className="weekly-watchlist-actions">
+          <Link className="ghost-button" to="/ratings">
+            Open Top Ratings
+          </Link>
         </div>
         <p className="panel-copy earnings-console-note">
           Latest signal date on screen: {formatLocalDate(payload?.latest_signal_date)}.

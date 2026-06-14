@@ -13,6 +13,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { OverlapPage } from "./pages/OverlapPage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { ChartsPage } from "./pages/ChartsPage";
+import { RatingsPage } from "./pages/RatingsPage";
 import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
 import { ScannerBoardPage } from "./pages/ScannerBoardPage";
@@ -41,6 +42,14 @@ export default function App() {
           element={
             <RoleRoute allowedRoles={["premium", "admin"]}>
               <ScannerBoardPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/ratings"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <RatingsPage />
             </RoleRoute>
           }
         />
