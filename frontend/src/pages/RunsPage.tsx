@@ -250,6 +250,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   );
   const selectedJobLog = useMemo(() => {
     const liveStreamJob = liveJobStream.job;
+    const liveStreamLog = liveJobStream.lines.length > 0 ? liveJobStream.lines.join("\n") : "";
     const liveChildSnapshotLog =
       selectedChildJob && liveStreamJob && "job_run_id" in liveStreamJob && liveStreamJob.job_run_id === selectedChildJob.job_run_id
         ? liveStreamJob.log_tail
@@ -258,6 +259,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       selectedJob && liveStreamJob && "job_id" in liveStreamJob && liveStreamJob.job_id === selectedJob.job_id
         ? liveStreamJob.log_tail
         : "";
+    if (liveStreamLog) {
+      return liveStreamLog;
+    }
     if (liveJobStream.logTail) {
       return liveJobStream.logTail;
     }
@@ -270,7 +274,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         : "Waiting for screener subtasks to attach to this batch run.";
     }
     return liveParentSnapshotLog || selectedJob?.log_tail || "No job log yet.";
-  }, [childJobGroups.length, liveJobStream.job, liveJobStream.logTail, selectedChildJob, selectedJob]);
+  }, [childJobGroups.length, liveJobStream.job, liveJobStream.lines, liveJobStream.logTail, selectedChildJob, selectedJob]);
   const displayedSelectedJob = useMemo(() => {
     if (selectedJob && liveJobStream.job && "job_id" in liveJobStream.job && liveJobStream.job.job_id === selectedJob.job_id) {
       return liveJobStream.job;
@@ -1564,16 +1568,20 @@ type JobStreamStatusEvent = {
   cursor: number;
 };
 
+const MAX_CACHED_LOG_LINES = 5000;
+const jobConsoleLineCache = new Map<string, string[]>();
+
 function useJobStream(streamPath: string | null, enabled: boolean) {
   const [job, setJob] = useState<LiveJob | null>(null);
-  const [lines, setLines] = useState<string[]>([]);
+  const [lines, setLines] = useState<string[]>(() => (streamPath ? jobConsoleLineCache.get(streamPath) ?? [] : []));
   const [logTail, setLogTail] = useState("");
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     setJob(null);
-    setLines([]);
-    setLogTail("");
+    const cachedLines = streamPath ? jobConsoleLineCache.get(streamPath) ?? [] : [];
+    setLines(cachedLines);
+    setLogTail(cachedLines.length > 0 ? cachedLines.join("\n") : "");
     setConnected(false);
 
     if (!streamPath || !enabled) {
@@ -1586,18 +1594,23 @@ function useJobStream(streamPath: string | null, enabled: boolean) {
     source.addEventListener("snapshot", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as JobStreamSnapshotEvent;
       setJob(payload.job);
-      const nextLines = payload.recent_lines ?? [];
-      setLines(nextLines);
-      setLogTail(nextLines.length > 0 ? nextLines.join("\n") : payload.job?.log_tail || "");
+      const snapshotLines = payload.recent_lines ?? [];
+      setLines((current) => {
+        const next = mergeConsoleLines(current, snapshotLines);
+        jobConsoleLineCache.set(streamPath, next);
+        setLogTail(next.length > 0 ? next.join("\n") : payload.job?.log_tail || "");
+        return next;
+      });
       setConnected(true);
     });
 
     source.addEventListener("log", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as JobStreamLogEvent;
-      setLines((current) => [...current, payload.line].slice(-200));
-      setLogTail((current) => {
-        const next = current ? `${current}\n${payload.line}` : payload.line;
-        return next.split("\n").slice(-200).join("\n");
+      setLines((current) => {
+        const next = mergeConsoleLines(current, [payload.line]);
+        jobConsoleLineCache.set(streamPath, next);
+        setLogTail(next.join("\n"));
+        return next;
       });
       setJob((current) => {
         if (!current) {
@@ -1616,8 +1629,14 @@ function useJobStream(streamPath: string | null, enabled: boolean) {
     source.addEventListener("status", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as JobStreamStatusEvent;
       setJob(payload.job);
-      if (payload.job?.log_tail) {
-        setLogTail(payload.job.log_tail);
+      const statusLines = payload.job?.log_tail ? payload.job.log_tail.split("\n").filter(Boolean) : [];
+      if (statusLines.length > 0) {
+        setLines((current) => {
+          const next = mergeConsoleLines(current, statusLines);
+          jobConsoleLineCache.set(streamPath, next);
+          setLogTail(next.join("\n"));
+          return next;
+        });
       }
       setConnected(true);
     });
@@ -1625,8 +1644,14 @@ function useJobStream(streamPath: string | null, enabled: boolean) {
     source.addEventListener("eof", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as JobStreamStatusEvent;
       setJob(payload.job);
-      if (payload.job?.log_tail) {
-        setLogTail(payload.job.log_tail);
+      const finalLines = payload.job?.log_tail ? payload.job.log_tail.split("\n").filter(Boolean) : [];
+      if (finalLines.length > 0) {
+        setLines((current) => {
+          const next = mergeConsoleLines(current, finalLines);
+          jobConsoleLineCache.set(streamPath, next);
+          setLogTail(next.join("\n"));
+          return next;
+        });
       }
       setConnected(false);
       source.close();
@@ -1643,6 +1668,35 @@ function useJobStream(streamPath: string | null, enabled: boolean) {
   }, [enabled, streamPath]);
 
   return { job, lines, logTail, connected };
+}
+
+function mergeConsoleLines(current: string[], incoming: string[]): string[] {
+  const normalizedIncoming = incoming.map((line) => line.replace(/\r$/, "")).filter((line) => line.length > 0);
+  if (normalizedIncoming.length === 0) {
+    return current;
+  }
+  if (current.length === 0) {
+    return normalizedIncoming.slice(-MAX_CACHED_LOG_LINES);
+  }
+
+  const maxOverlap = Math.min(current.length, normalizedIncoming.length, 200);
+  let overlap = 0;
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    let matches = true;
+    for (let index = 0; index < size; index += 1) {
+      if (current[current.length - size + index] !== normalizedIncoming[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      overlap = size;
+      break;
+    }
+  }
+
+  const next = current.concat(normalizedIncoming.slice(overlap));
+  return next.slice(-MAX_CACHED_LOG_LINES);
 }
 
 function liveJobDisplayLabel(job: LiveJob | null): string {
