@@ -410,16 +410,42 @@ class _FakeWatchlistService:
             "ema21": [],
             "weekly_ema8": [],
             "ipo_vwap": [],
-            "market_extension": {
-                "config": {"timeframe": "weekly", "ma_type": "sma", "length": 10, "warning_pct": 11.0, "extreme_pct": 15.0, "label": "10W SMA"},
-                "line": [],
-                "signals": [],
-                "latest": None,
-            },
+            "market_extension": {"config": {"timeframe": "weekly", "ma_type": "sma", "length": 10, "warning_pct": 11.0, "extreme_pct": 15.0, "label": "10W SMA"}, "line": [], "signals": [], "latest": None},
             "rs_line": [],
+            "daily_rs_rating": [],
+            "weekly_rs_rating": [],
+            "rs_markers": [],
+            "setup_markers": [],
+            "fearzone_panel": {"rows": [], "signals": []},
+            "vcs": None,
+            "sepa_dashboard": None,
+        }
+
+    def get_chart_overlays_payload(
+        self,
+        ticker: str,
+        period: str = "18mo",
+        *,
+        as_of_date: dt.date | None = None,
+        include_setup_markers: bool = False,
+    ):
+        return {
+            "ticker": ticker.upper(),
+            "benchmark_ticker": "SPY",
+            "period": period,
+            "requested_as_of_date": as_of_date.isoformat() if as_of_date else None,
+            "resolved_as_of_date": "2026-05-30",
+            "latest_available_date": "2026-05-30",
+            "data_source": "database",
+            "market_extension": {"config": {"timeframe": "weekly", "ma_type": "sma", "length": 10, "warning_pct": 11.0, "extreme_pct": 15.0, "label": "10W SMA"}, "line": [], "signals": [], "latest": None},
+            "rs_line": [],
+            "daily_rs_rating": [],
+            "weekly_rs_rating": [],
             "rs_markers": [],
             "setup_markers": [{"time": "2026-05-30", "kind": "ftd_sweep_breakout", "label": "FTD Sweep"}] if include_setup_markers else [],
             "fearzone_panel": {"rows": [], "signals": []},
+            "vcs": None,
+            "sepa_dashboard": None,
         }
 
     def get_chart_insider_payload(self, ticker: str, *, lookback_days: int = 14, as_of_date: dt.date | None = None):
@@ -748,6 +774,13 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["ticker"], "NVDA")
         self.assertEqual(payload["requested_as_of_date"], "2026-05-31")
         self.assertEqual(payload["resolved_as_of_date"], "2026-05-30")
+
+    def test_get_chart_overlays(self) -> None:
+        response = self.client.get("/api/chart-overlays/nvda?asOfDate=2026-05-31&includeSetupMarkers=true")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["ticker"], "NVDA")
+        self.assertEqual(payload["setup_markers"][0]["kind"], "ftd_sweep_breakout")
 
     def test_get_scanner_board(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: premium_principal()

@@ -547,6 +547,26 @@ export type WatchlistChartResponse = {
   } | null;
 };
 
+export type ChartOverlaysResponse = Pick<
+  WatchlistChartResponse,
+  | "ticker"
+  | "benchmark_ticker"
+  | "period"
+  | "requested_as_of_date"
+  | "resolved_as_of_date"
+  | "latest_available_date"
+  | "data_source"
+  | "market_extension"
+  | "rs_line"
+  | "daily_rs_rating"
+  | "weekly_rs_rating"
+  | "rs_markers"
+  | "setup_markers"
+  | "fearzone_panel"
+  | "vcs"
+  | "sepa_dashboard"
+>;
+
 export type ChartFundamentalsResponse = {
   ticker: string;
   earnings_eps_history: Array<{

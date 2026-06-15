@@ -918,6 +918,24 @@ def ticker_chart_data(
     )
 
 
+@router.get("/chart-overlays/{ticker}", response_class=JSONResponse)
+def ticker_chart_overlays_data(
+    ticker: str,
+    period: str = Query(default="18mo"),
+    as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
+    include_setup_markers: bool = Query(default=False, alias="includeSetupMarkers"),
+    service: WatchlistService = Depends(get_chart_watchlist_service),
+) -> JSONResponse:
+    return JSONResponse(
+        service.get_chart_overlays_payload(
+            ticker=ticker.upper(),
+            period=period,
+            as_of_date=as_of_date,
+            include_setup_markers=include_setup_markers,
+        )
+    )
+
+
 @router.get("/chart-fundamentals/{ticker}", response_class=JSONResponse)
 def chart_fundamentals_data(
     ticker: str,

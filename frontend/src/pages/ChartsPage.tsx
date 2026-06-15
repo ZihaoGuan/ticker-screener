@@ -7,7 +7,7 @@ import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
 import { formatLocalDate } from "../lib/format";
-import type { AdHocScreenResponse, AdminTickerListStatusResponse, CandlePoint, ChartAnnotations, ChartFundamentalsResponse, ChartInsiderResponse, WatchlistChartResponse } from "../lib/types";
+import type { AdHocScreenResponse, AdminTickerListStatusResponse, CandlePoint, ChartAnnotations, ChartFundamentalsResponse, ChartInsiderResponse, ChartOverlaysResponse, WatchlistChartResponse } from "../lib/types";
 
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
@@ -25,8 +25,9 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   flexSr: false,
 };
 const CHART_CACHE_PREFIX = "chart-screen-cache-v4";
-const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "fundamentals" | "insider", number> = {
+const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "overlays" | "fundamentals" | "insider", number> = {
   payload: 10 * 60 * 1000,
+  overlays: 10 * 60 * 1000,
   fundamentals: 60 * 60 * 1000,
   insider: 4 * 60 * 60 * 1000,
 };
@@ -48,6 +49,7 @@ export function ChartsPage() {
   const [tickerInput, setTickerInput] = useState(requestedTicker);
   const [dateInput, setDateInput] = useState(requestedDate);
   const [payload, setPayload] = useState<WatchlistChartResponse | null>(null);
+  const [overlayPayload, setOverlayPayload] = useState<ChartOverlaysResponse | null>(null);
   const [fundamentalsPayload, setFundamentalsPayload] = useState<ChartFundamentalsResponse | null>(null);
   const [insiderPayload, setInsiderPayload] = useState<ChartInsiderResponse | null>(null);
   const [setupPayload, setSetupPayload] = useState<AdHocScreenResponse | null>(null);
@@ -86,6 +88,7 @@ export function ChartsPage() {
   useEffect(() => {
     if (!requestedTicker) {
       setPayload(null);
+      setOverlayPayload(null);
       setFundamentalsPayload(null);
       setInsiderPayload(null);
       setSetupPayload(null);
@@ -101,10 +104,7 @@ export function ChartsPage() {
     if (requestedDate) {
       query.set("asOfDate", requestedDate);
     }
-    if (selectedSetups.ftd_sweep) {
-      query.set("includeSetupMarkers", "true");
-    }
-    const payloadCacheSuffix = `${requestedDate || "latest"}:${selectedSetups.ftd_sweep ? "setup-markers" : "base"}`;
+    const payloadCacheSuffix = `${requestedDate || "latest"}:base`;
     const cacheKey = buildChartCacheKey("payload", requestedTicker, payloadCacheSuffix);
     const cached = refreshNonce === 0 ? readChartCache<WatchlistChartResponse>(cacheKey) : null;
     if (cached && hasUsableChartData(cached)) {
@@ -135,10 +135,35 @@ export function ChartsPage() {
       })
       .catch((error) => {
         setPayload(null);
+        setOverlayPayload(null);
         setNotice(error instanceof Error ? error.message : "Failed to load chart.");
       })
       .finally(() => setIsLoading(false));
-  }, [refreshNonce, requestedDate, requestedTicker, selectedSetups.ftd_sweep]);
+  }, [refreshNonce, requestedDate, requestedTicker]);
+
+  useEffect(() => {
+    if (!requestedTicker || !payload?.resolved_as_of_date) {
+      setOverlayPayload(null);
+      return;
+    }
+    const query = new URLSearchParams({ period: "18mo", asOfDate: payload.resolved_as_of_date });
+    if (selectedSetups.ftd_sweep) {
+      query.set("includeSetupMarkers", "true");
+    }
+    const overlayCacheSuffix = `${payload.resolved_as_of_date}:${selectedSetups.ftd_sweep ? "setup-markers" : "base"}`;
+    const cacheKey = buildChartCacheKey("overlays", requestedTicker, overlayCacheSuffix);
+    const cached = refreshNonce === 0 ? readChartCache<ChartOverlaysResponse>(cacheKey) : null;
+    if (cached) {
+      setOverlayPayload(cached);
+      return;
+    }
+    void fetchJson<ChartOverlaysResponse>(`/api/chart-overlays/${requestedTicker}?${query.toString()}`)
+      .then((response) => {
+        writeChartCache(cacheKey, response);
+        setOverlayPayload(response);
+      })
+      .catch(() => setOverlayPayload(null));
+  }, [payload?.resolved_as_of_date, refreshNonce, requestedTicker, selectedSetups.ftd_sweep]);
 
   useEffect(() => {
     if (!requestedTicker) {
@@ -263,13 +288,20 @@ export function ChartsPage() {
       .finally(() => setIsSetupLoading(false));
   }, [payload?.resolved_as_of_date, requestedTicker, selectedSetupIds]);
 
+  const chartPayload = useMemo<WatchlistChartResponse | null>(() => {
+    if (!payload) {
+      return null;
+    }
+    return overlayPayload ? { ...payload, ...overlayPayload } : payload;
+  }, [overlayPayload, payload]);
+
   const chartData = useMemo<CandlePoint[]>(
     () =>
-      (payload?.candles ?? []).map((item, index) => ({
+      (chartPayload?.candles ?? []).map((item, index) => ({
         ...item,
-        volume: payload?.volume[index]?.value ?? 0,
+        volume: chartPayload?.volume[index]?.value ?? 0,
       })),
-    [payload],
+    [chartPayload],
   );
   const lastCandle = chartData[chartData.length - 1] ?? null;
   const previousCandle = chartData.length > 1 ? chartData[chartData.length - 2] : null;
@@ -278,22 +310,22 @@ export function ChartsPage() {
     lastCandle && previousCandle && previousCandle.close > 0
       ? ((lastCandle.close - previousCandle.close) / previousCandle.close) * 100
       : null;
-  const latestRsMarker = payload?.rs_markers?.[payload.rs_markers.length - 1] ?? null;
-  const dailyRsRatingSeries = payload?.daily_rs_rating ?? [];
-  const weeklyRsRatingSeries = payload?.weekly_rs_rating ?? [];
+  const latestRsMarker = chartPayload?.rs_markers?.[chartPayload.rs_markers.length - 1] ?? null;
+  const dailyRsRatingSeries = chartPayload?.daily_rs_rating ?? [];
+  const weeklyRsRatingSeries = chartPayload?.weekly_rs_rating ?? [];
   const adr14Pct = useMemo(() => computeAdrPercent(chartData, 14), [chartData]);
   const adr14InRange = adr14Pct != null ? adr14Pct >= 3 && adr14Pct <= 10 : null;
   const atr14 = useMemo(() => computeAtr(chartData, 14), [chartData]);
-  const latestMa50 = payload?.ma50?.[payload.ma50.length - 1]?.value ?? null;
-  const latestMarketExtension = payload?.market_extension?.latest ?? null;
-  const marketExtensionLabel = payload?.market_extension?.config?.label ?? "10W SMA";
+  const latestMa50 = chartPayload?.ma50?.[chartPayload.ma50.length - 1]?.value ?? null;
+  const latestMarketExtension = chartPayload?.market_extension?.latest ?? null;
+  const marketExtensionLabel = chartPayload?.market_extension?.config?.label ?? "10W SMA";
   const atrMultipleFrom50Ma =
     atr14 != null && latestMa50 != null && Number.isFinite(lastClose ?? NaN)
       ? ((lastClose ?? 0) - latestMa50) / atr14
       : null;
   const hasTrimWarning = atrMultipleFrom50Ma != null ? atrMultipleFrom50Ma >= 3 : false;
-  const vcs = payload?.vcs ?? null;
-  const sepaDashboard = payload?.sepa_dashboard ?? null;
+  const vcs = chartPayload?.vcs ?? null;
+  const sepaDashboard = chartPayload?.sepa_dashboard ?? null;
   const earningsRows = fundamentalsPayload?.earnings_eps_history ?? [];
   const latestFundamentalsSnapshot = fundamentalsPayload?.fundamentals_snapshot ?? null;
   const latestRatingSnapshot = fundamentalsPayload?.rating_snapshot ?? null;
@@ -308,7 +340,7 @@ export function ChartsPage() {
     if (!selectedSetups.ftd_sweep) {
       return [];
     }
-    return (payload?.setup_markers ?? [])
+    return (chartPayload?.setup_markers ?? [])
       .filter((marker) => marker.kind === "ftd_sweep_breakout")
       .map((marker) => ({
         time: marker.time,
@@ -317,11 +349,11 @@ export function ChartsPage() {
         shape: "square" as const,
         position: "belowBar" as const,
       }));
-  }, [payload?.setup_markers, selectedSetups.ftd_sweep]);
-  const atrExtensionMarkers = useMemo(() => buildAtrExtensionMarkers(chartData, payload?.ma50 ?? [], 14), [chartData, payload?.ma50]);
+  }, [chartPayload?.setup_markers, selectedSetups.ftd_sweep]);
+  const atrExtensionMarkers = useMemo(() => buildAtrExtensionMarkers(chartData, chartPayload?.ma50 ?? [], 14), [chartData, chartPayload?.ma50]);
   const sellIntoStrengthMarkers = useMemo(
-    () => buildSellIntoStrengthMarkers(chartData, payload?.ma50 ?? []),
-    [chartData, payload?.ma50],
+    () => buildSellIntoStrengthMarkers(chartData, chartPayload?.ma50 ?? []),
+    [chartData, chartPayload?.ma50],
   );
   const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
     { key: "ema8", label: "EMA 8" },
@@ -341,7 +373,7 @@ export function ChartsPage() {
   const canManageExclusions = auth.hasCapability("manage_exclusions");
   const canSyncHistory = auth.hasCapability("sync_history");
   const currentExclusion = tickerListStatus?.exclusion_entry ?? null;
-  const showBackfillSection = canSyncHistory && requestedTicker !== "" && payload?.data_source === "internet";
+  const showBackfillSection = canSyncHistory && requestedTicker !== "" && chartPayload?.data_source === "internet";
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -433,7 +465,7 @@ export function ChartsPage() {
         <div>
           <div className="hero-symbol-row">
             <h1>{requestedTicker || "Chart"}</h1>
-            {payload?.benchmark_ticker ? <span className="ticker-exchange">RS vs {payload.benchmark_ticker}</span> : null}
+            {chartPayload?.benchmark_ticker ? <span className="ticker-exchange">RS vs {chartPayload.benchmark_ticker}</span> : null}
           </div>
           <div className="hero-price-row">
             <span className="hero-price">{formatPrice(lastClose)}</span>
@@ -494,7 +526,7 @@ export function ChartsPage() {
           </div>
           <div>
             <span className="eyebrow">As Of</span>
-            <strong>{payload?.resolved_as_of_date ?? "Latest trading day"}</strong>
+            <strong>{chartPayload?.resolved_as_of_date ?? "Latest trading day"}</strong>
           </div>
           <div>
             <span className="eyebrow">{marketExtensionLabel}</span>
@@ -570,7 +602,7 @@ export function ChartsPage() {
           </div>
           <div>
             <span className="eyebrow">Source</span>
-            <strong>{payload?.data_source ?? "-"}</strong>
+            <strong>{chartPayload?.data_source ?? "-"}</strong>
           </div>
         </div>
       </section>
@@ -889,7 +921,7 @@ export function ChartsPage() {
             <PriceChart
               ticker={requestedTicker}
               candles={chartData}
-              overlays={payload ?? undefined}
+              overlays={chartPayload ?? undefined}
               extraAnnotations={setupAnnotations}
               extraMarkers={[
                 ...historicalSetupMarkers,
@@ -900,14 +932,14 @@ export function ChartsPage() {
               forceFearzonePanel
             />
             <div className="chart-annotation-strip">
-              {payload?.resolved_as_of_date ? <span className="chart-pill chart-pill-event">As Of {payload.resolved_as_of_date}</span> : null}
-              {payload?.benchmark_ticker ? <span className="chart-pill chart-pill-rs">RS vs {payload.benchmark_ticker}</span> : null}
+              {chartPayload?.resolved_as_of_date ? <span className="chart-pill chart-pill-event">As Of {chartPayload.resolved_as_of_date}</span> : null}
+              {chartPayload?.benchmark_ticker ? <span className="chart-pill chart-pill-rs">RS vs {chartPayload.benchmark_ticker}</span> : null}
               {latestRsMarker ? (
                 <span className="chart-pill chart-pill-rs">
                   {latestRsMarker.kind === "daily_new_high_before_price" ? "RS new high before price" : "RS new high"}
                 </span>
               ) : null}
-              {payload?.data_source ? <span className="chart-pill chart-pill-setup">Source {payload.data_source}</span> : null}
+              {chartPayload?.data_source ? <span className="chart-pill chart-pill-setup">Source {chartPayload.data_source}</span> : null}
               {latestMarketExtension ? (
                 <span className={`chart-pill ${marketExtensionChartPillClass(latestMarketExtension.state)}`}>
                   {marketExtensionLabel} {formatPercent(latestMarketExtension.extension_pct)}
@@ -1109,7 +1141,7 @@ function ratingToChartY(
   return top + ((100 - clamped) / 100) * usableHeight;
 }
 
-function buildChartCacheKey(kind: "payload" | "fundamentals" | "insider", ticker: string, scope: string) {
+function buildChartCacheKey(kind: "payload" | "overlays" | "fundamentals" | "insider", ticker: string, scope: string) {
   return `${CHART_CACHE_PREFIX}:${kind}:${ticker}:${scope}`;
 }
 
@@ -1154,10 +1186,13 @@ function clearChartCacheKey(key: string) {
   }
 }
 
-function resolveChartCacheKind(key: string): "payload" | "fundamentals" | "insider" | null {
+function resolveChartCacheKind(key: string): "payload" | "overlays" | "fundamentals" | "insider" | null {
   const suffix = key.replace(`${CHART_CACHE_PREFIX}:`, "");
   if (suffix.startsWith("payload:")) {
     return "payload";
+  }
+  if (suffix.startsWith("overlays:")) {
+    return "overlays";
   }
   if (suffix.startsWith("fundamentals:")) {
     return "fundamentals";

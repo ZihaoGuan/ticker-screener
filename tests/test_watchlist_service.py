@@ -485,6 +485,34 @@ class WatchlistServiceTests(unittest.TestCase):
         markers_patch.assert_not_called()
         self.assertEqual(payload["setup_markers"], [])
 
+    def test_get_chart_payload_skips_heavy_overlay_computation(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = self._long_price_frame()
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
+            return_value={"NVDA": frame.copy(), "SPY": frame.copy()},
+        ), patch(
+            "src.webapp.services.watchlist_service._compute_market_extension_overlay",
+        ) as market_extension_patch, patch(
+            "src.webapp.services.watchlist_service._compute_fearzone_panel",
+        ) as fearzone_patch, patch(
+            "src.webapp.services.watchlist_service.latest_vcs_snapshot",
+        ) as vcs_patch, patch(
+            "src.webapp.services.watchlist_service.build_sepa_dashboard_snapshot",
+        ) as sepa_patch:
+            payload = service.get_chart_payload("NVDA", period="6mo", as_of_date=dt.date(2025, 3, 24))
+
+        market_extension_patch.assert_not_called()
+        fearzone_patch.assert_not_called()
+        vcs_patch.assert_not_called()
+        sepa_patch.assert_not_called()
+        self.assertEqual(payload["rs_line"], [])
+
     def test_get_chart_payload_includes_setup_markers_when_requested(self) -> None:
         service = WatchlistService(
             artifacts_dir=Path(self.temp_dir.name),
@@ -500,7 +528,7 @@ class WatchlistServiceTests(unittest.TestCase):
             "src.webapp.services.watchlist_service._compute_ftd_sweep_markers",
             return_value=[{"time": "2025-03-24", "kind": "ftd_sweep_breakout", "label": "FTD Sweep"}],
         ) as markers_patch:
-            payload = service.get_chart_payload(
+            payload = service.get_chart_overlays_payload(
                 "NVDA",
                 period="6mo",
                 as_of_date=dt.date(2025, 3, 24),
@@ -509,6 +537,30 @@ class WatchlistServiceTests(unittest.TestCase):
 
         markers_patch.assert_called_once()
         self.assertEqual(payload["setup_markers"][0]["kind"], "ftd_sweep_breakout")
+
+    def test_get_chart_overlays_payload_computes_heavy_overlays(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = self._long_price_frame()
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
+            return_value={"NVDA": frame.copy(), "SPY": frame.copy()},
+        ), patch(
+            "src.webapp.services.watchlist_service._compute_market_extension_overlay",
+            return_value={"config": {"timeframe": "weekly", "ma_type": "sma", "length": 10, "warning_pct": 11.0, "extreme_pct": 15.0, "label": "10W SMA"}, "line": [], "signals": [], "latest": None},
+        ) as market_extension_patch, patch(
+            "src.webapp.services.watchlist_service._compute_fearzone_panel",
+            return_value={"rows": [], "signals": []},
+        ) as fearzone_patch:
+            payload = service.get_chart_overlays_payload("NVDA", period="6mo", as_of_date=dt.date(2025, 3, 24))
+
+        market_extension_patch.assert_called_once()
+        fearzone_patch.assert_called_once()
+        self.assertIn("market_extension", payload)
 
     def test_get_chart_fundamentals_payload_includes_rating_bundle(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")

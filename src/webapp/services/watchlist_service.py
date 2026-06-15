@@ -64,8 +64,10 @@ _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
 _SCANNER_BOARD_CUTOFF_HOUR = 20
 _SCANNER_BOARD_CUTOFF_MINUTE = 30
-_chart_payload_cache: dict[tuple[str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
+_chart_payload_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
 _chart_payload_cache_lock = threading.Lock()
+_chart_overlay_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
+_chart_overlay_cache_lock = threading.Lock()
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
         "id": "weekly_rs",
@@ -302,51 +304,6 @@ class WatchlistService:
         weekly_ema8 = weekly_close.ewm(span=8, adjust=False).mean()
         frame["weekly_ema8"] = weekly_ema8.reindex(frame.index, method="ffill")
         frame["ipo_vwap"] = _compute_ipo_vwap(frame)
-        visible_dates = {pd.Timestamp(index).date().isoformat() for index in visible_frame.index}
-        market_extension = _compute_market_extension_overlay(frame, visible_dates=visible_dates)
-
-        rs_line: pd.Series | None = None
-        rs_new_high: pd.Series | None = None
-        rs_new_high_before_price: pd.Series | None = None
-        daily_rs_rating: pd.Series | None = None
-        weekly_rs_rating: pd.Series | None = None
-        fearzone_panel = _filter_fearzone_panel(
-            _compute_fearzone_panel(frame),
-            visible_dates=visible_dates,
-        )
-        vcs_snapshot = latest_vcs_snapshot(frame)
-        setup_markers = (
-            _compute_ftd_sweep_markers(
-                frame=frame,
-                visible_dates=visible_dates,
-                ticker=normalized_ticker,
-                benchmark_ticker=self.benchmark_ticker,
-            )
-            if include_setup_markers
-            else []
-        )
-        if benchmark_frame is not None and not benchmark_frame.empty:
-            benchmark_frame = benchmark_frame.sort_index()
-            benchmark_frame = benchmark_frame.loc[benchmark_frame.index <= pd.Timestamp(resolved_as_of_date)].copy()
-            rs_line = _compute_rs_line(frame["Close"], benchmark_frame["Close"])
-            daily_rs_rating = _compute_rs_rating_series(frame["Close"], benchmark_frame["Close"])
-            if daily_rs_rating is not None and not daily_rs_rating.empty:
-                weekly_rs_rating = daily_rs_rating.resample("W-FRI").last().dropna()
-            rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
-                rs_line=rs_line,
-                price_reference=frame["High"].reindex(rs_line.index),
-                lookback=250,
-            )
-        sepa_dashboard = (
-            build_sepa_dashboard_snapshot(
-                frame,
-                benchmark_frame if benchmark_frame is not None else pd.DataFrame(),
-                benchmark_ticker=self.benchmark_ticker,
-            )
-            if benchmark_frame is not None and not benchmark_frame.empty
-            else None
-        )
-
         candles: list[dict[str, Any]] = []
         volume: list[dict[str, Any]] = []
         ma20: list[dict[str, Any]] = []
@@ -356,10 +313,6 @@ class WatchlistService:
         ema21: list[dict[str, Any]] = []
         weekly_ema8_points: list[dict[str, Any]] = []
         ipo_vwap: list[dict[str, Any]] = []
-        rs_points: list[dict[str, Any]] = []
-        daily_rs_rating_points: list[dict[str, Any]] = []
-        weekly_rs_rating_points: list[dict[str, Any]] = []
-        rs_markers: list[dict[str, Any]] = []
 
         visible_index_set = set(visible_frame.index)
 
@@ -399,6 +352,147 @@ class WatchlistService:
                 weekly_ema8_points.append({"time": time_value, "value": float(row["weekly_ema8"])})
             if pd.notna(row["ipo_vwap"]):
                 ipo_vwap.append({"time": time_value, "value": float(row["ipo_vwap"])})
+
+        payload = {
+            "ticker": normalized_ticker,
+            "benchmark_ticker": self.benchmark_ticker,
+            "period": period,
+            "requested_as_of_date": requested_as_of_date.isoformat() if requested_as_of_date else None,
+            "resolved_as_of_date": resolved_as_of_date.isoformat(),
+            "latest_available_date": resolved_as_of_date.isoformat(),
+            "data_source": data_source,
+            "candles": candles,
+            "volume": volume,
+            "ma20": ma20,
+            "ma50": ma50,
+            "ma200": ma200,
+            "ema8": ema8,
+            "ema21": ema21,
+            "weekly_ema8": weekly_ema8_points,
+            "ipo_vwap": ipo_vwap,
+            "market_extension": _empty_market_extension_overlay(),
+            "rs_line": [],
+            "daily_rs_rating": [],
+            "weekly_rs_rating": [],
+            "rs_markers": [],
+            "setup_markers": [],
+            "fearzone_panel": {"rows": [], "signals": []},
+            "vcs": None,
+            "sepa_dashboard": None,
+        }
+        if payload["candles"]:
+            _write_chart_payload_cache(cache_key, payload)
+        return payload
+
+    def get_chart_overlays_payload(
+        self,
+        ticker: str,
+        period: str = "18mo",
+        *,
+        as_of_date: dt.date | None = None,
+        include_setup_markers: bool = False,
+    ) -> dict[str, Any]:
+        normalized_ticker = str(ticker or "").strip().upper()
+        requested_as_of_date = as_of_date
+        cache_key = _build_chart_overlay_cache_key(
+            ticker=normalized_ticker,
+            period=period,
+            as_of_date=as_of_date,
+            benchmark_ticker=self.benchmark_ticker,
+            market_data_source=self.market_data_source,
+            include_setup_markers=include_setup_markers,
+        )
+        cached_payload = _read_chart_overlay_cache(cache_key)
+        if cached_payload is not None:
+            return cached_payload
+        chart_request = _resolve_chart_request(period=period, as_of_date=as_of_date)
+        frame, benchmark_frame, data_source = self._load_chart_frames(
+            ticker=normalized_ticker,
+            benchmark_ticker=self.benchmark_ticker,
+            required_start_date=chart_request.visible_start_date,
+            start_date=chart_request.fetch_start_date,
+            end_date=chart_request.fetch_end_date,
+            warmup_trading_days=chart_request.warmup_trading_days,
+        )
+        if frame is None or frame.empty:
+            return _empty_chart_overlay_payload(
+                normalized_ticker,
+                period=period,
+                requested_as_of_date=requested_as_of_date,
+                benchmark_ticker=self.benchmark_ticker,
+                data_source=data_source,
+            )
+
+        frame = frame.sort_index()
+        resolved_as_of_timestamp = frame.index.max()
+        resolved_as_of_date = pd.Timestamp(resolved_as_of_timestamp).date()
+        visible_start_date = chart_request.visible_start_date
+        visible_frame = frame.loc[(frame.index.date >= visible_start_date) & (frame.index.date <= resolved_as_of_date)].copy()
+        if visible_frame.empty:
+            return _empty_chart_overlay_payload(
+                normalized_ticker,
+                period=period,
+                requested_as_of_date=requested_as_of_date,
+                resolved_as_of_date=resolved_as_of_date,
+                benchmark_ticker=self.benchmark_ticker,
+                data_source=data_source,
+            )
+
+        visible_dates = {pd.Timestamp(index).date().isoformat() for index in visible_frame.index}
+        market_extension = _compute_market_extension_overlay(frame, visible_dates=visible_dates)
+
+        rs_line: pd.Series | None = None
+        rs_new_high: pd.Series | None = None
+        rs_new_high_before_price: pd.Series | None = None
+        daily_rs_rating: pd.Series | None = None
+        weekly_rs_rating: pd.Series | None = None
+        fearzone_panel = _filter_fearzone_panel(
+            _compute_fearzone_panel(frame),
+            visible_dates=visible_dates,
+        )
+        vcs_snapshot = latest_vcs_snapshot(frame)
+        setup_markers = (
+            _compute_ftd_sweep_markers(
+                frame=frame,
+                visible_dates=visible_dates,
+                ticker=normalized_ticker,
+                benchmark_ticker=self.benchmark_ticker,
+            )
+            if include_setup_markers
+            else []
+        )
+        if benchmark_frame is not None and not benchmark_frame.empty:
+            benchmark_frame = benchmark_frame.sort_index()
+            benchmark_frame = benchmark_frame.loc[benchmark_frame.index <= pd.Timestamp(resolved_as_of_date)].copy()
+            rs_line = _compute_rs_line(frame["Close"], benchmark_frame["Close"])
+            daily_rs_rating = _compute_rs_rating_series(frame["Close"], benchmark_frame["Close"])
+            if daily_rs_rating is not None and not daily_rs_rating.empty:
+                weekly_rs_rating = daily_rs_rating.resample("W-FRI").last().dropna()
+        sepa_dashboard = (
+            build_sepa_dashboard_snapshot(
+                frame,
+                benchmark_frame if benchmark_frame is not None else pd.DataFrame(),
+                benchmark_ticker=self.benchmark_ticker,
+            )
+            if benchmark_frame is not None and not benchmark_frame.empty
+            else None
+        )
+
+        rs_points: list[dict[str, Any]] = []
+        daily_rs_rating_points: list[dict[str, Any]] = []
+        weekly_rs_rating_points: list[dict[str, Any]] = []
+        rs_markers: list[dict[str, Any]] = []
+        visible_index_set = set(visible_frame.index)
+        if rs_line is not None and benchmark_frame is not None and not benchmark_frame.empty:
+            rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
+                rs_line=rs_line,
+                price_reference=frame["High"].reindex(rs_line.index),
+                lookback=250,
+            )
+        for index, row in frame.iterrows():
+            if index not in visible_index_set:
+                continue
+            time_value = pd.Timestamp(index).date().isoformat()
             if rs_line is not None and index in rs_line.index and pd.notna(rs_line.loc[index]):
                 rs_points.append({"time": time_value, "value": float(rs_line.loc[index])})
                 if rs_new_high is not None and bool(rs_new_high.loc[index]):
@@ -427,15 +521,6 @@ class WatchlistService:
             "resolved_as_of_date": resolved_as_of_date.isoformat(),
             "latest_available_date": resolved_as_of_date.isoformat(),
             "data_source": data_source,
-            "candles": candles,
-            "volume": volume,
-            "ma20": ma20,
-            "ma50": ma50,
-            "ma200": ma200,
-            "ema8": ema8,
-            "ema21": ema21,
-            "weekly_ema8": weekly_ema8_points,
-            "ipo_vwap": ipo_vwap,
             "market_extension": market_extension,
             "rs_line": rs_points,
             "daily_rs_rating": daily_rs_rating_points,
@@ -446,8 +531,7 @@ class WatchlistService:
             "vcs": vcs_snapshot.to_dict() if vcs_snapshot is not None else None,
             "sepa_dashboard": sepa_dashboard.to_dict() if sepa_dashboard is not None else None,
         }
-        if payload["candles"]:
-            _write_chart_payload_cache(cache_key, payload)
+        _write_chart_overlay_cache(cache_key, payload)
         return payload
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
@@ -816,19 +900,7 @@ def _empty_chart_payload(
         "ema21": [],
         "weekly_ema8": [],
         "ipo_vwap": [],
-        "market_extension": {
-            "config": {
-                "timeframe": "weekly",
-                "ma_type": "sma",
-                "length": 10,
-                "warning_pct": 11.0,
-                "extreme_pct": 15.0,
-                "label": "10W SMA",
-            },
-            "line": [],
-            "signals": [],
-            "latest": None,
-        },
+        "market_extension": _empty_market_extension_overlay(),
         "rs_line": [],
         "daily_rs_rating": [],
         "weekly_rs_rating": [],
@@ -836,6 +908,52 @@ def _empty_chart_payload(
         "setup_markers": [],
         "fearzone_panel": {"rows": [], "signals": []},
         "vcs": None,
+        "sepa_dashboard": None,
+    }
+
+
+def _empty_chart_overlay_payload(
+    ticker: str,
+    *,
+    period: str = "18mo",
+    requested_as_of_date: dt.date | None = None,
+    resolved_as_of_date: dt.date | None = None,
+    benchmark_ticker: str = "SPY",
+    data_source: str = "internet",
+) -> dict[str, Any]:
+    return {
+        "ticker": ticker,
+        "benchmark_ticker": benchmark_ticker,
+        "period": period,
+        "requested_as_of_date": requested_as_of_date.isoformat() if requested_as_of_date else None,
+        "resolved_as_of_date": resolved_as_of_date.isoformat() if resolved_as_of_date else None,
+        "latest_available_date": resolved_as_of_date.isoformat() if resolved_as_of_date else None,
+        "data_source": data_source,
+        "market_extension": _empty_market_extension_overlay(),
+        "rs_line": [],
+        "daily_rs_rating": [],
+        "weekly_rs_rating": [],
+        "rs_markers": [],
+        "setup_markers": [],
+        "fearzone_panel": {"rows": [], "signals": []},
+        "vcs": None,
+        "sepa_dashboard": None,
+    }
+
+
+def _empty_market_extension_overlay() -> dict[str, Any]:
+    return {
+        "config": {
+            "timeframe": "weekly",
+            "ma_type": "sma",
+            "length": 10,
+            "warning_pct": 11.0,
+            "extreme_pct": 15.0,
+            "label": "10W SMA",
+        },
+        "line": [],
+        "signals": [],
+        "latest": None,
     }
 
 
@@ -921,6 +1039,45 @@ def _write_chart_payload_cache(key: tuple[str, str, str, str, str, str], payload
 def _clear_chart_payload_cache() -> None:
     with _chart_payload_cache_lock:
         _chart_payload_cache.clear()
+    with _chart_overlay_cache_lock:
+        _chart_overlay_cache.clear()
+
+
+def _build_chart_overlay_cache_key(
+    *,
+    ticker: str,
+    period: str,
+    as_of_date: dt.date | None,
+    benchmark_ticker: str,
+    market_data_source: str,
+    include_setup_markers: bool,
+) -> tuple[str, str, str, str, str, str]:
+    return (
+        str(ticker or "").strip().upper(),
+        str(period or "18mo").strip().lower() or "18mo",
+        as_of_date.isoformat() if as_of_date else "latest",
+        str(benchmark_ticker or "SPY").strip().upper() or "SPY",
+        str(market_data_source or "").strip().lower() or "internet",
+        "setup-markers" if include_setup_markers else "base",
+    )
+
+
+def _read_chart_overlay_cache(key: tuple[str, str, str, str, str, str]) -> dict[str, Any] | None:
+    now = time.time()
+    with _chart_overlay_cache_lock:
+        cached_entry = _chart_overlay_cache.get(key)
+        if cached_entry is None:
+            return None
+        expires_at, payload = cached_entry
+        if expires_at <= now:
+            _chart_overlay_cache.pop(key, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _write_chart_overlay_cache(key: tuple[str, str, str, str, str, str], payload: dict[str, Any]) -> None:
+    with _chart_overlay_cache_lock:
+        _chart_overlay_cache[key] = (time.time() + _CHART_PAYLOAD_CACHE_TTL_SECONDS, copy.deepcopy(payload))
 
 
 def _chart_fundamentals_cache_is_complete(entry: dict[str, Any] | None) -> bool:
