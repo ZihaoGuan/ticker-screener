@@ -64,17 +64,17 @@ export default function App() {
         <Route
           path="/warmup"
           element={
-            <ProtectedRoute capability="run_screeners">
+            <RoleRoute allowedRoles={["admin"]}>
               <WarmupPage />
-            </ProtectedRoute>
+            </RoleRoute>
           }
         />
         <Route
           path="/backtests"
           element={
-            <ProtectedRoute capability="run_screeners">
+            <RoleRoute allowedRoles={["admin"]}>
               <BacktestsPage />
-            </ProtectedRoute>
+            </RoleRoute>
           }
         />
         <Route path="/runs" element={<Navigate to="/screeners" replace />} />
@@ -124,9 +124,9 @@ export default function App() {
         <Route
           path="/portfolio"
           element={
-            <ProtectedRoute capability="manage_exclusions">
+            <RoleRoute allowedRoles={["admin"]}>
               <PortfolioPage />
-            </ProtectedRoute>
+            </RoleRoute>
           }
         />
         <Route

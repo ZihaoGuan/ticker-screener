@@ -14,9 +14,9 @@ const navItems = [
   { to: "/rotation/sector", label: "Rotation", icon: "◎", roles: ["premium", "admin"] as RoleName[] },
   { to: "/report", label: "Report", icon: "◈", roles: ["premium", "admin"] as RoleName[] },
   { to: "/screeners", label: "Screeners", icon: "◉", capability: "run_screeners" as CapabilityName },
-  { to: "/warmup", label: "Warmup", icon: "◍", capability: "run_screeners" as CapabilityName },
-  { to: "/backtests", label: "Backtests", icon: "◌", capability: "run_screeners" as CapabilityName },
-  { to: "/portfolio", label: "Portfolio", icon: "◐", capability: "manage_exclusions" as CapabilityName },
+  { to: "/warmup", label: "Warmup", icon: "◍", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
+  { to: "/backtests", label: "Backtests", icon: "◌", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
+  { to: "/portfolio", label: "Portfolio", icon: "◐", roles: ["admin"] as RoleName[], expo: true, capability: "manage_exclusions" as CapabilityName },
   { to: "/admin", label: "Admin", icon: "◔", capability: "manage_exclusions" as CapabilityName },
 ];
 
@@ -58,6 +58,7 @@ export function AppLayout({ children }: PropsWithChildren) {
             >
               <span className="nav-icon">{item.icon}</span>
               <span>{item.label}</span>
+              {item.expo ? <span className="nav-tag">EXPO</span> : null}
             </NavLink>
           ))}
         </nav>
