@@ -1,0 +1,485 @@
+import { useEffect, useMemo, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { LoadingBlock } from "../components/LoadingBlock";
+import { fetchJson } from "../lib/api";
+import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
+import type {
+  ScannerBoardCard,
+  ScannerBoardResponse,
+  TopRatingEntry,
+  TopRatingsResponse,
+  TopTechnicalRatingEntry,
+  TopTechnicalRatingsResponse,
+  WatchlistDetailResponse,
+} from "../lib/types";
+
+type SortKey = "als" | "ta" | "fa" | "ars" | "ticker";
+
+type ScannerRow = {
+  ticker: string;
+  company: string;
+  sector: string;
+  industry: string;
+  summary: string;
+  setupLabel: string;
+  chartHref: string;
+  marketCap: number | null;
+  taScore: number | null;
+  faScore: number | null;
+  arsScore: number | null;
+  alsScore: number | null;
+};
+
+const MAX_RATINGS_ROWS = 500;
+
+export function ScannerResultPage() {
+  const { scannerId = "" } = useParams();
+  const [board, setBoard] = useState<ScannerBoardResponse | null>(null);
+  const [card, setCard] = useState<ScannerBoardCard | null>(null);
+  const [detail, setDetail] = useState<WatchlistDetailResponse | null>(null);
+  const [fundamentalPayload, setFundamentalPayload] = useState<TopRatingsResponse | null>(null);
+  const [technicalPayload, setTechnicalPayload] = useState<TopTechnicalRatingsResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [notice, setNotice] = useState("");
+  const [search, setSearch] = useState("");
+  const [sectorFilter, setSectorFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<SortKey>("als");
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function load() {
+      setIsLoading(true);
+      setNotice("");
+      try {
+        const [boardPayload, fundamentalRows, technicalRows] = await Promise.all([
+          fetchJson<ScannerBoardResponse>("/api/scanner-board"),
+          fetchJson<TopRatingsResponse>(`/api/ratings/top?limit=${MAX_RATINGS_ROWS}`),
+          fetchJson<TopTechnicalRatingsResponse>(`/api/ratings/technical/top?limit=${MAX_RATINGS_ROWS}`),
+        ]);
+        if (ignore) {
+          return;
+        }
+        setBoard(boardPayload);
+        setFundamentalPayload(fundamentalRows);
+        setTechnicalPayload(technicalRows);
+
+        const selectedCard = boardPayload.cards.find((item) => item.id === scannerId) ?? null;
+        setCard(selectedCard);
+        if (!selectedCard) {
+          setDetail(null);
+          setNotice(`Unknown scanner: ${scannerId}`);
+          return;
+        }
+        if (!selectedCard.stem) {
+          setDetail(null);
+          setNotice("Scanner has no persisted watchlist yet.");
+          return;
+        }
+        const detailPayload = await fetchJson<WatchlistDetailResponse>(`/api/watchlists/${encodeURIComponent(selectedCard.stem)}`);
+        if (ignore) {
+          return;
+        }
+        setDetail(detailPayload);
+      } catch (error) {
+        if (ignore) {
+          return;
+        }
+        setBoard(null);
+        setCard(null);
+        setDetail(null);
+        setFundamentalPayload(null);
+        setTechnicalPayload(null);
+        setNotice(error instanceof Error ? error.message : "Failed to load scanner list.");
+      } finally {
+        if (!ignore) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      ignore = true;
+    };
+  }, [scannerId]);
+
+  const fundamentalMap = useMemo(() => {
+    return new Map((fundamentalPayload?.rows ?? []).map((row) => [row.ticker.toUpperCase(), row] satisfies [string, TopRatingEntry]));
+  }, [fundamentalPayload?.rows]);
+
+  const technicalMap = useMemo(() => {
+    return new Map((technicalPayload?.rows ?? []).map((row) => [row.ticker.toUpperCase(), row] satisfies [string, TopTechnicalRatingEntry]));
+  }, [technicalPayload?.rows]);
+
+  const rows = useMemo(() => {
+    return (detail?.entries ?? []).map((entry) => buildScannerRow(entry, card?.stem ?? "", fundamentalMap, technicalMap));
+  }, [card?.stem, detail?.entries, fundamentalMap, technicalMap]);
+
+  const sectors = useMemo(() => {
+    return Array.from(new Set(rows.map((row) => row.sector).filter((sector) => sector && sector !== "Unknown sector"))).sort();
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    let nextRows = rows;
+    if (sectorFilter !== "all") {
+      nextRows = nextRows.filter((row) => row.sector === sectorFilter);
+    }
+    if (query) {
+      nextRows = nextRows.filter((row) =>
+        [row.ticker, row.company, row.sector, row.industry, row.summary, row.setupLabel].join(" ").toLowerCase().includes(query),
+      );
+    }
+    return [...nextRows].sort((left, right) => compareScannerRows(left, right, sortBy));
+  }, [rows, search, sectorFilter, sortBy]);
+
+  const topNote = useMemo(() => {
+    const first = detail?.entries.find((entry) => typeof entry.master_note === "string" && entry.master_note.trim());
+    return typeof first?.master_note === "string" ? first.master_note.trim() : card?.description ?? "";
+  }, [card?.description, detail?.entries]);
+
+  const handleExportCsv = () => {
+    if (filteredRows.length === 0) {
+      return;
+    }
+    const lines = [
+      ["Ticker", "Company", "Sector", "Industry", "Market Cap", "TA", "FA", "ARS", "ALS Score", "Setup", "Summary"].join(","),
+      ...filteredRows.map((row) =>
+        [
+          row.ticker,
+          csvValue(row.company),
+          csvValue(row.sector),
+          csvValue(row.industry),
+          row.marketCap == null ? "" : row.marketCap.toString(),
+          row.taScore == null ? "" : row.taScore.toFixed(1),
+          row.faScore == null ? "" : row.faScore.toFixed(1),
+          row.arsScore == null ? "" : Math.round(row.arsScore).toString(),
+          row.alsScore == null ? "" : Math.round(row.alsScore).toString(),
+          csvValue(row.setupLabel),
+          csvValue(row.summary),
+        ].join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${card?.stem || scannerId}-scanner-list.csv`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="page-grid scanner-result-page">
+      <section className="scanner-result-hero panel">
+        <div className="scanner-result-breadcrumbs">
+          <Link to="/">Dashboard</Link>
+          <span>›</span>
+          <Link to="/scanner">Stock Scanner</Link>
+          <span>›</span>
+          <span>{card?.label ?? "Scanner Detail"}</span>
+        </div>
+        <div className="scanner-result-title-row">
+          <div>
+            <span className="scanner-result-kicker">Precision Utility</span>
+            <h1>{card?.label ?? "Scanner Detail"}</h1>
+          </div>
+          <span className={`scanner-result-status${rows.length > 0 ? " is-live" : ""}`}>{rows.length > 0 ? "Pattern Detected" : "No Active Hits"}</span>
+        </div>
+        <p className="scanner-result-copy">{card?.description ?? "Open scanner to review latest persisted result list."}</p>
+        <div className="scanner-result-metrics">
+          <div className="scanner-result-metric">
+            <span className="eyebrow">Target Trading Day</span>
+            <strong>{formatLocalDate(board?.target_trading_date)}</strong>
+          </div>
+          <div className="scanner-result-metric">
+            <span className="eyebrow">Captured</span>
+            <strong>{formatLocalDateTime(card?.captured_at)}</strong>
+          </div>
+          <div className="scanner-result-metric">
+            <span className="eyebrow">Signals</span>
+            <strong>{formatCount(filteredRows.length)}</strong>
+          </div>
+          <div className="scanner-result-metric">
+            <span className="eyebrow">Dataset</span>
+            <strong>{card?.stem ?? "--"}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="scanner-result-filter-grid">
+        <label className="scanner-result-filter panel">
+          <span className="eyebrow">Search</span>
+          <input type="text" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find ticker, company, sector" />
+        </label>
+        <label className="scanner-result-filter panel">
+          <span className="eyebrow">Sector</span>
+          <select value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value)}>
+            <option value="all">All sectors</option>
+            {sectors.map((sector) => (
+              <option key={sector} value={sector}>
+                {sector}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="scanner-result-filter panel">
+          <span className="eyebrow">Sorted By</span>
+          <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SortKey)}>
+            <option value="als">ALS Score</option>
+            <option value="ta">TA</option>
+            <option value="fa">FA</option>
+            <option value="ars">ARS</option>
+            <option value="ticker">Ticker</option>
+          </select>
+        </label>
+        <div className="scanner-result-filter panel scanner-result-filter-actions">
+          <span className="eyebrow">Views</span>
+          <div className="scanner-result-view-actions">
+            <Link className="ghost-button" to={card?.stem ? `/watchlists?stem=${encodeURIComponent(card.stem)}` : "/watchlists"}>
+              Charts
+            </Link>
+            <span className="scanner-result-view-chip is-active">List</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="scanner-result-toolbar">
+        <div className="scanner-result-toolbar-left">
+          <strong>Showing {formatCount(filteredRows.length)} results</strong>
+          <span>View: List</span>
+          <span>Sorted by: {labelForSort(sortBy)}</span>
+        </div>
+        <div className="scanner-result-toolbar-right">
+          <button className="ghost-button scanner-result-export" type="button" onClick={handleExportCsv} disabled={filteredRows.length === 0}>
+            Export CSV
+          </button>
+        </div>
+      </section>
+
+      <section className="scanner-result-table-shell panel">
+        {isLoading ? <LoadingBlock label="Loading scanner result list…" /> : null}
+        {!isLoading && notice ? <p className="panel-copy">{notice}</p> : null}
+        {!isLoading && !notice && filteredRows.length === 0 ? <p className="panel-copy">No tickers match current scanner filters.</p> : null}
+        {!isLoading && filteredRows.length > 0 ? (
+          <>
+            <div className="data-table-responsive scanner-result-table-wrap">
+              <table className="data-table scanner-result-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Symbol</th>
+                    <th>Company</th>
+                    <th>Sector</th>
+                    <th>Market Cap</th>
+                    <th>TA</th>
+                    <th>FA</th>
+                    <th>ARS</th>
+                    <th>ALS Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.map((row, index) => (
+                    <tr key={`${row.ticker}-${index}`}>
+                      <td data-label="#">{index + 1}</td>
+                      <td data-label="Symbol">
+                        <Link className="scanner-result-symbol" to={row.chartHref}>
+                          <span>{row.ticker}</span>
+                          {row.setupLabel ? <span className="scanner-inline-badge">{row.setupLabel}</span> : null}
+                        </Link>
+                      </td>
+                      <td data-label="Company">
+                        <div className="scanner-result-company">
+                          <strong>{row.company || row.ticker}</strong>
+                          {row.summary ? <span>{row.summary}</span> : null}
+                        </div>
+                      </td>
+                      <td data-label="Sector">
+                        <div className="scanner-result-sector">
+                          <strong>{row.sector}</strong>
+                          {row.industry && row.industry !== row.sector ? <span>{row.industry}</span> : null}
+                        </div>
+                      </td>
+                      <td data-label="Market Cap">{formatMarketCap(row.marketCap)}</td>
+                      <td data-label="TA">
+                        <span className={`scanner-score-pill ${toneForScore(row.taScore, 10)}`}>{formatTenPointScore(row.taScore)}</span>
+                      </td>
+                      <td data-label="FA">
+                        <span className={`scanner-score-pill ${toneForScore(row.faScore, 10)}`}>{formatTenPointScore(row.faScore)}</span>
+                      </td>
+                      <td data-label="ARS">{formatPercentScore(row.arsScore)}</td>
+                      <td data-label="ALS Score" className="scanner-result-als-cell">
+                        {formatIntegerScore(row.alsScore)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="scanner-result-footer">
+              <span>Showing {formatCount(filteredRows.length)} stocks</span>
+              <div className="scanner-result-preview-pills">
+                {filteredRows.slice(0, 5).map((row) => (
+                  <span key={`preview-${row.ticker}`} className="scanner-card-pill">
+                    {row.ticker}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : null}
+      </section>
+
+      <section className="scanner-result-note panel">
+        <div className="scanner-result-note-icon">i</div>
+        <div>
+          <h2>Scanner Logic Note</h2>
+          <p className="panel-copy">{topNote || "Scanner detail uses latest persisted watchlist plus latest rating tables when available."}</p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function buildScannerRow(
+  entry: Record<string, unknown>,
+  stem: string,
+  fundamentalMap: Map<string, TopRatingEntry>,
+  technicalMap: Map<string, TopTechnicalRatingEntry>,
+): ScannerRow {
+  const ticker = String(entry.ticker ?? "").trim().toUpperCase();
+  const fundamental = fundamentalMap.get(ticker);
+  const technical = technicalMap.get(ticker);
+  const technicalOverall = technical?.overall_rating ?? null;
+  const fundamentalOverall = fundamental?.overall_rating ?? null;
+  const leadershipOverall = technical?.leadership_score ?? null;
+  return {
+    ticker,
+    company: String(entry.company_name ?? ""),
+    sector: String(entry.sector ?? fundamental?.sector ?? "Unknown sector"),
+    industry: String(entry.industry ?? fundamental?.industry ?? ""),
+    summary: String(entry.summary ?? ""),
+    setupLabel: String(entry.setup_label ?? ""),
+    chartHref: buildChartHref(ticker, stem),
+    marketCap: coerceOptionalNumber(entry.market_cap),
+    taScore: technicalOverall != null ? technicalOverall / 10 : null,
+    faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
+    arsScore: leadershipOverall,
+    alsScore: averagePresent([technicalOverall, fundamentalOverall, leadershipOverall]),
+  };
+}
+
+function buildChartHref(ticker: string, stem: string) {
+  const params = new URLSearchParams();
+  params.set("ticker", ticker);
+  if (stem) {
+    params.set("stem", stem);
+  }
+  return `/charts?${params.toString()}`;
+}
+
+function coerceOptionalNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function averagePresent(values: Array<number | null | undefined>) {
+  const numbers = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (numbers.length === 0) {
+    return null;
+  }
+  return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+}
+
+function compareScannerRows(left: ScannerRow, right: ScannerRow, sortBy: SortKey) {
+  if (sortBy === "ticker") {
+    return left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "ta") {
+    return compareNullableNumber(right.taScore, left.taScore) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "fa") {
+    return compareNullableNumber(right.faScore, left.faScore) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "ars") {
+    return compareNullableNumber(right.arsScore, left.arsScore) || left.ticker.localeCompare(right.ticker);
+  }
+  return compareNullableNumber(right.alsScore, left.alsScore) || left.ticker.localeCompare(right.ticker);
+}
+
+function compareNullableNumber(left: number | null, right: number | null) {
+  const normalizedLeft = typeof left === "number" ? left : Number.NEGATIVE_INFINITY;
+  const normalizedRight = typeof right === "number" ? right : Number.NEGATIVE_INFINITY;
+  return normalizedLeft - normalizedRight;
+}
+
+function formatTenPointScore(value: number | null) {
+  return value == null ? "--" : value.toFixed(1);
+}
+
+function formatMarketCap(value: number | null) {
+  if (value == null) {
+    return "--";
+  }
+  const absolute = Math.abs(value);
+  if (absolute >= 1_000_000_000_000) {
+    return `${(value / 1_000_000_000_000).toFixed(2)}T`;
+  }
+  if (absolute >= 1_000_000_000) {
+    return `${(value / 1_000_000_000).toFixed(1)}B`;
+  }
+  if (absolute >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}M`;
+  }
+  return value.toFixed(0);
+}
+
+function formatPercentScore(value: number | null) {
+  return value == null ? "--" : `${Math.round(value)}%`;
+}
+
+function formatIntegerScore(value: number | null) {
+  return value == null ? "--" : `${Math.round(value)}`;
+}
+
+function toneForScore(value: number | null, max: number) {
+  if (value == null) {
+    return "is-neutral";
+  }
+  if (value >= max * 0.8) {
+    return "is-strong";
+  }
+  if (value >= max * 0.6) {
+    return "is-warm";
+  }
+  return "is-neutral";
+}
+
+function labelForSort(sortBy: SortKey) {
+  switch (sortBy) {
+    case "ta":
+      return "TA";
+    case "fa":
+      return "FA";
+    case "ars":
+      return "ARS";
+    case "ticker":
+      return "Ticker";
+    default:
+      return "ALS Score";
+  }
+}
+
+function csvValue(value: string) {
+  const normalized = String(value ?? "");
+  if (!normalized.includes(",") && !normalized.includes('"') && !normalized.includes("\n")) {
+    return normalized;
+  }
+  return `"${normalized.split('"').join('""')}"`;
+}
