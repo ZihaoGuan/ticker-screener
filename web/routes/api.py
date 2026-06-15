@@ -147,6 +147,17 @@ def _job_stream_signature(job: dict[str, object]) -> str:
     return json.dumps(payload, sort_keys=True, default=str)
 
 
+def _jobs_payload(service: RunService) -> dict[str, object]:
+    return {
+        "actions": service.list_actions(),
+        "jobs": service.list_jobs(),
+    }
+
+
+def _jobs_payload_signature(payload: dict[str, object]) -> str:
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
 def _build_job_stream_response(
     *,
     request: Request,
@@ -387,6 +398,43 @@ def jobs_data(
     _: Principal = Depends(require_run_screeners),
 ) -> JSONResponse:
     return JSONResponse({"actions": service.list_actions(), "jobs": service.list_jobs()})
+
+
+@router.get("/jobs/stream")
+async def jobs_data_stream(
+    request: Request,
+    service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_run_screeners),
+) -> StreamingResponse:
+    async def event_stream():
+        payload = _jobs_payload(service)
+        yield _format_sse("snapshot", payload)
+        last_signature = _jobs_payload_signature(payload)
+        last_heartbeat_at = asyncio.get_running_loop().time()
+
+        while True:
+            if await request.is_disconnected():
+                break
+            payload = _jobs_payload(service)
+            signature = _jobs_payload_signature(payload)
+            if signature != last_signature:
+                yield _format_sse("jobs", payload)
+                last_signature = signature
+            now = asyncio.get_running_loop().time()
+            if now - last_heartbeat_at >= _JOB_STREAM_HEARTBEAT_SECONDS:
+                yield _format_sse("heartbeat", {"ok": True})
+                last_heartbeat_at = now
+            await asyncio.sleep(_JOB_STREAM_POLL_SECONDS)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/jobs/{job_id}", response_class=JSONResponse)

@@ -84,19 +84,6 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [isLoadingBacktestDetail, setIsLoadingBacktestDetail] = useState(false);
   const [batchRunNotice, setBatchRunNotice] = useState("");
 
-  const refresh = () => {
-    void fetchJson<JobsResponse>("/api/jobs")
-      .then((nextPayload) => {
-        setPayload(nextPayload);
-        setHasError(false);
-      })
-      .catch(() => {
-        setPayload({ actions: [], jobs: [] });
-        setHasError(true);
-      })
-      .finally(() => setIsLoading(false));
-  };
-
   const loadScheduledJobs = () => {
     if (!canManageSchedules) {
       setScheduledJobs([]);
@@ -143,9 +130,30 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   };
 
   useEffect(() => {
-    refresh();
-    const timer = window.setInterval(refresh, 4000);
-    return () => window.clearInterval(timer);
+    setIsLoading(true);
+    setHasError(false);
+    const source = new EventSource("/api/jobs/stream", { withCredentials: true });
+
+    source.addEventListener("snapshot", (event) => {
+      const nextPayload = JSON.parse((event as MessageEvent).data) as JobsResponse;
+      setPayload(nextPayload);
+      setHasError(false);
+      setIsLoading(false);
+    });
+
+    source.addEventListener("jobs", (event) => {
+      const nextPayload = JSON.parse((event as MessageEvent).data) as JobsResponse;
+      setPayload(nextPayload);
+      setHasError(false);
+      setIsLoading(false);
+    });
+
+    source.onerror = () => {
+      setHasError(true);
+      setIsLoading(false);
+    };
+
+    return () => source.close();
   }, []);
 
   useEffect(() => {
@@ -405,7 +413,6 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setBatchRunNotice("");
     try {
       await launchRunAction(actionId, params);
-      refresh();
     } finally {
       setIsRunning(false);
     }
@@ -451,10 +458,8 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         await launchRunAction(action.id, {});
       }
       setBatchRunNotice(`Queued ${actions.length} ${sectionLabel.toLowerCase()} screeners.`);
-      refresh();
     } catch (error) {
       setBatchRunNotice(error instanceof Error ? error.message : `Failed to queue ${sectionLabel.toLowerCase()} screeners.`);
-      refresh();
     } finally {
       setIsRunning(false);
     }
@@ -466,7 +471,6 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       await fetchJson<{ ok: boolean; job: JobsResponse["jobs"][number] }>(`/api/jobs/${jobId}/cancel`, {
         method: "POST",
       });
-      refresh();
     } finally {
       setIsCancellingJobId("");
     }

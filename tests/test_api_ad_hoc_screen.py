@@ -55,6 +55,42 @@ class _FakeRunService:
     def list_actions(self):
         return [{"id": "rs", "label": "Run RS"}]
 
+    def list_jobs(self):
+        return [
+            {
+                "job_id": "rs-job",
+                "action_id": "rs",
+                "label": "Run RS",
+                "status": "success",
+                "command": "python scripts/run_rs_screen.py",
+                "started_at": "2026-06-15T00:00:00+00:00",
+                "finished_at": "2026-06-15T00:01:00+00:00",
+                "return_code": 0,
+                "log_tail": "line one\nline two",
+                "progress_current": 2,
+                "progress_total": 2,
+                "progress_percent": 100,
+                "progress_label": "Completed",
+                "success_count": 3,
+                "watchlist_file": "",
+                "watchlist_stem": "",
+                "watchlist_url": "",
+                "summary_file": "",
+                "raw_results_file": "",
+                "scan_target": "",
+                "job_run_id": None,
+                "screen_run_id": None,
+                "backtest_run_id": None,
+                "cancel_requested": False,
+                "execution_mode": "local",
+                "worker_name": "",
+                "target_worker": "",
+                "duration_seconds": 60,
+                "child_jobs": [],
+                "child_job_summary": {"total": 0, "running": 0, "success": 0, "failed": 0, "cancelled": 0},
+            }
+        ]
+
     def get_job(self, job_id: str):
         return {
             "job_id": job_id,
@@ -808,6 +844,22 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertIn('"line":"line one"', body)
         self.assertIn('"line":"line two"', body)
         self.assertIn("event: eof", body)
+
+    def test_premium_can_stream_jobs_snapshot(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=2,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+
+        with self.client.stream("GET", "/api/jobs/stream") as response:
+            body = response.text
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: snapshot", body)
+        self.assertIn('"job_id":"rs-job"', body)
+        self.assertIn('"id":"rs"', body)
 
     def test_premium_can_stream_child_job_log(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
