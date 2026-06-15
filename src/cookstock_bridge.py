@@ -131,7 +131,9 @@ def _apply_market_data_source_patches(module: ModuleType, market_data_source: st
         if prefetched:
             ticker = self._resolve_benchmark_ticker(benchmarkTicker).upper()
             benchmark_frames = prefetched.get("benchmark_frames", {})
-            frame = benchmark_frames.get(ticker) or prefetched.get("ticker_frames", {}).get(ticker)
+            frame = benchmark_frames.get(ticker)
+            if frame is None:
+                frame = prefetched.get("ticker_frames", {}).get(ticker)
             if frame is not None:
                 cache_key = (ticker, int(getattr(self, "history_lookback_days", 365)))
                 if cache_key not in self.benchmark_price_cache:

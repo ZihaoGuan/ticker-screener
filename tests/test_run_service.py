@@ -339,7 +339,6 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("weekly_tight_close", action_ids)
         self.assertIn("weekly_tight_close_breakout", action_ids)
         self.assertIn("three_weeks_tight", action_ids)
-        self.assertIn("hve", action_ids)
         self.assertIn("inside_dryup", action_ids)
         self.assertIn("weekly_rs_before_price", action_ids)
         self.assertNotIn("weekly_rs", action_ids)
@@ -349,6 +348,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("build_ticker_ratings", action_ids)
         self.assertIn("build_technical_ratings", action_ids)
         self.assertIn("run_finviz_ratings_pipeline", action_ids)
+        self.assertIn("sync_chart_fundamentals_cache", action_ids)
         self.assertIn("backfill_trendline_snapshots", action_ids)
         self.assertIn("reload_postgres_market_data_date", action_ids)
 
@@ -422,6 +422,44 @@ class RunServiceTests(unittest.TestCase):
         command = captured["command"]
         overwrite_index = command.index("--overwrite-policy")
         self.assertEqual(command[overwrite_index + 1], "skip-existing")
+
+    def test_launch_chart_fundamentals_cache_sync_includes_focused_options(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "sync_chart_fundamentals_cache",
+            options={
+                "as_of_date": "2026-06-15",
+                "fundamental_limit": "220",
+                "technical_limit": "180",
+                "upcoming_weeks": "2",
+                "earnings_limit": "10",
+                "overwrite_policy": "replace-date",
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        self.assertIn("scripts/sync_chart_fundamentals_cache.py", command)
+        self.assertIn("--as-of-date", command)
+        self.assertIn("2026-06-15", command)
+        self.assertIn("--fundamental-limit", command)
+        self.assertIn("220", command)
+        self.assertIn("--technical-limit", command)
+        self.assertIn("180", command)
+        self.assertIn("--upcoming-weeks", command)
+        self.assertIn("2", command)
+        self.assertIn("--earnings-limit", command)
+        self.assertIn("10", command)
+        self.assertIn("--overwrite-policy", command)
+        self.assertIn("replace-date", command)
 
     def test_launch_remote_finviz_pipeline_queues_db_job_and_skips_local_runner(self) -> None:
         captured_patch: dict[str, object] = {}

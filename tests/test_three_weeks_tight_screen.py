@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import datetime as dt
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
-from src.three_weeks_tight_screen import find_three_weeks_tight_hit
+from src.three_weeks_tight_screen import find_three_weeks_tight_hit, run_three_weeks_tight_screen
 from src.universe import UniverseTicker
 
 
@@ -65,6 +68,56 @@ class ThreeWeeksTightScreenTests(unittest.TestCase):
         )
 
         self.assertIsNone(hit)
+
+    def test_run_screen_uses_prefetch_batches_with_current_signature(self) -> None:
+        ticker = UniverseTicker(symbol="AAPL", sector="Technology", industry="Software", exchange="NASDAQ")
+        config = SimpleNamespace(benchmark_ticker="SPY")
+        cookstock = SimpleNamespace()
+
+        class FakeFinancials:
+            def _get_clean_price_data(self):
+                frame = _three_weeks_tight_frame().reset_index(names="Date")
+                return [
+                    {
+                        "formatted_date": row["Date"].strftime("%Y-%m-%d"),
+                        "open": row["Open"],
+                        "high": row["High"],
+                        "low": row["Low"],
+                        "close": row["Close"],
+                        "volume": row["Volume"],
+                    }
+                    for _, row in frame.iterrows()
+                ]
+
+        cookstock.cookFinancials = lambda *args, **kwargs: FakeFinancials()
+
+        captured: dict[str, object] = {}
+
+        def fake_iter_prefetched(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            yield [ticker]
+
+        with (
+            patch("src.three_weeks_tight_screen.load_configured_cookstock", return_value=cookstock),
+            patch("src.three_weeks_tight_screen.freeze_cookstock_today") as freeze_mock,
+            patch("src.three_weeks_tight_screen.iter_prefetched_cookstock_batches", side_effect=fake_iter_prefetched),
+        ):
+            freeze_mock.return_value.__enter__.return_value = None
+            freeze_mock.return_value.__exit__.return_value = False
+            result = run_three_weeks_tight_screen(config, [ticker], as_of_date=dt.date(2026, 6, 15))
+
+        self.assertEqual(result.passed_tickers, 1)
+        self.assertEqual(result.failed_tickers, [])
+        self.assertEqual(captured["args"], (config, [ticker]))
+        self.assertEqual(
+            captured["kwargs"],
+            {
+                "as_of_date": dt.date(2026, 6, 15),
+                "history_lookback_days": 80,
+                "benchmark_ticker": "SPY",
+            },
+        )
 
 
 if __name__ == "__main__":

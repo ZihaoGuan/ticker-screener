@@ -69,6 +69,23 @@ def _normalize_bars_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
+def _build_price_frame(financials) -> pd.DataFrame:
+    rows = financials._get_clean_price_data()
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(
+        {
+            "Date": pd.to_datetime([row.get("formatted_date") for row in rows]),
+            "Open": [row.get("open") for row in rows],
+            "High": [row.get("high") for row in rows],
+            "Low": [row.get("low") for row in rows],
+            "Close": [row.get("close") for row in rows],
+            "Volume": [row.get("volume") for row in rows],
+        }
+    )
+    return frame.dropna(subset=["Date", "Open", "High", "Low", "Close", "Volume"]).set_index("Date").sort_index()
+
+
 def _to_weekly_frame(frame: pd.DataFrame) -> pd.DataFrame:
     weekly = frame.resample("W-FRI").agg(
         {
@@ -155,17 +172,22 @@ def run_three_weeks_tight_screen(
         position = 0
         for ticker_batch in iter_prefetched_cookstock_batches(
             config,
-            cookstock,
             tickers,
             as_of_date=as_of_date,
-            history_days=THREE_WEEKS_TIGHT_HISTORY_DAYS,
-            require_history=False,
+            history_lookback_days=THREE_WEEKS_TIGHT_HISTORY_DAYS,
+            benchmark_ticker=config.benchmark_ticker,
         ):
-            for ticker, financials in ticker_batch:
+            for ticker in ticker_batch:
                 position += 1
                 print(f"[{position}/{total_tickers}] screening {ticker.symbol}")
                 try:
-                    hit = find_three_weeks_tight_hit(financials._daily_df, ticker=ticker)
+                    financials = cookstock.cookFinancials(
+                        ticker.symbol,
+                        benchmarkTicker=config.benchmark_ticker,
+                        historyLookbackDays=THREE_WEEKS_TIGHT_HISTORY_DAYS,
+                    )
+                    frame = _build_price_frame(financials)
+                    hit = find_three_weeks_tight_hit(frame, ticker=ticker)
                 except Exception as exc:
                     failures.append({"ticker": ticker.symbol, "error": str(exc)})
                     continue

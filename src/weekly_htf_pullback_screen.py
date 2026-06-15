@@ -70,7 +70,25 @@ class WeeklyHtfPullbackScreenResult:
 
 def _build_price_frame(financials) -> pd.DataFrame:
     rows = financials._get_clean_price_data()
-    if not rows:
+    if rows is None:
+        return pd.DataFrame()
+    if isinstance(rows, pd.DataFrame):
+        if rows.empty:
+            return pd.DataFrame()
+        frame = rows.copy()
+        if "Date" in frame.columns:
+            frame["Date"] = pd.to_datetime(frame["Date"])
+            frame = frame.set_index("Date")
+        if not isinstance(frame.index, pd.DatetimeIndex):
+            frame.index = pd.to_datetime(frame.index)
+        column_map = {str(column).lower(): column for column in frame.columns}
+        required = ["open", "high", "low", "close", "volume"]
+        if any(column not in column_map for column in required):
+            return pd.DataFrame()
+        normalized = frame[[column_map[column] for column in required]].copy()
+        normalized.columns = ["Open", "High", "Low", "Close", "Volume"]
+        return normalized.dropna(subset=["Close"]).sort_index()
+    if len(rows) == 0:
         return pd.DataFrame()
     frame = pd.DataFrame(
         {

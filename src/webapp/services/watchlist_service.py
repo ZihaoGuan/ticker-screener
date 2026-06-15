@@ -419,19 +419,64 @@ class WatchlistService:
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
+        ratings_repository = RatingsRepository(self.database_url) if self.database_url else None
+        ratings_bundle = ratings_repository.load_latest_ticker_rating_bundle(normalized_ticker) if ratings_repository else None
+        cached_entry = ratings_repository.load_latest_chart_fundamentals_cache_entry(normalized_ticker) if ratings_repository else None
+        if _chart_fundamentals_cache_is_complete(cached_entry):
+            return {
+                "ticker": normalized_ticker,
+                "earnings_eps_history": list(cached_entry.get("earnings_eps_history") or [])[: max(1, earnings_limit)],
+                "holders_float_held_by_institutions_pct": cached_entry.get("holders_float_held_by_institutions_pct"),
+                "revenue_yoy_pct": cached_entry.get("revenue_yoy_pct"),
+                "earnings_yoy_pct": cached_entry.get("earnings_yoy_pct"),
+                "implied_move": cached_entry.get("implied_move"),
+                "fundamentals_snapshot": ratings_bundle.get("fundamentals_snapshot") if ratings_bundle else None,
+                "rating_snapshot": ratings_bundle.get("rating_snapshot") if ratings_bundle else None,
+                "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
+                "diagnostics": _chart_cache_diagnostics(cached_entry),
+            }
+
         earnings_rows, holders_pct, revenue_yoy_pct, earnings_yoy_pct, browser_diagnostics = _load_yahoo_earnings_and_holders_playwright(
             normalized_ticker,
-            earnings_limit=earnings_limit,
+            earnings_limit=max(earnings_limit, 8),
         )
         implied_move, options_diagnostics = _load_yahoo_implied_move_playwright(normalized_ticker)
-        ratings_bundle = RatingsRepository(self.database_url).load_latest_ticker_rating_bundle(normalized_ticker) if self.database_url else None
+        merged_payload = _merge_chart_fundamentals_cache_fields(
+            cached_entry,
+            earnings_rows=earnings_rows,
+            holders_pct=holders_pct,
+            revenue_yoy_pct=revenue_yoy_pct,
+            earnings_yoy_pct=earnings_yoy_pct,
+            implied_move=implied_move,
+        )
+        if ratings_repository:
+            ratings_repository.ensure_ticker_metadata_stub(normalized_ticker, source="chart-fundamentals-cache")
+            ratings_repository.upsert_chart_fundamentals_cache_entry(
+                ticker=normalized_ticker,
+                as_of_date=dt.date.today(),
+                earnings_eps_history=list(merged_payload["earnings_eps_history"]),
+                holders_float_held_by_institutions_pct=merged_payload["holders_float_held_by_institutions_pct"],
+                revenue_yoy_pct=merged_payload["revenue_yoy_pct"],
+                earnings_yoy_pct=merged_payload["earnings_yoy_pct"],
+                implied_move=merged_payload["implied_move"],
+                source_summary={
+                    "source": "yahoo-playwright",
+                    "diagnostics": {
+                        "earnings": browser_diagnostics["earnings"],
+                        "holders": browser_diagnostics["holders"],
+                        "statistics": browser_diagnostics["statistics"],
+                        "options": options_diagnostics,
+                    },
+                    "cached_entry_used": bool(cached_entry),
+                },
+            )
         return {
             "ticker": normalized_ticker,
-            "earnings_eps_history": earnings_rows,
-            "holders_float_held_by_institutions_pct": holders_pct,
-            "revenue_yoy_pct": revenue_yoy_pct,
-            "earnings_yoy_pct": earnings_yoy_pct,
-            "implied_move": implied_move,
+            "earnings_eps_history": list(merged_payload["earnings_eps_history"])[: max(1, earnings_limit)],
+            "holders_float_held_by_institutions_pct": merged_payload["holders_float_held_by_institutions_pct"],
+            "revenue_yoy_pct": merged_payload["revenue_yoy_pct"],
+            "earnings_yoy_pct": merged_payload["earnings_yoy_pct"],
+            "implied_move": merged_payload["implied_move"],
             "fundamentals_snapshot": ratings_bundle.get("fundamentals_snapshot") if ratings_bundle else None,
             "rating_snapshot": ratings_bundle.get("rating_snapshot") if ratings_bundle else None,
             "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
@@ -801,6 +846,66 @@ def _download_history_frame(*, ticker: str, start_date: dt.date, end_date: dt.da
         threads=False,
     )
     return _normalize_download_frame(history)
+
+
+def _chart_fundamentals_cache_is_complete(entry: dict[str, Any] | None) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    earnings_rows = entry.get("earnings_eps_history")
+    implied_move = entry.get("implied_move")
+    return bool(
+        isinstance(earnings_rows, list)
+        and len(earnings_rows) > 0
+        and entry.get("holders_float_held_by_institutions_pct") is not None
+        and entry.get("revenue_yoy_pct") is not None
+        and entry.get("earnings_yoy_pct") is not None
+        and isinstance(implied_move, dict)
+        and implied_move.get("percent_move") is not None
+    )
+
+
+def _merge_chart_fundamentals_cache_fields(
+    cached_entry: dict[str, Any] | None,
+    *,
+    earnings_rows: list[dict[str, Any]],
+    holders_pct: float | None,
+    revenue_yoy_pct: float | None,
+    earnings_yoy_pct: float | None,
+    implied_move: dict[str, Any] | None,
+) -> dict[str, Any]:
+    cached_entry = cached_entry if isinstance(cached_entry, dict) else {}
+    cached_earnings_rows = cached_entry.get("earnings_eps_history")
+    cached_implied_move = cached_entry.get("implied_move")
+    return {
+        "earnings_eps_history": earnings_rows if earnings_rows else (cached_earnings_rows if isinstance(cached_earnings_rows, list) else []),
+        "holders_float_held_by_institutions_pct": (
+            holders_pct
+            if holders_pct is not None
+            else cached_entry.get("holders_float_held_by_institutions_pct")
+        ),
+        "revenue_yoy_pct": revenue_yoy_pct if revenue_yoy_pct is not None else cached_entry.get("revenue_yoy_pct"),
+        "earnings_yoy_pct": earnings_yoy_pct if earnings_yoy_pct is not None else cached_entry.get("earnings_yoy_pct"),
+        "implied_move": implied_move if implied_move is not None else (cached_implied_move if isinstance(cached_implied_move, dict) else None),
+    }
+
+
+def _chart_cache_diagnostics(entry: dict[str, Any]) -> dict[str, Any]:
+    source_summary = entry.get("source_summary") if isinstance(entry.get("source_summary"), dict) else {}
+    diagnostics = source_summary.get("diagnostics") if isinstance(source_summary.get("diagnostics"), dict) else {}
+    if diagnostics:
+        return diagnostics
+    cache_attempt = {
+        "cache": True,
+        "as_of_date": entry.get("as_of_date"),
+        "scraped_at": entry.get("scraped_at"),
+        "updated_at": entry.get("updated_at"),
+    }
+    return {
+        "earnings": {"status": "cache", "attempts": [cache_attempt]},
+        "holders": {"status": "cache", "attempts": [cache_attempt]},
+        "statistics": {"status": "cache", "attempts": [cache_attempt]},
+        "options": {"status": "cache", "attempts": [cache_attempt]},
+    }
 
 
 def _load_yahoo_earnings_and_holders_playwright(

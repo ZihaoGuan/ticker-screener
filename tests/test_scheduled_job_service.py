@@ -40,6 +40,35 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertIn("sync_postgres_market_data", actions)
         self.assertIn("reload_postgres_market_data_date", actions)
 
+    def test_get_context_loads_even_with_stale_removed_action_in_jobs_file(self) -> None:
+        config_path = self.project_root / "config" / "scheduled_jobs.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+{
+  "jobs": [
+    {
+      "job_id": "old_hve",
+      "job_label": "Old HVE",
+      "action_id": "hve",
+      "cron_expr": "0 9 * * 1",
+      "cron_tz": "America/New_York",
+      "enabled": true,
+      "options": {}
+    }
+  ]
+}
+""".strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
+        context = self.service.get_context()
+
+        self.assertEqual(context["jobs"][0]["job_id"], "old_hve")
+        self.assertEqual(context["jobs"][0]["action_id"], "hve")
+        self.assertIn("sync_postgres_market_data", {item["id"] for item in context["available_actions"]})
+
     def test_upsert_reload_postgres_market_data_date_accepts_local_date_template(self) -> None:
         job = self.service.upsert_job(
             job_id="reload_one_day",

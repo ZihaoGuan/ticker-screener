@@ -103,6 +103,26 @@ CREATE INDEX IF NOT EXISTS idx_ticker_fundamentals_snapshots_date_ticker
 CREATE INDEX IF NOT EXISTS idx_ticker_fundamentals_snapshots_date_sector
   ON ticker_fundamentals_snapshots(as_of_date, sector);
 
+CREATE TABLE IF NOT EXISTS ticker_chart_fundamentals_cache (
+  ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
+  as_of_date DATE NOT NULL,
+  earnings_eps_history_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  holders_float_held_by_institutions_pct NUMERIC(18,6),
+  revenue_yoy_pct NUMERIC(18,6),
+  earnings_yoy_pct NUMERIC(18,6),
+  implied_move_json JSONB,
+  source_summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (ticker, as_of_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_chart_fundamentals_cache_date_ticker
+  ON ticker_chart_fundamentals_cache(as_of_date, ticker);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_chart_fundamentals_cache_updated_at
+  ON ticker_chart_fundamentals_cache(updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS sector_metric_baselines (
   as_of_date DATE NOT NULL,
   sector TEXT NOT NULL,

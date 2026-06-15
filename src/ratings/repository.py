@@ -184,6 +184,155 @@ class RatingsRepository:
             connection.commit()
         return len(rows)
 
+    def upsert_chart_fundamentals_cache_entry(
+        self,
+        *,
+        ticker: str,
+        as_of_date: dt.date,
+        earnings_eps_history: list[dict[str, Any]] | None = None,
+        holders_float_held_by_institutions_pct: float | None = None,
+        revenue_yoy_pct: float | None = None,
+        earnings_yoy_pct: float | None = None,
+        implied_move: dict[str, Any] | None = None,
+        source_summary: dict[str, Any] | None = None,
+        scraped_at: dt.datetime | None = None,
+    ) -> None:
+        connection = self._connect()
+        if connection is None:
+            return
+        sql = """
+            INSERT INTO ticker_chart_fundamentals_cache (
+              ticker,
+              as_of_date,
+              earnings_eps_history_json,
+              holders_float_held_by_institutions_pct,
+              revenue_yoy_pct,
+              earnings_yoy_pct,
+              implied_move_json,
+              source_summary_json,
+              scraped_at,
+              updated_at
+            ) VALUES (
+              %s,
+              %s,
+              %s::jsonb,
+              %s,
+              %s,
+              %s,
+              %s::jsonb,
+              %s::jsonb,
+              COALESCE(%s, NOW()),
+              NOW()
+            )
+            ON CONFLICT (ticker, as_of_date) DO UPDATE SET
+              earnings_eps_history_json = EXCLUDED.earnings_eps_history_json,
+              holders_float_held_by_institutions_pct = EXCLUDED.holders_float_held_by_institutions_pct,
+              revenue_yoy_pct = EXCLUDED.revenue_yoy_pct,
+              earnings_yoy_pct = EXCLUDED.earnings_yoy_pct,
+              implied_move_json = EXCLUDED.implied_move_json,
+              source_summary_json = EXCLUDED.source_summary_json,
+              scraped_at = COALESCE(EXCLUDED.scraped_at, ticker_chart_fundamentals_cache.scraped_at),
+              updated_at = NOW()
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql,
+                    (
+                        str(ticker or "").strip().upper(),
+                        as_of_date,
+                        json.dumps(earnings_eps_history or []),
+                        holders_float_held_by_institutions_pct,
+                        revenue_yoy_pct,
+                        earnings_yoy_pct,
+                        json.dumps(implied_move) if implied_move is not None else None,
+                        json.dumps(source_summary or {}),
+                        scraped_at,
+                    ),
+                )
+            connection.commit()
+
+    def load_latest_chart_fundamentals_cache_entry(self, ticker: str) -> dict[str, Any] | None:
+        normalized_ticker = str(ticker or "").strip().upper()
+        if not normalized_ticker:
+            return None
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            SELECT
+              ticker,
+              as_of_date,
+              earnings_eps_history_json,
+              holders_float_held_by_institutions_pct,
+              revenue_yoy_pct,
+              earnings_yoy_pct,
+              implied_move_json,
+              source_summary_json,
+              scraped_at,
+              updated_at
+            FROM ticker_chart_fundamentals_cache
+            WHERE ticker = %s
+            ORDER BY as_of_date DESC, updated_at DESC
+            LIMIT 1
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized_ticker,))
+                row = cursor.fetchone()
+        if not row:
+            return None
+        (
+            cached_ticker,
+            as_of_date,
+            earnings_eps_history_json,
+            holders_pct,
+            revenue_yoy_pct,
+            earnings_yoy_pct,
+            implied_move_json,
+            source_summary_json,
+            scraped_at,
+            updated_at,
+        ) = row
+        earnings_eps_history = _coerce_json_payload(earnings_eps_history_json, default=[])
+        implied_move = _coerce_json_payload(implied_move_json, default=None)
+        source_summary = _coerce_json_payload(source_summary_json, default={})
+        return {
+            "ticker": str(cached_ticker or "").upper(),
+            "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date or ""),
+            "earnings_eps_history": earnings_eps_history if isinstance(earnings_eps_history, list) else [],
+            "holders_float_held_by_institutions_pct": float(holders_pct) if holders_pct is not None else None,
+            "revenue_yoy_pct": float(revenue_yoy_pct) if revenue_yoy_pct is not None else None,
+            "earnings_yoy_pct": float(earnings_yoy_pct) if earnings_yoy_pct is not None else None,
+            "implied_move": implied_move if isinstance(implied_move, dict) else None,
+            "source_summary": source_summary if isinstance(source_summary, dict) else {},
+            "scraped_at": scraped_at.isoformat() if hasattr(scraped_at, "isoformat") else None,
+            "updated_at": updated_at.isoformat() if hasattr(updated_at, "isoformat") else None,
+        }
+
+    def load_latest_chart_fundamentals_dates(self, tickers: Iterable[str]) -> dict[str, dt.date]:
+        normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
+        if not normalized:
+            return {}
+        connection = self._connect()
+        if connection is None:
+            return {}
+        sql = """
+            SELECT ticker, MAX(as_of_date)
+            FROM ticker_chart_fundamentals_cache
+            WHERE ticker = ANY(%s)
+            GROUP BY ticker
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized,))
+                rows = cursor.fetchall()
+        result: dict[str, dt.date] = {}
+        for ticker, as_of_date in rows:
+            if isinstance(as_of_date, dt.date):
+                result[str(ticker).upper()] = as_of_date
+        return result
+
     def replace_sector_metric_baselines(
         self,
         as_of_date: dt.date,
@@ -855,3 +1004,16 @@ def _normalize_text_values(values: Iterable[str] | None) -> list[str]:
     if not values:
         return []
     return [normalized for normalized in (str(item).strip().lower() for item in values) if normalized]
+
+
+def _coerce_json_payload(value: Any, *, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return default
+    return default

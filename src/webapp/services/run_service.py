@@ -52,6 +52,7 @@ class RunService:
     REMOTE_WORKER_STALE_SECONDS = 90
     _remote_execution_action_ids = {
         "sync_finviz_fundamentals",
+        "sync_chart_fundamentals_cache",
         "build_sector_rating_baselines",
         "build_ticker_ratings",
         "build_technical_ratings",
@@ -250,6 +251,34 @@ class RunService:
         placeholder="worker-a",
         help_text="Optional worker name. Leave blank to let any worker claim the queued job.",
     )
+    _fundamental_limit_field = RunField(
+        "fundamental_limit",
+        "Top Fundamental",
+        "number",
+        placeholder="200",
+        help_text="How many top fundamental-rating tickers to include in the focused refresh set.",
+    )
+    _technical_limit_field = RunField(
+        "technical_limit",
+        "Top Technical",
+        "number",
+        placeholder="200",
+        help_text="How many top technical-rating tickers to include in the focused refresh set.",
+    )
+    _upcoming_weeks_field = RunField(
+        "upcoming_weeks",
+        "Upcoming Weeks",
+        "number",
+        placeholder="2",
+        help_text="How many upcoming earnings weeks to union into the refresh set.",
+    )
+    _earnings_limit_field = RunField(
+        "earnings_limit",
+        "Earnings Rows",
+        "number",
+        placeholder="8",
+        help_text="How many earnings EPS history rows to persist per ticker.",
+    )
     _filter_precedence_field = RunField(
         "filter_precedence",
         "Filter Precedence",
@@ -356,6 +385,24 @@ class RunService:
                 _retry_failed_from_manifest_field,
                 _circuit_breaker_consecutive_503_field,
             ),
+        ),
+        "sync_chart_fundamentals_cache": RunAction(
+            "sync_chart_fundamentals_cache",
+            "Sync Chart Fundamentals Cache",
+            "scripts/sync_chart_fundamentals_cache.py",
+            supports_limit=False,
+            fields=(
+                _tickers_field,
+                _execution_mode_field,
+                _target_worker_field,
+                _as_of_date_field,
+                _fundamental_limit_field,
+                _technical_limit_field,
+                _upcoming_weeks_field,
+                _earnings_limit_field,
+                _overwrite_policy_field,
+            ),
+            bias_group="other",
         ),
         "build_sector_rating_baselines": RunAction(
             "build_sector_rating_baselines",
@@ -497,27 +544,6 @@ class RunService:
             "gap_fill",
             "Run Gap Fill",
             "scripts/run_gap_fill_screen.py",
-            fields=(
-                _limit_field,
-                _tickers_field,
-                _date_label_field,
-                _as_of_date_field,
-                _market_data_source_field,
-                _filter_precedence_field,
-                _include_sectors_field,
-                _exclude_sectors_field,
-                _include_industries_field,
-                _exclude_industries_field,
-                _include_themes_field,
-                _exclude_themes_field,
-            ),
-            bias_group="bullish",
-            bullish_subgroup="leaders",
-        ),
-        "hve": RunAction(
-            "hve",
-            "Run HVE",
-            "scripts/run_hve_screen.py",
             fields=(
                 _limit_field,
                 _tickers_field,
@@ -1576,6 +1602,14 @@ class RunService:
             command.extend(["--delay-max-seconds", str(normalized_options["delay_max_seconds"])])
         if normalized_options.get("rest_seconds") is not None:
             command.extend(["--rest-seconds", str(normalized_options["rest_seconds"])])
+        if normalized_options.get("fundamental_limit") is not None:
+            command.extend(["--fundamental-limit", str(normalized_options["fundamental_limit"])])
+        if normalized_options.get("technical_limit") is not None:
+            command.extend(["--technical-limit", str(normalized_options["technical_limit"])])
+        if normalized_options.get("upcoming_weeks") is not None:
+            command.extend(["--upcoming-weeks", str(normalized_options["upcoming_weeks"])])
+        if normalized_options.get("earnings_limit") is not None:
+            command.extend(["--earnings-limit", str(normalized_options["earnings_limit"])])
         if normalized_options.get("scope_json"):
             command.extend(["--scope-json", str(normalized_options["scope_json"])])
         if normalized_options.get("candidate_threshold") is not None:
@@ -1673,7 +1707,7 @@ class RunService:
                 except ValueError as exc:
                     raise ValueError("Trade Date must be YYYY-MM-DD.") from exc
 
-        for key in ("chunk_size", "max_retries", "batch_size", "candidate_threshold", "entry_signal_threshold", "max_parallel"):
+        for key in ("chunk_size", "max_retries", "batch_size", "candidate_threshold", "entry_signal_threshold", "max_parallel", "fundamental_limit", "technical_limit", "upcoming_weeks", "earnings_limit"):
             value = options.get(key)
             if value in (None, ""):
                 continue
@@ -2186,7 +2220,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "run_finviz_ratings_pipeline"}:
+        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "run_finviz_ratings_pipeline"}:
             return "admin_sync"
         return "screen_run"
 
@@ -2215,7 +2249,7 @@ class RunService:
         if str(job.get("status")) != "success":
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "overlap_backtest_v1"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "overlap_backtest_v1"}:
             return
         summary_file = str(job.get("summary_file") or "").strip()
         if not summary_file:

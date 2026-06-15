@@ -139,6 +139,7 @@ class ScheduledJobService:
         return parsed
 
     def _available_actions(self) -> list[dict[str, Any]]:
+        filter_catalog = self.run_service._get_filter_catalog()
         return [
             {"id": item["id"], "label": item["label"], "fields": item.get("fields", [])}
             for item in (
@@ -156,7 +157,7 @@ class ScheduledJobService:
                                 "help_text": field.help_text,
                                 "options": self.run_service._field_options(
                                     field,
-                                    self.run_service._build_filter_option_catalog(),
+                                    filter_catalog,
                                 ),
                             }
                             for field in action.fields

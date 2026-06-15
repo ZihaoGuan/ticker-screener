@@ -434,6 +434,73 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rating_snapshot"]["overall_rating"], 88.5)
         self.assertEqual(payload["rating_diagnostics"]["missing_metric_names"], [])
 
+    def test_get_chart_fundamentals_payload_uses_db_cache_when_complete(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        cached_entry = {
+            "ticker": "NVDA",
+            "as_of_date": "2026-06-15",
+            "earnings_eps_history": [{"date": "2026-05-28", "eps_estimate": 0.9, "reported_eps": 1.1, "surprise_pct": 22.2}],
+            "holders_float_held_by_institutions_pct": 79.25,
+            "revenue_yoy_pct": 85.2,
+            "earnings_yoy_pct": 210.6,
+            "implied_move": {"strike": 100.0, "straddle_mid": 8.5, "dollar_move": 8.5, "percent_move": 7.8},
+            "source_summary": {
+                "diagnostics": {
+                    "earnings": {"status": "ok", "attempts": [{"cache": True}]},
+                    "holders": {"status": "ok", "attempts": [{"cache": True}]},
+                    "statistics": {"status": "ok", "attempts": [{"cache": True}]},
+                    "options": {"status": "ok", "attempts": [{"cache": True}]},
+                }
+            },
+        }
+        with patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_chart_fundamentals_cache_entry",
+            return_value=cached_entry,
+        ), patch(
+            "src.webapp.services.watchlist_service._load_yahoo_earnings_and_holders_playwright",
+        ) as scrape_patch, patch(
+            "src.webapp.services.watchlist_service._load_yahoo_implied_move_playwright",
+        ) as implied_patch:
+            payload = service.get_chart_fundamentals_payload("NVDA")
+
+        self.assertEqual(payload["holders_float_held_by_institutions_pct"], 79.25)
+        self.assertEqual(payload["implied_move"]["percent_move"], 7.8)
+        self.assertEqual(payload["diagnostics"]["earnings"]["status"], "ok")
+        scrape_patch.assert_not_called()
+        implied_patch.assert_not_called()
+
+    def test_get_chart_fundamentals_payload_persists_merged_cache_on_scrape(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        cached_entry = {
+            "ticker": "NVDA",
+            "as_of_date": "2026-06-08",
+            "earnings_eps_history": [{"date": "2026-02-28", "eps_estimate": 0.7, "reported_eps": 0.8, "surprise_pct": 14.0}],
+            "holders_float_held_by_institutions_pct": 71.5,
+            "revenue_yoy_pct": None,
+            "earnings_yoy_pct": 55.0,
+            "implied_move": {"strike": 95.0, "straddle_mid": 6.0, "dollar_move": 6.0, "percent_move": 5.0},
+            "source_summary": {},
+        }
+        with patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_chart_fundamentals_cache_entry",
+            return_value=cached_entry,
+        ), patch(
+            "src.webapp.services.watchlist_service._load_yahoo_earnings_and_holders_playwright",
+            return_value=([], None, 88.1, None, {"earnings": {"status": "error", "attempts": []}, "holders": {"status": "error", "attempts": []}, "statistics": {"status": "ok", "attempts": []}}),
+        ), patch(
+            "src.webapp.services.watchlist_service._load_yahoo_implied_move_playwright",
+            return_value=(None, {"status": "error", "attempts": []}),
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.upsert_chart_fundamentals_cache_entry",
+        ) as upsert_patch:
+            payload = service.get_chart_fundamentals_payload("NVDA")
+
+        self.assertEqual(payload["revenue_yoy_pct"], 88.1)
+        self.assertEqual(payload["holders_float_held_by_institutions_pct"], 71.5)
+        self.assertEqual(payload["earnings_eps_history"][0]["date"], "2026-02-28")
+        self.assertEqual(payload["implied_move"]["percent_move"], 5.0)
+        upsert_patch.assert_called_once()
+
     def test_get_chart_insider_payload_filters_recent_rows(self) -> None:
         insider_dir = Path(self.temp_dir.name) / "raw" / "insider"
         insider_dir.mkdir(parents=True, exist_ok=True)
