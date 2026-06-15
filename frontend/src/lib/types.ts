@@ -329,6 +329,7 @@ export type JobsResponse = {
     progress_percent: number | null;
     progress_label: string | null;
     success_count: number;
+    log_file: string;
     watchlist_file: string;
     watchlist_stem: string;
     watchlist_url: string;
