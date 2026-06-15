@@ -26,6 +26,7 @@ type RunsPageProps = {
 };
 
 export function RunsPage({ mode = "screeners" }: RunsPageProps) {
+  const screenersMode = mode === "screeners";
   const auth = useAuth();
   const canManageSchedules = auth.hasCapability("manage_exclusions");
   const [payload, setPayload] = useState<JobsResponse | null>(null);
@@ -70,6 +71,8 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const [isSavingScheduleSettings, setIsSavingScheduleSettings] = useState(false);
   const [scheduleNotice, setScheduleNotice] = useState("");
+  const [isScheduleEditorOpen, setIsScheduleEditorOpen] = useState(false);
+  const [isSchedulerSettingsOpen, setIsSchedulerSettingsOpen] = useState(false);
   const [warmStrategyIds, setWarmStrategyIds] = useState("");
   const [warmFrom, setWarmFrom] = useState(isoDateDaysAgo(20));
   const [warmTo, setWarmTo] = useState(isoDateDaysAgo(1));
@@ -533,6 +536,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       setScheduleNotice("Scheduled job saved.");
       loadScheduleConfig();
       resetScheduleForm();
+      setIsScheduleEditorOpen(false);
     } catch (error) {
       setScheduleNotice(error instanceof Error ? error.message : "Failed to save scheduled job.");
     } finally {
@@ -550,6 +554,13 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     const serialized = JSON.stringify(job.options ?? {}, null, 2);
     setScheduleOptionsJson(serialized);
     setLastSuggestedOptionsJson(serialized);
+    setIsScheduleEditorOpen(true);
+  };
+
+  const handleOpenNewSchedule = () => {
+    resetScheduleForm();
+    setScheduleNotice("");
+    setIsScheduleEditorOpen(true);
   };
 
   const handleDeleteSchedule = async (jobId: string) => {
@@ -580,6 +591,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       });
       setScheduleNotice("Scheduler settings saved.");
       loadScheduleConfig();
+      setIsSchedulerSettingsOpen(false);
     } catch (error) {
       setScheduleNotice(error instanceof Error ? error.message : "Failed to save scheduler settings.");
     } finally {
@@ -665,10 +677,16 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       .filter((group) => group.sections.length > 0);
   }, [mode, visibleActions]);
 
+  const consoleMeta = selectedChildJob ? displayedSelectedChildJob : displayedSelectedJob;
+
   return (
     <>
       <div className="page-grid">
-        <Panel title={pageTitle}>
+        <Panel
+          title={screenersMode ? "Screener Launcher v2" : pageTitle}
+          aside={screenersMode ? <span className="screeners-operator-badge">Operator Mode</span> : undefined}
+          className={screenersMode ? "screeners-launcher-panel" : ""}
+        >
           {isLoading && !payload ? <LoadingBlock label="Loading available screeners…" /> : null}
           {batchRunNotice ? <p className="panel-copy">{batchRunNotice}</p> : null}
           {groupedVisibleActions.map((group) => (
@@ -678,7 +696,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                 <div key={section.key} className="screener-subgroup-section">
                   <div className="screener-subgroup-head">
                     {section.label ? <h3 className="screener-subgroup-title">{section.label}</h3> : null}
-                    {mode === "screeners" ? (
+                    {screenersMode ? (
                       <button
                         className="screener-batch-button"
                         onClick={() => void handleBatchRun(section.label || group.label || "selected", section.actions)}
@@ -697,14 +715,15 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                           return (
                             <>
                               <div className="screener-card-header">
-                                <h3>{action.label}</h3>
+                                <div className="screener-card-title-block">
+                                  <h3>{action.label}</h3>
+                                  {screenersMode ? <span className="screener-card-id">ID: {action.id}</span> : null}
+                                </div>
                               </div>
                               <p className="screener-description">
                                 {configureOnly
                                   ? "Open config to choose date range and screener set."
-                                  : action.fields.length > 0
-                                  ? "Run with defaults now, or open config for custom parameters."
-                                  : "Run immediately with the default screener settings."}
+                                  : describeScreenerAction(action.id, action.fields.length > 0)}
                               </p>
                               <div className="screener-card-actions">
                                 {!configureOnly ? (
@@ -714,7 +733,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                                 ) : null}
                                 {action.fields.length > 0 ? (
                                   <button className="screener-config-button" onClick={() => handleConfigureClick(action.id)} type="button" disabled={isRunning}>
-                                    {configureOnly ? "OPEN CONFIG" : "CONFIGURE"}
+                                    {screenersMode && !configureOnly ? "▣" : configureOnly ? "OPEN CONFIG" : "CONFIGURE"}
                                   </button>
                                 ) : null}
                               </div>
@@ -730,195 +749,12 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
           ))}
         </Panel>
 
-        {canManageSchedules && mode === "screeners" ? (
-          <>
-            <Panel title="Scheduled Screeners" aside={<span className="eyebrow">{scheduledJobs.length} tracked</span>}>
-              {isLoadingScheduledJobs ? <LoadingBlock label="Loading scheduled job status…" compact /> : null}
-              <div className="data-table-responsive">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Job</th>
-                      <th>Status</th>
-                      <th>Last Start</th>
-                      <th>Last Finish</th>
-                      <th>Exit Code</th>
-                      <th>Log</th>
-                      <th>Artifact</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scheduledJobs.length === 0 ? (
-                      <tr>
-                        <td colSpan={7}>{isLoadingScheduledJobs ? "Loading scheduled jobs..." : "No scheduled job status files found."}</td>
-                      </tr>
-                    ) : (
-                      scheduledJobs.map((job) => (
-                        <tr key={job.job_id}>
-                          <td data-label="Job">
-                            <div className="admin-job-cell">
-                              <strong>{job.job_label}</strong>
-                              <span className="file-meta">{job.job_id}</span>
-                            </div>
-                          </td>
-                          <td data-label="Status">{renderScheduledJobStatus(job.status)}</td>
-                          <td data-label="Last Start">{formatLocalDateTime(job.last_started_at)}</td>
-                          <td data-label="Last Finish">{formatLocalDateTime(job.last_finished_at)}</td>
-                          <td data-label="Exit Code" className="mono">{job.exit_code ?? "-"}</td>
-                          <td data-label="Log" className="file-meta">{job.log_file || "-"}</td>
-                          <td data-label="Artifact" className="file-meta">{job.artifact_file || "-"}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
-
-            <Panel title="Scheduler Config" aside={<span className="eyebrow">{scheduledConfigs.length} schedules</span>}>
-              <div className="run-toolbar">
-                <div className="run-params-grid">
-                  <label className="field">
-                    <span>Max Parallel Jobs</span>
-                    <input type="number" min={1} max={20} value={maxParallelJobs} onChange={(event) => setMaxParallelJobs(event.target.value)} />
-                  </label>
-                </div>
-                <div className="run-action-footer">
-                  <button className="primary-button" type="button" disabled={isSavingScheduleSettings || isLoadingScheduleConfig} onClick={() => void handleSaveScheduleSettings()}>
-                    {isSavingScheduleSettings ? "Saving..." : "Save Scheduler Settings"}
-                  </button>
-                  <span className="panel-copy">Host cron should run scheduler command every 5 minutes: {schedulerCommand || "-"}</span>
-                </div>
-                <form className="run-toolbar" onSubmit={(event) => void handleSaveSchedule(event)}>
-                  <div className="run-params-grid">
-                    <label className="field">
-                      <span>Job ID</span>
-                      <input type="text" value={scheduleJobId} onChange={(event) => setScheduleJobId(event.target.value)} placeholder="weekly_rs_close" required />
-                    </label>
-                    <label className="field">
-                      <span>Job Label</span>
-                      <input type="text" value={scheduleJobLabel} onChange={(event) => setScheduleJobLabel(event.target.value)} placeholder="Weekly RS After Close" required />
-                    </label>
-                    <label className="field">
-                      <span>Screener</span>
-                      <select value={scheduleActionId} onChange={(event) => setScheduleActionId(event.target.value)}>
-                        {availableScheduledActions.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Cron Expr</span>
-                      <input type="text" value={scheduleCronExpr} onChange={(event) => setScheduleCronExpr(event.target.value)} placeholder="30 16 * * 1-5" required />
-                    </label>
-                    <label className="field">
-                      <span>Timezone</span>
-                      <select value={scheduleCronTz} onChange={(event) => setScheduleCronTz(event.target.value)}>
-                        {commonTimezones.map((item) => (
-                          <option key={item} value={item}>
-                            {item}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Enabled</span>
-                      <select value={scheduleEnabled ? "true" : "false"} onChange={(event) => setScheduleEnabled(event.target.value === "true")}>
-                        <option value="true">enabled</option>
-                        <option value="false">disabled</option>
-                      </select>
-                    </label>
-                    <label className="field" style={{ gridColumn: "1 / -1" }}>
-                      <span>Action Options JSON</span>
-                      <textarea
-                        value={scheduleOptionsJson}
-                        onChange={(event) => setScheduleOptionsJson(event.target.value)}
-                        rows={8}
-                        placeholder='{"reference_date":"{{local_date}}"}'
-                      />
-                    </label>
-                  </div>
-                  <div className="run-action-footer">
-                    <button className="primary-button" type="submit" disabled={isSavingSchedule || isLoadingScheduleConfig}>
-                      {isSavingSchedule ? "Saving..." : "Save Schedule"}
-                    </button>
-                    <button className="ghost-button" type="button" onClick={resetScheduleForm} disabled={isSavingSchedule}>
-                      Clear
-                    </button>
-                    {scheduleNotice ? <span className="panel-copy">{scheduleNotice}</span> : null}
-                  </div>
-                  <p className="panel-copy">
-                    Supported schedule date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
-                  </p>
-                  <p className="panel-copy">Suggested options for this action:</p>
-                  <pre className="panel-copy"><code>{suggestedScheduleOptionsJson}</code></pre>
-                  {selectedScheduledAction?.fields?.length ? (
-                    <p className="panel-copy">Action fields: {selectedScheduledAction.fields.map((field) => field.id).join(", ")}</p>
-                  ) : null}
-                </form>
-                {isLoadingScheduleConfig ? <LoadingBlock label="Loading scheduler config…" compact /> : null}
-                <div className="data-table-responsive">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Job</th>
-                        <th>Screener</th>
-                        <th>Cron</th>
-                        <th>TZ</th>
-                        <th>Options</th>
-                        <th>Enabled</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {scheduledConfigs.length === 0 ? (
-                        <tr>
-                          <td colSpan={7}>{isLoadingScheduleConfig ? "Loading schedules..." : "No scheduled jobs configured yet."}</td>
-                        </tr>
-                      ) : (
-                        scheduledConfigs.map((job) => (
-                          <tr key={job.job_id}>
-                            <td data-label="Job">
-                              <div className="admin-job-cell">
-                                <strong>{job.job_label}</strong>
-                                <span className="file-meta">{job.job_id}</span>
-                              </div>
-                            </td>
-                            <td data-label="Screener">{job.action_id}</td>
-                            <td data-label="Cron">{job.cron_expr}</td>
-                            <td data-label="TZ">{job.cron_tz}</td>
-                            <td data-label="Options">
-                              <code>{JSON.stringify(job.options ?? {})}</code>
-                            </td>
-                            <td data-label="Enabled">{job.enabled ? "Yes" : "No"}</td>
-                            <td data-label="Actions">
-                              <div className="button-row">
-                                <button className="table-action-button" type="button" disabled={isSavingSchedule} onClick={() => handleEditSchedule(job)}>
-                                  Edit
-                                </button>
-                                <button className="table-action-button" type="button" disabled={isSavingSchedule} onClick={() => void handleDeleteSchedule(job.job_id)}>
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </Panel>
-          </>
-        ) : null}
-
         <Panel
-          title="Current Progress"
+          title={screenersMode ? "Active Job Monitor" : "Current Progress"}
           aside={visibleActiveJob ? <span className="eyebrow">{visibleActiveJob.label}</span> : <span className="eyebrow">Idle</span>}
+          className={screenersMode ? "screeners-progress-panel" : ""}
         >
-          <div className="run-progress-panel">
+          <div className={`run-progress-panel${screenersMode ? " screeners-progress-shell" : ""}`}>
             <ProgressBar
               status={visibleActiveJob?.status ?? "cancelled"}
               label={
@@ -1112,13 +948,14 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         </Panel>
         ) : null}
 
-        <Panel title={jobsPanelTitle}>
+        <div className={screenersMode ? "screeners-history-console-grid" : ""}>
+        <Panel title={screenersMode ? "Batch Tracking & History" : jobsPanelTitle} className={screenersMode ? "screeners-history-panel" : ""}>
           {isLoading && !payload ? <LoadingBlock label="Loading recent jobs…" /> : null}
           <div className="data-table-responsive">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Job ID</th>
+                  <th>Job / Label</th>
                   <th>Screener</th>
                   <th>Scan Date</th>
                   <th>Status</th>
@@ -1147,15 +984,24 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                   const rows = [
                     <tr
                       key={job.job_id}
-                      className={isSelected ? "is-selected-row" : ""}
+                      className={`${screenersMode ? "screeners-history-row" : ""} ${isSelected ? "is-selected-row" : ""}`.trim()}
                       onClick={() => setSelectedJobId(job.job_id)}
                     >
-                      <td data-label="Job ID" className="mono">#{job.job_id}</td>
-                      <td data-label="Screener">
-                        {job.label}
-                        {hasChildren ? <span className="file-meta"> · {job.child_jobs.length} subtasks</span> : null}
+                      <td data-label="Job / Label">
+                        <div className="screeners-history-job">
+                          <strong>{job.label}</strong>
+                          <span className="file-meta mono">#{job.job_id}</span>
+                        </div>
                       </td>
-                      <td data-label="Scan Date">{job.scan_target || "-"}</td>
+                      <td data-label="Screener">
+                        <div className="screeners-history-cell">
+                          <span className="schedule-chip mono">{job.action_id}</span>
+                          {hasChildren ? <span className="file-meta">{job.child_jobs.length} subtasks</span> : <span className="file-meta">Single run</span>}
+                        </div>
+                      </td>
+                      <td data-label="Scan Date">
+                        <span className="schedule-chip schedule-chip-soft mono">{job.scan_target || "-"}</span>
+                      </td>
                       <td data-label="Status">
                         <StatusPill status={job.status} />
                       </td>
@@ -1174,7 +1020,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                       <td data-label="Action">
                         {job.status === "running" ? (
                           <button
-                            className="table-action-button"
+                            className="table-action-button screeners-history-action screeners-history-action-danger"
                             type="button"
                             onClick={(event) => {
                               event.stopPropagation();
@@ -1185,7 +1031,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                             {isCancellingJobId === job.job_id ? "Stopping..." : "Stop"}
                           </button>
                         ) : job.watchlist_url ? (
-                          <Link className="table-action-button table-link-button" to={job.watchlist_url} onClick={(event) => event.stopPropagation()}>
+                          <Link className="table-action-button table-link-button screeners-history-action" to={job.watchlist_url} onClick={(event) => event.stopPropagation()}>
                             Open Result
                           </Link>
                         ) : (
@@ -1312,7 +1158,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         </Panel>
 
         <Panel
-          title="Console Tail"
+          title={screenersMode ? "Live Console" : "Console Tail"}
           aside={
             <div className="runs-panel-aside">
               <span className="eyebrow">
@@ -1328,10 +1174,342 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
               {selectedChildJob ? <StatusPill status={displayedSelectedChildJob?.status ?? selectedChildJob.status} /> : displayedSelectedJob ? <StatusPill status={displayedSelectedJob.status} /> : null}
             </div>
           }
+          className={screenersMode ? "screeners-console-panel" : ""}
         >
-          <pre ref={consoleRef} className="console-surface">{selectedJobLog}</pre>
+          {screenersMode ? (
+            <div className="screeners-console-terminal">
+              <div className="screeners-console-header">
+                <div className="screeners-console-header-title">
+                  <span className="schedule-chip mono">Console: {consoleMeta ? describeConsoleRunId(consoleMeta) : "idle"}</span>
+                  <span className="file-meta">{consoleMeta ? liveJobDisplayLabel(consoleMeta) : "Select job to inspect live stream."}</span>
+                </div>
+                <div className="screeners-console-header-status">
+                  {liveJobStream.connected ? <span className="status-pill status-running">LIVE</span> : <span className="schedule-state-pill schedule-state-pill-disabled">Snapshot</span>}
+                </div>
+              </div>
+              <div className="screeners-console-shell">
+                <pre ref={consoleRef} className="console-surface">{selectedJobLog}</pre>
+                <div className="screeners-console-meta">
+                  <div className="screeners-console-meta-block">
+                    <span className="eyebrow">Label</span>
+                    <strong>{consoleMeta ? liveJobDisplayLabel(consoleMeta) : "-"}</strong>
+                  </div>
+                  <div className="screeners-console-meta-block">
+                    <span className="eyebrow">Hits</span>
+                    <strong className="mono">{consoleMeta?.success_count ?? 0}</strong>
+                  </div>
+                  <div className="screeners-console-meta-block">
+                    <span className="eyebrow">Status</span>
+                    {consoleMeta ? <StatusPill status={consoleMeta.status} /> : <span className="eyebrow">Idle</span>}
+                  </div>
+                  <div className="screeners-console-meta-block">
+                    <span className="eyebrow">Duration</span>
+                    <strong className="mono">{formatDuration(consoleMeta?.duration_seconds ?? 0)}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <pre ref={consoleRef} className="console-surface">{selectedJobLog}</pre>
+          )}
         </Panel>
+        </div>
+
+        {canManageSchedules && screenersMode ? (
+          <>
+            <Panel title="Scheduled Screeners" aside={<span className="eyebrow">{scheduledJobs.length} tracked</span>} className="screeners-scheduled-panel">
+              {isLoadingScheduledJobs ? <LoadingBlock label="Loading scheduled job status…" compact /> : null}
+              <div className="data-table-responsive">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Job</th>
+                      <th>Status</th>
+                      <th>Last Start</th>
+                      <th>Last Finish</th>
+                      <th>Exit Code</th>
+                      <th>Log</th>
+                      <th>Artifact</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scheduledJobs.length === 0 ? (
+                      <tr>
+                        <td colSpan={7}>{isLoadingScheduledJobs ? "Loading scheduled jobs..." : "No scheduled job status files found."}</td>
+                      </tr>
+                    ) : (
+                      scheduledJobs.map((job) => (
+                        <tr key={job.job_id} className="screeners-scheduled-row">
+                          <td data-label="Job">
+                            <div className="admin-job-cell schedule-job-cell">
+                              <strong>{job.job_label}</strong>
+                              <span className="file-meta">{job.job_id}</span>
+                            </div>
+                          </td>
+                          <td data-label="Status">
+                            <div className="schedule-cell-stack">
+                              {renderScheduledJobStatus(job.status)}
+                              <span className="file-meta">{job.exit_code == null ? "Exit pending" : `exit ${job.exit_code}`}</span>
+                            </div>
+                          </td>
+                          <td data-label="Last Start">
+                            <div className="schedule-cell-stack">
+                              <span>{formatLocalDateTime(job.last_started_at)}</span>
+                              <span className="file-meta">latest dispatch</span>
+                            </div>
+                          </td>
+                          <td data-label="Last Finish">
+                            <div className="schedule-cell-stack">
+                              <span>{formatLocalDateTime(job.last_finished_at)}</span>
+                              <span className="file-meta">latest completion</span>
+                            </div>
+                          </td>
+                          <td data-label="Exit Code">
+                            <span className="schedule-chip schedule-chip-soft mono">{job.exit_code ?? "-"}</span>
+                          </td>
+                          <td data-label="Log">
+                            <div className="schedule-cell-stack">
+                              <code className="schedule-options-code">{formatFilePathPreview(job.log_file)}</code>
+                              <span className="file-meta">{job.log_file ? "status log" : "no log file"}</span>
+                            </div>
+                          </td>
+                          <td data-label="Artifact">
+                            <div className="schedule-cell-stack">
+                              <code className="schedule-options-code">{formatFilePathPreview(job.artifact_file)}</code>
+                              <span className="file-meta">{job.artifact_file ? "result artifact" : "no artifact yet"}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+
+            <Panel title="Scheduler Config" aside={<span className="eyebrow">{scheduledConfigs.length} schedules</span>} className="screeners-scheduler-config-panel">
+              <div className="run-toolbar">
+                <div className="screeners-scheduler-toolbar">
+                  <div>
+                    <p className="panel-copy">Manage recurring screener tasks from focused dialogs instead of the full inline admin form.</p>
+                    <p className="file-meta">Host cron command: {schedulerCommand || "-"}</p>
+                  </div>
+                  <div className="button-row">
+                    <button className="primary-button" type="button" onClick={handleOpenNewSchedule} disabled={isSavingSchedule || isLoadingScheduleConfig}>
+                      New Schedule
+                    </button>
+                    <button className="ghost-button" type="button" onClick={() => setIsSchedulerSettingsOpen(true)} disabled={isSavingScheduleSettings || isLoadingScheduleConfig}>
+                      Scheduler Settings
+                    </button>
+                  </div>
+                </div>
+                {scheduleNotice ? <p className="panel-copy">{scheduleNotice}</p> : null}
+                {isLoadingScheduleConfig ? <LoadingBlock label="Loading scheduler config…" compact /> : null}
+                <div className="data-table-responsive">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Job</th>
+                        <th>Screener</th>
+                        <th>Cron</th>
+                        <th>TZ</th>
+                        <th>Options</th>
+                        <th>Enabled</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scheduledConfigs.length === 0 ? (
+                        <tr>
+                          <td colSpan={7}>{isLoadingScheduleConfig ? "Loading schedules..." : "No scheduled jobs configured yet."}</td>
+                        </tr>
+                      ) : (
+                        scheduledConfigs.map((job) => (
+                          <tr key={job.job_id}>
+                            <td data-label="Job">
+                              <div className="admin-job-cell schedule-job-cell">
+                                <strong>{job.job_label}</strong>
+                                <span className="file-meta">{job.job_id}</span>
+                              </div>
+                            </td>
+                            <td data-label="Screener">
+                              <div className="schedule-cell-stack">
+                                <span className="schedule-chip mono">{job.action_id}</span>
+                                <span className="panel-copy">{describeScreenerAction(job.action_id, Boolean(job.options && Object.keys(job.options).length > 0))}</span>
+                              </div>
+                            </td>
+                            <td data-label="Cron">
+                              <div className="schedule-cell-stack">
+                                <span className="schedule-chip schedule-chip-soft mono">{job.cron_expr}</span>
+                                <span className="file-meta">{describeScheduleCadence(job.cron_expr)}</span>
+                              </div>
+                            </td>
+                            <td data-label="TZ">
+                              <span className="schedule-chip schedule-chip-soft">{job.cron_tz}</span>
+                            </td>
+                            <td data-label="Options">
+                              <div className="schedule-cell-stack">
+                                <code className="schedule-options-code">{formatScheduleOptionsPreview(job.options)}</code>
+                                <span className="file-meta">{summarizeScheduleOptions(job.options)}</span>
+                              </div>
+                            </td>
+                            <td data-label="Enabled">
+                              <span className={`schedule-state-pill ${job.enabled ? "schedule-state-pill-enabled" : "schedule-state-pill-disabled"}`}>
+                                {job.enabled ? "Live" : "Paused"}
+                              </span>
+                            </td>
+                            <td data-label="Actions">
+                              <div className="schedule-actions">
+                                <button className="table-action-button schedule-action-button" type="button" disabled={isSavingSchedule} onClick={() => handleEditSchedule(job)}>
+                                  Open
+                                </button>
+                                <button className="table-action-button schedule-action-button schedule-action-button-danger" type="button" disabled={isSavingSchedule} onClick={() => void handleDeleteSchedule(job.job_id)}>
+                                  Remove
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </Panel>
+          </>
+        ) : null}
       </div>
+
+      {isScheduleEditorOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setIsScheduleEditorOpen(false)}>
+          <div className="modal-shell screeners-schedule-modal-shell" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <form className="modal-content screeners-schedule-modal" onSubmit={(event) => void handleSaveSchedule(event)}>
+              <div className="modal-header">
+                <div>
+                  <div className="eyebrow">{scheduleJobId ? "Edit schedule" : "New schedule"}</div>
+                  <h2>{scheduleJobLabel || "Configure Scheduled Screener"}</h2>
+                </div>
+                <button className="ghost-button" type="button" onClick={() => setIsScheduleEditorOpen(false)}>
+                  Close
+                </button>
+              </div>
+              <div className="modal-body">
+                <div className="run-params-grid">
+                  <label className="field">
+                    <span>Job ID</span>
+                    <input type="text" value={scheduleJobId} onChange={(event) => setScheduleJobId(event.target.value)} placeholder="weekly_rs_close" required />
+                  </label>
+                  <label className="field">
+                    <span>Job Label</span>
+                    <input type="text" value={scheduleJobLabel} onChange={(event) => setScheduleJobLabel(event.target.value)} placeholder="Weekly RS After Close" required />
+                  </label>
+                  <label className="field">
+                    <span>Screener</span>
+                    <select value={scheduleActionId} onChange={(event) => setScheduleActionId(event.target.value)}>
+                      {availableScheduledActions.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Cron Expr</span>
+                    <input type="text" value={scheduleCronExpr} onChange={(event) => setScheduleCronExpr(event.target.value)} placeholder="30 16 * * 1-5" required />
+                  </label>
+                  <label className="field">
+                    <span>Timezone</span>
+                    <select value={scheduleCronTz} onChange={(event) => setScheduleCronTz(event.target.value)}>
+                      {commonTimezones.map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Enabled</span>
+                    <select value={scheduleEnabled ? "true" : "false"} onChange={(event) => setScheduleEnabled(event.target.value === "true")}>
+                      <option value="true">enabled</option>
+                      <option value="false">disabled</option>
+                    </select>
+                  </label>
+                  <label className="field" style={{ gridColumn: "1 / -1" }}>
+                    <span>Action Options JSON</span>
+                    <textarea
+                      value={scheduleOptionsJson}
+                      onChange={(event) => setScheduleOptionsJson(event.target.value)}
+                      rows={8}
+                      placeholder='{"reference_date":"{{local_date}}"}'
+                    />
+                  </label>
+                </div>
+                <div className="detail-card">
+                  <div className="eyebrow">Templates</div>
+                  <p className="panel-copy">
+                    Supported date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
+                  </p>
+                  <p className="panel-copy">Suggested options:</p>
+                  <pre className="panel-copy"><code>{suggestedScheduleOptionsJson}</code></pre>
+                  {selectedScheduledAction?.fields?.length ? (
+                    <p className="panel-copy">Action fields: {selectedScheduledAction.fields.map((field) => field.id).join(", ")}</p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="secondary-button" type="button" onClick={resetScheduleForm} disabled={isSavingSchedule}>
+                  Clear
+                </button>
+                <div className="button-row">
+                  <button className="ghost-button" type="button" onClick={() => setIsScheduleEditorOpen(false)} disabled={isSavingSchedule}>
+                    Cancel
+                  </button>
+                  <button className="primary-button" type="submit" disabled={isSavingSchedule || isLoadingScheduleConfig}>
+                    {isSavingSchedule ? "Saving..." : "Save Schedule"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isSchedulerSettingsOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setIsSchedulerSettingsOpen(false)}>
+          <div className="modal-shell" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-content screeners-settings-modal">
+              <div className="modal-header">
+                <div>
+                  <div className="eyebrow">Scheduler settings</div>
+                  <h2>Runner Throughput</h2>
+                </div>
+                <button className="ghost-button" type="button" onClick={() => setIsSchedulerSettingsOpen(false)}>
+                  Close
+                </button>
+              </div>
+              <div className="modal-body">
+                <label className="field">
+                  <span>Max Parallel Jobs</span>
+                  <input type="number" min={1} max={20} value={maxParallelJobs} onChange={(event) => setMaxParallelJobs(event.target.value)} />
+                </label>
+                <div className="detail-card">
+                  <div className="eyebrow">Host cron</div>
+                  <p className="panel-copy">{schedulerCommand || "-"}</p>
+                  <p className="file-meta">Host cron should run this command every 5 minutes.</p>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="ghost-button" type="button" onClick={() => setIsSchedulerSettingsOpen(false)} disabled={isSavingScheduleSettings}>
+                  Cancel
+                </button>
+                <button className="primary-button" type="button" disabled={isSavingScheduleSettings || isLoadingScheduleConfig} onClick={() => void handleSaveScheduleSettings()}>
+                  {isSavingScheduleSettings ? "Saving..." : "Save Settings"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <ScreenerConfigModal
         action={selectedAction}
@@ -1458,6 +1636,89 @@ function liveJobDisplayLabel(job: LiveJob | null): string {
     return job.strategy_id || job.label;
   }
   return job.label;
+}
+
+function describeConsoleRunId(job: LiveJob): string {
+  if ("job_run_id" in job && job.job_run_id != null) {
+    return `#run-${job.job_run_id}`;
+  }
+  if ("job_id" in job) {
+    return `#job-${job.job_id}`;
+  }
+  return "#job";
+}
+
+function describeScreenerAction(actionId: string, hasConfig: boolean): string {
+  const catalog: Record<string, string> = {
+    rs: "High relative-strength leaders still holding momentum before price fully extends.",
+    weekly_rs_before_price: "Weekly RS leaders with room before price catches up to relative strength.",
+    vcp: "Volatility contraction setups tightening into potential breakout pivots.",
+    sepa_vcp: "SEPA VCP squeeze names with Minervini trend, pressure, and risk context.",
+    trend_template: "Minervini trend-template names stacked above 50, 150, and 200 day support.",
+    gap_fill: "Post-earnings gap reversal candidates with reclaim or fill behavior.",
+    fearzone: "High-velocity panic reversals where snapback asymmetry may appear.",
+    td9_bullish: "Bullish TD Sequential exhaustion names where downside pressure may be spent.",
+    sean_breakout: "Daily leaders already clearing key EMA, volume, and ADR thresholds.",
+    rsi_ma_bb_bullish: "RSI and MA/Bollinger bullish trigger set for early continuation entries.",
+    rsi_ma_bb_bearish: "Bearish RSI and MA/Bollinger trigger set for breakdown continuation.",
+    near_200ma: "Names testing the 200 day moving average with clear inflection context.",
+    lost_21ema: "Recent loss of 21 EMA support while longer trend structure still matters.",
+    earnings_growth: "Earnings-led growth names showing improving fundamental acceleration.",
+    earnings_weekly_criteria: "Weekly earnings filter using repo criteria for cleaner candidate sets.",
+    peg: "PEG-oriented value screen tuned around earnings gap context.",
+    legacy_peg: "Legacy PEG variant kept for compatibility and comparison runs.",
+  };
+  if (catalog[actionId]) {
+    return catalog[actionId];
+  }
+  return hasConfig ? "Run with defaults now, or open config for custom parameters." : "Run immediately with the default screener settings.";
+}
+
+function describeScheduleCadence(cronExpr: string): string {
+  const normalized = cronExpr.trim().split(/\s+/);
+  if (normalized.length !== 5) {
+    return "Custom cadence";
+  }
+  const [, hour, dayOfMonth, month, dayOfWeek] = normalized;
+  if (dayOfMonth === "*" && month === "*" && dayOfWeek === "1-5") {
+    return "Weekdays";
+  }
+  if (dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+    return "Daily";
+  }
+  if (dayOfMonth === "*" && month === "*" && dayOfWeek.includes(",")) {
+    return "Selected weekdays";
+  }
+  if (dayOfMonth !== "*" && month === "*") {
+    return "Monthly";
+  }
+  if (dayOfMonth !== "*" && month !== "*") {
+    return "Calendar date";
+  }
+  if (hour === "*" || hour.includes("/")) {
+    return "Intraday cadence";
+  }
+  return "Custom cadence";
+}
+
+function formatScheduleOptionsPreview(options: ScheduledJobConfig["options"]): string {
+  const serialized = JSON.stringify(options ?? {});
+  return serialized.length > 84 ? `${serialized.slice(0, 81)}...` : serialized;
+}
+
+function summarizeScheduleOptions(options: ScheduledJobConfig["options"]): string {
+  const entries = Object.entries(options ?? {});
+  if (entries.length === 0) {
+    return "Default payload";
+  }
+  return `${entries.length} override${entries.length === 1 ? "" : "s"}`;
+}
+
+function formatFilePathPreview(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+  return value.length > 72 ? `...${value.slice(-69)}` : value;
 }
 
 function isHierarchicalBatchJob(actionId: string): boolean {

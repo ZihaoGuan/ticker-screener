@@ -4,21 +4,65 @@
   gap: 16px;
 }
 
+.screeners-launcher-panel,
+.screeners-progress-panel,
+.screeners-history-panel,
+.screeners-console-panel,
+.screeners-scheduled-panel,
+.screeners-scheduler-config-panel {
+  background: #18181b;
+  border: 1px solid #27272a;
+}
+
+.screeners-launcher-panel .panel-head,
+.screeners-progress-panel .panel-head,
+.screeners-history-panel .panel-head,
+.screeners-console-panel .panel-head,
+.screeners-scheduled-panel .panel-head,
+.screeners-scheduler-config-panel .panel-head {
+  align-items: center;
+  border-bottom: 1px solid #27272a;
+  padding-bottom: 14px;
+}
+
+.screeners-launcher-panel .panel-head h2,
+.screeners-progress-panel .panel-head h2,
+.screeners-history-panel .panel-head h2,
+.screeners-console-panel .panel-head h2,
+.screeners-scheduled-panel .panel-head h2,
+.screeners-scheduler-config-panel .panel-head h2 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.screeners-operator-badge {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 6px;
+  color: #4ade80;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
+
 .screener-group-section + .screener-group-section {
   margin-top: 24px;
 }
 
 .screener-group-title {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #a1a1aa;
+  color: #e4e4e7;
 }
 
 .screener-subgroup-section + .screener-subgroup-section {
-  margin-top: 18px;
+  margin-top: 24px;
 }
 
 .screener-subgroup-head {
@@ -31,16 +75,18 @@
 
 .screener-subgroup-title {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: #d4d4d8;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .screener-batch-button {
-  background: transparent;
-  border: 1px solid #3f3f46;
-  border-radius: 999px;
-  color: #e4e4e7;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.24);
+  border-radius: 6px;
+  color: #4ade80;
   cursor: pointer;
   font-size: 11px;
   font-weight: 700;
@@ -50,8 +96,8 @@
 }
 
 .screener-batch-button:hover:not(:disabled) {
-  border-color: #34d399;
-  color: #d1fae5;
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(74, 222, 128, 0.4);
 }
 
 .screener-batch-button:disabled {
@@ -60,34 +106,46 @@
 }
 
 .screener-card {
-  background: linear-gradient(135deg, #1f1f23 0%, #18181b 100%);
+  background: #1c1c1f;
   border: 1px solid #27272a;
   border-radius: 8px;
-  padding: 20px;
+  padding: 18px;
   transition: all 0.2s ease;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .screener-card:hover {
   border-color: #34d399;
-  background: linear-gradient(135deg, #212127 0%, #1a1a1f 100%);
+  background: #202024;
   box-shadow: 0 4px 12px rgba(52, 211, 153, 0.1);
 }
 
 .screener-card-header {
+  display: block;
+}
+
+.screener-card-title-block {
+  align-items: flex-start;
   display: flex;
-  align-items: center;
   gap: 12px;
+  justify-content: space-between;
 }
 
 .screener-card-header h3 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 700;
   color: #f4f4f5;
+}
+
+.screener-card-id {
+  color: #71717a;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .screener-description {
@@ -99,7 +157,7 @@
 }
 
 .screener-run-button {
-  background: #34d399;
+  background: #4ade80;
   border: none;
   border-radius: 6px;
   color: #09090b;
@@ -114,7 +172,7 @@
 }
 
 .screener-run-button:hover:not(:disabled) {
-  background: #2fbb8f;
+  background: #6ee7b7;
   transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(52, 211, 153, 0.2);
 }
@@ -136,12 +194,15 @@
 }
 
 .screener-config-button {
+  align-items: center;
   background: transparent;
   border: 1px solid #3f3f46;
   border-radius: 6px;
   color: #f4f4f5;
+  display: flex;
   font-size: 12px;
   font-weight: 600;
+  justify-content: center;
   padding: 10px 14px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -164,10 +225,239 @@
   flex: 1;
 }
 
+.screeners-progress-shell {
+  background:
+    linear-gradient(to bottom, transparent 50%, rgba(78, 222, 163, 0.04) 50%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+  background-size: 100% 4px, 100% 100%;
+  border: 1px solid #27272a;
+  padding: 20px;
+}
+
 .run-progress-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.screeners-history-console-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
+}
+
+.screeners-history-panel .data-table thead th,
+.screeners-scheduled-panel .data-table thead th,
+.screeners-scheduler-config-panel .data-table thead th {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.screeners-history-panel .data-table tbody tr:hover,
+.screeners-scheduled-panel .data-table tbody tr:hover,
+.screeners-scheduler-config-panel .data-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.screeners-history-row td {
+  vertical-align: top;
+}
+
+.screeners-scheduled-row td {
+  vertical-align: top;
+}
+
+.screeners-history-job,
+.screeners-history-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.screeners-history-action {
+  border-radius: 999px;
+  min-width: 98px;
+  justify-content: center;
+}
+
+.screeners-history-action-danger {
+  border-color: rgba(244, 63, 94, 0.28);
+  color: #fecdd3;
+}
+
+.screeners-console-terminal {
+  background: #111114;
+  border: 1px solid #27272a;
+}
+
+.screeners-console-header {
+  align-items: center;
+  background: #1b1b1f;
+  border-bottom: 1px solid #27272a;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.screeners-console-header-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.screeners-console-header-status {
+  display: flex;
+  align-items: center;
+}
+
+.screeners-console-shell {
+  background: #09090b;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px;
+  min-height: 320px;
+  overflow: hidden;
+}
+
+.screeners-console-shell .console-surface {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: #67e8a5;
+  min-height: 320px;
+}
+
+.screeners-console-meta {
+  background: #18181b;
+  border-left: 1px solid #27272a;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 12px;
+}
+
+.screeners-console-meta-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.screeners-console-meta-block strong {
+  color: #f4f4f5;
+  font-size: 13px;
+}
+
+.screeners-scheduled-panel,
+.screeners-scheduler-config-panel {
+  margin-top: 4px;
+}
+
+.screeners-scheduler-toolbar {
+  align-items: center;
+  background: #111114;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+}
+
+.schedule-job-cell,
+.schedule-cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.schedule-chip {
+  align-items: center;
+  align-self: flex-start;
+  background: rgba(78, 222, 163, 0.12);
+  border: 1px solid rgba(78, 222, 163, 0.26);
+  border-radius: 999px;
+  color: #baf7d9;
+  display: inline-flex;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 5px 10px;
+  text-transform: uppercase;
+}
+
+.schedule-chip-soft {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f4f4f5;
+  text-transform: none;
+}
+
+.schedule-options-code {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #d4d4d8;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 8px 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-state-pill {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
+
+.schedule-state-pill-enabled {
+  background: rgba(78, 222, 163, 0.14);
+  border: 1px solid rgba(78, 222, 163, 0.24);
+  color: #baf7d9;
+}
+
+.schedule-state-pill-disabled {
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  color: #fecdd3;
+}
+
+.schedule-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.schedule-action-button {
+  border-radius: 999px;
+  min-width: 78px;
+}
+
+.schedule-action-button-danger {
+  border-color: rgba(244, 63, 94, 0.28);
+  color: #fecdd3;
+}
+
+.screeners-schedule-modal-shell {
+  width: min(860px, 100%);
+}
+
+.screeners-schedule-modal,
+.screeners-settings-modal {
+  background: #18181b;
+  border: 1px solid #27272a;
+}
+
+.screeners-schedule-modal .detail-card,
+.screeners-settings-modal .detail-card {
+  background: #111114;
+  border: 1px solid #27272a;
 }
 
 .backtest-detail-grid {
@@ -212,6 +502,41 @@
 }
 
 @media (max-width: 768px) {
+  .screeners-history-console-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .screeners-scheduler-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .screeners-console-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .screeners-console-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .screeners-console-meta {
+    border-left: 0;
+    border-top: 1px solid #27272a;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .schedule-actions {
+    flex-direction: column;
+  }
+
+  .schedule-action-button,
+  .screeners-history-action {
+    width: 100%;
+  }
+
   .screeners-grid {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   }
