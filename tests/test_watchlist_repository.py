@@ -246,6 +246,19 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "sean_breakout_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "sean_breakout")
 
+    def test_group_key_supports_trend_template(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="trend_template",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "trend_template_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "trend_template")
+
     def test_group_key_supports_vcs_setup_stage(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",

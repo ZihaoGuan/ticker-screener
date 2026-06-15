@@ -209,6 +209,22 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["sepa_vcp"]["entry_count"], 1)
         self.assertEqual(cards["sepa_vcp"]["preview_tickers"], ["NVDA"])
 
+    def test_get_scanner_board_includes_trend_template_card(self) -> None:
+        self._write_watchlist(
+            "trend_template_2026-06-12",
+            tickers=["NVDA", "CRWD"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertTrue(cards["trend_template"]["available"])
+        self.assertEqual(cards["trend_template"]["entry_count"], 2)
+        self.assertEqual(cards["trend_template"]["preview_tickers"], ["NVDA", "CRWD"])
+
     def test_get_scanner_board_includes_sean_breakout_card(self) -> None:
         self._write_watchlist(
             "sean_breakout_2026-06-12",

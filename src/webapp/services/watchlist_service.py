@@ -86,6 +86,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "trend_template",
+        "strategy_id": "trend_template",
+        "label": "Trend Template",
+        "description": "Minervini trend-template names already above stacked 50/150/200 moving averages and still near 52-week highs.",
+        "timeframe": "Daily",
+        "accent": "lime",
+    },
+    {
         "id": "sean_breakout",
         "strategy_id": "sean_breakout",
         "label": "Sean Breakout",

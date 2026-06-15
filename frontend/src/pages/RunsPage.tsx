@@ -244,19 +244,28 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     [expandedBatchDateByJobId, selectedJob],
   );
   const selectedJobLog = useMemo(() => {
-    if (selectedChildJob) {
-      return selectedChildJob.log_tail || "No screener log yet.";
-    }
+    const liveStreamJob = liveJobStream.job;
+    const liveChildLog =
+      selectedChildJob && liveStreamJob && "job_run_id" in liveStreamJob && liveStreamJob.job_run_id === selectedChildJob.job_run_id
+        ? liveStreamJob.log_tail
+        : "";
+    const liveParentLog =
+      selectedJob && liveStreamJob && "job_id" in liveStreamJob && liveStreamJob.job_id === selectedJob.job_id
+        ? liveStreamJob.log_tail
+        : "";
     if (liveJobStream.lines.length > 0) {
       return liveJobStream.lines.join("\n");
+    }
+    if (selectedChildJob) {
+      return liveChildLog || selectedChildJob.log_tail || "No screener log yet.";
     }
     if (selectedJob && isHierarchicalBatchJob(selectedJob.action_id)) {
       return childJobGroups.length > 0
         ? "Select date row, then click screener row to view separate log."
         : "Waiting for screener subtasks to attach to this batch run.";
     }
-    return selectedJob?.log_tail ?? "No job log yet.";
-  }, [childJobGroups.length, liveJobStream.lines, selectedChildJob, selectedJob]);
+    return liveParentLog || selectedJob?.log_tail || "No job log yet.";
+  }, [childJobGroups.length, liveJobStream.job, liveJobStream.lines, selectedChildJob, selectedJob]);
   const displayedSelectedJob = useMemo(() => {
     if (selectedJob && liveJobStream.job && "job_id" in liveJobStream.job && liveJobStream.job.job_id === selectedJob.job_id) {
       return liveJobStream.job;

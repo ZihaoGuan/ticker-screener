@@ -104,6 +104,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("fearzone", "fearzone", "Fearzone"),
         ("near_200ma", "near_200ma", "Near 200MA"),
         ("lost_21ema", "lost_21ema", "Lost 21EMA"),
+        ("trend_template", "trend_template", "Trend Template"),
         ("pre_earnings_ma_stack", "pre_earnings_ma_stack", "Pre Earnings MA Stack"),
         ("earnings_weekly_criteria", "earnings_weekly_criteria", "Earnings Weekly Criteria"),
         ("earnings_growth", "earnings_growth", "Earnings Growth"),

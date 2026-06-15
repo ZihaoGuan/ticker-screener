@@ -331,6 +331,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("sepa_vcp", action_ids)
         self.assertIn("rti", action_ids)
         self.assertIn("sean_breakout", action_ids)
+        self.assertIn("trend_template", action_ids)
         self.assertIn("vcs_setup_stage", action_ids)
         self.assertIn("vcs_critical_tightness", action_ids)
         self.assertIn("base_detection", action_ids)

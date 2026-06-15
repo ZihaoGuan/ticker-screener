@@ -28,6 +28,7 @@ from .sepa_vcp_screen import SEPA_HISTORY_DAYS, find_recent_sepa_vcp_hit
 from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, ScreenerSpec
 from .td_sequential_screen import find_recent_td_sequential_hit
 from .three_weeks_tight_screen import find_three_weeks_tight_hit
+from .trend_template_screen import run_trend_template_screen
 from .universe import UniverseTicker
 from .vcp_screen import run_vcp_screen
 from .vcs_screen import find_recent_vcs_hit
@@ -556,6 +557,24 @@ def _run_lost_21ema(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     return ScreenerEvaluationResult(passed=True, metrics={"ticker": bundle.ticker}, reasons=tuple(payload.get("reasons", [])), hit=payload)
 
 
+def _run_trend_template(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    result = run_trend_template_screen(config, [_ticker_from_bundle(bundle)], as_of_date=bundle.as_of_date)
+    hits = list(getattr(result, "hits", []))
+    failures = list(getattr(result, "failed_tickers", []))
+    if failures:
+        return ScreenerEvaluationResult(passed=False, error=str(failures[0].get("error") or "unknown screener failure"))
+    if not hits:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hits[0].to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "criteria_passed": payload["criteria_passed"]},
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
     max_rs_days = int(config.rs_new_high_history_days)
     max_vcp_days = max(int(config.rs_new_high_history_days), 365)
@@ -794,5 +813,12 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=320,
             warmup_trading_days=20,
             evaluator=_run_lost_21ema,
+        ),
+        "trend_template": ScreenerSpec(
+            id="trend_template",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=320,
+            warmup_trading_days=20,
+            evaluator=_run_trend_template,
         ),
     }
