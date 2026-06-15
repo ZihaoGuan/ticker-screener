@@ -17,6 +17,7 @@ import { RatingsPage } from "./pages/RatingsPage";
 import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
 import { ScannerBoardPage } from "./pages/ScannerBoardPage";
+import { ScannerResultPage } from "./pages/ScannerResultPage";
 import { WarmupPage } from "./pages/WarmupPage";
 import { WeeklyWatchlistPage } from "./pages/WeeklyWatchlistPage";
 import { WatchlistsPage } from "./pages/WatchlistsPage";
@@ -42,6 +43,14 @@ export default function App() {
           element={
             <RoleRoute allowedRoles={["premium", "admin"]}>
               <ScannerBoardPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/scanner/:scannerId"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <ScannerResultPage />
             </RoleRoute>
           }
         />

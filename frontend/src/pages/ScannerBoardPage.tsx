@@ -146,7 +146,7 @@ export function ScannerBoardPage() {
           }
 
           return (
-            <Link key={card.id} className={`scanner-idea-card accent-${card.accent}`} to={card.list_href || `/watchlists?stem=${encodeURIComponent(card.stem)}`}>
+            <Link key={card.id} className={`scanner-idea-card accent-${card.accent}`} to={`/scanner/${encodeURIComponent(card.id)}`}>
               {content}
             </Link>
           );
