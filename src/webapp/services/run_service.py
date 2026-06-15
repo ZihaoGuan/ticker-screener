@@ -1493,6 +1493,9 @@ class RunService:
     ) -> str:
         local_job_id = str(job_id or uuid.uuid4().hex[:12])
         started_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+        log_file = self.artifacts_dir / "status" / "logs" / f"{local_job_id}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_file.write_text("", encoding="utf-8")
         initial_log = "Starting...\n"
         fallback_reason = str(normalized.get("_remote_fallback_reason") or "").strip()
         if fallback_reason:
@@ -1518,6 +1521,7 @@ class RunService:
             "cancel_requested": False,
             "options": normalized,
             "execution_mode": "local",
+            "log_file": str(log_file),
             "_started_monotonic": time.monotonic(),
         }
 
@@ -1535,6 +1539,7 @@ class RunService:
                     "command": " ".join(command),
                     "progress_label": "Starting…",
                     "log_tail": initial_log.rstrip(),
+                    "log_file": str(log_file),
                 },
                 status="running",
             )
@@ -1838,34 +1843,39 @@ class RunService:
         with self._jobs_lock:
             job = self._jobs_by_id[job_id]
             job["_process"] = process
+            log_path = Path(str(job.get("log_file") or ""))
         assert process.stdout is not None
-        for line in process.stdout:
-            log_lines.append(line.rstrip())
-            log_lines = log_lines[-80:]
-            with self._jobs_lock:
-                job = self._jobs_by_id[job_id]
-                job["log_tail"] = "\n".join(log_lines)
-                self._update_progress(job, log_lines)
-                self._update_artifacts(job, line.rstrip())
-                snapshot = {
-                    "job_id": str(job.get("job_id") or ""),
-                    "execution_mode": "local",
-                    "log_tail": str(job.get("log_tail") or ""),
-                    "progress_current": job.get("progress_current"),
-                    "progress_total": job.get("progress_total"),
-                    "progress_percent": job.get("progress_percent"),
-                    "progress_label": job.get("progress_label"),
-                    "success_count": int(job.get("success_count") or 0),
-                    "summary_file": str(job.get("summary_file") or ""),
-                    "watchlist_file": str(job.get("watchlist_file") or ""),
-                    "raw_results_file": str(job.get("raw_results_file") or ""),
-                    "job_run_id": job.get("job_run_id"),
-                }
-            self.history_repository.patch_job_run_result(
-                snapshot.get("job_run_id"),
-                result_payload_patch=snapshot,
-                artifact_path=str(snapshot.get("summary_file") or snapshot.get("watchlist_file") or "") or None,
-            )
+        with log_path.open("a", encoding="utf-8") as log_handle:
+            for line in process.stdout:
+                log_handle.write(line)
+                log_handle.flush()
+                log_lines.append(line.rstrip())
+                log_lines = log_lines[-80:]
+                with self._jobs_lock:
+                    job = self._jobs_by_id[job_id]
+                    job["log_tail"] = "\n".join(log_lines)
+                    self._update_progress(job, log_lines)
+                    self._update_artifacts(job, line.rstrip())
+                    snapshot = {
+                        "job_id": str(job.get("job_id") or ""),
+                        "execution_mode": "local",
+                        "log_tail": str(job.get("log_tail") or ""),
+                        "log_file": str(job.get("log_file") or ""),
+                        "progress_current": job.get("progress_current"),
+                        "progress_total": job.get("progress_total"),
+                        "progress_percent": job.get("progress_percent"),
+                        "progress_label": job.get("progress_label"),
+                        "success_count": int(job.get("success_count") or 0),
+                        "summary_file": str(job.get("summary_file") or ""),
+                        "watchlist_file": str(job.get("watchlist_file") or ""),
+                        "raw_results_file": str(job.get("raw_results_file") or ""),
+                        "job_run_id": job.get("job_run_id"),
+                    }
+                self.history_repository.patch_job_run_result(
+                    snapshot.get("job_run_id"),
+                    result_payload_patch=snapshot,
+                    artifact_path=str(snapshot.get("summary_file") or snapshot.get("watchlist_file") or "") or None,
+                )
 
         return_code = process.wait()
         finished_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
