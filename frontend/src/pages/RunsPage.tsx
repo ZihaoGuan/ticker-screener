@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
@@ -83,6 +83,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [selectedBacktest, setSelectedBacktest] = useState<BacktestRunDetailV1 | null>(null);
   const [isLoadingBacktestDetail, setIsLoadingBacktestDetail] = useState(false);
   const [batchRunNotice, setBatchRunNotice] = useState("");
+  const consoleRef = useRef<HTMLPreElement | null>(null);
 
   const loadScheduledJobs = () => {
     if (!canManageSchedules) {
@@ -282,6 +283,19 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     () => availableScheduledActions.find((item) => item.id === scheduleActionId) ?? null,
     [availableScheduledActions, scheduleActionId],
   );
+
+  useEffect(() => {
+    const element = consoleRef.current;
+    if (!element) {
+      return;
+    }
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    const shouldStickToBottom = liveJobStream.connected || distanceFromBottom <= 48;
+    if (!shouldStickToBottom) {
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+  }, [liveJobStream.connected, selectedChildJobId, selectedJobId, selectedJobLog]);
 
   useEffect(() => {
     if (!selectedJob?.child_jobs.length) {
@@ -1315,7 +1329,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
             </div>
           }
         >
-          <pre className="console-surface">{selectedJobLog}</pre>
+          <pre ref={consoleRef} className="console-surface">{selectedJobLog}</pre>
         </Panel>
       </div>
 
