@@ -31,6 +31,7 @@ from web.dependencies import (
     config,
     get_audit_service,
     get_auth_service,
+    get_chart_watchlist_service,
     get_current_principal,
     get_dashboard_service,
     get_earnings_calendar_service,
@@ -884,7 +885,7 @@ def watchlist_chart_data(
     ticker: str,
     period: str = Query(default="18mo"),
     as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
-    service: WatchlistService = Depends(get_watchlist_service),
+    service: WatchlistService = Depends(get_chart_watchlist_service),
     _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     _ = stem
@@ -896,7 +897,7 @@ def ticker_chart_data(
     ticker: str,
     period: str = Query(default="18mo"),
     as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
-    service: WatchlistService = Depends(get_watchlist_service),
+    service: WatchlistService = Depends(get_chart_watchlist_service),
 ) -> JSONResponse:
     return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period, as_of_date=as_of_date))
 

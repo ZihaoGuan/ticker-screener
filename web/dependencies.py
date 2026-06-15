@@ -62,6 +62,14 @@ def get_watchlist_service() -> WatchlistService:
     )
 
 
+def get_chart_watchlist_service() -> WatchlistService:
+    return WatchlistService(
+        artifacts_dir=config.artifacts_dir,
+        database_url=config.database_url,
+        market_data_source="database-first",
+    )
+
+
 def get_run_service() -> RunService:
     return RunService(project_root=PROJECT_ROOT, database_url=config.database_url, artifacts_dir=config.artifacts_dir)
 

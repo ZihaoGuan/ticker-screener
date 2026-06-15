@@ -9,13 +9,15 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.webapp.services.watchlist_service import WatchlistService
+from src.webapp.services.watchlist_service import WatchlistService, _clear_chart_payload_cache
 
 
 class WatchlistServiceTests(unittest.TestCase):
     def setUp(self) -> None:
+        _clear_chart_payload_cache()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
+        self.addCleanup(_clear_chart_payload_cache)
         artifacts_dir = Path(self.temp_dir.name)
         watchlists_dir = artifacts_dir / "watchlists"
         watchlists_dir.mkdir(parents=True, exist_ok=True)
@@ -426,6 +428,43 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(dashboard["buy_risk_status"], "Low Risk")
         self.assertEqual(dashboard["pressure_status"], "Buying")
         self.assertEqual(dashboard["recent_vcp_signal_date"], "2025-03-24")
+
+    def test_get_chart_payload_uses_backend_cache_for_repeat_requests(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = self._long_price_frame()
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
+            return_value={"NVDA": frame.copy(), "SPY": frame.copy()},
+        ) as load_patch:
+            first = service.get_chart_payload("NVDA", period="6mo", as_of_date=dt.date(2025, 3, 24))
+            second = service.get_chart_payload("NVDA", period="6mo", as_of_date=dt.date(2025, 3, 24))
+
+        self.assertEqual(load_patch.call_count, 1)
+        self.assertEqual(first["candles"], second["candles"])
+        self.assertEqual(first["data_source"], "database")
+
+    def test_get_chart_payload_does_not_cache_empty_payloads(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
+            return_value={},
+        ) as load_patch:
+            first = service.get_chart_payload("NVDA", as_of_date=dt.date(2026, 5, 29))
+            second = service.get_chart_payload("NVDA", as_of_date=dt.date(2026, 5, 29))
+
+        self.assertEqual(load_patch.call_count, 2)
+        self.assertEqual(first["candles"], [])
+        self.assertEqual(second["candles"], [])
 
     def test_get_chart_fundamentals_payload_includes_rating_bundle(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")

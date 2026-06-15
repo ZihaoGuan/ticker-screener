@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import html
 from io import StringIO
@@ -7,8 +8,10 @@ import json
 from pathlib import Path
 import re
 import subprocess
-from typing import Any
 import logging
+import threading
+import time
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -57,9 +60,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_playwright.mjs"
 _YAHOO_OPTIONS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_options_playwright.mjs"
 _INSIDER_CACHE_TTL_HOURS = 12
+_CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
 _SCANNER_BOARD_CUTOFF_HOUR = 20
 _SCANNER_BOARD_CUTOFF_MINUTE = 30
+_chart_payload_cache: dict[tuple[str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
+_chart_payload_cache_lock = threading.Lock()
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
         "id": "weekly_rs",
@@ -242,6 +248,16 @@ class WatchlistService:
     ) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
         requested_as_of_date = as_of_date
+        cache_key = _build_chart_payload_cache_key(
+            ticker=normalized_ticker,
+            period=period,
+            as_of_date=as_of_date,
+            benchmark_ticker=self.benchmark_ticker,
+            market_data_source=self.market_data_source,
+        )
+        cached_payload = _read_chart_payload_cache(cache_key)
+        if cached_payload is not None:
+            return cached_payload
         chart_request = _resolve_chart_request(period=period, as_of_date=as_of_date)
         frame, benchmark_frame, data_source = self._load_chart_frames(
             ticker=normalized_ticker,
@@ -397,7 +413,7 @@ class WatchlistService:
                 if pd.notna(value):
                     weekly_rs_rating_points.append({"time": week_date.isoformat(), "value": float(value)})
 
-        return {
+        payload = {
             "ticker": normalized_ticker,
             "benchmark_ticker": self.benchmark_ticker,
             "period": period,
@@ -424,6 +440,9 @@ class WatchlistService:
             "vcs": vcs_snapshot.to_dict() if vcs_snapshot is not None else None,
             "sepa_dashboard": sepa_dashboard.to_dict() if sepa_dashboard is not None else None,
         }
+        if payload["candles"]:
+            _write_chart_payload_cache(cache_key, payload)
+        return payload
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
@@ -854,6 +873,46 @@ def _download_history_frame(*, ticker: str, start_date: dt.date, end_date: dt.da
         threads=False,
     )
     return _normalize_download_frame(history)
+
+
+def _build_chart_payload_cache_key(
+    *,
+    ticker: str,
+    period: str,
+    as_of_date: dt.date | None,
+    benchmark_ticker: str,
+    market_data_source: str,
+) -> tuple[str, str, str, str, str]:
+    return (
+        str(ticker or "").strip().upper(),
+        str(period or "18mo").strip().lower() or "18mo",
+        as_of_date.isoformat() if as_of_date else "latest",
+        str(benchmark_ticker or "SPY").strip().upper() or "SPY",
+        str(market_data_source or "").strip().lower() or "internet",
+    )
+
+
+def _read_chart_payload_cache(key: tuple[str, str, str, str, str]) -> dict[str, Any] | None:
+    now = time.time()
+    with _chart_payload_cache_lock:
+        cached_entry = _chart_payload_cache.get(key)
+        if cached_entry is None:
+            return None
+        expires_at, payload = cached_entry
+        if expires_at <= now:
+            _chart_payload_cache.pop(key, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _write_chart_payload_cache(key: tuple[str, str, str, str, str], payload: dict[str, Any]) -> None:
+    with _chart_payload_cache_lock:
+        _chart_payload_cache[key] = (time.time() + _CHART_PAYLOAD_CACHE_TTL_SECONDS, copy.deepcopy(payload))
+
+
+def _clear_chart_payload_cache() -> None:
+    with _chart_payload_cache_lock:
+        _chart_payload_cache.clear()
 
 
 def _chart_fundamentals_cache_is_complete(entry: dict[str, Any] | None) -> bool:
