@@ -1396,6 +1396,17 @@ function useJobStream(streamPath: string | null, enabled: boolean) {
     source.addEventListener("log", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as JobStreamLogEvent;
       setLines((current) => [...current, payload.line].slice(-200));
+      setJob((current) => {
+        if (!current) {
+          return current;
+        }
+        const currentLog = typeof current.log_tail === "string" ? current.log_tail : "";
+        const nextLog = currentLog ? `${currentLog}\n${payload.line}` : payload.line;
+        return {
+          ...current,
+          log_tail: nextLog.split("\n").slice(-200).join("\n"),
+        };
+      });
       setConnected(true);
     });
 
