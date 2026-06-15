@@ -69,6 +69,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("rti_{date_label}.json",),
         "legacy_summary_templates": ("rti_run_summary_{date_label}.json",),
     },
+    "sean_breakout": {
+        "stem_template": "sean_breakout_{date_label}",
+        "legacy_watchlist_templates": ("sean_breakout_{date_label}.json",),
+        "legacy_raw_templates": ("sean_breakout_{date_label}.json",),
+        "legacy_summary_templates": ("sean_breakout_run_summary_{date_label}.json",),
+    },
     "vcs_setup_stage": {
         "stem_template": "vcs_setup_stage_{date_label}",
         "legacy_watchlist_templates": ("vcs_setup_stage_{date_label}.json",),
@@ -269,6 +275,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("bb_squeeze", "bb_squeeze"),
     ("sepa_vcp", "sepa_vcp"),
     ("rti", "rti"),
+    ("sean_breakout", "sean_breakout"),
     ("vcs_setup_stage", "vcs_setup_stage"),
     ("vcs_critical_tightness", "vcs_critical_tightness"),
     ("vcp", "vcp"),

@@ -330,6 +330,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("bb_squeeze", action_ids)
         self.assertIn("sepa_vcp", action_ids)
         self.assertIn("rti", action_ids)
+        self.assertIn("sean_breakout", action_ids)
         self.assertIn("vcs_setup_stage", action_ids)
         self.assertIn("vcs_critical_tightness", action_ids)
         self.assertIn("base_detection", action_ids)

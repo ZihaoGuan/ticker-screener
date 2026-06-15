@@ -99,6 +99,11 @@ PIPELINES = (
         "filename": "rti_{date}.json",
     },
     {
+        "id": "sean_breakout",
+        "label": "Sean Breakout",
+        "filename": "sean_breakout_{date}.json",
+    },
+    {
         "id": "vcs_setup_stage",
         "label": "VCS Setup Stage",
         "filename": "vcs_setup_stage_{date}.json",
@@ -163,6 +168,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "bb_squeeze": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sepa_vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "rti": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "sean_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcs_setup_stage": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcs_critical_tightness": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "td9_bullish": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},

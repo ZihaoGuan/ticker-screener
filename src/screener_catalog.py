@@ -21,6 +21,7 @@ from .lost_21ema_screen import run_lost_21ema_screen
 from .macd_screen import find_recent_macd_hit
 from .near_200ma_screen import run_near_200ma_screen
 from .rti_screen import find_recent_rti_hit
+from .sean_breakout_screen import find_recent_sean_breakout_hit
 from .rsi_ma_bb_screen import find_recent_rsi_ma_bb_hit
 from .rs_screen import run_rs_screen
 from .sepa_vcp_screen import SEPA_HISTORY_DAYS, find_recent_sepa_vcp_hit
@@ -225,6 +226,27 @@ def _run_rti(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
             "signal_date": payload["signal_date"],
             "signal_kind": payload["signal_kind"],
             "rti_value": payload["rti_value"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_sean_breakout(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_sean_breakout_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "avg_volume_10": payload["avg_volume_10"],
+            "adr_pct_20": payload["adr_pct_20"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
@@ -681,6 +703,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=20,
             warmup_trading_days=5,
             evaluator=_run_rti,
+        ),
+        "sean_breakout": ScreenerSpec(
+            id="sean_breakout",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=90,
+            warmup_trading_days=20,
+            evaluator=_run_sean_breakout,
         ),
         "vcs_setup_stage": ScreenerSpec(
             id="vcs_setup_stage",

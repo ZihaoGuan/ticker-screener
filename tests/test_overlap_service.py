@@ -59,6 +59,9 @@ class OverlapSummaryTests(unittest.TestCase):
         rti_root = self.artifacts_dir / "screeners" / date_label / "rti"
         rti_root.mkdir(parents=True, exist_ok=True)
         (rti_root / "watchlist.json").write_text(json.dumps([{"ticker": "CRWD"}]), encoding="utf-8")
+        sean_breakout_root = self.artifacts_dir / "screeners" / date_label / "sean_breakout"
+        sean_breakout_root.mkdir(parents=True, exist_ok=True)
+        (sean_breakout_root / "watchlist.json").write_text(json.dumps([{"ticker": "APP"}]), encoding="utf-8")
         vcs_root = self.artifacts_dir / "screeners" / date_label / "vcs_critical_tightness"
         vcs_root.mkdir(parents=True, exist_ok=True)
         (vcs_root / "watchlist.json").write_text(json.dumps([{"ticker": "PLTR"}]), encoding="utf-8")
@@ -71,12 +74,14 @@ class OverlapSummaryTests(unittest.TestCase):
         self.assertIn("weekly_tight_close_breakout", pipeline_ids)
         self.assertIn("bb_squeeze", pipeline_ids)
         self.assertIn("rti", pipeline_ids)
+        self.assertIn("sean_breakout", pipeline_ids)
         self.assertIn("vcs_critical_tightness", pipeline_ids)
         self.assertEqual(payload["pipeline_counts"]["weekly_rs"], 1)
         self.assertEqual(payload["pipeline_counts"]["base_detection"], 1)
         self.assertEqual(payload["pipeline_counts"]["weekly_tight_close_breakout"], 1)
         self.assertEqual(payload["pipeline_counts"]["bb_squeeze"], 1)
         self.assertEqual(payload["pipeline_counts"]["rti"], 1)
+        self.assertEqual(payload["pipeline_counts"]["sean_breakout"], 1)
         self.assertEqual(payload["pipeline_counts"]["vcs_critical_tightness"], 1)
 
 

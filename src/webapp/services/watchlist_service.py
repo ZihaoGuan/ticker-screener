@@ -86,6 +86,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "sean_breakout",
+        "strategy_id": "sean_breakout",
+        "label": "Sean Breakout",
+        "description": "Daily leaders closing above 21 and 50 EMA with price, volume, and ADR thresholds already cleared.",
+        "timeframe": "Daily",
+        "accent": "amber",
+    },
+    {
         "id": "fearzone",
         "strategy_id": "fearzone",
         "label": "Fearzone",

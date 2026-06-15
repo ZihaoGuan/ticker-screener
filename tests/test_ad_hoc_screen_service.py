@@ -816,6 +816,51 @@ def _bb_squeeze_frame(*, squeeze: bool, positive_cci: bool) -> pd.DataFrame:
     )
 
 
+def _sean_breakout_frame(*, close_ok: bool = True, ema_ok: bool = True, volume_ok: bool = True, adr_ok: bool = True) -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-02", periods=80, freq="B")
+    close_values: list[float] = []
+    open_values: list[float] = []
+    high_values: list[float] = []
+    low_values: list[float] = []
+    volume_values: list[float] = []
+
+    for idx, _date in enumerate(index):
+        base_close = 3.4 + (idx * 0.08)
+        if not close_ok and idx == len(index) - 1:
+            close_value = 2.95
+        elif not ema_ok and idx >= len(index) - 6:
+            close_value = 6.6 - ((idx - (len(index) - 6)) * 0.45)
+        else:
+            close_value = base_close
+
+        if adr_ok:
+            bar_range = 0.42 + ((idx % 3) * 0.03)
+        else:
+            bar_range = 0.10 + ((idx % 2) * 0.01)
+
+        open_value = close_value - (bar_range * 0.15)
+        high_value = max(open_value, close_value) + (bar_range * 0.45)
+        low_value = min(open_value, close_value) - (bar_range * 0.40)
+        volume_value = 720_000.0 if volume_ok else 420_000.0
+
+        close_values.append(close_value)
+        open_values.append(open_value)
+        high_values.append(high_value)
+        low_values.append(low_value)
+        volume_values.append(volume_value)
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high_values,
+            "Low": low_values,
+            "Close": close_values,
+            "Volume": volume_values,
+        },
+        index=index,
+    )
+
+
 def _sepa_vcp_stock_frame() -> pd.DataFrame:
     index = pd.date_range(start="2024-01-02", periods=320, freq="B")
     close_values: list[float] = []
@@ -1502,6 +1547,29 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "bb_squeeze")
         self.assertEqual(payload["screeners"][0]["hit"]["signal_kind"], "positive_cci")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_sean_breakout_catalog_entry(self) -> None:
+        ticker_frame = _sean_breakout_frame()
+        benchmark_frame = _frame("2026-01-02", 120)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 4, 23),
+                screener_ids=["sean_breakout"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "sean_breakout")
+        self.assertEqual(payload["screeners"][0]["hit"]["signal_kind"], "sean_breakout")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_supports_sepa_vcp_catalog_entry(self) -> None:

@@ -92,6 +92,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("bb_squeeze", "bb_squeeze", "BB Squeeze"),
         ("sepa_vcp", "sepa_vcp", "SEPA VCP"),
         ("rti", "rti", "RTI"),
+        ("sean_breakout", "sean_breakout", "Sean Breakout"),
         ("vcs_critical_tightness", "vcs", "VCS"),
         ("vcs_setup_stage", "vcs", "VCS"),
         ("base_detection", "base_detection", "Base Detection"),
