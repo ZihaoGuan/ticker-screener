@@ -1266,6 +1266,12 @@ class RunService:
         enriched = self._attach_child_jobs(jobs)
         return enriched[0]
 
+    def get_child_job(self, child_job_run_id: int) -> dict[str, Any]:
+        row = self.history_repository.get_job_run(child_job_run_id)
+        if row is None or row.get("parent_job_run_id") is None:
+            raise ValueError(f"Unknown child job: {child_job_run_id}")
+        return self._serialize_child_job_run(row)
+
     def precheck(self, action_id: str, *, options: dict[str, Any] | None = None) -> dict[str, Any]:
         action = self._actions.get(action_id)
         if action is None:

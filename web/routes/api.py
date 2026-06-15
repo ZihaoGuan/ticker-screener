@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import json
+from pathlib import Path
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.webapp.access_control import Principal
 from src.webapp.services.admin_service import AdminService
@@ -50,6 +53,181 @@ from web.dependencies import (
 
 
 router = APIRouter(prefix="/api", tags=["api"])
+
+_JOB_STREAM_POLL_SECONDS = 1.0
+_JOB_STREAM_HEARTBEAT_SECONDS = 15.0
+_JOB_STREAM_MAX_CHUNK_BYTES = 16_384
+
+
+def _format_sse(event: str, data: dict[str, object], *, event_id: str | None = None) -> str:
+    lines: list[str] = []
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+    lines.append(f"event: {event}")
+    payload = json.dumps(data, separators=(",", ":"))
+    for line in payload.splitlines():
+        lines.append(f"data: {line}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _coerce_stream_cursor(cursor: int | None, last_event_id: str | None) -> int:
+    if last_event_id is not None:
+        try:
+            return max(0, int(last_event_id))
+        except (TypeError, ValueError):
+            pass
+    if cursor is None:
+        return 0
+    return max(0, int(cursor))
+
+
+def _resolve_job_log_path(service: RunService, job: dict[str, object]) -> Path | None:
+    raw_path = str(job.get("log_file") or "").strip()
+    if not raw_path:
+        return None
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = (service.project_root / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    try:
+        candidate.relative_to(service.project_root.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.exists() and candidate.is_file() else None
+
+
+def _current_log_cursor(log_path: Path | None) -> int:
+    if log_path is None:
+        return 0
+    try:
+        return max(0, int(log_path.stat().st_size))
+    except OSError:
+        return 0
+
+
+def _read_job_log_update(log_path: Path | None, cursor: int, pending_fragment: str) -> tuple[int, str, list[str]]:
+    if log_path is None:
+        return cursor, pending_fragment, []
+    try:
+        with log_path.open("rb") as handle:
+            handle.seek(cursor)
+            chunk = handle.read(_JOB_STREAM_MAX_CHUNK_BYTES)
+            next_cursor = int(handle.tell())
+    except OSError:
+        return cursor, pending_fragment, []
+    if not chunk:
+        return cursor, pending_fragment, []
+    text = pending_fragment + chunk.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    next_fragment = ""
+    if text and not text.endswith(("\n", "\r")):
+        if lines:
+            next_fragment = lines.pop()
+        else:
+            next_fragment = text
+    return next_cursor, next_fragment, lines
+
+
+def _job_stream_signature(job: dict[str, object]) -> str:
+    payload = {
+        "status": job.get("status"),
+        "return_code": job.get("return_code"),
+        "finished_at": job.get("finished_at"),
+        "progress_current": job.get("progress_current"),
+        "progress_total": job.get("progress_total"),
+        "progress_percent": job.get("progress_percent"),
+        "progress_label": job.get("progress_label"),
+        "success_count": job.get("success_count"),
+        "watchlist_file": job.get("watchlist_file"),
+        "summary_file": job.get("summary_file"),
+        "raw_results_file": job.get("raw_results_file"),
+        "child_job_summary": job.get("child_job_summary"),
+    }
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
+def _build_job_stream_response(
+    *,
+    request: Request,
+    service: RunService,
+    stream_key: str,
+    initial_job: dict[str, object],
+    cursor: int | None,
+    last_event_id: str | None,
+    resolver,
+) -> StreamingResponse:
+    async def event_stream():
+        current_job = initial_job
+        log_path = _resolve_job_log_path(service, current_job)
+        has_resume_cursor = cursor is not None or last_event_id is not None
+        resume_cursor = _coerce_stream_cursor(cursor, last_event_id)
+        pending_fragment = ""
+        current_cursor = resume_cursor if has_resume_cursor else _current_log_cursor(log_path)
+        recent_lines = [] if has_resume_cursor else [line for line in str(current_job.get("log_tail") or "").splitlines() if line]
+        yield _format_sse(
+            "snapshot",
+            {"job": current_job, "cursor": current_cursor, "recent_lines": recent_lines},
+            event_id=str(current_cursor),
+        )
+        last_signature = _job_stream_signature(current_job)
+        last_heartbeat_at = asyncio.get_running_loop().time()
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            current_job = resolver()
+            log_path = _resolve_job_log_path(service, current_job)
+            next_cursor, pending_fragment, new_lines = _read_job_log_update(log_path, current_cursor, pending_fragment)
+            current_cursor = next_cursor
+            for line in new_lines:
+                yield _format_sse(
+                    "log",
+                    {"job_id": stream_key, "cursor": current_cursor, "line": line},
+                    event_id=str(current_cursor),
+                )
+
+            next_signature = _job_stream_signature(current_job)
+            if next_signature != last_signature:
+                yield _format_sse(
+                    "status",
+                    {"job": current_job, "cursor": current_cursor},
+                    event_id=str(current_cursor),
+                )
+                last_signature = next_signature
+
+            if str(current_job.get("status") or "") not in {"queued", "running"}:
+                if pending_fragment:
+                    yield _format_sse(
+                        "log",
+                        {"job_id": stream_key, "cursor": current_cursor, "line": pending_fragment},
+                        event_id=str(current_cursor),
+                    )
+                    pending_fragment = ""
+                yield _format_sse(
+                    "eof",
+                    {"job": current_job, "cursor": current_cursor},
+                    event_id=str(current_cursor),
+                )
+                break
+
+            now = asyncio.get_running_loop().time()
+            if now - last_heartbeat_at >= _JOB_STREAM_HEARTBEAT_SECONDS:
+                yield _format_sse("heartbeat", {"job_id": stream_key, "cursor": current_cursor}, event_id=str(current_cursor))
+                last_heartbeat_at = now
+
+            await asyncio.sleep(_JOB_STREAM_POLL_SECONDS)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _record_audit(
@@ -217,6 +395,54 @@ def job_detail(job_id: str, service: RunService = Depends(get_run_service), _: P
         return JSONResponse(service.get_job(job_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/jobs/{job_id}/stream")
+async def job_detail_stream(
+    request: Request,
+    job_id: str,
+    cursor: int | None = Query(default=None),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_run_screeners),
+) -> StreamingResponse:
+    try:
+        initial_job = service.get_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _build_job_stream_response(
+        request=request,
+        service=service,
+        stream_key=job_id,
+        initial_job=initial_job,
+        cursor=cursor,
+        last_event_id=last_event_id,
+        resolver=lambda: service.get_job(job_id),
+    )
+
+
+@router.get("/child-jobs/{child_job_run_id}/stream")
+async def child_job_detail_stream(
+    request: Request,
+    child_job_run_id: int,
+    cursor: int | None = Query(default=None),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    service: RunService = Depends(get_run_service),
+    _: Principal = Depends(require_run_screeners),
+) -> StreamingResponse:
+    try:
+        initial_job = service.get_child_job(child_job_run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _build_job_stream_response(
+        request=request,
+        service=service,
+        stream_key=str(child_job_run_id),
+        initial_job=initial_job,
+        cursor=cursor,
+        last_event_id=last_event_id,
+        resolver=lambda: service.get_child_job(child_job_run_id),
+    )
 
 
 @router.post("/jobs/{job_id}/cancel", response_class=JSONResponse)

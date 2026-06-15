@@ -797,6 +797,35 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(payload[0]["child_jobs"][0]["progress_total"], 10)
         self.assertEqual(payload[0]["child_jobs"][0]["progress_percent"], 20)
 
+    def test_get_child_job_serializes_child_run(self) -> None:
+        self.service.history_repository.get_job_run = lambda job_run_id: {  # type: ignore[method-assign]
+            "id": job_run_id,
+            "parent_job_run_id": 101,
+            "job_type": "screen_run",
+            "job_name": "Run RS (2026-05-31)",
+            "status": "success",
+            "request_payload": {"strategy_id": "rs", "run_date": "2026-05-31", "command": "python scripts/run_rs_screen.py"},
+            "result_payload": {
+                "strategy_id": "rs",
+                "run_date": "2026-05-31",
+                "screen_run_id": 77,
+                "success_count": 3,
+                "log_tail": "line one\n[2/10] screening MSFT | passed=3\nline two",
+                "log_file": "/tmp/rs.log",
+            },
+            "artifact_path": "/tmp/summary.json",
+            "started_at": dt.datetime(2026, 6, 1, 0, 0, tzinfo=dt.timezone.utc),
+            "finished_at": dt.datetime(2026, 6, 1, 0, 1, tzinfo=dt.timezone.utc),
+            "created_at": dt.datetime(2026, 6, 1, 0, 0, tzinfo=dt.timezone.utc),
+        }
+
+        payload = self.service.get_child_job(501)
+
+        self.assertEqual(payload["job_run_id"], 501)
+        self.assertEqual(payload["strategy_id"], "rs")
+        self.assertEqual(payload["screen_run_id"], 77)
+        self.assertEqual(payload["log_file"], "/tmp/rs.log")
+
     def test_precheck_reports_db_ready_vs_fallback(self) -> None:
         self.service.history_repository.is_configured = lambda: True  # type: ignore[method-assign]
         original_load_app_config = run_service_module.load_app_config

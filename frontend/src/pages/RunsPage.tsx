@@ -220,6 +220,16 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     () => selectedJob?.child_jobs.find((job) => job.job_run_id === selectedChildJobId) ?? null,
     [selectedChildJobId, selectedJob],
   );
+  const liveStreamPath = useMemo(() => {
+    if (selectedChildJob?.job_run_id != null) {
+      return `/api/child-jobs/${selectedChildJob.job_run_id}/stream`;
+    }
+    if (selectedJob) {
+      return `/api/jobs/${selectedJob.job_id}/stream`;
+    }
+    return null;
+  }, [selectedChildJob, selectedJob]);
+  const liveJobStream = useJobStream(liveStreamPath, Boolean(liveStreamPath));
   const childJobGroups = useMemo(() => groupChildJobsByDate(selectedJob?.child_jobs ?? []), [selectedJob]);
   const expandedBatchDate = useMemo(
     () => (selectedJob ? expandedBatchDateByJobId[selectedJob.job_id] ?? null : null),
@@ -229,13 +239,28 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     if (selectedChildJob) {
       return selectedChildJob.log_tail || "No screener log yet.";
     }
+    if (liveJobStream.lines.length > 0) {
+      return liveJobStream.lines.join("\n");
+    }
     if (selectedJob && isHierarchicalBatchJob(selectedJob.action_id)) {
       return childJobGroups.length > 0
         ? "Select date row, then click screener row to view separate log."
         : "Waiting for screener subtasks to attach to this batch run.";
     }
     return selectedJob?.log_tail ?? "No job log yet.";
-  }, [childJobGroups.length, selectedChildJob, selectedJob]);
+  }, [childJobGroups.length, liveJobStream.lines, selectedChildJob, selectedJob]);
+  const displayedSelectedJob = useMemo(() => {
+    if (selectedJob && liveJobStream.job && "job_id" in liveJobStream.job && liveJobStream.job.job_id === selectedJob.job_id) {
+      return liveJobStream.job;
+    }
+    return selectedJob;
+  }, [liveJobStream.job, selectedJob]);
+  const displayedSelectedChildJob = useMemo(() => {
+    if (selectedChildJob && liveJobStream.job && "job_run_id" in liveJobStream.job && liveJobStream.job.job_run_id === selectedChildJob.job_run_id) {
+      return liveJobStream.job;
+    }
+    return selectedChildJob;
+  }, [liveJobStream.job, selectedChildJob]);
   const selectedScheduledAction = useMemo(
     () => availableScheduledActions.find((item) => item.id === scheduleActionId) ?? null,
     [availableScheduledActions, scheduleActionId],
@@ -1265,14 +1290,15 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
             <div className="runs-panel-aside">
               <span className="eyebrow">
                 {selectedChildJob
-                  ? `${selectedChildJob.strategy_id || selectedChildJob.label} · ${selectedChildJob.success_count} hits · ${formatDuration(selectedChildJob.duration_seconds)}`
-                  : selectedJob && isHierarchicalBatchJob(selectedJob.action_id) && expandedBatchDate
+                  ? `${liveJobDisplayLabel(displayedSelectedChildJob)} · ${displayedSelectedChildJob?.success_count ?? 0} hits · ${formatDuration(displayedSelectedChildJob?.duration_seconds ?? 0)}`
+                  : displayedSelectedJob && isHierarchicalBatchJob(displayedSelectedJob.action_id) && expandedBatchDate
                     ? `${expandedBatchDate} · choose screener for separate log`
-                  : selectedJob
-                    ? `${selectedJob.label} · ${selectedJob.success_count} hits · ${formatDuration(selectedJob.duration_seconds)}`
+                  : displayedSelectedJob
+                    ? `${displayedSelectedJob.label} · ${displayedSelectedJob.success_count} hits · ${formatDuration(displayedSelectedJob.duration_seconds)}`
                     : "Auto-refresh: 4s"}
               </span>
-              {selectedChildJob ? <StatusPill status={selectedChildJob.status} /> : selectedJob ? <StatusPill status={selectedJob.status} /> : null}
+              {liveJobStream.connected ? <span className="status-pill status-running">LIVE</span> : null}
+              {selectedChildJob ? <StatusPill status={displayedSelectedChildJob?.status ?? selectedChildJob.status} /> : displayedSelectedJob ? <StatusPill status={displayedSelectedJob.status} /> : null}
             </div>
           }
         >
@@ -1295,6 +1321,91 @@ function isoDateDaysAgo(daysAgo: number): string {
   const value = new Date();
   value.setDate(value.getDate() - daysAgo);
   return value.toISOString().slice(0, 10);
+}
+
+type LiveJob = JobsResponse["jobs"][number] | JobsResponse["jobs"][number]["child_jobs"][number];
+
+type JobStreamSnapshotEvent = {
+  job: LiveJob;
+  cursor: number;
+  recent_lines: string[];
+};
+
+type JobStreamLogEvent = {
+  job_id: string;
+  cursor: number;
+  line: string;
+};
+
+type JobStreamStatusEvent = {
+  job: LiveJob;
+  cursor: number;
+};
+
+function useJobStream(streamPath: string | null, enabled: boolean) {
+  const [job, setJob] = useState<LiveJob | null>(null);
+  const [lines, setLines] = useState<string[]>([]);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    setJob(null);
+    setLines([]);
+    setConnected(false);
+
+    if (!streamPath || !enabled) {
+      return;
+    }
+
+    const url = new URL(streamPath, window.location.origin);
+    const source = new EventSource(url.toString(), { withCredentials: true });
+
+    source.addEventListener("snapshot", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as JobStreamSnapshotEvent;
+      setJob(payload.job);
+      setLines(payload.recent_lines ?? []);
+      setConnected(true);
+    });
+
+    source.addEventListener("log", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as JobStreamLogEvent;
+      setLines((current) => [...current, payload.line].slice(-200));
+      setConnected(true);
+    });
+
+    source.addEventListener("status", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as JobStreamStatusEvent;
+      setJob(payload.job);
+      setConnected(true);
+    });
+
+    source.addEventListener("eof", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as JobStreamStatusEvent;
+      setJob(payload.job);
+      setConnected(false);
+      source.close();
+    });
+
+    source.onerror = () => {
+      setConnected(false);
+    };
+
+    return () => {
+      source.close();
+      setConnected(false);
+    };
+  }, [enabled, streamPath]);
+
+  return { job, lines, connected };
+}
+
+function liveJobDisplayLabel(job: LiveJob | null): string {
+  if (!job) {
+    return "";
+  }
+  if ("strategy_id" in job) {
+    return job.strategy_id || job.label;
+  }
+  return job.label;
 }
 
 function isHierarchicalBatchJob(actionId: string): boolean {

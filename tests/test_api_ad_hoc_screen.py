@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
+import tempfile
 import unittest
 
 try:
@@ -38,12 +40,84 @@ class _FakeAdHocService:
 
 
 class _FakeRunService:
+    def __init__(self) -> None:
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self.project_root = Path(self._temp_dir.name)
+        log_dir = self.project_root / "artifacts" / "status"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_path = log_dir / "rs-job.log"
+        self.log_path.write_text("line one\nline two\n", encoding="utf-8")
+
     def launch(self, action_id: str, *, options: dict[str, object] | None = None):
         _ = options
         return f"{action_id}-job"
 
     def list_actions(self):
         return [{"id": "rs", "label": "Run RS"}]
+
+    def get_job(self, job_id: str):
+        return {
+            "job_id": job_id,
+            "action_id": "rs",
+            "label": "Run RS",
+            "status": "success",
+            "command": "python scripts/run_rs_screen.py",
+            "started_at": "2026-06-15T00:00:00+00:00",
+            "finished_at": "2026-06-15T00:01:00+00:00",
+            "return_code": 0,
+            "log_tail": "line one\nline two",
+            "progress_current": 2,
+            "progress_total": 2,
+            "progress_percent": 100,
+            "progress_label": "Completed",
+            "success_count": 3,
+            "watchlist_file": "",
+            "watchlist_stem": "",
+            "watchlist_url": "",
+            "summary_file": "",
+            "raw_results_file": "",
+            "scan_target": "",
+            "job_run_id": None,
+            "screen_run_id": None,
+            "backtest_run_id": None,
+            "cancel_requested": False,
+            "execution_mode": "local",
+            "worker_name": "",
+            "target_worker": "",
+            "duration_seconds": 60,
+            "child_jobs": [],
+            "child_job_summary": {"total": 0, "running": 0, "success": 0, "failed": 0, "cancelled": 0},
+            "log_file": str(self.log_path),
+        }
+
+    def get_child_job(self, child_job_run_id: int):
+        return {
+            "job_run_id": child_job_run_id,
+            "parent_job_run_id": 1,
+            "job_type": "screen_run",
+            "label": "Run RS (2026-06-15)",
+            "status": "success",
+            "started_at": "2026-06-15T00:00:00+00:00",
+            "finished_at": "2026-06-15T00:01:00+00:00",
+            "artifact_path": "",
+            "command": "python scripts/run_rs_screen.py",
+            "strategy_id": "rs",
+            "run_date": "2026-06-15",
+            "screen_run_id": 77,
+            "success_count": 3,
+            "summary_file": "",
+            "watchlist_file": "",
+            "raw_results_file": "",
+            "log_tail": "line one\nline two",
+            "log_file": str(self.log_path),
+            "message": "Done",
+            "skipped": False,
+            "progress_current": 2,
+            "progress_total": 2,
+            "progress_percent": 100,
+            "progress_label": "Completed",
+            "duration_seconds": 60,
+        }
 
 
 class _FakeScreenerHistoryService:
@@ -716,6 +790,42 @@ class ApiAdHocScreenTests(unittest.TestCase):
         response = self.client.post("/api/runs/rs", json={})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["job_id"], "rs-job")
+
+    def test_premium_can_stream_job_log(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=2,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+
+        with self.client.stream("GET", "/api/jobs/rs-job/stream?cursor=0") as response:
+            body = response.text
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: snapshot", body)
+        self.assertIn("event: log", body)
+        self.assertIn('"line":"line one"', body)
+        self.assertIn('"line":"line two"', body)
+        self.assertIn("event: eof", body)
+
+    def test_premium_can_stream_child_job_log(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=2,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+
+        with self.client.stream("GET", "/api/child-jobs/501/stream?cursor=0") as response:
+            body = response.text
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: snapshot", body)
+        self.assertIn("event: log", body)
+        self.assertIn('"line":"line one"', body)
+        self.assertIn('"line":"line two"', body)
+        self.assertIn("event: eof", body)
 
     def test_premium_cannot_access_admin_users(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
