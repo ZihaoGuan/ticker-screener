@@ -87,6 +87,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [isLoadingBacktestDetail, setIsLoadingBacktestDetail] = useState(false);
   const [batchRunNotice, setBatchRunNotice] = useState("");
   const consoleRef = useRef<HTMLPreElement | null>(null);
+  const shouldAutoScrollConsoleRef = useRef(true);
 
   const loadScheduledJobs = () => {
     if (!canManageSchedules) {
@@ -292,13 +293,29 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     if (!element) {
       return;
     }
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-    const shouldStickToBottom = liveJobStream.connected || distanceFromBottom <= 48;
-    if (!shouldStickToBottom) {
+    if (!shouldAutoScrollConsoleRef.current) {
       return;
     }
     element.scrollTop = element.scrollHeight;
-  }, [liveJobStream.connected, selectedChildJobId, selectedJobId, selectedJobLog]);
+  }, [selectedJobLog]);
+
+  useEffect(() => {
+    shouldAutoScrollConsoleRef.current = true;
+    const element = consoleRef.current;
+    if (!element) {
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+  }, [selectedChildJobId, selectedJobId]);
+
+  const handleConsoleScroll = () => {
+    const element = consoleRef.current;
+    if (!element) {
+      return;
+    }
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    shouldAutoScrollConsoleRef.current = distanceFromBottom <= 48;
+  };
 
   useEffect(() => {
     if (!selectedJob?.child_jobs.length) {
@@ -1188,7 +1205,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                 </div>
               </div>
               <div className="screeners-console-shell">
-                <pre ref={consoleRef} className="console-surface">{selectedJobLog}</pre>
+                <pre ref={consoleRef} className="console-surface" onScroll={handleConsoleScroll}>{selectedJobLog}</pre>
                 <div className="screeners-console-meta">
                   <div className="screeners-console-meta-block">
                     <span className="eyebrow">Label</span>
@@ -1210,7 +1227,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
               </div>
             </div>
           ) : (
-            <pre ref={consoleRef} className="console-surface">{selectedJobLog}</pre>
+            <pre ref={consoleRef} className="console-surface" onScroll={handleConsoleScroll}>{selectedJobLog}</pre>
           )}
         </Panel>
         </div>

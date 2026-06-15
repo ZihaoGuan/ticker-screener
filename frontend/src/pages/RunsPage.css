@@ -316,7 +316,7 @@
   background: #09090b;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 140px;
-  min-height: 320px;
+  height: 420px;
   overflow: hidden;
 }
 
@@ -325,7 +325,9 @@
   border: 0;
   border-radius: 0;
   color: #67e8a5;
-  min-height: 320px;
+  height: 420px;
+  max-height: 420px;
+  overflow: auto;
 }
 
 .screeners-console-meta {
