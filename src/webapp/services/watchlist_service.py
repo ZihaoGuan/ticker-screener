@@ -245,6 +245,7 @@ class WatchlistService:
         period: str = "18mo",
         *,
         as_of_date: dt.date | None = None,
+        include_setup_markers: bool = False,
     ) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
         requested_as_of_date = as_of_date
@@ -254,6 +255,7 @@ class WatchlistService:
             as_of_date=as_of_date,
             benchmark_ticker=self.benchmark_ticker,
             market_data_source=self.market_data_source,
+            include_setup_markers=include_setup_markers,
         )
         cached_payload = _read_chart_payload_cache(cache_key)
         if cached_payload is not None:
@@ -313,11 +315,15 @@ class WatchlistService:
             visible_dates=visible_dates,
         )
         vcs_snapshot = latest_vcs_snapshot(frame)
-        setup_markers = _compute_ftd_sweep_markers(
-            frame=frame,
-            visible_dates=visible_dates,
-            ticker=normalized_ticker,
-            benchmark_ticker=self.benchmark_ticker,
+        setup_markers = (
+            _compute_ftd_sweep_markers(
+                frame=frame,
+                visible_dates=visible_dates,
+                ticker=normalized_ticker,
+                benchmark_ticker=self.benchmark_ticker,
+            )
+            if include_setup_markers
+            else []
         )
         if benchmark_frame is not None and not benchmark_frame.empty:
             benchmark_frame = benchmark_frame.sort_index()
@@ -882,17 +888,19 @@ def _build_chart_payload_cache_key(
     as_of_date: dt.date | None,
     benchmark_ticker: str,
     market_data_source: str,
-) -> tuple[str, str, str, str, str]:
+    include_setup_markers: bool,
+) -> tuple[str, str, str, str, str, str]:
     return (
         str(ticker or "").strip().upper(),
         str(period or "18mo").strip().lower() or "18mo",
         as_of_date.isoformat() if as_of_date else "latest",
         str(benchmark_ticker or "SPY").strip().upper() or "SPY",
         str(market_data_source or "").strip().lower() or "internet",
+        "setup-markers" if include_setup_markers else "base",
     )
 
 
-def _read_chart_payload_cache(key: tuple[str, str, str, str, str]) -> dict[str, Any] | None:
+def _read_chart_payload_cache(key: tuple[str, str, str, str, str, str]) -> dict[str, Any] | None:
     now = time.time()
     with _chart_payload_cache_lock:
         cached_entry = _chart_payload_cache.get(key)
@@ -905,7 +913,7 @@ def _read_chart_payload_cache(key: tuple[str, str, str, str, str]) -> dict[str, 
         return copy.deepcopy(payload)
 
 
-def _write_chart_payload_cache(key: tuple[str, str, str, str, str], payload: dict[str, Any]) -> None:
+def _write_chart_payload_cache(key: tuple[str, str, str, str, str, str], payload: dict[str, Any]) -> None:
     with _chart_payload_cache_lock:
         _chart_payload_cache[key] = (time.time() + _CHART_PAYLOAD_CACHE_TTL_SECONDS, copy.deepcopy(payload))
 

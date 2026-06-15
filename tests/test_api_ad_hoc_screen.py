@@ -385,7 +385,14 @@ class _FakeWatchlistService:
     def get_watchlist_detail(self, stem: str):
         return {"stem": stem, "entry_count": 0, "entries": []}
 
-    def get_chart_payload(self, ticker: str, period: str = "18mo", *, as_of_date: dt.date | None = None):
+    def get_chart_payload(
+        self,
+        ticker: str,
+        period: str = "18mo",
+        *,
+        as_of_date: dt.date | None = None,
+        include_setup_markers: bool = False,
+    ):
         return {
             "ticker": ticker.upper(),
             "benchmark_ticker": "SPY",
@@ -411,6 +418,7 @@ class _FakeWatchlistService:
             },
             "rs_line": [],
             "rs_markers": [],
+            "setup_markers": [{"time": "2026-05-30", "kind": "ftd_sweep_breakout", "label": "FTD Sweep"}] if include_setup_markers else [],
             "fearzone_panel": {"rows": [], "signals": []},
         }
 

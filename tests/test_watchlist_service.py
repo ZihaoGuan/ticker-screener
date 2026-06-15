@@ -466,6 +466,50 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(first["candles"], [])
         self.assertEqual(second["candles"], [])
 
+    def test_get_chart_payload_skips_setup_markers_by_default(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = self._long_price_frame()
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
+            return_value={"NVDA": frame.copy(), "SPY": frame.copy()},
+        ), patch(
+            "src.webapp.services.watchlist_service._compute_ftd_sweep_markers",
+        ) as markers_patch:
+            payload = service.get_chart_payload("NVDA", period="6mo", as_of_date=dt.date(2025, 3, 24))
+
+        markers_patch.assert_not_called()
+        self.assertEqual(payload["setup_markers"], [])
+
+    def test_get_chart_payload_includes_setup_markers_when_requested(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = self._long_price_frame()
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
+            return_value={"NVDA": frame.copy(), "SPY": frame.copy()},
+        ), patch(
+            "src.webapp.services.watchlist_service._compute_ftd_sweep_markers",
+            return_value=[{"time": "2025-03-24", "kind": "ftd_sweep_breakout", "label": "FTD Sweep"}],
+        ) as markers_patch:
+            payload = service.get_chart_payload(
+                "NVDA",
+                period="6mo",
+                as_of_date=dt.date(2025, 3, 24),
+                include_setup_markers=True,
+            )
+
+        markers_patch.assert_called_once()
+        self.assertEqual(payload["setup_markers"][0]["kind"], "ftd_sweep_breakout")
+
     def test_get_chart_fundamentals_payload_includes_rating_bundle(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         with patch(

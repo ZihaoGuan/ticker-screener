@@ -101,7 +101,11 @@ export function ChartsPage() {
     if (requestedDate) {
       query.set("asOfDate", requestedDate);
     }
-    const cacheKey = buildChartCacheKey("payload", requestedTicker, requestedDate || "latest");
+    if (selectedSetups.ftd_sweep) {
+      query.set("includeSetupMarkers", "true");
+    }
+    const payloadCacheSuffix = `${requestedDate || "latest"}:${selectedSetups.ftd_sweep ? "setup-markers" : "base"}`;
+    const cacheKey = buildChartCacheKey("payload", requestedTicker, payloadCacheSuffix);
     const cached = refreshNonce === 0 ? readChartCache<WatchlistChartResponse>(cacheKey) : null;
     if (cached && hasUsableChartData(cached)) {
       setPayload(cached);
@@ -134,7 +138,7 @@ export function ChartsPage() {
         setNotice(error instanceof Error ? error.message : "Failed to load chart.");
       })
       .finally(() => setIsLoading(false));
-  }, [refreshNonce, requestedDate, requestedTicker]);
+  }, [refreshNonce, requestedDate, requestedTicker, selectedSetups.ftd_sweep]);
 
   useEffect(() => {
     if (!requestedTicker) {
