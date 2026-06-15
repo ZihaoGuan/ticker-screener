@@ -85,16 +85,40 @@ def _resolve_job_log_path(service: RunService, job: dict[str, object]) -> Path |
     raw_path = str(job.get("log_file") or "").strip()
     if not raw_path:
         return None
-    candidate = Path(raw_path)
-    if not candidate.is_absolute():
-        candidate = (service.project_root / candidate).resolve()
+    configured_artifacts_dir = service.artifacts_dir.resolve()
+    allowed_roots = [service.project_root.resolve(), configured_artifacts_dir]
+    raw_candidate = Path(raw_path)
+    candidate_options: list[Path] = []
+
+    if raw_candidate.is_absolute():
+        candidate_options.append(raw_candidate.resolve())
+        raw_parts = raw_candidate.parts
+        artifacts_name = configured_artifacts_dir.name
+        if len(raw_parts) >= 2 and raw_parts[1] == artifacts_name:
+            candidate_options.append((configured_artifacts_dir / Path(*raw_parts[2:])).resolve())
     else:
-        candidate = candidate.resolve()
-    try:
-        candidate.relative_to(service.project_root.resolve())
-    except ValueError:
-        return None
-    return candidate if candidate.exists() and candidate.is_file() else None
+        candidate_options.append((service.project_root / raw_candidate).resolve())
+        candidate_options.append((configured_artifacts_dir / raw_candidate).resolve())
+
+    for candidate in candidate_options:
+        try:
+            if not any(candidate.is_relative_to(root) for root in allowed_roots):
+                continue
+        except AttributeError:
+            try:
+                candidate.relative_to(service.project_root.resolve())
+                inside_allowed_root = True
+            except ValueError:
+                try:
+                    candidate.relative_to(configured_artifacts_dir)
+                    inside_allowed_root = True
+                except ValueError:
+                    inside_allowed_root = False
+            if not inside_allowed_root:
+                continue
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
 
 
 def _current_log_cursor(log_path: Path | None) -> int:

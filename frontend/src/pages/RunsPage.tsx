@@ -246,27 +246,27 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   );
   const selectedJobLog = useMemo(() => {
     const liveStreamJob = liveJobStream.job;
-    const liveChildLog =
+    const liveChildSnapshotLog =
       selectedChildJob && liveStreamJob && "job_run_id" in liveStreamJob && liveStreamJob.job_run_id === selectedChildJob.job_run_id
         ? liveStreamJob.log_tail
         : "";
-    const liveParentLog =
+    const liveParentSnapshotLog =
       selectedJob && liveStreamJob && "job_id" in liveStreamJob && liveStreamJob.job_id === selectedJob.job_id
         ? liveStreamJob.log_tail
         : "";
-    if (liveJobStream.lines.length > 0) {
-      return liveJobStream.lines.join("\n");
+    if (liveJobStream.logTail) {
+      return liveJobStream.logTail;
     }
     if (selectedChildJob) {
-      return liveChildLog || selectedChildJob.log_tail || "No screener log yet.";
+      return liveChildSnapshotLog || selectedChildJob.log_tail || "No screener log yet.";
     }
     if (selectedJob && isHierarchicalBatchJob(selectedJob.action_id)) {
       return childJobGroups.length > 0
         ? "Select date row, then click screener row to view separate log."
         : "Waiting for screener subtasks to attach to this batch run.";
     }
-    return liveParentLog || selectedJob?.log_tail || "No job log yet.";
-  }, [childJobGroups.length, liveJobStream.job, liveJobStream.lines, selectedChildJob, selectedJob]);
+    return liveParentSnapshotLog || selectedJob?.log_tail || "No job log yet.";
+  }, [childJobGroups.length, liveJobStream.job, liveJobStream.logTail, selectedChildJob, selectedJob]);
   const displayedSelectedJob = useMemo(() => {
     if (selectedJob && liveJobStream.job && "job_id" in liveJobStream.job && liveJobStream.job.job_id === selectedJob.job_id) {
       return liveJobStream.job;
@@ -1372,11 +1372,13 @@ type JobStreamStatusEvent = {
 function useJobStream(streamPath: string | null, enabled: boolean) {
   const [job, setJob] = useState<LiveJob | null>(null);
   const [lines, setLines] = useState<string[]>([]);
+  const [logTail, setLogTail] = useState("");
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     setJob(null);
     setLines([]);
+    setLogTail("");
     setConnected(false);
 
     if (!streamPath || !enabled) {
@@ -1389,13 +1391,19 @@ function useJobStream(streamPath: string | null, enabled: boolean) {
     source.addEventListener("snapshot", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as JobStreamSnapshotEvent;
       setJob(payload.job);
-      setLines(payload.recent_lines ?? []);
+      const nextLines = payload.recent_lines ?? [];
+      setLines(nextLines);
+      setLogTail(nextLines.length > 0 ? nextLines.join("\n") : payload.job?.log_tail || "");
       setConnected(true);
     });
 
     source.addEventListener("log", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as JobStreamLogEvent;
       setLines((current) => [...current, payload.line].slice(-200));
+      setLogTail((current) => {
+        const next = current ? `${current}\n${payload.line}` : payload.line;
+        return next.split("\n").slice(-200).join("\n");
+      });
       setJob((current) => {
         if (!current) {
           return current;
@@ -1413,12 +1421,18 @@ function useJobStream(streamPath: string | null, enabled: boolean) {
     source.addEventListener("status", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as JobStreamStatusEvent;
       setJob(payload.job);
+      if (payload.job?.log_tail) {
+        setLogTail(payload.job.log_tail);
+      }
       setConnected(true);
     });
 
     source.addEventListener("eof", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as JobStreamStatusEvent;
       setJob(payload.job);
+      if (payload.job?.log_tail) {
+        setLogTail(payload.job.log_tail);
+      }
       setConnected(false);
       source.close();
     });
@@ -1433,7 +1447,7 @@ function useJobStream(streamPath: string | null, enabled: boolean) {
     };
   }, [enabled, streamPath]);
 
-  return { job, lines, connected };
+  return { job, lines, logTail, connected };
 }
 
 function liveJobDisplayLabel(job: LiveJob | null): string {
