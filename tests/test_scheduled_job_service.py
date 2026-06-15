@@ -82,6 +82,19 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         self.assertEqual(job["options"]["trade_date"], "{{local_date}}")
 
+    def test_upsert_chart_fundamentals_cache_accepts_local_date_template(self) -> None:
+        job = self.service.upsert_job(
+            job_id="chart_fund_cache",
+            job_label="Chart Fundamentals Cache",
+            action_id="sync_chart_fundamentals_cache",
+            cron_expr="0 7 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            options={"as_of_date": "{{local_date}}", "fundamental_limit": 200},
+        )
+
+        self.assertEqual(job["options"]["as_of_date"], "{{local_date}}")
+
     def test_template_resolution_expands_date_tokens(self) -> None:
         local_now = dt.datetime(2026, 6, 6, 8, 15)
 

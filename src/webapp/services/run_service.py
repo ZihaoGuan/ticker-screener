@@ -1738,6 +1738,13 @@ class RunService:
                     dt.date.fromisoformat(trade_date_value)
                 except ValueError as exc:
                     raise ValueError("Trade Date must be YYYY-MM-DD.") from exc
+        if "as_of_date" in normalized:
+            as_of_date_value = str(normalized["as_of_date"])
+            if not self._is_template_token(as_of_date_value):
+                try:
+                    dt.date.fromisoformat(as_of_date_value)
+                except ValueError as exc:
+                    raise ValueError("As Of Date must be YYYY-MM-DD.") from exc
 
         for key in ("chunk_size", "max_retries", "batch_size", "candidate_threshold", "entry_signal_threshold", "max_parallel", "fundamental_limit", "technical_limit", "upcoming_weeks", "earnings_limit"):
             value = options.get(key)
@@ -2438,6 +2445,10 @@ class RunService:
     def _resolve_as_of_date(self, normalized: dict[str, Any]) -> dt.date:
         value = str(normalized.get("as_of_date") or "").strip()
         if value:
+            if self._is_template_token(value):
+                # Scheduler resolves template tokens before launch. For precheck/save-time flows,
+                # fall back to current local date instead of raising on the unresolved token.
+                return dt.date.today()
             return dt.date.fromisoformat(value)
         return dt.date.today()
 

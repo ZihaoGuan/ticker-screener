@@ -52,6 +52,11 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(job["progress_percent"], 40)
         self.assertEqual(job["progress_label"], "4/10 screening")
 
+    def test_resolve_as_of_date_accepts_template_token(self) -> None:
+        resolved = self.service._resolve_as_of_date({"as_of_date": "{{local_date}}"})
+
+        self.assertEqual(resolved, dt.date.today())
+
     def test_update_progress_uses_stage_markers_when_batch_progress_not_available(self) -> None:
         job = {
             "success_count": 0,
