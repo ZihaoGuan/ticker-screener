@@ -1,51 +1,16 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { LoadingBlock } from "../components/LoadingBlock";
+import { useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { useAuth } from "../auth/AuthContext";
 
 export function LoginPage() {
   const auth = useAuth();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const token = searchParams.get("token") ?? "";
   const nextPath = searchParams.get("next") ?? "/";
-  const [email, setEmail] = useState("");
+  const loginError = searchParams.get("error") ?? "";
   const [premiumEmail, setPremiumEmail] = useState("");
-  const [message, setMessage] = useState("");
   const [premiumMessage, setPremiumMessage] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmittingPremium, setIsSubmittingPremium] = useState(false);
-
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-    setIsSubmitting(true);
-    void auth
-      .verifyMagicLink(token)
-      .then(() => {
-        navigate(nextPath, { replace: true });
-      })
-      .catch((error) => {
-        setMessage(error instanceof Error ? error.message : "Unable to verify sign-in link.");
-      })
-      .finally(() => setIsSubmitting(false));
-  }, [auth, navigate, nextPath, token]);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsSubmitting(true);
-    setMessage("");
-    try {
-      const responseMessage = await auth.requestMagicLink(email);
-      setMessage(responseMessage);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to request sign-in link.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handlePremiumRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -64,32 +29,18 @@ export function LoginPage() {
 
   return (
     <div className="page-grid">
-      <Panel title="Sign In" aside={<span className="eyebrow">Magic Link</span>}>
-        {token && isSubmitting ? <LoadingBlock label="Verifying sign-in link…" /> : null}
-        <p className="panel-copy">Enter your email to receive a sign-in link. Visitors can still browse results without logging in.</p>
-        <form className="run-toolbar" onSubmit={(event) => void handleSubmit(event)}>
-          <div className="run-params-grid">
-            <label className="field">
-              <span>Email</span>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
-                autoComplete="email"
-              />
-            </label>
-          </div>
-          <div className="button-row">
-            <button className="primary-button" type="submit" disabled={isSubmitting || token.length > 0}>
-              {isSubmitting && !token ? "Sending..." : "Send Sign-In Link"}
-            </button>
-          </div>
-        </form>
-        {message ? <p className="panel-copy">{message}</p> : null}
+      <Panel title="Sign In" aside={<span className="eyebrow">Google OAuth</span>}>
+        <p className="panel-copy">Use approved Google account to sign in. Visitors can still browse results without logging in.</p>
+        <div className="button-row">
+          <a className="primary-button" href={`/api/auth/google/start?next=${encodeURIComponent(nextPath)}`}>
+            Sign In With Google
+          </a>
+        </div>
+        {loginError ? <p className="panel-copy">{loginError}</p> : null}
+        <p className="panel-copy">Admin setup: add your Google email to `WEBAPP_AUTH_BOOTSTRAP_ADMIN_EMAILS` or create active user record in Admin, then sign in with same Google email.</p>
       </Panel>
       <Panel title="Request Premium Access" aside={<span className="eyebrow">Visitor</span>}>
-        <p className="panel-copy">Visitors can browse results. Request premium access here if you want screener run permissions.</p>
+        <p className="panel-copy">Visitors can browse results. Request premium access here if you want screener run permissions, then sign in with same Google email after approval.</p>
         <form className="run-toolbar" onSubmit={(event) => void handlePremiumRequest(event)}>
           <div className="run-params-grid">
             <label className="field">
@@ -104,7 +55,7 @@ export function LoginPage() {
             </label>
           </div>
           <div className="button-row">
-            <button className="primary-button" type="submit" disabled={isSubmittingPremium || token.length > 0}>
+            <button className="primary-button" type="submit" disabled={isSubmittingPremium}>
               {isSubmittingPremium ? "Submitting..." : "Request Premium"}
             </button>
           </div>

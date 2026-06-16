@@ -65,21 +65,18 @@ Edit `.env` and set:
 - `WEBAPP_BASE_URL`
 - `WEBAPP_AUTH_SECRET_KEY`
 - `WEBAPP_AUTH_BOOTSTRAP_ADMIN_EMAILS`
-- `WEBAPP_SMTP_HOST`
-- `WEBAPP_SMTP_PORT`
-- `WEBAPP_SMTP_FROM_ADDRESS`
+- `WEBAPP_GOOGLE_CLIENT_ID`
+- `WEBAPP_GOOGLE_CLIENT_SECRET`
+- `WEBAPP_GOOGLE_REDIRECT_URI`
 
 If you keep the default service names, the example database URL is already correct.
 
 For auth, also configure as needed:
 
-- `WEBAPP_SMTP_USERNAME`
-- `WEBAPP_SMTP_PASSWORD`
-- `WEBAPP_SMTP_USE_TLS`
-- `WEBAPP_SMTP_USE_SSL`
+- `WEBAPP_GOOGLE_HOSTED_DOMAIN`
 - `WEBAPP_AUTH_SESSION_COOKIE_NAME`
+- `WEBAPP_AUTH_OAUTH_STATE_COOKIE_NAME`
 - `WEBAPP_AUTH_SESSION_TTL_HOURS`
-- `WEBAPP_AUTH_MAGIC_LINK_TTL_MINUTES`
 - `WEBAPP_AUTH_COOKIE_SECURE`
 - `WEBAPP_AUTH_COOKIE_SAMESITE`
 
@@ -153,8 +150,8 @@ Open in browser:
 Auth smoke checks:
 
 - open `https://app.your-domain.com/login`
-- request a magic link for one bootstrap admin email
-- follow the link and confirm `/api/auth/me` shows `admin`
+- click `Sign In With Google` using one bootstrap admin email
+- confirm `/api/auth/me` shows `admin`
 - confirm anonymous browser session can still open watchlists and backtests
 - confirm anonymous browser session gets `401` for `POST /api/runs/rs`
 

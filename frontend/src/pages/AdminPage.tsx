@@ -395,7 +395,7 @@ export function AdminPage() {
       });
       setInviteEmail("");
       setInviteRole("visitor");
-      setNotice("User saved and sign-in email sent.");
+      setNotice("User saved. They can now sign in with Google using that email.");
       refreshUsers();
       loadAudit();
     } catch (error) {
@@ -447,7 +447,7 @@ export function AdminPage() {
       await fetchJson<{ ok: boolean }>(`/api/admin/access-requests/${requestId}/approve`, {
         method: "POST",
       });
-      setNotice("Access request approved and sign-in email sent.");
+      setNotice("Access request approved. User can now sign in with Google using that email.");
       refreshUsers();
       loadAudit();
     } catch (error) {
@@ -1093,8 +1093,9 @@ export function AdminPage() {
           </div>
           <div className="run-action-footer">
             <button className="primary-button" type="submit" disabled={isSavingUser}>
-              {isSavingUser ? "Saving..." : "Invite or Create User"}
+              {isSavingUser ? "Saving..." : "Add or Update User"}
             </button>
+            <span className="panel-copy">Use Google-account email here. Added users can sign in immediately with same Google email.</span>
           </div>
         </form>
 

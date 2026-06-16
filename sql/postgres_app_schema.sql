@@ -423,6 +423,20 @@ CREATE INDEX IF NOT EXISTS idx_app_sessions_session_id
 CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id
   ON app_sessions(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS app_user_identities (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  provider_subject TEXT NOT NULL,
+  provider_email TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (provider, provider_subject)
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_user_identities_user_id
+  ON app_user_identities(user_id, provider);
+
 CREATE TABLE IF NOT EXISTS app_access_requests (
   id BIGSERIAL PRIMARY KEY,
   email TEXT NOT NULL,

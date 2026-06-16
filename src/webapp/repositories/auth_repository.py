@@ -180,6 +180,45 @@ class AuthRepository:
             connection.commit()
         return int(row[0]) if row else None
 
+    def get_user_identity(self, *, provider: str, provider_subject: str) -> dict[str, Any] | None:
+        return self._fetch_one(
+            """
+            SELECT id, user_id, provider, provider_subject, provider_email, created_at, updated_at
+            FROM app_user_identities
+            WHERE provider = %s
+              AND provider_subject = %s
+            """,
+            (provider, provider_subject),
+        )
+
+    def upsert_user_identity(
+        self,
+        *,
+        user_id: int,
+        provider: str,
+        provider_subject: str,
+        provider_email: str,
+    ) -> dict[str, Any] | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            INSERT INTO app_user_identities (user_id, provider, provider_subject, provider_email)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (provider, provider_subject)
+            DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                provider_email = EXCLUDED.provider_email,
+                updated_at = NOW()
+            RETURNING id, user_id, provider, provider_subject, provider_email, created_at, updated_at
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (user_id, provider, provider_subject, provider_email.lower() or None))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows[0] if rows else None
+
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         return self._fetch_one(
             """
@@ -316,6 +355,24 @@ class AuthRepository:
         if rows:
             return rows[0]
         return None
+
+    def update_user_email(self, *, user_id: int, email: str) -> dict[str, Any] | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            UPDATE app_users
+            SET email = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            RETURNING id, email, role, is_active, created_at, updated_at, last_login_at
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (email.lower(), user_id))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows[0] if rows else None
 
     def _update_user(self, *, user_id: int, field_sql: str, value: object) -> dict[str, Any] | None:
         connection = self._connect()

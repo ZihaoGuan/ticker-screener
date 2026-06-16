@@ -4,10 +4,11 @@ import asyncio
 import datetime as dt
 import json
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from src.webapp.access_control import Principal
 from src.webapp.services.admin_service import AdminService
@@ -327,6 +328,73 @@ def earnings_calendar_data(
 @router.get("/auth/me", response_class=JSONResponse)
 def auth_me(principal: Principal = Depends(get_current_principal)) -> JSONResponse:
     return JSONResponse(jsonable_encoder({"authenticated": principal.authenticated, "user": principal.to_dict() if principal.authenticated else None, "role": principal.role, "capabilities": list(principal.capabilities)}))
+
+
+@router.get("/auth/google/start", response_class=RedirectResponse)
+def google_auth_start(
+    next_path: str = Query(default="/", alias="next"),
+    service: AuthService = Depends(get_auth_service),
+) -> RedirectResponse:
+    try:
+        payload = service.begin_google_oauth(next_path=next_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    response = RedirectResponse(url=str(payload["authorization_url"]), status_code=302)
+    response.set_cookie(
+        key=config.auth_oauth_state_cookie_name,
+        value=str(payload["state_cookie_value"]),
+        httponly=True,
+        secure=config.auth_cookie_secure,
+        samesite=config.auth_cookie_samesite,
+        max_age=600,
+        path="/",
+    )
+    return response
+
+
+@router.get("/auth/google/callback", response_class=RedirectResponse)
+def google_auth_callback(
+    request: Request,
+    code: str = Query(default=""),
+    state: str = Query(default=""),
+    error: str = Query(default=""),
+    error_description: str = Query(default="", alias="error_description"),
+    service: AuthService = Depends(get_auth_service),
+) -> RedirectResponse:
+    next_path = "/"
+    if error.strip():
+        next_path = str(request.query_params.get("next") or "/")
+        response = RedirectResponse(
+            url=f"/login?{urlencode({'next': next_path, 'error': error_description.strip() or error.strip()})}",
+            status_code=302,
+        )
+        response.delete_cookie(
+            key=config.auth_oauth_state_cookie_name,
+            path="/",
+            secure=config.auth_cookie_secure,
+            samesite=config.auth_cookie_samesite,
+        )
+        return response
+    try:
+        result = service.complete_google_oauth(
+            code=code,
+            state=state,
+            signed_state_cookie=request.cookies.get(config.auth_oauth_state_cookie_name),
+            request_ip=request.client.host if request.client else "",
+            request_user_agent=request.headers.get("user-agent", ""),
+        )
+        next_path = str(result.get("next_path") or "/")
+        response = RedirectResponse(url=next_path, status_code=302)
+        set_auth_cookie(response, str(result["session_cookie_value"]))
+    except ValueError as exc:
+        response = RedirectResponse(url=f"/login?{urlencode({'error': str(exc)})}", status_code=302)
+    response.delete_cookie(
+        key=config.auth_oauth_state_cookie_name,
+        path="/",
+        secure=config.auth_cookie_secure,
+        samesite=config.auth_cookie_samesite,
+    )
+    return response
 
 
 @router.post("/auth/request-link", response_class=JSONResponse)
@@ -1631,7 +1699,7 @@ def admin_invite_user(
         resource_type="user",
         resource_id=str(user.get("id") or ""),
         resource_label=str(user.get("email") or ""),
-        message=f"Invited or updated user {user.get('email')}.",
+        message=f"Saved or updated user {user.get('email')}.",
         metadata={"user_id": user.get("id"), "email": user.get("email"), "role": user.get("role"), "is_active": user.get("is_active")},
     )
     return JSONResponse(jsonable_encoder({"ok": True, "user": user}))

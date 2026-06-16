@@ -32,6 +32,11 @@ class WebAppConfig:
         "TICKER_SCREENER_AUTH_SESSION_COOKIE_NAME",
         default="ticker_screener_session",
     )
+    auth_oauth_state_cookie_name: str = _env(
+        "WEBAPP_AUTH_OAUTH_STATE_COOKIE_NAME",
+        "TICKER_SCREENER_AUTH_OAUTH_STATE_COOKIE_NAME",
+        default="ticker_screener_oauth_state",
+    )
     auth_session_ttl_hours: int = int(_env("WEBAPP_AUTH_SESSION_TTL_HOURS", "TICKER_SCREENER_AUTH_SESSION_TTL_HOURS", default="168"))
     auth_magic_link_ttl_minutes: int = int(
         _env("WEBAPP_AUTH_MAGIC_LINK_TTL_MINUTES", "TICKER_SCREENER_AUTH_MAGIC_LINK_TTL_MINUTES", default="20")
@@ -43,6 +48,10 @@ class WebAppConfig:
         "TICKER_SCREENER_AUTH_BOOTSTRAP_ADMIN_EMAILS",
         default="",
     )
+    google_client_id: str = _env("WEBAPP_GOOGLE_CLIENT_ID", "TICKER_SCREENER_GOOGLE_CLIENT_ID", default="")
+    google_client_secret: str = _env("WEBAPP_GOOGLE_CLIENT_SECRET", "TICKER_SCREENER_GOOGLE_CLIENT_SECRET", default="")
+    google_redirect_uri: str = _env("WEBAPP_GOOGLE_REDIRECT_URI", "TICKER_SCREENER_GOOGLE_REDIRECT_URI", default="")
+    google_hosted_domain: str = _env("WEBAPP_GOOGLE_HOSTED_DOMAIN", "TICKER_SCREENER_GOOGLE_HOSTED_DOMAIN", default="")
     smtp_host: str = _env("WEBAPP_SMTP_HOST", "TICKER_SCREENER_SMTP_HOST", default="")
     smtp_port: int = int(_env("WEBAPP_SMTP_PORT", "TICKER_SCREENER_SMTP_PORT", default="587"))
     smtp_username: str = _env("WEBAPP_SMTP_USERNAME", "TICKER_SCREENER_SMTP_USERNAME", default="")
