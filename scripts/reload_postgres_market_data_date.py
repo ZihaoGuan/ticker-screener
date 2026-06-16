@@ -202,7 +202,7 @@ def main() -> int:
                         f"chunk={total_chunks}",
                         f"tickers={len(chunk_result.tickers)}",
                         f"reloaded={len(normalized_histories)}",
-                        f"missing={missing}",
+                        f"missing={len(missing_tickers)}",
                         f"applied_rows={applied}",
                         f"overflow_skipped={skipped_overflow}",
                         f"running_rows={total_rows}",
