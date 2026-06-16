@@ -7,6 +7,7 @@ from typing import Any
 from ...config import AppConfig, load_app_config
 from ...cookstock_bridge import load_configured_cookstock
 from ...earnings_enrichment import _parse_session_from_summary
+from ...ratings.repository import RatingsRepository
 from ...universe import UniverseTicker, load_universe
 from .screener_history_service import ScreenerHistoryService
 
@@ -26,6 +27,7 @@ class EarningsCalendarService:
         self.project_root = project_root
         self.app_config = app_config or load_app_config()
         self.history_service = ScreenerHistoryService(database_url=database_url, artifacts_dir=artifacts_dir)
+        self.ratings_repository = RatingsRepository(database_url)
         self._universe_index: dict[str, UniverseTicker] | None = None
 
     def get_next_week_calendar(
@@ -51,6 +53,15 @@ class EarningsCalendarService:
         universe_index = self._get_universe_index()
         cookstock = load_configured_cookstock(self.app_config)
         raw_events = cookstock.fetch_earnings_calendar_watchlist(selected_week_start, selected_week_end)
+        ticker_list = sorted(
+            {
+                str(item.get("ticker") or "").strip().upper()
+                for item in raw_events
+                if str(item.get("ticker") or "").strip()
+            }
+        )
+        rating_snapshots = self.ratings_repository.load_latest_rating_snapshots_for_tickers(ticker_list)
+        technical_rating_snapshots = self.ratings_repository.load_latest_technical_rating_snapshots_for_tickers(ticker_list)
 
         grouped_days: dict[str, dict[str, Any]] = {}
         available_sector_labels: set[str] = set()
@@ -110,6 +121,8 @@ class EarningsCalendarService:
                     "sector": sector,
                     "industry": industry,
                     "exchange": exchange,
+                    "fundamental_rating": rating_snapshots.get(ticker),
+                    "technical_rating": technical_rating_snapshots.get(ticker),
                     "criteria": criteria_by_ticker.get(ticker),
                     "implied_move_signal": criteria_by_ticker.get(ticker, {}).get("implied_move_signal")
                     if isinstance(criteria_by_ticker.get(ticker), dict)

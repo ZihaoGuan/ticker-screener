@@ -69,6 +69,10 @@ function normalizeFilterValue(value: string | null | undefined) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function formatRatingValue(value: number | null | undefined) {
+  return value == null ? "--" : value.toFixed(1);
+}
+
 function filterEntries(
   entries: EarningsCalendarEntry[],
   {
@@ -112,6 +116,26 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
             <span className="earnings-exchange-badge">{entry.exchange ?? "-"}</span>
           </div>
           <p className="earnings-entry-meta">{[entry.sector, entry.industry].filter(Boolean).join(" / ") || "No sector or industry"}</p>
+          {entry.fundamental_rating || entry.technical_rating ? (
+            <div className="earnings-criteria-pill-row">
+              {entry.fundamental_rating ? (
+                <span
+                  className={`earnings-criteria-pill${entry.fundamental_rating.rating_status === "ok" ? " is-match" : " is-miss"}`}
+                  title={`Fundamental rating ${entry.fundamental_rating.as_of_date}${entry.fundamental_rating.rating_status ? ` · ${entry.fundamental_rating.rating_status}` : ""}`}
+                >
+                  {`F ${formatRatingValue(entry.fundamental_rating.overall_rating)}`}
+                </span>
+              ) : null}
+              {entry.technical_rating ? (
+                <span
+                  className={`earnings-criteria-pill${entry.technical_rating.technical_status === "ok" ? " is-match" : " is-miss"}`}
+                  title={`Technical rating ${entry.technical_rating.as_of_date}${entry.technical_rating.rating_band ? ` · ${entry.technical_rating.rating_band}` : ""}${entry.technical_rating.technical_status ? ` · ${entry.technical_rating.technical_status}` : ""}`}
+                >
+                  {`T ${formatRatingValue(entry.technical_rating.overall_rating)}${entry.technical_rating.rating_band ? ` ${entry.technical_rating.rating_band}` : ""}`}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {entry.summary ? <p className="earnings-entry-summary">"{entry.summary}"</p> : null}
           {entry.implied_move_signal ? (
             <div className="earnings-criteria-pill-row">

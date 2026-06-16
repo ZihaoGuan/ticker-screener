@@ -31,6 +31,8 @@ class EarningsCalendarServiceTests(unittest.TestCase):
             artifacts_dir=self.artifacts_dir,
         )
         self.service._get_universe_index = lambda: {}  # type: ignore[method-assign]
+        self.service.ratings_repository.load_latest_rating_snapshots_for_tickers = lambda tickers: {}  # type: ignore[method-assign]
+        self.service.ratings_repository.load_latest_technical_rating_snapshots_for_tickers = lambda tickers: {}  # type: ignore[method-assign]
         self.service._load_latest_criteria_meta = lambda: {  # type: ignore[method-assign]
             "available": True,
             "strategy_id": "earnings_weekly_criteria",
@@ -81,6 +83,43 @@ class EarningsCalendarServiceTests(unittest.TestCase):
         self.assertTrue(entry["criteria"]["criteria"][IMPLIED_MOVE_CRITERIA_KEY])
         self.assertTrue(entry["criteria"]["passed"])
         self.assertEqual(payload["criteria_filter"]["matched_count"], 1)
+
+    def test_next_week_calendar_includes_rating_snapshots_when_available(self) -> None:
+        fake_events = [
+            {
+                "ticker": "AAA",
+                "event_date": dt.date(2026, 6, 8),
+                "summary": "Before market open",
+            }
+        ]
+        self.service.ratings_repository.load_latest_rating_snapshots_for_tickers = lambda tickers: {  # type: ignore[method-assign]
+            "AAA": {
+                "as_of_date": "2026-06-06",
+                "overall_rating": 88.5,
+                "rating_status": "ok",
+                "rating_status_reason": "",
+            }
+        }
+        self.service.ratings_repository.load_latest_technical_rating_snapshots_for_tickers = lambda tickers: {  # type: ignore[method-assign]
+            "AAA": {
+                "as_of_date": "2026-06-05",
+                "overall_rating": 91.2,
+                "rating_band": "A",
+                "technical_status": "ok",
+                "technical_status_reason": "",
+                "flags": ["rs_leader"],
+            }
+        }
+
+        with patch("src.webapp.services.earnings_calendar_service.load_configured_cookstock", return_value=_FakeCookstock(fake_events)):
+            payload = self.service.get_next_week_calendar(reference_date=dt.date(2026, 6, 2), week_offset=1)
+
+        entry = payload["days"][1]["before_market"][0]
+        self.assertEqual(entry["fundamental_rating"]["overall_rating"], 88.5)
+        self.assertEqual(entry["fundamental_rating"]["rating_status"], "ok")
+        self.assertEqual(entry["technical_rating"]["overall_rating"], 91.2)
+        self.assertEqual(entry["technical_rating"]["rating_band"], "A")
+        self.assertEqual(entry["technical_rating"]["technical_status"], "ok")
 
     def test_week_offset_zero_defaults_to_current_week_and_after_hours_maps_to_after_market(self) -> None:
         fake_events = [

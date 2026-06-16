@@ -1304,6 +1304,24 @@ export type EarningsCalendarEntry = {
   sector?: string | null;
   industry?: string | null;
   exchange?: string | null;
+  fundamental_rating?: {
+    as_of_date: string;
+    overall_rating: number | null;
+    valuation_grade?: string | null;
+    profitability_grade?: string | null;
+    growth_grade?: string | null;
+    performance_grade?: string | null;
+    rating_status?: string | null;
+    rating_status_reason?: string | null;
+  } | null;
+  technical_rating?: {
+    as_of_date: string;
+    overall_rating: number | null;
+    rating_band?: string | null;
+    technical_status?: string | null;
+    technical_status_reason?: string | null;
+    flags?: string[];
+  } | null;
   implied_move_signal?: {
     threshold_pct: number;
     near_earnings: boolean;

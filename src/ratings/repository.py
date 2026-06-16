@@ -792,6 +792,100 @@ class RatingsRepository:
             }
         return result
 
+    def load_latest_rating_snapshots_for_tickers(self, tickers: Iterable[str]) -> dict[str, dict[str, Any]]:
+        normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
+        if not normalized:
+            return {}
+        connection = self._connect()
+        if connection is None:
+            return {}
+        sql = """
+            SELECT DISTINCT ON (ticker)
+              ticker,
+              as_of_date,
+              overall_rating,
+              valuation_grade,
+              profitability_grade,
+              growth_grade,
+              performance_grade,
+              rating_status,
+              rating_status_reason
+            FROM ticker_rating_snapshots
+            WHERE ticker = ANY(%s)
+            ORDER BY ticker, as_of_date DESC, updated_at DESC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized,))
+                rows = cursor.fetchall()
+        result: dict[str, dict[str, Any]] = {}
+        for (
+            ticker,
+            as_of_date,
+            overall_rating,
+            valuation_grade,
+            profitability_grade,
+            growth_grade,
+            performance_grade,
+            rating_status,
+            rating_status_reason,
+        ) in rows:
+            result[str(ticker).upper()] = {
+                "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date or ""),
+                "overall_rating": float(overall_rating) if overall_rating is not None else None,
+                "valuation_grade": valuation_grade,
+                "profitability_grade": profitability_grade,
+                "growth_grade": growth_grade,
+                "performance_grade": performance_grade,
+                "rating_status": rating_status,
+                "rating_status_reason": rating_status_reason,
+            }
+        return result
+
+    def load_latest_technical_rating_snapshots_for_tickers(self, tickers: Iterable[str]) -> dict[str, dict[str, Any]]:
+        normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
+        if not normalized:
+            return {}
+        connection = self._connect()
+        if connection is None:
+            return {}
+        sql = """
+            SELECT DISTINCT ON (ticker)
+              ticker,
+              as_of_date,
+              overall_rating,
+              rating_band,
+              technical_status,
+              technical_status_reason,
+              flags
+            FROM ticker_technical_rating_snapshots
+            WHERE ticker = ANY(%s)
+            ORDER BY ticker, as_of_date DESC, updated_at DESC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized,))
+                rows = cursor.fetchall()
+        result: dict[str, dict[str, Any]] = {}
+        for (
+            ticker,
+            as_of_date,
+            overall_rating,
+            rating_band,
+            technical_status,
+            technical_status_reason,
+            flags,
+        ) in rows:
+            result[str(ticker).upper()] = {
+                "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date or ""),
+                "overall_rating": float(overall_rating) if overall_rating is not None else None,
+                "rating_band": rating_band,
+                "technical_status": technical_status,
+                "technical_status_reason": technical_status_reason,
+                "flags": list(flags or []),
+            }
+        return result
+
     def list_top_rating_snapshots(
         self,
         *,
