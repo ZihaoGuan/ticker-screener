@@ -25,6 +25,7 @@ from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
 from ...market_extension import compute_extension_frame, resample_to_weekly
 from ...market_data_access import (
     db_frame_has_recent_coverage,
+    load_many_ticker_windows,
     load_many_ticker_windows_for_range,
     resolve_database_url,
     resolve_market_data_source,
@@ -794,6 +795,7 @@ class WatchlistService:
         universe_index = self._get_universe_index()
         overrides = load_ticker_theme_overrides()
         theme_catalog = self._get_theme_catalog()
+        latest_market_map = self._load_latest_market_snapshot_map(entries)
         enriched: list[dict[str, Any]] = []
         for raw_entry in entries:
             entry = dict(raw_entry)
@@ -821,8 +823,56 @@ class WatchlistService:
                 entry["exchange"] = exchange
             if theme_tags:
                 entry["theme_tags"] = theme_tags
+            latest_market = latest_market_map.get(ticker)
+            if latest_market:
+                entry["latest_trade_date"] = latest_market["trade_date"]
+                entry["current_volume"] = latest_market["volume"]
+                entry["daily_change_pct"] = latest_market["change_pct"]
             enriched.append(entry)
         return enriched
+
+    def _load_latest_market_snapshot_map(self, entries: list[dict[str, Any]]) -> dict[str, dict[str, float | int | str | None]]:
+        if not self.database_url:
+            return {}
+        tickers = [
+            normalize_ticker_symbol(str(item.get("ticker") or ""))
+            for item in entries
+            if isinstance(item, dict) and str(item.get("ticker") or "").strip()
+        ]
+        normalized = [ticker for ticker in tickers if ticker]
+        if not normalized:
+            return {}
+        try:
+            frames = load_many_ticker_windows(
+                normalized,
+                dt.date.today(),
+                2,
+                database_url=self.database_url,
+            )
+        except Exception as exc:
+            logger.warning("Watchlist latest market enrichment unavailable; continuing without DB day-volume/change data: %s", exc)
+            return {}
+
+        snapshots: dict[str, dict[str, float | int | str | None]] = {}
+        for ticker, frame in frames.items():
+            if frame is None or frame.empty:
+                continue
+            latest = frame.iloc[-1]
+            latest_index = frame.index.max()
+            latest_date = latest_index.date().isoformat() if hasattr(latest_index, "date") else str(latest_index)
+            latest_close = _coerce_optional_float(latest.get("Close"))
+            previous_close = None
+            if len(frame.index) >= 2:
+                previous_close = _coerce_optional_float(frame.iloc[-2].get("Close"))
+            change_pct = None
+            if latest_close is not None and previous_close is not None and previous_close > 0:
+                change_pct = ((latest_close / previous_close) - 1.0) * 100.0
+            snapshots[ticker] = {
+                "trade_date": latest_date,
+                "volume": int(round(_coerce_float(latest.get("Volume")))),
+                "change_pct": change_pct,
+            }
+        return snapshots
 
     def _get_universe_index(self) -> dict[str, UniverseTicker]:
         if self._universe_index is not None:

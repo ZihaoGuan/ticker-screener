@@ -195,6 +195,43 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["entry_count"], 1)
         self.assertEqual(payload["entries"][0]["ticker"], "NVDA")
 
+    def test_get_watchlist_detail_attaches_latest_db_volume_and_change(self) -> None:
+        watchlists_dir = Path(self.temp_dir.name) / "watchlists"
+        (watchlists_dir / "fearzone_2026-06-13.json").write_text(
+            '[{"ticker":"NVDA"}]',
+            encoding="utf-8",
+        )
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = pd.DataFrame(
+            {
+                "Open": [100.0, 103.0],
+                "High": [104.0, 106.0],
+                "Low": [99.0, 102.0],
+                "Close": [102.0, 105.0],
+                "Adj Close": [102.0, 105.0],
+                "Volume": [1_200_000, 1_500_000],
+            },
+            index=pd.to_datetime(["2026-06-12", "2026-06-15"]),
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows", return_value={"NVDA": frame.copy()}), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ):
+            payload = service.get_watchlist_detail("fearzone_2026-06-13")
+
+        entry = payload["entries"][0]
+        self.assertEqual(entry["latest_trade_date"], "2026-06-15")
+        self.assertEqual(entry["current_volume"], 1_500_000)
+        self.assertAlmostEqual(entry["daily_change_pct"], ((105.0 / 102.0) - 1.0) * 100.0)
+
     def test_get_scanner_board_filters_excluded_tickers_from_counts_and_previews(self) -> None:
         self._write_watchlist(
             "sepa_vcp_2026-06-12",
