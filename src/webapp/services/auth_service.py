@@ -50,7 +50,8 @@ class AuthService:
             request_user_agent=request_user_agent,
         )
         link = self._build_magic_link(raw_token)
-        self._send_email(
+        self._send_magic_link_email(
+            user_id=int(user["id"]),
             to_address=clean_email,
             subject=f"{self.config.app_title} sign-in link",
             body=(
@@ -207,6 +208,13 @@ class AuthService:
                 server.login(self.config.smtp_username, self.config.smtp_password)
             server.send_message(message)
 
+    def _send_magic_link_email(self, *, user_id: int, to_address: str, subject: str, body: str) -> None:
+        try:
+            self._send_email(to_address=to_address, subject=subject, body=body)
+        except (smtplib.SMTPException, OSError) as exc:
+            self.repository.revoke_magic_links_for_user(user_id=user_id)
+            raise ValueError(f"Unable to send sign-in email: {exc}") from exc
+
     def _deliver_role_grant_link(self, *, user_id: int, email: str, subject: str, intro: str) -> dict[str, Any]:
         self.repository.revoke_magic_links_for_user(user_id=user_id)
         raw_token = secrets.token_urlsafe(32)
@@ -220,7 +228,8 @@ class AuthService:
             request_user_agent="system",
         )
         link = self._build_magic_link(raw_token)
-        self._send_email(
+        self._send_magic_link_email(
+            user_id=user_id,
             to_address=email,
             subject=subject,
             body=(
