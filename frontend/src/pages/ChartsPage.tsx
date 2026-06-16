@@ -7,7 +7,7 @@ import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
 import { formatLocalDate } from "../lib/format";
-import type { AdHocScreenResponse, AdminTickerListStatusResponse, CandlePoint, ChartAnnotations, ChartFundamentalsResponse, ChartInsiderResponse, ChartOverlaysResponse, WatchlistChartResponse } from "../lib/types";
+import type { AdminTickerListStatusResponse, CandlePoint, ChartFundamentalsResponse, ChartInsiderResponse, ChartOverlaysResponse, WatchlistChartResponse } from "../lib/types";
 
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
@@ -34,15 +34,6 @@ const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "overlays" | "fundamentals"
 
 export function ChartsPage() {
   const auth = useAuth();
-  const setupOptions = [
-    { id: "hve", label: "HVE" },
-    { id: "inside_dryup", label: "Inside Dry-Up" },
-    { id: "ftd_sweep", label: "FTD Sweep" },
-    { id: "weekly_htf_pullback", label: "Weekly HTF Pullback" },
-    { id: "htf_8w_runup", label: "HTF 8W Runup" },
-    { id: "vcp", label: "VCP" },
-    { id: "sepa_vcp", label: "SEPA VCP" },
-  ] as const;
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTicker = (searchParams.get("ticker") ?? "").trim().toUpperCase();
   const requestedDate = (searchParams.get("date") ?? "").trim();
@@ -52,26 +43,14 @@ export function ChartsPage() {
   const [overlayPayload, setOverlayPayload] = useState<ChartOverlaysResponse | null>(null);
   const [fundamentalsPayload, setFundamentalsPayload] = useState<ChartFundamentalsResponse | null>(null);
   const [insiderPayload, setInsiderPayload] = useState<ChartInsiderResponse | null>(null);
-  const [setupPayload, setSetupPayload] = useState<AdHocScreenResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFundamentalsLoading, setIsFundamentalsLoading] = useState(false);
   const [isInsiderLoading, setIsInsiderLoading] = useState(false);
-  const [isSetupLoading, setIsSetupLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [fundamentalsNotice, setFundamentalsNotice] = useState("");
   const [insiderNotice, setInsiderNotice] = useState("");
-  const [setupNotice, setSetupNotice] = useState("");
   const [chartVisibility, setChartVisibility] = useState<ChartVisibility>(DEFAULT_CHART_VISIBILITY);
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const [selectedSetups, setSelectedSetups] = useState<Record<string, boolean>>({
-    hve: false,
-    inside_dryup: false,
-    ftd_sweep: false,
-    weekly_htf_pullback: false,
-    htf_8w_runup: false,
-    vcp: false,
-    sepa_vcp: false,
-  });
   const [tickerListStatus, setTickerListStatus] = useState<AdminTickerListStatusResponse | null>(null);
   const [isTickerListLoading, setIsTickerListLoading] = useState(false);
   const [isListDialogOpen, setIsListDialogOpen] = useState(false);
@@ -91,7 +70,6 @@ export function ChartsPage() {
       setOverlayPayload(null);
       setFundamentalsPayload(null);
       setInsiderPayload(null);
-      setSetupPayload(null);
       setNotice("");
       setFundamentalsNotice("");
       setInsiderNotice("");
@@ -147,10 +125,7 @@ export function ChartsPage() {
       return;
     }
     const query = new URLSearchParams({ period: "18mo", asOfDate: payload.resolved_as_of_date });
-    if (selectedSetups.ftd_sweep) {
-      query.set("includeSetupMarkers", "true");
-    }
-    const overlayCacheSuffix = `${payload.resolved_as_of_date}:${selectedSetups.ftd_sweep ? "setup-markers" : "base"}`;
+    const overlayCacheSuffix = `${payload.resolved_as_of_date}:base`;
     const cacheKey = buildChartCacheKey("overlays", requestedTicker, overlayCacheSuffix);
     const cached = refreshNonce === 0 ? readChartCache<ChartOverlaysResponse>(cacheKey) : null;
     if (cached) {
@@ -163,7 +138,7 @@ export function ChartsPage() {
         setOverlayPayload(response);
       })
       .catch(() => setOverlayPayload(null));
-  }, [payload?.resolved_as_of_date, refreshNonce, requestedTicker, selectedSetups.ftd_sweep]);
+  }, [payload?.resolved_as_of_date, refreshNonce, requestedTicker]);
 
   useEffect(() => {
     if (!requestedTicker) {
@@ -253,41 +228,6 @@ export function ChartsPage() {
       .finally(() => setIsFundamentalsLoading(false));
   }, [refreshNonce, requestedTicker]);
 
-  const selectedSetupIds = useMemo(
-    () => setupOptions.filter((option) => selectedSetups[option.id]).map((option) => option.id),
-    [selectedSetups],
-  );
-
-  useEffect(() => {
-    if (!requestedTicker || !payload?.resolved_as_of_date || selectedSetupIds.length === 0) {
-      setSetupPayload(null);
-      setSetupNotice("");
-      return;
-    }
-    setIsSetupLoading(true);
-    setSetupNotice("");
-    void fetchJson<AdHocScreenResponse>("/api/ad-hoc-screen", {
-      method: "POST",
-      body: JSON.stringify({
-        ticker: requestedTicker,
-        as_of_date: payload.resolved_as_of_date,
-        screeners: selectedSetupIds,
-      }),
-    })
-      .then((response) => {
-        setSetupPayload(response);
-        const failed = response.screeners.filter((item) => !item.passed);
-        if (failed.length > 0) {
-          setSetupNotice(`Some setups not active: ${failed.map((item) => item.id).join(", ")}`);
-        }
-      })
-      .catch((error) => {
-        setSetupPayload(null);
-        setSetupNotice(error instanceof Error ? error.message : "Failed to load setup overlays.");
-      })
-      .finally(() => setIsSetupLoading(false));
-  }, [payload?.resolved_as_of_date, requestedTicker, selectedSetupIds]);
-
   const chartPayload = useMemo<WatchlistChartResponse | null>(() => {
     if (!payload) {
       return null;
@@ -312,7 +252,6 @@ export function ChartsPage() {
       : null;
   const latestRsMarker = chartPayload?.rs_markers?.[chartPayload.rs_markers.length - 1] ?? null;
   const dailyRsRatingSeries = chartPayload?.daily_rs_rating ?? [];
-  const weeklyRsRatingSeries = chartPayload?.weekly_rs_rating ?? [];
   const adr14Pct = useMemo(() => computeAdrPercent(chartData, 14), [chartData]);
   const adr14InRange = adr14Pct != null ? adr14Pct >= 3 && adr14Pct <= 10 : null;
   const atr14 = useMemo(() => computeAtr(chartData, 14), [chartData]);
@@ -330,26 +269,6 @@ export function ChartsPage() {
   const latestFundamentalsSnapshot = fundamentalsPayload?.fundamentals_snapshot ?? null;
   const latestRatingSnapshot = fundamentalsPayload?.rating_snapshot ?? null;
   const latestRatingDiagnostics = fundamentalsPayload?.rating_diagnostics ?? null;
-  const setupAnnotations = useMemo<ChartAnnotations[]>(() => {
-    return (setupPayload?.screeners ?? [])
-      .filter((item) => item.passed && item.hit)
-      .map((item) => buildSetupAnnotation(item.id, item.hit!))
-      .filter((item): item is ChartAnnotations => item !== null);
-  }, [setupPayload]);
-  const historicalSetupMarkers = useMemo(() => {
-    if (!selectedSetups.ftd_sweep) {
-      return [];
-    }
-    return (chartPayload?.setup_markers ?? [])
-      .filter((marker) => marker.kind === "ftd_sweep_breakout")
-      .map((marker) => ({
-        time: marker.time,
-        label: marker.label ?? "FTD Sweep",
-        color: "#f97316",
-        shape: "square" as const,
-        position: "belowBar" as const,
-      }));
-  }, [chartPayload?.setup_markers, selectedSetups.ftd_sweep]);
   const atrExtensionMarkers = useMemo(() => buildAtrExtensionMarkers(chartData, chartPayload?.ma50 ?? [], 14), [chartData, chartPayload?.ma50]);
   const sellIntoStrengthMarkers = useMemo(
     () => buildSellIntoStrengthMarkers(chartData, chartPayload?.ma50 ?? []),
@@ -372,8 +291,20 @@ export function ChartsPage() {
   ];
   const canManageExclusions = auth.hasCapability("manage_exclusions");
   const canSyncHistory = auth.hasCapability("sync_history");
+  const isAdmin = auth.role === "admin";
   const currentExclusion = tickerListStatus?.exclusion_entry ?? null;
   const showBackfillSection = canSyncHistory && requestedTicker !== "" && chartPayload?.data_source === "internet";
+  const signalGuideGroups = useMemo(
+    () =>
+      buildSignalGuideGroups({
+        chartPayload,
+        latestRsMarker,
+        atrExtensionCount: atrExtensionMarkers.length,
+        sellSignalCount: sellIntoStrengthMarkers.length,
+        hasTrimWarning,
+      }),
+    [atrExtensionMarkers.length, chartPayload, hasTrimWarning, latestRsMarker, sellIntoStrengthMarkers.length],
+  );
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -659,28 +590,6 @@ export function ChartsPage() {
         </Panel>
       ) : null}
 
-      <Panel title="Setup Overlays" aside={<span className="eyebrow">Optional screener overlays for this ticker/date</span>}>
-        <div className="chart-toolbar">
-          {setupOptions.map((option) => (
-            <label key={option.id} className="chart-toggle">
-              <input
-                type="checkbox"
-                checked={selectedSetups[option.id]}
-                onChange={() =>
-                  setSelectedSetups((current) => ({
-                    ...current,
-                    [option.id]: !current[option.id],
-                  }))
-                }
-              />
-              <span>{option.label}</span>
-            </label>
-          ))}
-        </div>
-        {isSetupLoading ? <LoadingBlock label="Loading setup overlays…" compact /> : null}
-        {setupNotice ? <p className="panel-copy">{setupNotice}</p> : null}
-      </Panel>
-
       <Panel title="Ticker Rating" aside={<span className="eyebrow">Latest DB-backed rating snapshot</span>}>
         {!requestedTicker ? <p className="panel-copy">Load ticker to inspect latest rating snapshot and diagnostics.</p> : null}
         {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading ticker rating…" compact /> : null}
@@ -922,9 +831,7 @@ export function ChartsPage() {
               ticker={requestedTicker}
               candles={chartData}
               overlays={chartPayload ?? undefined}
-              extraAnnotations={setupAnnotations}
               extraMarkers={[
-                ...historicalSetupMarkers,
                 ...atrExtensionMarkers,
                 ...(chartVisibility.sellSignals ? sellIntoStrengthMarkers : []),
               ]}
@@ -949,19 +856,11 @@ export function ChartsPage() {
                 <span className="chart-pill chart-pill-setup">Dist {formatPrice(latestMarketExtension.distance)}</span>
               ) : null}
               {vcs ? <span className={`chart-pill ${vcsChartPillClass(vcs.stage)}`}>VCS {formatScore(vcs.score)} {vcs.stage_label}</span> : null}
-              {historicalSetupMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{historicalSetupMarkers.length} old FTD sweep marker(s)</span> : null}
               {atr14 != null ? <span className="chart-pill chart-pill-setup">ATR14 {formatPrice(atr14)}</span> : null}
               {atrMultipleFrom50Ma != null ? <span className="chart-pill chart-pill-setup">50MA {formatAtrMultiple(atrMultipleFrom50Ma)}</span> : null}
               {hasTrimWarning ? <span className="chart-pill chart-pill-event">Trim warning: 3x ATR above 50MA</span> : null}
               {atrExtensionMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{atrExtensionMarkers.length} ATR extension dot(s)</span> : null}
               {sellIntoStrengthMarkers.length > 0 ? <span className="chart-pill chart-pill-event">{sellIntoStrengthMarkers.length} sell signal(s)</span> : null}
-              {setupAnnotations.map((item, index) =>
-                item.setupLabel ? (
-                  <span key={`${item.setupLabel}-${index}`} className="chart-pill chart-pill-setup">
-                    {item.setupLabel}
-                  </span>
-                ) : null,
-              )}
             </div>
             <div className="rs-rating-grid">
               <RsRatingMiniChart
@@ -969,15 +868,29 @@ export function ChartsPage() {
                 series={dailyRsRatingSeries}
                 emptyLabel="Daily RS rating needs more history."
               />
-              <RsRatingMiniChart
-                title="RS Rating Weekly"
-                series={weeklyRsRatingSeries}
-                emptyLabel="Weekly RS rating unavailable yet."
-              />
             </div>
           </>
         ) : null}
       </Panel>
+
+      {isAdmin && signalGuideGroups.length > 0 ? (
+        <Panel title="Signal Logic" aside={<span className="eyebrow">Admin only</span>}>
+          <div className="list-grid">
+            {signalGuideGroups.map((group) => (
+              <div key={group.title} className="chart-card">
+                <div className="chart-rs-header">{group.title}</div>
+                {group.items.map((item) => (
+                  <div key={item.label} style={{ marginTop: 12 }}>
+                    <strong>{item.label}</strong>
+                    <p className="panel-copy">{item.meaning}</p>
+                    <p className="panel-copy">{item.logic}</p>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
 
       <ExclusionDialog
         isOpen={isListDialogOpen}
@@ -1068,6 +981,7 @@ function RsRatingMiniChart({
   const path = useMemo(() => buildMiniChartPath(series), [series]);
   const latestValue = series.length > 0 ? series[series.length - 1]?.value ?? null : null;
   const latestTime = series.length > 0 ? series[series.length - 1]?.time ?? "" : "";
+  const axisLabels = useMemo(() => buildMiniChartAxisLabels(series), [series]);
 
   return (
     <div className="chart-card rs-rating-card">
@@ -1094,6 +1008,11 @@ function RsRatingMiniChart({
               </g>
             );
           })}
+          {axisLabels.map((label) => (
+            <text key={`${title}-${label.x}-${label.text}`} x={label.x} y="170" fill="#71717a" fontSize="11" textAnchor={label.anchor}>
+              {label.text}
+            </text>
+          ))}
           <path d={path.areaPath} fill="rgba(96, 165, 250, 0.12)" />
           <path d={path.linePath} fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
           {path.lastPoint ? <circle cx={path.lastPoint.x} cy={path.lastPoint.y} r="4" fill="#93c5fd" stroke="#0f172a" strokeWidth="1.5" /> : null}
@@ -1112,7 +1031,7 @@ function buildMiniChartPath(series: Array<{ time: string; value: number }>) {
   const left = 10;
   const right = 10;
   const top = 14;
-  const bottom = 20;
+  const bottom = 32;
   const usableWidth = width - left - right;
   const baselineY = height - bottom;
   const points = series.map((point, index) => {
@@ -1129,12 +1048,32 @@ function buildMiniChartPath(series: Array<{ time: string; value: number }>) {
   };
 }
 
+function buildMiniChartAxisLabels(series: Array<{ time: string; value: number }>) {
+  if (series.length === 0) {
+    return [];
+  }
+  const width = 560;
+  const left = 10;
+  const right = 10;
+  const usableWidth = width - left - right;
+  const indices = Array.from(new Set([0, Math.floor((series.length - 1) / 2), series.length - 1]));
+  return indices.map((index) => {
+    const point = series[index];
+    const x = left + (usableWidth * index) / Math.max(1, series.length - 1);
+    return {
+      x,
+      text: point?.time ?? "",
+      anchor: index === 0 ? ("start" as const) : index === series.length - 1 ? ("end" as const) : ("middle" as const),
+    };
+  });
+}
+
 function ratingToChartY(
   value: number,
   dimensions: { top?: number; bottom?: number; height?: number } = {},
 ) {
   const top = dimensions.top ?? 14;
-  const bottom = dimensions.bottom ?? 20;
+  const bottom = dimensions.bottom ?? 32;
   const height = dimensions.height ?? 180;
   const clamped = Math.max(0, Math.min(100, value));
   const usableHeight = height - top - bottom;
@@ -1415,103 +1354,134 @@ function buildExponentialMovingAverage(
   return points;
 }
 
-function buildSetupAnnotation(id: string, hit: Record<string, unknown>): ChartAnnotations | null {
-  switch (id) {
-    case "hve":
-      return {
-        setupLabel: "HVE",
-        eventDate: readString(hit.signal_date),
-        eventLabel: "HVE signal",
-        triggerPrice: readNumber(hit.high_price),
-        triggerLabel: "Signal high",
-        entryPrice: readNumber(hit.current_price),
-        entryLabel: "Signal close",
-        secondaryEntryPrice: readNumber(hit.ma50),
-        secondaryEntryLabel: "50D MA",
-        stopPrice: readNumber(hit.low_price),
-        stopLabel: "Signal low",
-      };
-    case "inside_dryup":
-      return {
-        setupLabel: "Inside Day Dry-Up",
-        eventDate: readString(hit.signal_date),
-        eventLabel: "Inside day",
-        triggerPrice: readNumber(hit.trigger_price),
-        triggerLabel: "Inside-day high",
-        entryPrice: readNumber(hit.trigger_price),
-        entryLabel: "Trigger",
-        secondaryEntryPrice: readNumber(hit.ema21),
-        secondaryEntryLabel: "21 EMA",
-        stopPrice: readNumber(hit.stop_price),
-        stopLabel: "Inside-day low",
-      };
-    case "ftd_sweep":
-      return {
-        setupLabel: "FTD Sweep Breakout",
-        eventDate: readString(hit.sweep_breakout_date),
-        eventLabel: "Sweep breakout",
-        triggerPrice: readNumber(hit.ftd_high),
-        triggerLabel: "FTD High",
-        entryPrice: readNumber(hit.breakout_level),
-        entryLabel: "Breakout",
-        secondaryEntryPrice: readNumber(hit.sweep_low),
-        secondaryEntryLabel: "Sweep low",
-        secondaryEntryLow: readNumber(hit.sweep_low),
-        secondaryEntryHigh: readNumber(hit.ftd_high),
-        stopPrice: readNumber(hit.ftd_pivot_low),
-        stopLabel: "Pivot low",
-      };
-    case "weekly_htf_pullback":
-      return {
-        setupLabel: "Weekly HTF Pullback",
-        eventDate: readString(hit.htf_runup_high_date),
-        eventLabel: "Runup high",
-        triggerPrice: readNumber(hit.weekly_ema8),
-        triggerLabel: "8W EMA",
-        secondaryEntryPrice: readNumber(hit.htf_runup_high),
-        secondaryEntryLabel: "Runup high",
-      };
-    case "htf_8w_runup":
-      return {
-        setupLabel: "HTF 8W Runup",
-        eventDate: readString(hit.runup_high_date),
-        eventLabel: "Runup high",
-        triggerPrice: readNumber(hit.runup_high),
-        triggerLabel: "Runup high",
-      };
-    case "vcp":
-      return {
-        setupLabel: "VCP",
-        triggerPrice: readNumber(hit.pivot_price),
-        triggerLabel: "Pivot",
-        entryPrice: readNumber(hit.pivot_price),
-        entryLabel: "Pivot",
-        stopPrice: readNumber(hit.support_price),
-        stopLabel: "Support",
-      };
-    case "sepa_vcp":
-      return {
-        setupLabel: "SEPA VCP",
-        eventDate: readString(hit.signal_date),
-        eventLabel: "5D squeeze",
-        triggerPrice: readNumber(hit.trigger_price),
-        triggerLabel: "Squeeze high",
-        entryPrice: readNumber(hit.trigger_price),
-        entryLabel: "Breakout",
-        secondaryEntryPrice: readNumber(hit.ma50),
-        secondaryEntryLabel: "50D MA",
-        stopPrice: readNumber(hit.stop_price),
-        stopLabel: "Squeeze low",
-      };
-    default:
-      return null;
+type SignalGuideItem = {
+  label: string;
+  meaning: string;
+  logic: string;
+};
+
+type SignalGuideGroup = {
+  title: string;
+  items: SignalGuideItem[];
+};
+
+function buildSignalGuideGroups({
+  chartPayload,
+  latestRsMarker,
+  atrExtensionCount,
+  sellSignalCount,
+  hasTrimWarning,
+}: {
+  chartPayload: WatchlistChartResponse | null;
+  latestRsMarker: WatchlistChartResponse["rs_markers"][number] | null;
+  atrExtensionCount: number;
+  sellSignalCount: number;
+  hasTrimWarning: boolean;
+}): SignalGuideGroup[] {
+  const groups: SignalGuideGroup[] = [];
+
+  const coreItems: SignalGuideItem[] = [
+    {
+      label: "Gap Zones",
+      meaning: "Highlights important gap areas on the price chart.",
+      logic: "Chart overlay marks gap-up or gap-down zones so you can see likely support, resistance, or unfinished business fast.",
+    },
+    {
+      label: "HTF Box",
+      meaning: "Shows the higher-timeframe price box or compression range.",
+      logic: "Overlay frames the larger structure so daily action can be judged inside a bigger weekly-style context.",
+    },
+    {
+      label: "MA Stack",
+      meaning: "Shows whether moving averages are aligned in a constructive trend order.",
+      logic: "Uses the short and intermediate averages already plotted on chart. Clean bullish stacking means faster averages stay above slower ones.",
+    },
+  ];
+  if (chartPayload?.market_extension?.latest) {
+    coreItems.push({
+      label: "10W Extension",
+      meaning: "Shows how stretched price is versus the 10-week moving average.",
+      logic: "Computed from weekly close versus 10W SMA. Warning at 11% or more. Extreme at 15% or more.",
+    });
   }
-}
+  if (chartPayload?.vcs) {
+    coreItems.push({
+      label: "VCS",
+      meaning: "Summarizes how constructive the current volatility-contraction structure is.",
+      logic: "Uses the backend VCS score and stage labels to separate base, setup, and critical states.",
+    });
+  }
+  if (chartPayload?.fearzone_panel?.rows?.length) {
+    coreItems.push({
+      label: "Fearzone Panel",
+      meaning: "Highlights panic-reset context where downside emotion may be exhausting.",
+      logic: "Driven by backend fearzone calculations and rendered as a dedicated chart sub-panel.",
+    });
+  }
+  if (chartPayload?.sepa_dashboard) {
+    coreItems.push({
+      label: "SEPA Dashboard",
+      meaning: "Quick health summary for trend quality, pressure, and buy-risk context.",
+      logic: "Uses backend SEPA fields like TPR, RPR, VCP state, buy risk, and pressure to summarize setup quality.",
+    });
+  }
+  if (coreItems.length > 0) {
+    groups.push({ title: "Core Overlays", items: coreItems });
+  }
 
-function readString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
+  const rsItems: SignalGuideItem[] = [];
+  if (latestRsMarker) {
+    rsItems.push({
+      label: latestRsMarker.kind === "daily_new_high_before_price" ? "RS New High Before Price" : "RS New High",
+      meaning: "Relative strength line is leading price or making a fresh high with price strength confirmation.",
+      logic: latestRsMarker.kind === "daily_new_high_before_price"
+        ? "RS line breaks to a new high before price itself breaks to a new high. That is stronger leadership."
+        : "RS line makes a fresh high while price is also advancing, confirming leadership versus the benchmark.",
+    });
+  }
+  if ((chartPayload?.daily_rs_rating?.length ?? 0) > 0) {
+    rsItems.push({
+      label: "RS Rating Daily",
+      meaning: "Daily relative-strength rating trend over time.",
+      logic: "Backend supplies dated daily RS scores. Mini-chart now uses rating values vertically and actual dates on the horizontal axis.",
+    });
+  }
+  if (chartPayload?.benchmark_ticker) {
+    rsItems.push({
+      label: "RS Line",
+      meaning: `Compares ${chartPayload.ticker} versus ${chartPayload.benchmark_ticker} to show leadership or lagging behavior.`,
+      logic: "The RS pane plots relative performance against the benchmark. Rising RS means the stock is outperforming even if price is not breaking out yet.",
+    });
+  }
+  if (rsItems.length > 0) {
+    groups.push({ title: "RS Signals", items: rsItems });
+  }
 
-function readNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  const riskItems: SignalGuideItem[] = [];
+  if (hasTrimWarning) {
+    riskItems.push({
+      label: "Trim Warning",
+      meaning: "Price is unusually far above the 50MA in ATR terms.",
+      logic: "Triggered when close is at least 3 ATR above the current 50MA. This is extension risk, not an entry signal.",
+    });
+  }
+  if (atrExtensionCount > 0) {
+    riskItems.push({
+      label: "ATR Extension Dots",
+      meaning: "Marks bars where price became 3 ATR or more above the 50MA.",
+      logic: "For each bar, ATR14 is recomputed and compared with distance above 50MA. Marker appears at 3.0x or higher.",
+    });
+  }
+  if (sellSignalCount > 0) {
+    riskItems.push({
+      label: "Sell Signals",
+      meaning: "Flags possible sell-into-strength conditions after fast, climactic upside runs.",
+      logic: "Marks bars with explosive volume plus either 20% or more above 10EMA after a parabolic run, or 50% or more above 50SMA with explosive volume.",
+    });
+  }
+  if (riskItems.length > 0) {
+    groups.push({ title: "Trim / Sell", items: riskItems });
+  }
+
+  return groups;
 }
