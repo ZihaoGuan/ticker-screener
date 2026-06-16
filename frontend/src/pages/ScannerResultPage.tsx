@@ -13,7 +13,8 @@ import type {
   WatchlistDetailResponse,
 } from "../lib/types";
 
-type SortKey = "als" | "ta" | "fa" | "ars" | "ticker";
+type SortKey = "als" | "ta" | "fa" | "ars" | "ticker" | "company" | "sector" | "volume" | "change";
+type SortDirection = "asc" | "desc";
 
 type ScannerRow = {
   ticker: string;
@@ -23,7 +24,8 @@ type ScannerRow = {
   summary: string;
   setupLabel: string;
   chartHref: string;
-  marketCap: number | null;
+  dayVolume: number | null;
+  changePct: number | null;
   taScore: number | null;
   faScore: number | null;
   arsScore: number | null;
@@ -44,6 +46,7 @@ export function ScannerResultPage() {
   const [search, setSearch] = useState("");
   const [sectorFilter, setSectorFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("als");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   useEffect(() => {
     let ignore = false;
@@ -131,8 +134,8 @@ export function ScannerResultPage() {
         [row.ticker, row.company, row.sector, row.industry, row.summary, row.setupLabel].join(" ").toLowerCase().includes(query),
       );
     }
-    return [...nextRows].sort((left, right) => compareScannerRows(left, right, sortBy));
-  }, [rows, search, sectorFilter, sortBy]);
+    return [...nextRows].sort((left, right) => compareScannerRows(left, right, sortBy, sortDirection));
+  }, [rows, search, sectorFilter, sortBy, sortDirection]);
 
   const topNote = useMemo(() => {
     const first = detail?.entries.find((entry) => typeof entry.master_note === "string" && entry.master_note.trim());
@@ -144,14 +147,15 @@ export function ScannerResultPage() {
       return;
     }
     const lines = [
-      ["Ticker", "Company", "Sector", "Industry", "Market Cap", "TA", "FA", "ARS", "ALS Score", "Setup", "Summary"].join(","),
+      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "TA", "FA", "ARS", "ALS Score", "Setup", "Summary"].join(","),
       ...filteredRows.map((row) =>
         [
           row.ticker,
           csvValue(row.company),
           csvValue(row.sector),
           csvValue(row.industry),
-          row.marketCap == null ? "" : row.marketCap.toString(),
+          row.dayVolume == null ? "" : row.dayVolume.toString(),
+          row.changePct == null ? "" : row.changePct.toFixed(2),
           row.taScore == null ? "" : row.taScore.toFixed(1),
           row.faScore == null ? "" : row.faScore.toFixed(1),
           row.arsScore == null ? "" : Math.round(row.arsScore).toString(),
@@ -226,16 +230,6 @@ export function ScannerResultPage() {
             ))}
           </select>
         </label>
-        <label className="scanner-result-filter panel">
-          <span className="eyebrow">Sorted By</span>
-          <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SortKey)}>
-            <option value="als">ALS Score</option>
-            <option value="ta">TA</option>
-            <option value="fa">FA</option>
-            <option value="ars">ARS</option>
-            <option value="ticker">Ticker</option>
-          </select>
-        </label>
         <div className="scanner-result-filter panel scanner-result-filter-actions">
           <span className="eyebrow">Views</span>
           <div className="scanner-result-view-actions">
@@ -251,7 +245,7 @@ export function ScannerResultPage() {
         <div className="scanner-result-toolbar-left">
           <strong>Showing {formatCount(filteredRows.length)} results</strong>
           <span>View: List</span>
-          <span>Sorted by: {labelForSort(sortBy)}</span>
+          <span>Sorted by: {labelForSort(sortBy)} ({sortDirection})</span>
         </div>
         <div className="scanner-result-toolbar-right">
           <button className="ghost-button scanner-result-export" type="button" onClick={handleExportCsv} disabled={filteredRows.length === 0}>
@@ -271,14 +265,15 @@ export function ScannerResultPage() {
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th>Symbol</th>
-                    <th>Company</th>
-                    <th>Sector</th>
-                    <th>Market Cap</th>
-                    <th>TA</th>
-                    <th>FA</th>
-                    <th>ARS</th>
-                    <th>ALS Score</th>
+                    <th>{renderSortHeader("Symbol", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortHeader("Company", "company", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortHeader("Sector", "sector", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortHeader("Day Vol", "volume", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortHeader("Change %", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortHeader("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortHeader("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -303,7 +298,8 @@ export function ScannerResultPage() {
                           {row.industry && row.industry !== row.sector ? <span>{row.industry}</span> : null}
                         </div>
                       </td>
-                      <td data-label="Market Cap">{formatMarketCap(row.marketCap)}</td>
+                      <td data-label="Day Vol">{formatVolume(row.dayVolume)}</td>
+                      <td data-label="Change %">{renderChange(row.changePct)}</td>
                       <td data-label="TA">
                         <span className={`scanner-score-pill ${toneForScore(row.taScore, 10)}`}>{formatTenPointScore(row.taScore)}</span>
                       </td>
@@ -364,7 +360,8 @@ function buildScannerRow(
     summary: String(entry.summary ?? ""),
     setupLabel: String(entry.setup_label ?? ""),
     chartHref: buildChartHref(ticker, stem),
-    marketCap: coerceOptionalNumber(entry.market_cap),
+    dayVolume: resolveDisplayVolume(entry),
+    changePct: resolveDisplayChangePct(entry),
     taScore: technicalOverall != null ? technicalOverall / 10 : null,
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,
@@ -397,47 +394,99 @@ function averagePresent(values: Array<number | null | undefined>) {
   return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
 }
 
-function compareScannerRows(left: ScannerRow, right: ScannerRow, sortBy: SortKey) {
-  if (sortBy === "ticker") {
-    return left.ticker.localeCompare(right.ticker);
+function resolveDisplayChangePct(entry: Record<string, unknown> | null | undefined): number | null {
+  const candidates = [entry?.price_change_pct, entry?.daily_change_pct, entry?.change_pct, entry?.pct_change];
+  for (const candidate of candidates) {
+    const value = coerceOptionalNumber(candidate);
+    if (value != null) {
+      return value;
+    }
   }
-  if (sortBy === "ta") {
-    return compareNullableNumber(right.taScore, left.taScore) || left.ticker.localeCompare(right.ticker);
-  }
-  if (sortBy === "fa") {
-    return compareNullableNumber(right.faScore, left.faScore) || left.ticker.localeCompare(right.ticker);
-  }
-  if (sortBy === "ars") {
-    return compareNullableNumber(right.arsScore, left.arsScore) || left.ticker.localeCompare(right.ticker);
-  }
-  return compareNullableNumber(right.alsScore, left.alsScore) || left.ticker.localeCompare(right.ticker);
+  return null;
 }
 
-function compareNullableNumber(left: number | null, right: number | null) {
-  const normalizedLeft = typeof left === "number" ? left : Number.NEGATIVE_INFINITY;
-  const normalizedRight = typeof right === "number" ? right : Number.NEGATIVE_INFINITY;
-  return normalizedLeft - normalizedRight;
+function resolveDisplayVolume(entry: Record<string, unknown> | null | undefined): number | null {
+  const candidates = [entry?.current_volume, entry?.breakout_day_volume, entry?.day_volume, entry?.volume];
+  for (const candidate of candidates) {
+    const value = coerceOptionalNumber(candidate);
+    if (value != null) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function compareScannerRows(left: ScannerRow, right: ScannerRow, sortBy: SortKey, sortDirection: SortDirection) {
+  if (sortBy === "ticker") {
+    return compareText(left.ticker, right.ticker, sortDirection);
+  }
+  if (sortBy === "company") {
+    return compareText(left.company, right.company, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "sector") {
+    return compareText(left.sector, right.sector, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "volume") {
+    return compareNullableNumber(left.dayVolume, right.dayVolume, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "change") {
+    return compareNullableNumber(left.changePct, right.changePct, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "ta") {
+    return compareNullableNumber(left.taScore, right.taScore, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "fa") {
+    return compareNullableNumber(left.faScore, right.faScore, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "ars") {
+    return compareNullableNumber(left.arsScore, right.arsScore, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  return compareNullableNumber(left.alsScore, right.alsScore, sortDirection) || left.ticker.localeCompare(right.ticker);
+}
+
+function compareNullableNumber(left: number | null, right: number | null, sortDirection: SortDirection) {
+  const missingSentinel = sortDirection === "asc" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  const normalizedLeft = typeof left === "number" ? left : missingSentinel;
+  const normalizedRight = typeof right === "number" ? right : missingSentinel;
+  return sortDirection === "asc" ? normalizedLeft - normalizedRight : normalizedRight - normalizedLeft;
+}
+
+function compareText(left: string, right: string, sortDirection: SortDirection) {
+  return sortDirection === "asc" ? left.localeCompare(right) : right.localeCompare(left);
 }
 
 function formatTenPointScore(value: number | null) {
   return value == null ? "--" : value.toFixed(1);
 }
 
-function formatMarketCap(value: number | null) {
+function formatVolume(value: number | null) {
   if (value == null) {
     return "--";
   }
   const absolute = Math.abs(value);
-  if (absolute >= 1_000_000_000_000) {
-    return `${(value / 1_000_000_000_000).toFixed(2)}T`;
-  }
   if (absolute >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(1)}B`;
+    return `${(value / 1_000_000_000).toFixed(2)}B`;
   }
   if (absolute >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}M`;
+    return `${(value / 1_000_000).toFixed(2)}M`;
+  }
+  if (absolute >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}K`;
   }
   return value.toFixed(0);
+}
+
+function renderChange(value: number | null) {
+  if (value == null) {
+    return <span className="ticker-change neutral">--</span>;
+  }
+  const tone = value >= 0 ? "up" : "down";
+  return (
+    <span className={`ticker-change ${tone}`}>
+      {value >= 0 ? "+" : ""}
+      {value.toFixed(2)}%
+    </span>
+  );
 }
 
 function formatPercentScore(value: number | null) {
@@ -463,6 +512,14 @@ function toneForScore(value: number | null, max: number) {
 
 function labelForSort(sortBy: SortKey) {
   switch (sortBy) {
+    case "company":
+      return "Company";
+    case "sector":
+      return "Sector";
+    case "volume":
+      return "Day Vol";
+    case "change":
+      return "Change %";
     case "ta":
       return "TA";
     case "fa":
@@ -474,6 +531,35 @@ function labelForSort(sortBy: SortKey) {
     default:
       return "ALS Score";
   }
+}
+
+function renderSortHeader(
+  label: string,
+  key: SortKey,
+  sortBy: SortKey,
+  sortDirection: SortDirection,
+  setSortBy: (value: SortKey) => void,
+  setSortDirection: (value: SortDirection) => void,
+) {
+  const isActive = sortBy === key;
+  const indicator = isActive ? (sortDirection === "asc" ? " ↑" : " ↓") : "";
+  return (
+    <button
+      type="button"
+      className={`ghost-button scanner-result-sort-button${isActive ? " is-active" : ""}`}
+      onClick={() => {
+        if (isActive) {
+          setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+          return;
+        }
+        setSortBy(key);
+        setSortDirection(key === "ticker" || key === "company" || key === "sector" ? "asc" : "desc");
+      }}
+    >
+      {label}
+      {indicator}
+    </button>
+  );
 }
 
 function csvValue(value: string) {
