@@ -89,6 +89,11 @@ PIPELINES = (
         "filename": "bb_squeeze_{date}.json",
     },
     {
+        "id": "high_tight_flag",
+        "label": "High Tight Flag",
+        "filename": "high_tight_flag_{date}.json",
+    },
+    {
         "id": "sepa_vcp",
         "label": "SEPA VCP",
         "filename": "sepa_vcp_{date}.json",
@@ -166,6 +171,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "ftd_sweep": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "fearzone_zeiierman": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "bb_squeeze": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "high_tight_flag": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sepa_vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "rti": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sean_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

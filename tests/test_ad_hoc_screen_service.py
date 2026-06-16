@@ -944,6 +944,48 @@ def _vcs_frame(*, compressed: bool, variant: int = 0) -> pd.DataFrame:
     )
 
 
+def _high_tight_flag_frame(*, passes: bool) -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-02", periods=260, freq="B")
+    open_values: list[float] = []
+    high_values: list[float] = []
+    low_values: list[float] = []
+    close_values: list[float] = []
+    volume_values: list[float] = []
+
+    for idx, _date in enumerate(index):
+        if idx < 200:
+            close_value = 45.0 + (idx * 0.4)
+            bar_range = 8.5 - min(idx * 0.01, 2.0)
+            volume_value = 1_700_000.0 + (idx * 2_000.0)
+        elif idx < 220:
+            close_value = 100.0 + ((idx - 200) * 1.0)
+            bar_range = 6.0 - ((idx - 200) * 0.08)
+            volume_value = 2_000_000.0 - ((idx - 200) * 12_000.0)
+        else:
+            close_value = 145.0 + ((idx - 220) * (2.2 if passes else 0.8))
+            bar_range = 4.2 - ((idx - 220) * 0.05)
+            volume_value = 1_760_000.0 - ((idx - 220) * 20_000.0)
+        open_value = close_value - (bar_range * 0.15)
+        high_value = close_value + (bar_range * 0.5)
+        low_value = close_value - (bar_range * 0.5)
+        open_values.append(open_value)
+        high_values.append(high_value)
+        low_values.append(low_value)
+        close_values.append(close_value)
+        volume_values.append(max(volume_value, 500_000.0))
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high_values,
+            "Low": low_values,
+            "Close": close_values,
+            "Volume": volume_values,
+        },
+        index=index,
+    )
+
+
 class AdHocScreenServiceTests(unittest.TestCase):
     def test_run_prefetches_once_and_evaluates_selected_screeners(self) -> None:
         ticker_frame = _frame("2026-01-01", 40)
@@ -1547,6 +1589,29 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "bb_squeeze")
         self.assertEqual(payload["screeners"][0]["hit"]["signal_kind"], "positive_cci")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_high_tight_flag_catalog_entry(self) -> None:
+        ticker_frame = _high_tight_flag_frame(passes=True)
+        benchmark_frame = _frame("2026-01-02", 260)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 12, 31),
+                screener_ids=["high_tight_flag"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "high_tight_flag")
+        self.assertGreater(payload["screeners"][0]["hit"]["runup_40_ratio"], 1.9)
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_supports_sean_breakout_catalog_entry(self) -> None:
