@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 import unittest
 
 import pandas as pd
@@ -34,6 +35,24 @@ class MarketExtensionTests(unittest.TestCase):
 
         self.assertEqual(result["threshold_state"].iloc[-2], "normal")
         self.assertEqual(result["threshold_state"].iloc[-1], "extreme")
+
+    def test_compute_extension_frame_coerces_decimal_db_values(self) -> None:
+        index = pd.date_range(start="2026-01-02", periods=6, freq="W-FRI")
+        frame = pd.DataFrame(
+            {
+                "Open": [Decimal("100.0"), Decimal("102.0"), Decimal("104.0"), Decimal("107.0"), Decimal("109.0"), Decimal("115.0")],
+                "High": [Decimal("101.0"), Decimal("103.0"), Decimal("105.0"), Decimal("108.0"), Decimal("111.0"), Decimal("118.0")],
+                "Low": [Decimal("99.0"), Decimal("101.0"), Decimal("103.0"), Decimal("106.0"), Decimal("108.0"), Decimal("114.0")],
+                "Close": [Decimal("100.0"), Decimal("102.0"), Decimal("104.0"), Decimal("107.0"), Decimal("110.0"), Decimal("118.0")],
+                "Volume": [Decimal("1000000"), Decimal("1000000"), Decimal("1000000"), Decimal("1000000"), Decimal("1000000"), Decimal("1000000")],
+            },
+            index=index,
+        )
+
+        result = compute_extension_frame(frame, length=3, ma_type="sma", warning_pct=5.0, extreme_pct=5.5)
+
+        self.assertEqual(result["threshold_state"].iloc[-1], "extreme")
+        self.assertAlmostEqual(float(result["extension_pct"].iloc[-1]), 5.67, places=2)
 
     def test_find_extension_peaks_returns_local_maximum(self) -> None:
         index = pd.date_range(start="2026-01-02", periods=7, freq="W-FRI")

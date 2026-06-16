@@ -74,6 +74,9 @@ def compute_extension_frame(
     if not isinstance(bars.index, pd.DatetimeIndex):
         bars.index = pd.to_datetime(bars.index)
     bars = bars.sort_index()
+    for column in ("Open", "High", "Low", "Close", "Volume"):
+        if column in bars.columns:
+            bars[column] = pd.to_numeric(bars[column], errors="coerce")
     bars["moving_average"] = build_moving_average(bars["Close"], length=length, ma_type=ma_type)
     bars["extension_pct"] = ((bars["Close"] / bars["moving_average"]) - 1.0) * 100.0
     bars["warning_pct"] = float(warning_pct)
