@@ -8,7 +8,7 @@ import pandas as pd
 import yfinance as yf
 
 from ...config import load_app_config
-from ...market_data_access import db_frame_has_recent_coverage, load_daily_bars_frame_from_db
+from ...market_data_access import load_daily_bars_frame_from_db
 from ...market_extension import build_moving_average, compute_extension_frame, resample_to_weekly
 from ...rsi_divergence import find_latest_bearish_rsi_divergence_top
 from ...td_sequential_screen import find_recent_td_sequential_hit
@@ -53,13 +53,7 @@ class DashboardService:
             db_frame = None
 
         db_payload = _build_payload_if_possible(frame=db_frame, ticker=benchmark, data_source="database")
-        if (
-            db_payload is not None
-            and db_frame is not None
-            and not db_frame.empty
-            and db_frame_has_recent_coverage(db_frame, end_date, tolerance_days=7)
-            and not _market_health_payload_has_no_latest(db_payload)
-        ):
+        if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
             return db_payload
 
         internet_frame = _download_history_frame(benchmark, start_date, end_date)
