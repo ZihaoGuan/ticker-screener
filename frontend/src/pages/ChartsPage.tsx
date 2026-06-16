@@ -58,6 +58,7 @@ export function ChartsPage() {
   const [isSavingListAction, setIsSavingListAction] = useState(false);
   const [isLaunchingBackfill, setIsLaunchingBackfill] = useState(false);
   const [backfillNotice, setBackfillNotice] = useState("");
+  const [expandedHeroGroup, setExpandedHeroGroup] = useState<string | null>(null);
 
   useEffect(() => {
     setTickerInput(requestedTicker);
@@ -305,6 +306,93 @@ export function ChartsPage() {
       }),
     [atrExtensionMarkers.length, chartPayload, hasTrimWarning, latestRsMarker, sellIntoStrengthMarkers.length],
   );
+  const heroStatGroups = useMemo(
+    () => [
+      {
+        id: "context",
+        title: "Context",
+        description: "Basic context for this chart request: which trading session you are looking at, how many bars loaded, and whether data came from database or internet fallback.",
+        items: [
+          { label: "Source", value: chartPayload?.data_source ?? "-" },
+        ],
+      },
+      {
+        id: "structure",
+        title: "Structure",
+        description: "Structure groups base quality and setup health. VCS measures contraction quality. SEPA fields like TPR, buy risk, pressure, RPR, and VCP tell whether the broader trend-template and breakout context still look constructive.",
+        items: [
+          { label: "VCS", value: formatScore(vcs?.score) },
+          {
+            label: "VCS Stage",
+            value: vcs?.stage_label ?? "-",
+            className: vcs ? `status-pill ${vcsStageClass(vcs.stage)}` : undefined,
+          },
+          {
+            label: "TPR",
+            value: sepaDashboard?.tpr_status ?? "-",
+            className: sepaDashboard ? `status-pill ${sepaDashboard.tpr_pass ? "status-success" : "status-unknown"}` : undefined,
+          },
+          { label: "Buy Risk", value: sepaDashboard?.buy_risk_status ?? "-" },
+          { label: "Pressure", value: sepaDashboard?.pressure_status ?? "-" },
+          { label: "RPR", value: formatScore(sepaDashboard?.rpr_score) },
+          { label: "5D VCP", value: sepaDashboard?.vcp_status ?? "-" },
+          { label: "Recent Squeeze", value: sepaDashboard?.recent_vcp_signal_date ?? "-" },
+        ],
+      },
+      {
+        id: "extension",
+        title: "Extension / Risk",
+        description: "Extension and risk fields tell how stretched price is. Use them to judge chase risk, trim pressure, and whether the stock is still in a healthy daily range versus getting too extended.",
+        items: [
+          { label: marketExtensionLabel, value: formatPercent(latestMarketExtension?.extension_pct) },
+          {
+            label: "10W State",
+            value: formatMarketExtensionState(latestMarketExtension?.state),
+            className: latestMarketExtension ? `status-pill ${marketExtensionStateClass(latestMarketExtension.state)}` : undefined,
+          },
+          {
+            label: "ADR14",
+            value: formatPercent(adr14Pct),
+            className: adr14InRange == null ? undefined : `adr-badge ${adr14InRange ? "is-in-range" : "is-out-of-range"}`,
+          },
+          { label: "ATR14", value: formatPrice(atr14) },
+          { label: "ATR x 50MA", value: formatAtrMultiple(atrMultipleFrom50Ma) },
+          {
+            label: "Trim Warn",
+            value: hasTrimWarning ? ">= 3x ATR" : "Normal",
+            className: hasTrimWarning ? "atr-badge is-warning" : undefined,
+          },
+        ],
+      },
+      {
+        id: "fundamentals",
+        title: "Fundamentals",
+        description: "Quick fundamental pressure-check. These numbers help frame sponsorship, growth quality, and near-term event risk around the technical setup.",
+        items: [
+          { label: "Inst Float", value: formatPercent(fundamentalsPayload?.holders_float_held_by_institutions_pct) },
+          { label: "Rev YoY", value: formatPercent(fundamentalsPayload?.revenue_yoy_pct) },
+          { label: "Imp Move", value: formatPercent(fundamentalsPayload?.implied_move?.percent_move) },
+        ],
+      },
+    ],
+    [
+      adr14InRange,
+      adr14Pct,
+      atr14,
+      atrMultipleFrom50Ma,
+      chartData.length,
+      chartPayload?.data_source,
+      chartPayload?.resolved_as_of_date,
+      fundamentalsPayload?.holders_float_held_by_institutions_pct,
+      fundamentalsPayload?.implied_move?.percent_move,
+      fundamentalsPayload?.revenue_yoy_pct,
+      hasTrimWarning,
+      latestMarketExtension,
+      marketExtensionLabel,
+      sepaDashboard,
+      vcs,
+    ],
+  );
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -446,95 +534,39 @@ export function ChartsPage() {
             </p>
           ) : null}
         </div>
-          <div className="hero-stats">
-          <div>
-            <span className="eyebrow">VCS</span>
-            <strong>{formatScore(vcs?.score)}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">VCS Stage</span>
-            <strong className={vcs ? `status-pill ${vcsStageClass(vcs.stage)}` : undefined}>{vcs?.stage_label ?? "-"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">As Of</span>
-            <strong>{chartPayload?.resolved_as_of_date ?? "Latest trading day"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">{marketExtensionLabel}</span>
-            <strong>{formatPercent(latestMarketExtension?.extension_pct)}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">10W State</span>
-            <strong className={latestMarketExtension ? `status-pill ${marketExtensionStateClass(latestMarketExtension.state)}` : undefined}>
-              {formatMarketExtensionState(latestMarketExtension?.state)}
-            </strong>
-          </div>
-          <div>
-            <span className="eyebrow">Bars</span>
-            <strong>{chartData.length || "-"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">Requested</span>
-            <strong>{requestedDate || "Latest"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">ADR14</span>
-            <strong className={adr14InRange == null ? undefined : `adr-badge ${adr14InRange ? "is-in-range" : "is-out-of-range"}`}>
-              {formatPercent(adr14Pct)}
-            </strong>
-          </div>
-          <div>
-            <span className="eyebrow">ATR14</span>
-            <strong>{formatPrice(atr14)}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">ATR x 50MA</span>
-            <strong>{formatAtrMultiple(atrMultipleFrom50Ma)}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">TPR</span>
-            <strong className={sepaDashboard ? `status-pill ${sepaDashboard.tpr_pass ? "status-success" : "status-unknown"}` : undefined}>{sepaDashboard?.tpr_status ?? "-"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">Buy Risk</span>
-            <strong>{sepaDashboard?.buy_risk_status ?? "-"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">Pressure</span>
-            <strong>{sepaDashboard?.pressure_status ?? "-"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">RPR</span>
-            <strong>{formatScore(sepaDashboard?.rpr_score)}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">5D VCP</span>
-            <strong>{sepaDashboard?.vcp_status ?? "-"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">Recent Squeeze</span>
-            <strong>{sepaDashboard?.recent_vcp_signal_date ?? "-"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">Trim Warn</span>
-            <strong className={hasTrimWarning ? "atr-badge is-warning" : undefined}>{hasTrimWarning ? ">= 3x ATR" : "Normal"}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">Inst Float</span>
-            <strong>{formatPercent(fundamentalsPayload?.holders_float_held_by_institutions_pct)}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">Rev YoY</span>
-            <strong>{formatPercent(fundamentalsPayload?.revenue_yoy_pct)}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">Imp Move</span>
-            <strong>{formatPercent(fundamentalsPayload?.implied_move?.percent_move)}</strong>
-          </div>
-          <div>
-            <span className="eyebrow">Source</span>
-            <strong>{chartPayload?.data_source ?? "-"}</strong>
-          </div>
+        <div className="hero-as-of">
+          <span className="eyebrow">As Of</span>
+          <strong>{chartPayload?.resolved_as_of_date ?? "Latest trading day"}</strong>
+        </div>
+        <div className="hero-stats">
+          {heroStatGroups.map((group) => {
+            const isExpanded = expandedHeroGroup === group.id;
+            return (
+              <div key={group.id} className="hero-stat-group">
+                <div className="hero-stat-group-head">
+                  <span className="eyebrow">{group.title}</span>
+                  <button
+                    type="button"
+                    className="hero-stat-help"
+                    title={group.description}
+                    aria-label={`${group.title} meaning`}
+                    onClick={() => setExpandedHeroGroup((current) => (current === group.id ? null : group.id))}
+                  >
+                    ?
+                  </button>
+                </div>
+                <div className="hero-stat-group-grid">
+                  {group.items.map((item) => (
+                    <div key={`${group.id}-${item.label}`} className="hero-stat-item">
+                      <span className="eyebrow">{item.label}</span>
+                      <strong className={item.className}>{item.value}</strong>
+                    </div>
+                  ))}
+                </div>
+                {isExpanded ? <p className="hero-stat-help-copy">{group.description}</p> : null}
+              </div>
+            );
+          })}
         </div>
       </section>
 
@@ -978,9 +1010,13 @@ function RsRatingMiniChart({
   series: Array<{ time: string; value: number }>;
   emptyLabel: string;
 }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const path = useMemo(() => buildMiniChartPath(series), [series]);
-  const latestValue = series.length > 0 ? series[series.length - 1]?.value ?? null : null;
-  const latestTime = series.length > 0 ? series[series.length - 1]?.time ?? "" : "";
+  const activeIndex = hoveredIndex != null && hoveredIndex >= 0 && hoveredIndex < series.length ? hoveredIndex : series.length - 1;
+  const activePoint = activeIndex >= 0 ? series[activeIndex] ?? null : null;
+  const activePathPoint = path?.points[activeIndex] ?? null;
+  const activeValue = activePoint?.value ?? null;
+  const activeTime = activePoint?.time ?? "";
   const axisLabels = useMemo(() => buildMiniChartAxisLabels(series), [series]);
 
   return (
@@ -988,14 +1024,29 @@ function RsRatingMiniChart({
       <div className="rs-rating-card-head">
         <div>
           <div className="chart-rs-header">{title}</div>
-          <div className="rs-rating-meta">{latestTime ? `Latest ${latestTime}` : emptyLabel}</div>
+          <div className="rs-rating-meta">{activeTime ? `${hoveredIndex != null ? "Hover" : "Latest"} ${activeTime}` : emptyLabel}</div>
         </div>
-        <div className="rs-rating-value">{latestValue == null ? "--" : latestValue.toFixed(1)}</div>
+        <div className="rs-rating-value">{activeValue == null ? "--" : activeValue.toFixed(1)}</div>
       </div>
       {series.length === 0 || path == null ? (
         <p className="panel-copy">{emptyLabel}</p>
       ) : (
-        <svg className="rs-rating-svg" viewBox="0 0 560 180" preserveAspectRatio="none" aria-label={title}>
+        <svg
+          className="rs-rating-svg"
+          viewBox="0 0 560 180"
+          preserveAspectRatio="none"
+          aria-label={title}
+          onMouseMove={(event) => {
+            const bounds = event.currentTarget.getBoundingClientRect();
+            if (bounds.width <= 0 || series.length === 0) {
+              return;
+            }
+            const rawX = ((event.clientX - bounds.left) / bounds.width) * 560;
+            const nextIndex = clampMiniChartIndex(series.length, rawX);
+            setHoveredIndex((current) => (current === nextIndex ? current : nextIndex));
+          }}
+          onMouseLeave={() => setHoveredIndex((current) => (current == null ? current : null))}
+        >
           <rect x="0" y="0" width="560" height="180" rx="10" fill="#111114" />
           {[30, 70, 90].map((level) => {
             const y = ratingToChartY(level);
@@ -1003,11 +1054,23 @@ function RsRatingMiniChart({
               <g key={level}>
                 <line x1="0" y1={y} x2="560" y2={y} stroke={level >= 90 ? "#14532d" : "#27272a"} strokeDasharray="4 4" strokeWidth="1" />
                 <text x="8" y={y - 4} fill="#71717a" fontSize="11">
-                  {level}
+              {level}
                 </text>
               </g>
             );
           })}
+          {activePathPoint ? (
+            <line
+              x1={activePathPoint.x}
+              y1="8"
+              x2={activePathPoint.x}
+              y2="174"
+              stroke="#60a5fa"
+              strokeWidth="1"
+              strokeDasharray="4 4"
+              opacity="0.95"
+            />
+          ) : null}
           {axisLabels.map((label) => (
             <text key={`${title}-${label.x}-${label.text}`} x={label.x} y="170" fill="#71717a" fontSize="11" textAnchor={label.anchor}>
               {label.text}
@@ -1015,7 +1078,7 @@ function RsRatingMiniChart({
           ))}
           <path d={path.areaPath} fill="rgba(96, 165, 250, 0.12)" />
           <path d={path.linePath} fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-          {path.lastPoint ? <circle cx={path.lastPoint.x} cy={path.lastPoint.y} r="4" fill="#93c5fd" stroke="#0f172a" strokeWidth="1.5" /> : null}
+          {activePathPoint ? <circle cx={activePathPoint.x} cy={activePathPoint.y} r="4" fill="#93c5fd" stroke="#0f172a" strokeWidth="1.5" /> : null}
         </svg>
       )}
     </div>
@@ -1044,8 +1107,18 @@ function buildMiniChartPath(series: Array<{ time: string; value: number }>) {
   return {
     linePath,
     areaPath,
+    points,
     lastPoint: points[points.length - 1] ?? null,
   };
+}
+
+function clampMiniChartIndex(length: number, svgX: number) {
+  const width = 560;
+  const left = 10;
+  const right = 10;
+  const usableWidth = width - left - right;
+  const normalizedX = Math.max(left, Math.min(width - right, svgX)) - left;
+  return Math.max(0, Math.min(length - 1, Math.round((normalizedX / Math.max(1, usableWidth)) * Math.max(1, length - 1))));
 }
 
 function buildMiniChartAxisLabels(series: Array<{ time: string; value: number }>) {
