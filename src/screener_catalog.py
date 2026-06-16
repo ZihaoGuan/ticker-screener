@@ -18,6 +18,7 @@ from .high_tight_flag_screen import HTF_SLOPE_LOOKBACK, HTF_SMA_LONG_PERIOD, fin
 from .hve_screen import find_recent_hve_hit
 from .htf_runup_screen import run_htf_runup_screen
 from .inside_dryup_screen import find_recent_inside_dryup_hit
+from .leif_high_tight_flag_screen import LEIF_HTF_LOOKBACK_DAYS, find_leif_high_tight_flag_hit
 from .lost_21ema_screen import run_lost_21ema_screen
 from .macd_screen import find_recent_macd_hit
 from .near_200ma_screen import run_near_200ma_screen
@@ -228,6 +229,30 @@ def _run_high_tight_flag(bundle: ScreenerInputBundle) -> ScreenerEvaluationResul
             "signal_date": payload["signal_date"],
             "runup_40_ratio": payload["runup_40_ratio"],
             "atr_ratio": payload["atr_ratio"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_leif_high_tight_flag(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    benchmark_ticker = str(bundle.extras.get("benchmark_ticker") or "SPY").strip().upper() or "SPY"
+    hit = find_leif_high_tight_flag_hit(
+        bundle.bars,
+        bundle.benchmark_bars,
+        ticker=_ticker_from_bundle(bundle),
+        benchmark_ticker=benchmark_ticker,
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "score": payload["score"],
+            "rs_rating": payload["rs_rating"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
@@ -737,6 +762,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=HTF_SMA_LONG_PERIOD + HTF_SLOPE_LOOKBACK,
             warmup_trading_days=20,
             evaluator=_run_high_tight_flag,
+        ),
+        "leif_high_tight_flag": ScreenerSpec(
+            id="leif_high_tight_flag",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=LEIF_HTF_LOOKBACK_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_leif_high_tight_flag,
         ),
         "sepa_vcp": ScreenerSpec(
             id="sepa_vcp",

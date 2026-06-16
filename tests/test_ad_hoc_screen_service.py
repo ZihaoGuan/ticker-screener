@@ -986,6 +986,73 @@ def _high_tight_flag_frame(*, passes: bool) -> pd.DataFrame:
     )
 
 
+def _leif_benchmark_frame() -> pd.DataFrame:
+    return pd.DataFrame({"Close": [100.0 + (index_value * 0.18) for index_value in range(260)]}, index=pd.date_range(start="2025-01-02", periods=260, freq="B"))
+
+
+def _leif_high_tight_flag_frame(*, passes: bool) -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-02", periods=260, freq="B")
+    open_values: list[float] = []
+    high_values: list[float] = []
+    low_values: list[float] = []
+    close_values: list[float] = []
+    volume_values: list[float] = []
+
+    for idx, _date in enumerate(index):
+        if idx < 220:
+            close_value = 40.0 + (idx * 0.12)
+            volume_value = 1_000_000.0 + ((idx % 5) * 15_000.0)
+        elif idx < 240:
+            close_value = 66.4 + ((idx - 220) * 3.2)
+            volume_value = 2_200_000.0 + ((idx - 220) * 12_000.0)
+        elif idx < 259:
+            flag_closes = [
+                126.8,
+                125.9,
+                125.2,
+                123.8,
+                122.1,
+                120.6,
+                118.4,
+                116.5,
+                114.2,
+                112.4,
+                110.8,
+                111.6,
+                112.7,
+                114.0,
+                115.4,
+                117.1,
+                118.9,
+                120.5,
+                122.4,
+            ]
+            close_value = flag_closes[idx - 240]
+            volume_value = 1_050_000.0 - ((idx - 240) * 10_000.0)
+        else:
+            close_value = 127.2 if passes else 126.7
+            volume_value = 2_450_000.0 if passes else 1_300_000.0
+        open_value = close_value * 0.992
+        high_value = close_value * 1.01
+        low_value = close_value * 0.99
+        open_values.append(open_value)
+        high_values.append(high_value)
+        low_values.append(low_value)
+        close_values.append(close_value)
+        volume_values.append(volume_value)
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high_values,
+            "Low": low_values,
+            "Close": close_values,
+            "Volume": volume_values,
+        },
+        index=index,
+    )
+
+
 class AdHocScreenServiceTests(unittest.TestCase):
     def test_run_prefetches_once_and_evaluates_selected_screeners(self) -> None:
         ticker_frame = _frame("2026-01-01", 40)
@@ -1612,6 +1679,30 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "high_tight_flag")
         self.assertGreater(payload["screeners"][0]["hit"]["runup_40_ratio"], 1.9)
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_leif_high_tight_flag_catalog_entry(self) -> None:
+        ticker_frame = _leif_high_tight_flag_frame(passes=True)
+        benchmark_frame = _leif_benchmark_frame()
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 12, 31),
+                screener_ids=["leif_high_tight_flag"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "leif_high_tight_flag")
+        self.assertGreaterEqual(payload["screeners"][0]["hit"]["score"], 5.0)
+        self.assertGreaterEqual(payload["screeners"][0]["hit"]["rs_rating"], 80.0)
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_supports_sean_breakout_catalog_entry(self) -> None:

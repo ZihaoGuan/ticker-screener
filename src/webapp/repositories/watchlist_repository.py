@@ -91,6 +91,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("rsi_ma_bb_bearish", "rsi_ma_bb", "RSI MA/BB"),
         ("bb_squeeze", "bb_squeeze", "BB Squeeze"),
         ("high_tight_flag", "high_tight_flag", "High Tight Flag"),
+        ("leif_high_tight_flag", "leif_high_tight_flag", "Leif High Tight Flag"),
         ("sepa_vcp", "sepa_vcp", "SEPA VCP"),
         ("rti", "rti", "RTI"),
         ("sean_breakout", "sean_breakout", "Sean Breakout"),

@@ -1727,6 +1727,7 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     sepa_vcp: "SEPA VCP squeeze names with Minervini trend, pressure, and risk context.",
     trend_template: "Minervini trend-template names stacked above 50, 150, and 200 day support.",
     gap_fill: "Post-earnings gap reversal candidates with reclaim or fill behavior.",
+    leif_high_tight_flag: "Leif Soreide HTF breakout setup with scored pole, flag, volume, RS, and breakout rules.",
     fearzone: "High-velocity panic reversals where snapback asymmetry may appear.",
     td9_bullish: "Bullish TD Sequential exhaustion names where downside pressure may be spent.",
     sean_breakout: "Daily leaders already clearing key EMA, volume, and ADR thresholds.",

@@ -259,6 +259,19 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "trend_template_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "trend_template")
 
+    def test_group_key_supports_leif_high_tight_flag(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="leif_high_tight_flag",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "leif_high_tight_flag_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "leif_high_tight_flag")
+
     def test_group_key_supports_vcs_setup_stage(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",

@@ -45,6 +45,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("gap_fill_{date_label}.json",),
         "legacy_summary_templates": ("gap_fill_run_summary_{date_label}.json",),
     },
+    "leif_high_tight_flag": {
+        "stem_template": "leif_high_tight_flag_{date_label}",
+        "legacy_watchlist_templates": ("leif_high_tight_flag_{date_label}.json",),
+        "legacy_raw_templates": ("leif_high_tight_flag_{date_label}.json",),
+        "legacy_summary_templates": ("leif_high_tight_flag_run_summary_{date_label}.json",),
+    },
     "hve": {
         "stem_template": "hve_{date_label}",
         "legacy_watchlist_templates": ("hve_{date_label}.json",),
