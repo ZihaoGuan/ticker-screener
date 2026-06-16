@@ -4,6 +4,9 @@ import { createGapZonePrimitive } from "./GapZonePrimitive";
 import { createHighTightFlagPrimitive } from "./HighTightFlagPrimitive";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
 
+const EMPTY_ANNOTATIONS: ChartAnnotations[] = [];
+const EMPTY_MARKERS: Array<{ time: string; label?: string; color: string; shape: "circle" | "square"; position: "aboveBar" | "belowBar" }> = [];
+
 export type ChartVisibility = {
   ema8: boolean;
   ema21: boolean;
@@ -70,13 +73,15 @@ type FlexibleSrOverlay = {
   support: FlexibleSrCurve | null;
 };
 
-export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations = [], extraMarkers = [], visibility, forceFearzonePanel = false }: PriceChartProps) {
+export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations, extraMarkers, visibility, forceFearzonePanel = false }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
   const priceChartApiRef = useRef<IChartApi | null>(null);
   const rsChartApiRef = useRef<IChartApi | null>(null);
   const [visibleIndexRange, setVisibleIndexRange] = useState<{ from: number; to: number } | null>(null);
   const [hoverGuide, setHoverGuide] = useState<{ time: string; xRatio: number } | null>(null);
+  const resolvedExtraAnnotations = extraAnnotations ?? EMPTY_ANNOTATIONS;
+  const resolvedExtraMarkers = extraMarkers ?? EMPTY_MARKERS;
   const options = visibility ?? {
     ema8: true,
     ema21: true,
@@ -120,8 +125,8 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     () => detectGapZones(candles).filter((zone) => zone.remainingUpperPrice > zone.remainingLowerPrice + 1e-6).slice(-4),
     [candles],
   );
-  const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations, extraAnnotations), [candles, annotations, extraAnnotations]);
-  const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, extraAnnotations), [annotations, extraAnnotations]);
+  const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations, resolvedExtraAnnotations), [candles, annotations, resolvedExtraAnnotations]);
+  const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, resolvedExtraAnnotations), [annotations, resolvedExtraAnnotations]);
   const flexibleSrOverlay = useMemo(() => (options.flexSr ? buildFlexibleSrOverlay(candles) : null), [candles, options.flexSr]);
   const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
     const point = param.point;
@@ -337,7 +342,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     }
 
     const priceMarkers = [];
-    const eventAnnotations = [annotations, ...extraAnnotations].filter((item): item is ChartAnnotations => Boolean(item?.eventDate));
+    const eventAnnotations = [annotations, ...resolvedExtraAnnotations].filter((item): item is ChartAnnotations => Boolean(item?.eventDate));
     for (const eventAnnotation of eventAnnotations) {
       if (!eventAnnotation.eventDate) {
         continue;
@@ -359,7 +364,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         });
       }
     }
-    for (const marker of extraMarkers) {
+    for (const marker of resolvedExtraMarkers) {
       priceMarkers.push({
         time: marker.time,
         position: marker.position,
@@ -533,8 +538,8 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     visibleGapZones,
     highTightFlagBox,
     annotationLines,
-    extraAnnotations,
-    extraMarkers,
+    resolvedExtraAnnotations,
+    resolvedExtraMarkers,
     weeklyEma8,
     options.flexSr,
     flexibleSrOverlay,
@@ -595,10 +600,15 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
           hoveredTime={hoverGuide?.time ?? null}
           onHoverTime={(time, xRatio) => {
             if (!time || xRatio == null) {
-              setHoverGuide(null);
+              setHoverGuide((current) => (current == null ? current : null));
               return;
             }
-            setHoverGuide({ time, xRatio });
+            setHoverGuide((current) => {
+              if (current && current.time === time && Math.abs(current.xRatio - xRatio) < 0.0005) {
+                return current;
+              }
+              return { time, xRatio };
+            });
           }}
         />
       ) : null}
