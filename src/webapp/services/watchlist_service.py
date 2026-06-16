@@ -239,7 +239,7 @@ class WatchlistService:
         return {
             "stem": stem,
             "entry_count": len(entries),
-            "entries": entries[:200],
+            "entries": entries,
         }
 
     def get_chart_payload(

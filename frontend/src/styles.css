@@ -3158,6 +3158,28 @@ a {
   overflow: hidden;
 }
 
+.scanner-result-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  border-bottom: 1px solid #27272a;
+  color: #d4d4d8;
+}
+
+.scanner-result-pagination-status {
+  color: #a1a1aa;
+}
+
+.scanner-result-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .scanner-result-table-wrap {
   border-top: 1px solid #27272a;
 }

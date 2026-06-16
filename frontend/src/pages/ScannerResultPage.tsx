@@ -33,6 +33,7 @@ type ScannerRow = {
 };
 
 const MAX_RATINGS_ROWS = 500;
+const PAGE_SIZE = 50;
 
 export function ScannerResultPage() {
   const { scannerId = "" } = useParams();
@@ -47,6 +48,7 @@ export function ScannerResultPage() {
   const [sectorFilter, setSectorFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("als");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let ignore = false;
@@ -136,6 +138,23 @@ export function ScannerResultPage() {
     }
     return [...nextRows].sort((left, right) => compareScannerRows(left, right, sortBy, sortDirection));
   }, [rows, search, sectorFilter, sortBy, sortDirection]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [scannerId, search, sectorFilter, sortBy, sortDirection]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const normalizedPage = Math.min(currentPage, totalPages);
+  const pagedRows = useMemo(() => {
+    const startIndex = (normalizedPage - 1) * PAGE_SIZE;
+    return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredRows, normalizedPage]);
+
+  useEffect(() => {
+    if (currentPage !== normalizedPage) {
+      setCurrentPage(normalizedPage);
+    }
+  }, [currentPage, normalizedPage]);
 
   const topNote = useMemo(() => {
     const first = detail?.entries.find((entry) => typeof entry.master_note === "string" && entry.master_note.trim());
@@ -246,6 +265,7 @@ export function ScannerResultPage() {
           <strong>Showing {formatCount(filteredRows.length)} results</strong>
           <span>View: List</span>
           <span>Sorted by: {labelForSort(sortBy)} ({sortDirection})</span>
+          <span>Page {normalizedPage} / {formatCount(totalPages)}</span>
         </div>
         <div className="scanner-result-toolbar-right">
           <button className="ghost-button scanner-result-export" type="button" onClick={handleExportCsv} disabled={filteredRows.length === 0}>
@@ -260,6 +280,25 @@ export function ScannerResultPage() {
         {!isLoading && !notice && filteredRows.length === 0 ? <p className="panel-copy">No tickers match current scanner filters.</p> : null}
         {!isLoading && filteredRows.length > 0 ? (
           <>
+            <div className="scanner-result-pagination">
+              <span className="scanner-result-pagination-status">
+                Showing {formatCount((normalizedPage - 1) * PAGE_SIZE + 1)}-{formatCount(Math.min(normalizedPage * PAGE_SIZE, filteredRows.length))} of {formatCount(filteredRows.length)}
+              </span>
+              <div className="scanner-result-pagination-actions">
+                <button className="ghost-button" type="button" onClick={() => setCurrentPage(1)} disabled={normalizedPage <= 1}>
+                  First
+                </button>
+                <button className="ghost-button" type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={normalizedPage <= 1}>
+                  Prev
+                </button>
+                <button className="ghost-button" type="button" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={normalizedPage >= totalPages}>
+                  Next
+                </button>
+                <button className="ghost-button" type="button" onClick={() => setCurrentPage(totalPages)} disabled={normalizedPage >= totalPages}>
+                  Last
+                </button>
+              </div>
+            </div>
             <div className="data-table-responsive scanner-result-table-wrap">
               <table className="data-table scanner-result-table">
                 <thead>
@@ -277,9 +316,9 @@ export function ScannerResultPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((row, index) => (
+                  {pagedRows.map((row, index) => (
                     <tr key={`${row.ticker}-${index}`}>
-                      <td data-label="#">{index + 1}</td>
+                      <td data-label="#">{(normalizedPage - 1) * PAGE_SIZE + index + 1}</td>
                       <td data-label="Symbol">
                         <Link className="scanner-result-symbol" to={row.chartHref}>
                           <span>{row.ticker}</span>
@@ -316,9 +355,9 @@ export function ScannerResultPage() {
               </table>
             </div>
             <div className="scanner-result-footer">
-              <span>Showing {formatCount(filteredRows.length)} stocks</span>
+              <span>Page {normalizedPage} shows {formatCount(pagedRows.length)} stocks</span>
               <div className="scanner-result-preview-pills">
-                {filteredRows.slice(0, 5).map((row) => (
+                {pagedRows.slice(0, 5).map((row) => (
                   <span key={`preview-${row.ticker}`} className="scanner-card-pill">
                     {row.ticker}
                   </span>
