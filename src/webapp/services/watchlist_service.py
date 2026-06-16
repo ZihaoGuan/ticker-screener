@@ -87,6 +87,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "amber",
     },
     {
+        "id": "gap_fill",
+        "strategy_id": "gap_fill",
+        "label": "Gap Fill",
+        "description": "Open overhead gap setups nearing reclaim or already trading back into the fill zone.",
+        "timeframe": "Daily",
+        "accent": "amber",
+    },
+    {
         "id": "sepa_vcp",
         "strategy_id": "sepa_vcp",
         "label": "SEPA VCP",
