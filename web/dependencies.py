@@ -95,7 +95,7 @@ def get_portfolio_service() -> PortfolioService:
 
 
 def get_rrg_service() -> RrgService:
-    return RrgService(output_dir=config.output_dir, reports_fqdn=config.reports_fqdn)
+    return RrgService(output_dir=config.output_dir, reports_fqdn=config.reports_fqdn, database_url=config.database_url)
 
 
 def get_ad_hoc_screen_service() -> AdHocScreenService:
