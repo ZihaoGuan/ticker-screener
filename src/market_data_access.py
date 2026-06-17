@@ -69,8 +69,7 @@ def load_daily_bars_frame_from_db(
         columns=["trade_date", "Open", "High", "Low", "Close", "Adj Close", "Volume"],
     )
     frame["trade_date"] = pd.to_datetime(frame["trade_date"])
-    frame = frame.set_index("trade_date")
-    frame = frame.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+    frame = _normalize_ohlcv_frame(frame.set_index("trade_date"))
     return frame if not frame.empty else None
 
 
@@ -138,9 +137,20 @@ def _coerce_frame(rows: list[tuple[object, ...]]):
         columns=["trade_date", "Open", "High", "Low", "Close", "Adj Close", "Volume"],
     )
     frame["trade_date"] = pd.to_datetime(frame["trade_date"])
-    frame = frame.set_index("trade_date").sort_index()
-    frame = frame.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+    frame = _normalize_ohlcv_frame(frame.set_index("trade_date").sort_index())
     return frame if not frame.empty else None
+
+
+def _normalize_ohlcv_frame(frame: Any):
+    import pandas as pd
+
+    normalized = frame.copy()
+    numeric_columns = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
+    for column in numeric_columns:
+        if column in normalized.columns:
+            normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
+    normalized = normalized.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+    return normalized
 
 
 def resolve_trading_window_start(
