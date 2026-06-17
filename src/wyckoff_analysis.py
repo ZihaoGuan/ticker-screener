@@ -447,6 +447,8 @@ def compute_wyckoff_markers(frame: pd.DataFrame, *, visible_dates: set[str]) -> 
             markers.append({"time": time_value, "kind": "wyckoff_buy_signal", "label": "BUY"})
         if bool(row["sellSignal"]):
             markers.append({"time": time_value, "kind": "wyckoff_sell_signal", "label": "SELL"})
+        if bool(row["holdSignal"]):
+            markers.append({"time": time_value, "kind": "wyckoff_hold_signal", "label": "HOLD"})
     return markers
 
 

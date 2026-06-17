@@ -23,6 +23,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   rsSignals: true,
   sellSignals: true,
   wyckoffSignals: true,
+  wyckoffHoldSignals: true,
   flexSr: false,
 };
 const CHART_CACHE_PREFIX = "chart-screen-cache-v4";
@@ -303,14 +304,20 @@ export function ChartsPage() {
           if (marker.kind === "wyckoff_sell_signal") {
             return { time: marker.time, label: marker.label, color: "#fb7185", shape: "square" as const, position: "aboveBar" as const };
           }
+          if (marker.kind === "wyckoff_hold_signal") {
+            return { time: marker.time, label: marker.label, color: "#facc15", shape: "circle" as const, position: "belowBar" as const };
+          }
           return null;
         })
         .filter((marker): marker is NonNullable<typeof marker> => marker !== null),
     [overlayPayload?.setup_markers],
   );
-  const wyckoffClimaxCount = wyckoffMarkers.filter((marker) => marker.label === "BC").length;
-  const wyckoffBuyCount = wyckoffMarkers.filter((marker) => marker.label === "BUY").length;
-  const wyckoffSellCount = wyckoffMarkers.filter((marker) => marker.label === "SELL").length;
+  const wyckoffPrimaryMarkers = wyckoffMarkers.filter((marker) => marker.label !== "HOLD");
+  const wyckoffHoldMarkers = wyckoffMarkers.filter((marker) => marker.label === "HOLD");
+  const wyckoffClimaxCount = wyckoffPrimaryMarkers.filter((marker) => marker.label === "BC").length;
+  const wyckoffBuyCount = wyckoffPrimaryMarkers.filter((marker) => marker.label === "BUY").length;
+  const wyckoffSellCount = wyckoffPrimaryMarkers.filter((marker) => marker.label === "SELL").length;
+  const wyckoffHoldCount = wyckoffHoldMarkers.length;
   const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
     { key: "ema8", label: "EMA 8" },
     { key: "ema21", label: "EMA 21" },
@@ -325,6 +332,7 @@ export function ChartsPage() {
     { key: "rsSignals", label: "RS markers" },
     { key: "sellSignals", label: "Sell signals" },
     { key: "wyckoffSignals", label: "Wyckoff signals" },
+    { key: "wyckoffHoldSignals", label: "Wyckoff hold" },
     { key: "flexSr", label: "Flex SR (exp)" },
   ];
   const canManageExclusions = auth.hasCapability("manage_exclusions");
@@ -994,7 +1002,8 @@ export function ChartsPage() {
               overlays={chartPayload ?? undefined}
               extraMarkers={[
                 ...atrExtensionMarkers,
-                ...(chartVisibility.wyckoffSignals ? wyckoffMarkers : []),
+                ...(chartVisibility.wyckoffSignals ? wyckoffPrimaryMarkers : []),
+                ...(chartVisibility.wyckoffHoldSignals ? wyckoffHoldMarkers : []),
                 ...(chartVisibility.sellSignals ? sellIntoStrengthMarkers : []),
               ]}
               visibility={chartVisibility}
@@ -1025,6 +1034,7 @@ export function ChartsPage() {
               {wyckoffClimaxCount > 0 ? <span className="chart-pill chart-pill-event">{wyckoffClimaxCount} Wyckoff BC</span> : null}
               {wyckoffBuyCount > 0 ? <span className="chart-pill chart-pill-setup">{wyckoffBuyCount} Wyckoff BUY</span> : null}
               {wyckoffSellCount > 0 ? <span className="chart-pill chart-pill-event">{wyckoffSellCount} Wyckoff SELL</span> : null}
+              {wyckoffHoldCount > 0 ? <span className="chart-pill chart-pill-setup">{wyckoffHoldCount} Wyckoff HOLD</span> : null}
               {sellIntoStrengthMarkers.length > 0 ? <span className="chart-pill chart-pill-event">{sellIntoStrengthMarkers.length} sell signal(s)</span> : null}
             </div>
             <div className="rs-rating-grid">

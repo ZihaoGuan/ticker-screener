@@ -113,8 +113,10 @@ class WyckoffAnalysisTests(unittest.TestCase):
         self.assertEqual(hit.phase, "DISTRIBUTION")
         self.assertIn("UTAD", hit.event_flags)
 
-    def test_compute_wyckoff_markers_emits_buying_climax_buy_and_sell(self) -> None:
+    def test_compute_wyckoff_markers_emits_buying_climax_buy_sell_and_hold(self) -> None:
         visible_dates = {
+            "2025-09-15",
+            "2025-09-18",
             "2025-11-05",
             "2025-11-07",
         }
@@ -127,6 +129,8 @@ class WyckoffAnalysisTests(unittest.TestCase):
         self.assertIn(("2025-11-05", "wyckoff_buy_signal"), marker_kinds)
         self.assertIn(("2025-11-05", "wyckoff_sell_signal"), marker_kinds)
         self.assertIn(("2025-11-07", "wyckoff_buying_climax"), marker_kinds)
+        self.assertIn(("2025-09-18", "wyckoff_hold_signal"), marker_kinds)
+        self.assertIn(("2025-09-15", "wyckoff_hold_signal"), marker_kinds)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ export type ChartVisibility = {
   rsSignals: boolean;
   sellSignals: boolean;
   wyckoffSignals: boolean;
+  wyckoffHoldSignals: boolean;
   flexSr: boolean;
 };
 
@@ -97,6 +98,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     rsSignals: true,
     sellSignals: true,
     wyckoffSignals: true,
+    wyckoffHoldSignals: true,
     flexSr: false,
   };
 
