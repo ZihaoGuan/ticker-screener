@@ -7,7 +7,7 @@ import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
 import { formatLocalDate } from "../lib/format";
-import type { AdminTickerListStatusResponse, CandlePoint, ChartFundamentalsResponse, ChartInsiderResponse, ChartOverlaysResponse, WatchlistChartResponse } from "../lib/types";
+import type { AdminTickerListStatusResponse, CandlePoint, ChartFundamentalsResponse, ChartInsiderResponse, ChartOverlaysResponse, MissingSectorAdminResponse, WatchlistChartResponse } from "../lib/types";
 
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
@@ -31,6 +31,13 @@ const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "overlays" | "fundamentals"
   fundamentals: 60 * 60 * 1000,
   insider: 4 * 60 * 60 * 1000,
 };
+const EXCLUSION_REASON_OPTIONS = [
+  "Bad data quality",
+  "Not tradable / structured product",
+  "Too illiquid",
+  "Too small-cap / low quality",
+  "No longer want in scans",
+] as const;
 
 export function ChartsPage() {
   const auth = useAuth();
@@ -59,6 +66,11 @@ export function ChartsPage() {
   const [isLaunchingBackfill, setIsLaunchingBackfill] = useState(false);
   const [backfillNotice, setBackfillNotice] = useState("");
   const [expandedHeroGroup, setExpandedHeroGroup] = useState<string | null>(null);
+  const [availableSectorOptions, setAvailableSectorOptions] = useState<string[]>([]);
+  const [selectedSectorOption, setSelectedSectorOption] = useState("");
+  const [isSectorOptionsLoading, setIsSectorOptionsLoading] = useState(false);
+  const [isSavingSector, setIsSavingSector] = useState(false);
+  const [sectorNotice, setSectorNotice] = useState("");
 
   useEffect(() => {
     setTickerInput(requestedTicker);
@@ -270,6 +282,8 @@ export function ChartsPage() {
   const latestFundamentalsSnapshot = fundamentalsPayload?.fundamentals_snapshot ?? null;
   const latestRatingSnapshot = fundamentalsPayload?.rating_snapshot ?? null;
   const latestRatingDiagnostics = fundamentalsPayload?.rating_diagnostics ?? null;
+  const sectorLabel = latestFundamentalsSnapshot?.sector?.trim() || null;
+  const industryLabel = latestFundamentalsSnapshot?.industry?.trim() || null;
   const atrExtensionMarkers = useMemo(() => buildAtrExtensionMarkers(chartData, chartPayload?.ma50 ?? [], 14), [chartData, chartPayload?.ma50]);
   const sellIntoStrengthMarkers = useMemo(
     () => buildSellIntoStrengthMarkers(chartData, chartPayload?.ma50 ?? []),
@@ -315,7 +329,33 @@ export function ChartsPage() {
   const canSyncHistory = auth.hasCapability("sync_history");
   const isAdmin = auth.role === "admin";
   const currentExclusion = tickerListStatus?.exclusion_entry ?? null;
+  const showAddExclusionButton = canManageExclusions && !currentExclusion;
+  const showRemoveExclusionButton = canManageExclusions && !!currentExclusion;
+  const needsSectorAssignment = canManageExclusions && !!requestedTicker && !sectorLabel;
   const showBackfillSection = canSyncHistory && requestedTicker !== "" && chartPayload?.data_source === "internet";
+
+  useEffect(() => {
+    if (!needsSectorAssignment) {
+      setAvailableSectorOptions([]);
+      setSelectedSectorOption("");
+      setIsSectorOptionsLoading(false);
+      setSectorNotice("");
+      return;
+    }
+    setIsSectorOptionsLoading(true);
+    void fetchJson<MissingSectorAdminResponse>("/api/admin/missing-sectors")
+      .then((response) => {
+        setAvailableSectorOptions(response.available_sectors ?? []);
+        const matchedTicker = (response.tickers ?? []).find((item) => item.ticker === requestedTicker);
+        setSelectedSectorOption(matchedTicker?.suggested_sector ?? response.available_sectors?.[0] ?? "");
+      })
+      .catch((error) => {
+        setAvailableSectorOptions([]);
+        setSelectedSectorOption("");
+        setSectorNotice(error instanceof Error ? error.message : "Failed to load sector options.");
+      })
+      .finally(() => setIsSectorOptionsLoading(false));
+  }, [needsSectorAssignment, requestedTicker]);
   const signalGuideGroups = useMemo(
     () =>
       buildSignalGuideGroups({
@@ -499,6 +539,31 @@ export function ChartsPage() {
     }
   };
 
+  const handleAssignSector = async () => {
+    if (!requestedTicker) {
+      return;
+    }
+    const sector = selectedSectorOption.trim();
+    if (!sector) {
+      setSectorNotice("Select a sector before saving.");
+      return;
+    }
+    setIsSavingSector(true);
+    setSectorNotice("");
+    try {
+      await fetchJson<{ ok: boolean; entry: { ticker: string; sector: string } }>(`/api/admin/ticker-sectors/${requestedTicker}`, {
+        method: "POST",
+        body: JSON.stringify({ sector }),
+      });
+      setSectorNotice(`${requestedTicker} sector set to ${sector}.`);
+      setRefreshNonce((current) => current + 1);
+    } catch (error) {
+      setSectorNotice(error instanceof Error ? error.message : "Failed to update sector.");
+    } finally {
+      setIsSavingSector(false);
+    }
+  };
+
   return (
     <div className="page-grid charts-page">
       <section className="hero-strip">
@@ -518,30 +583,71 @@ export function ChartsPage() {
               <span className="hero-change neutral">Select ticker to load chart</span>
             )}
           </div>
+          {requestedTicker ? (
+            <div style={{ marginTop: 10 }}>
+              <p className="panel-copy" style={{ marginBottom: needsSectorAssignment ? 10 : 0 }}>
+                Sector: {sectorLabel ?? "Missing"}
+                {" · "}
+                Industry: {industryLabel ?? "Missing"}
+              </p>
+              {needsSectorAssignment ? (
+                <div className="button-row" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                  <select
+                    value={selectedSectorOption}
+                    onChange={(event) => setSelectedSectorOption(event.target.value)}
+                    disabled={isSectorOptionsLoading || isSavingSector || availableSectorOptions.length === 0}
+                  >
+                    <option value="">Select sector</option>
+                    {availableSectorOptions.map((sector) => (
+                      <option key={sector} value={sector}>
+                        {sector}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => void handleAssignSector()}
+                    disabled={isSectorOptionsLoading || isSavingSector || !selectedSectorOption.trim()}
+                  >
+                    {isSavingSector ? "Saving Sector..." : "Assign Sector"}
+                  </button>
+                  <span className="panel-copy">
+                    {isSectorOptionsLoading ? "Loading sector options..." : "Admin only: sector missing for this ticker."}
+                  </span>
+                </div>
+              ) : null}
+              {sectorNotice ? <p className="panel-copy">{sectorNotice}</p> : null}
+            </div>
+          ) : null}
           {canManageExclusions ? (
             <div className="button-row" style={{ marginTop: 12 }}>
-              <button
-                className="ghost-button"
-                type="button"
-                disabled={!requestedTicker || Boolean(currentExclusion) || isTickerListLoading}
-                onClick={() => {
-                  setListDialogMode("addExclusion");
-                  setIsListDialogOpen(true);
-                }}
-              >
-                Add To Exclusion
-              </button>
-              <button
-                className="ghost-button"
-                type="button"
-                disabled={!requestedTicker || !currentExclusion?.removable || isTickerListLoading}
-                onClick={() => {
-                  setListDialogMode("removeExclusion");
-                  setIsListDialogOpen(true);
-                }}
-              >
-                Remove From Exclusion
-              </button>
+              {showAddExclusionButton ? (
+                <button
+                  className="ghost-button"
+                  type="button"
+                  disabled={!requestedTicker || isTickerListLoading}
+                  onClick={() => {
+                    setListDialogMode("addExclusion");
+                    setIsListDialogOpen(true);
+                  }}
+                >
+                  Add To Exclusion
+                </button>
+              ) : null}
+              {showRemoveExclusionButton ? (
+                <button
+                  className="ghost-button"
+                  type="button"
+                  disabled={!requestedTicker || !currentExclusion?.removable || isTickerListLoading}
+                  onClick={() => {
+                    setListDialogMode("removeExclusion");
+                    setIsListDialogOpen(true);
+                  }}
+                >
+                  {currentExclusion?.removable ? "Remove From Exclusion" : "Excluded (Not Removable Here)"}
+                </button>
+              ) : null}
             </div>
           ) : null}
           {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, MA stack, 10W extension overlay, gap zones, HTF box, fearzone panel, and SEPA dashboard snapshot.</p>}
@@ -960,6 +1066,7 @@ export function ChartsPage() {
             ? "This writes to the manual exclusions list so future scans can skip this ticker."
             : "This removes the ticker from removable exclusion files."
         }
+        reasonOptions={listDialogMode === "addExclusion" ? [...EXCLUSION_REASON_OPTIONS] : []}
         submitting={isSavingListAction}
         onClose={() => setIsListDialogOpen(false)}
         onSubmit={handleTickerListAction}

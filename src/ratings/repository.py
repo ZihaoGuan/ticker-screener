@@ -895,7 +895,7 @@ class RatingsRepository:
     ) -> dict[str, Any]:
         connection = self._connect()
         if connection is None:
-            return {"as_of_date": None, "rows": [], "status_counts": {}}
+            return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
         normalized_limit = max(1, min(int(limit), 500))
         normalized_status = str(rating_status or "").strip().lower()
         date_sql = """
@@ -907,7 +907,17 @@ class RatingsRepository:
                 date_row = cursor.fetchone()
                 target_date = date_row[0] if date_row else None
                 if not isinstance(target_date, dt.date):
-                    return {"as_of_date": None, "rows": [], "status_counts": {}}
+                    return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
+                cursor.execute(
+                    """
+                    SELECT MAX(as_of_date)
+                    FROM ticker_rating_snapshots
+                    WHERE as_of_date < %s
+                    """,
+                    (target_date,),
+                )
+                previous_date_row = cursor.fetchone()
+                previous_date = previous_date_row[0] if previous_date_row else None
                 cursor.execute(
                     """
                     SELECT rating_status, COUNT(*)
@@ -923,41 +933,94 @@ class RatingsRepository:
                 }
                 cursor.execute(
                     """
+                    WITH filtered AS (
+                      SELECT
+                        r.ticker,
+                        r.as_of_date,
+                        COALESCE(r.sector, f.sector) AS sector,
+                        f.industry,
+                        r.overall_rating,
+                        r.valuation_score,
+                        r.profitability_score,
+                        r.growth_score,
+                        r.performance_score,
+                        r.valuation_grade,
+                        r.profitability_grade,
+                        r.growth_grade,
+                        r.performance_grade,
+                        r.rating_status,
+                        r.rating_status_reason
+                      FROM ticker_rating_snapshots r
+                      LEFT JOIN ticker_fundamentals_snapshots f
+                        ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
+                      WHERE r.as_of_date = %s
+                        AND (%s = '' OR LOWER(COALESCE(r.rating_status, '')) = %s)
+                    ),
+                    ranked AS (
+                      SELECT
+                        *,
+                        ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
+                      FROM filtered
+                    )
                     SELECT
-                      r.ticker,
-                      r.as_of_date,
-                      COALESCE(r.sector, f.sector) AS sector,
-                      f.industry,
-                      r.overall_rating,
-                      r.valuation_score,
-                      r.profitability_score,
-                      r.growth_score,
-                      r.performance_score,
-                      r.valuation_grade,
-                      r.profitability_grade,
-                      r.growth_grade,
-                      r.performance_grade,
-                      r.rating_status,
-                      r.rating_status_reason
-                    FROM ticker_rating_snapshots r
-                    LEFT JOIN ticker_fundamentals_snapshots f
-                      ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
-                    WHERE r.as_of_date = %s
-                      AND (%s = '' OR LOWER(COALESCE(r.rating_status, '')) = %s)
-                    ORDER BY r.overall_rating DESC NULLS LAST, r.ticker ASC
+                      ticker,
+                      as_of_date,
+                      sector,
+                      industry,
+                      overall_rating,
+                      valuation_score,
+                      profitability_score,
+                      growth_score,
+                      performance_score,
+                      valuation_grade,
+                      profitability_grade,
+                      growth_grade,
+                      performance_grade,
+                      rating_status,
+                      rating_status_reason,
+                      current_rank
+                    FROM ranked
+                    ORDER BY current_rank ASC
                     LIMIT %s
                     """,
                     (target_date, normalized_status, normalized_status, normalized_limit),
                 )
                 rows = cursor.fetchall()
-        return {
-            "as_of_date": target_date.isoformat(),
-            "rows": [
+                previous_ranks: dict[str, int] = {}
+                if isinstance(previous_date, dt.date):
+                    cursor.execute(
+                        """
+                        WITH filtered AS (
+                          SELECT
+                            ticker,
+                            overall_rating
+                          FROM ticker_rating_snapshots
+                          WHERE as_of_date = %s
+                            AND (%s = '' OR LOWER(COALESCE(rating_status, '')) = %s)
+                        ),
+                        ranked AS (
+                          SELECT
+                            ticker,
+                            ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS previous_rank
+                          FROM filtered
+                        )
+                        SELECT ticker, previous_rank
+                        FROM ranked
+                        """,
+                        (previous_date, normalized_status, normalized_status),
+                    )
+                    previous_ranks = {
+                        str(ticker or "").upper(): int(previous_rank)
+                        for ticker, previous_rank in cursor.fetchall()
+                    }
+        ranked_rows = [
+            _attach_rank_change(
                 {
                     "ticker": str(ticker or "").upper(),
                     "as_of_date": snapshot_date.isoformat() if isinstance(snapshot_date, dt.date) else str(snapshot_date),
                     "sector": sector,
                     "industry": industry,
+                    "current_rank": int(current_rank),
                     "overall_rating": float(overall_rating) if overall_rating is not None else None,
                     "valuation_score": float(valuation_score) if valuation_score is not None else None,
                     "profitability_score": float(profitability_score) if profitability_score is not None else None,
@@ -969,25 +1032,32 @@ class RatingsRepository:
                     "performance_grade": performance_grade,
                     "rating_status": rating_status_value,
                     "rating_status_reason": rating_status_reason,
-                }
-                for (
-                    ticker,
-                    snapshot_date,
-                    sector,
-                    industry,
-                    overall_rating,
-                    valuation_score,
-                    profitability_score,
-                    growth_score,
-                    performance_score,
-                    valuation_grade,
-                    profitability_grade,
-                    growth_grade,
-                    performance_grade,
-                    rating_status_value,
-                    rating_status_reason,
-                ) in rows
-            ],
+                },
+                previous_ranks,
+            )
+            for (
+                ticker,
+                snapshot_date,
+                sector,
+                industry,
+                overall_rating,
+                valuation_score,
+                profitability_score,
+                growth_score,
+                performance_score,
+                valuation_grade,
+                profitability_grade,
+                growth_grade,
+                performance_grade,
+                rating_status_value,
+                rating_status_reason,
+                current_rank,
+            ) in rows
+        ]
+        return {
+            "as_of_date": target_date.isoformat(),
+            "previous_as_of_date": previous_date.isoformat() if isinstance(previous_date, dt.date) else None,
+            "rows": ranked_rows,
             "status_counts": dict(sorted(status_counts.items())),
         }
 
@@ -1000,7 +1070,7 @@ class RatingsRepository:
     ) -> dict[str, Any]:
         connection = self._connect()
         if connection is None:
-            return {"as_of_date": None, "rows": [], "status_counts": {}}
+            return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
         normalized_limit = max(1, min(int(limit), 500))
         normalized_status = str(technical_status or "").strip().lower()
         date_sql = """
@@ -1012,7 +1082,17 @@ class RatingsRepository:
                 date_row = cursor.fetchone()
                 target_date = date_row[0] if date_row else None
                 if not isinstance(target_date, dt.date):
-                    return {"as_of_date": None, "rows": [], "status_counts": {}}
+                    return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
+                cursor.execute(
+                    """
+                    SELECT MAX(as_of_date)
+                    FROM ticker_technical_rating_snapshots
+                    WHERE as_of_date < %s
+                    """,
+                    (target_date,),
+                )
+                previous_date_row = cursor.fetchone()
+                previous_date = previous_date_row[0] if previous_date_row else None
                 cursor.execute(
                     """
                     SELECT technical_status, COUNT(*)
@@ -1028,40 +1108,92 @@ class RatingsRepository:
                 }
                 cursor.execute(
                     """
+                    WITH filtered AS (
+                      SELECT
+                        r.ticker,
+                        r.as_of_date,
+                        tm.sector,
+                        tm.industry,
+                        r.overall_rating,
+                        r.trend_regime_score,
+                        r.dma_speed_score,
+                        r.divergence_health_score,
+                        r.leadership_score,
+                        r.structure_volume_score,
+                        r.rating_band,
+                        r.technical_status,
+                        r.technical_status_reason,
+                        r.flags
+                      FROM ticker_technical_rating_snapshots r
+                      LEFT JOIN ticker_metadata tm
+                        ON tm.ticker = r.ticker
+                      WHERE r.as_of_date = %s
+                        AND (%s = '' OR LOWER(COALESCE(r.technical_status, '')) = %s)
+                    ),
+                    ranked AS (
+                      SELECT
+                        *,
+                        ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
+                      FROM filtered
+                    )
                     SELECT
-                      r.ticker,
-                      r.as_of_date,
-                      tm.sector,
-                      tm.industry,
-                      r.overall_rating,
-                      r.trend_regime_score,
-                      r.dma_speed_score,
-                      r.divergence_health_score,
-                      r.leadership_score,
-                      r.structure_volume_score,
-                      r.rating_band,
-                      r.technical_status,
-                      r.technical_status_reason,
-                      r.flags
-                    FROM ticker_technical_rating_snapshots r
-                    LEFT JOIN ticker_metadata tm
-                      ON tm.ticker = r.ticker
-                    WHERE r.as_of_date = %s
-                      AND (%s = '' OR LOWER(COALESCE(r.technical_status, '')) = %s)
-                    ORDER BY r.overall_rating DESC NULLS LAST, r.ticker ASC
+                      ticker,
+                      as_of_date,
+                      sector,
+                      industry,
+                      overall_rating,
+                      trend_regime_score,
+                      dma_speed_score,
+                      divergence_health_score,
+                      leadership_score,
+                      structure_volume_score,
+                      rating_band,
+                      technical_status,
+                      technical_status_reason,
+                      flags,
+                      current_rank
+                    FROM ranked
+                    ORDER BY current_rank ASC
                     LIMIT %s
                     """,
                     (target_date, normalized_status, normalized_status, normalized_limit),
                 )
                 rows = cursor.fetchall()
-        return {
-            "as_of_date": target_date.isoformat(),
-            "rows": [
+                previous_ranks: dict[str, int] = {}
+                if isinstance(previous_date, dt.date):
+                    cursor.execute(
+                        """
+                        WITH filtered AS (
+                          SELECT
+                            ticker,
+                            overall_rating
+                          FROM ticker_technical_rating_snapshots
+                          WHERE as_of_date = %s
+                            AND (%s = '' OR LOWER(COALESCE(technical_status, '')) = %s)
+                        ),
+                        ranked AS (
+                          SELECT
+                            ticker,
+                            ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS previous_rank
+                          FROM filtered
+                        )
+                        SELECT ticker, previous_rank
+                        FROM ranked
+                        """,
+                        (previous_date, normalized_status, normalized_status),
+                    )
+                    previous_ranks = {
+                        str(ticker or "").upper(): int(previous_rank)
+                        for ticker, previous_rank in cursor.fetchall()
+                    }
+        ranked_rows = [
+            _attach_rank_change(
                 {
                     "ticker": str(ticker or "").upper(),
                     "as_of_date": snapshot_date.isoformat() if isinstance(snapshot_date, dt.date) else str(snapshot_date),
                     "sector": sector,
                     "industry": industry,
+                    "current_rank": int(current_rank),
                     "overall_rating": float(overall_rating) if overall_rating is not None else None,
                     "trend_regime_score": float(trend_regime_score) if trend_regime_score is not None else None,
                     "dma_speed_score": float(dma_speed_score) if dma_speed_score is not None else None,
@@ -1072,24 +1204,31 @@ class RatingsRepository:
                     "technical_status": technical_status_value,
                     "technical_status_reason": technical_status_reason,
                     "flags": list(flags or []),
-                }
-                for (
-                    ticker,
-                    snapshot_date,
-                    sector,
-                    industry,
-                    overall_rating,
-                    trend_regime_score,
-                    dma_speed_score,
-                    divergence_health_score,
-                    leadership_score,
-                    structure_volume_score,
-                    rating_band,
-                    technical_status_value,
-                    technical_status_reason,
-                    flags,
-                ) in rows
-            ],
+                },
+                previous_ranks,
+            )
+            for (
+                ticker,
+                snapshot_date,
+                sector,
+                industry,
+                overall_rating,
+                trend_regime_score,
+                dma_speed_score,
+                divergence_health_score,
+                leadership_score,
+                structure_volume_score,
+                rating_band,
+                technical_status_value,
+                technical_status_reason,
+                flags,
+                current_rank,
+            ) in rows
+        ]
+        return {
+            "as_of_date": target_date.isoformat(),
+            "previous_as_of_date": previous_date.isoformat() if isinstance(previous_date, dt.date) else None,
+            "rows": ranked_rows,
             "status_counts": dict(sorted(status_counts.items())),
         }
 
@@ -1098,6 +1237,27 @@ def _normalize_text_values(values: Iterable[str] | None) -> list[str]:
     if not values:
         return []
     return [normalized for normalized in (str(item).strip().lower() for item in values) if normalized]
+
+
+def _attach_rank_change(row: dict[str, Any], previous_ranks: dict[str, int]) -> dict[str, Any]:
+    current_rank = int(row["current_rank"])
+    previous_rank = previous_ranks.get(str(row.get("ticker") or "").upper())
+    if previous_rank is None:
+        row["previous_rank"] = None
+        row["rank_change"] = "new"
+        row["rank_delta"] = None
+        return row
+    rank_delta = previous_rank - current_rank
+    if rank_delta > 0:
+        rank_change = "up"
+    elif rank_delta < 0:
+        rank_change = "down"
+    else:
+        rank_change = "same"
+    row["previous_rank"] = previous_rank
+    row["rank_change"] = rank_change
+    row["rank_delta"] = rank_delta
+    return row
 
 
 def _coerce_json_payload(value: Any, *, default: Any) -> Any:

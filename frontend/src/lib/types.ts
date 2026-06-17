@@ -664,6 +664,10 @@ export type TopRatingEntry = {
   as_of_date: string;
   sector: string | null;
   industry: string | null;
+  current_rank: number;
+  previous_rank: number | null;
+  rank_change: "up" | "down" | "same" | "new";
+  rank_delta: number | null;
   overall_rating: number | null;
   valuation_score: number | null;
   profitability_score: number | null;
@@ -679,6 +683,7 @@ export type TopRatingEntry = {
 
 export type TopRatingsResponse = {
   as_of_date: string | null;
+  previous_as_of_date: string | null;
   limit: number;
   rating_status: string;
   rows: TopRatingEntry[];
@@ -691,6 +696,10 @@ export type TopTechnicalRatingEntry = {
   as_of_date: string;
   sector: string | null;
   industry: string | null;
+  current_rank: number;
+  previous_rank: number | null;
+  rank_change: "up" | "down" | "same" | "new";
+  rank_delta: number | null;
   overall_rating: number | null;
   trend_regime_score: number | null;
   dma_speed_score: number | null;
@@ -705,6 +714,7 @@ export type TopTechnicalRatingEntry = {
 
 export type TopTechnicalRatingsResponse = {
   as_of_date: string | null;
+  previous_as_of_date: string | null;
   limit: number;
   technical_status: string;
   rows: TopTechnicalRatingEntry[];

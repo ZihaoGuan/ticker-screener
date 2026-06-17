@@ -47,6 +47,26 @@ function normalizeMode(value: string | null): RatingsMode {
   return value === "technical" ? "technical" : "fundamental";
 }
 
+function formatRankChange(row: Pick<TopRatingEntry, "current_rank" | "previous_rank" | "rank_change" | "rank_delta">): string {
+  if (row.rank_change === "new") {
+    return "New";
+  }
+  if (row.rank_change === "same") {
+    return "Same";
+  }
+  return `${row.rank_change === "up" ? "Up" : "Down"} ${Math.abs(row.rank_delta ?? 0)}`;
+}
+
+function rankChangeTitle(row: Pick<TopRatingEntry, "current_rank" | "previous_rank" | "rank_change" | "rank_delta">): string {
+  if (row.rank_change === "new") {
+    return `New on board at #${row.current_rank}`;
+  }
+  if (row.rank_change === "same") {
+    return `Held rank #${row.current_rank}`;
+  }
+  return `Moved from #${row.previous_rank ?? "-"} to #${row.current_rank}`;
+}
+
 export function RatingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const mode = normalizeMode(searchParams.get("mode"));
@@ -128,6 +148,10 @@ export function RatingsPage() {
             <span className="eyebrow">Rows</span>
             <strong>{formatCount(rows.length)}</strong>
           </div>
+          <div className="earnings-metric">
+            <span className="eyebrow">Prev Compare</span>
+            <strong>{formatLocalDate(payload?.previous_as_of_date)}</strong>
+          </div>
           <div className="earnings-metric earnings-metric-highlight">
             <span className="eyebrow">Best Overall</span>
             <strong>{formatScore(bestOverall)}</strong>
@@ -199,6 +223,7 @@ export function RatingsPage() {
               <thead>
                 <tr>
                   <th>#</th>
+                  <th>Rank Change</th>
                   <th>Ticker</th>
                   <th>Sector / Industry</th>
                   <th>Overall</th>
@@ -212,7 +237,8 @@ export function RatingsPage() {
               <tbody>
                 {(rows as TopRatingEntry[]).map((row, index) => (
                   <tr key={`${row.ticker}-${row.as_of_date}`}>
-                    <td data-label="#">{index + 1}</td>
+                    <td data-label="#">{row.current_rank ?? index + 1}</td>
+                    <td data-label="Rank Change" title={rankChangeTitle(row)}>{formatRankChange(row)}</td>
                     <td data-label="Ticker">
                       <Link to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
                     </td>
@@ -237,6 +263,7 @@ export function RatingsPage() {
               <thead>
                 <tr>
                   <th>#</th>
+                  <th>Rank Change</th>
                   <th>Ticker</th>
                   <th>Sector / Industry</th>
                   <th>Overall</th>
@@ -253,7 +280,8 @@ export function RatingsPage() {
               <tbody>
                 {(rows as TopTechnicalRatingEntry[]).map((row, index) => (
                   <tr key={`${row.ticker}-${row.as_of_date}`}>
-                    <td data-label="#">{index + 1}</td>
+                    <td data-label="#">{row.current_rank ?? index + 1}</td>
+                    <td data-label="Rank Change" title={rankChangeTitle(row)}>{formatRankChange(row)}</td>
                     <td data-label="Ticker">
                       <Link to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
                     </td>

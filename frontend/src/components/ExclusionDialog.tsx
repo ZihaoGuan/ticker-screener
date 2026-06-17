@@ -7,6 +7,7 @@ type ExclusionDialogProps = {
   title: string;
   confirmLabel: string;
   helperText: string;
+  reasonOptions?: string[];
   submitting: boolean;
   onClose: () => void;
   onSubmit: (reason: string) => Promise<void>;
@@ -19,21 +20,26 @@ export function ExclusionDialog({
   title,
   confirmLabel,
   helperText,
+  reasonOptions = [],
   submitting,
   onClose,
   onSubmit,
 }: ExclusionDialogProps) {
-  const [reason, setReason] = useState("");
+  const [selectedReason, setSelectedReason] = useState("");
+  const [customReason, setCustomReason] = useState("");
 
   useEffect(() => {
     if (!isOpen) {
-      setReason("");
+      setSelectedReason("");
+      setCustomReason("");
     }
   }, [isOpen]);
 
   if (!isOpen) {
     return null;
   }
+
+  const reason = selectedReason === "__custom__" ? customReason.trim() : selectedReason.trim() || customReason.trim();
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -69,13 +75,38 @@ export function ExclusionDialog({
 
             <label className="field">
               <span>Reason</span>
-              <textarea
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                rows={4}
-                placeholder="Example: Too small-cap, structured product, bad data quality, no longer want in scans"
-                required
-              />
+              {mode === "add" && reasonOptions.length > 0 ? (
+                <div className="button-row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+                  {reasonOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={selectedReason === option ? "primary-button" : "ghost-button"}
+                      onClick={() => setSelectedReason(option)}
+                      disabled={submitting}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className={selectedReason === "__custom__" ? "primary-button" : "ghost-button"}
+                    onClick={() => setSelectedReason("__custom__")}
+                    disabled={submitting}
+                  >
+                    Custom
+                  </button>
+                </div>
+              ) : null}
+              {mode !== "add" || selectedReason === "__custom__" || reasonOptions.length === 0 ? (
+                <textarea
+                  value={customReason}
+                  onChange={(event) => setCustomReason(event.target.value)}
+                  rows={4}
+                  placeholder="Example: Too small-cap, structured product, bad data quality, no longer want in scans"
+                  required={mode !== "add" || selectedReason === "__custom__" || reasonOptions.length === 0}
+                />
+              ) : null}
             </label>
           </div>
 
@@ -83,7 +114,7 @@ export function ExclusionDialog({
             <button className="secondary-button" type="button" onClick={onClose} disabled={submitting}>
               Cancel
             </button>
-            <button className="primary-button" type="submit" disabled={submitting || !reason.trim()}>
+            <button className="primary-button" type="submit" disabled={submitting || !reason}>
               {submitting ? "Saving..." : confirmLabel}
             </button>
           </div>
