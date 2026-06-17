@@ -251,6 +251,29 @@ class RrgServiceTests(unittest.TestCase):
         self.assertEqual(payload["series"], [])
         self.assertTrue(any("Interactive RRG refresh failed" in note for note in payload["meta"]["notes"]))
 
+    def test_history_frame_prefers_database_when_recent_coverage_exists(self) -> None:
+        db_frame = _rotation_frame("2026-01-02", 120)
+
+        with patch(
+            "src.webapp.services.rrg_service.load_daily_bars_frame_from_db",
+            return_value=db_frame,
+        ), patch(
+            "src.webapp.services.rrg_service.db_frame_has_recent_coverage",
+            return_value=True,
+        ), patch(
+            "src.webapp.services.rrg_service.fetch_history",
+            side_effect=AssertionError("should not hit yahoo when db frame is fresh"),
+        ):
+            service = RrgService(
+                output_dir=Path(self.temp_dir.name),
+                app_config=AppConfig(),
+                database_url="postgres://example",
+            )
+            history = service._history_frame("XLK", "3y")
+
+        self.assertEqual(list(history.columns), list(db_frame.columns))
+        self.assertEqual(len(history), len(db_frame))
+
 
 if __name__ == "__main__":
     unittest.main()

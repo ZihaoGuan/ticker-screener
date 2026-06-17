@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import datetime as dt
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -9,6 +10,7 @@ import pandas as pd
 
 from src.config import AppConfig, load_app_config
 from src.fearzone_screen import find_recent_fearzone_hit
+from src.market_data_access import db_frame_has_recent_coverage, load_daily_bars_frame_from_db, resolve_database_url
 from src.universe import UniverseTicker
 from scripts.render_sector_rotation_rrg import build_theme_universe, chunked
 from vendor.trade_master_signals.render_sector_rotation_rrg import (
@@ -57,10 +59,11 @@ class RrgGroup:
 
 
 class RrgService:
-    def __init__(self, output_dir: Path, reports_fqdn: str = "", app_config: AppConfig | None = None) -> None:
+    def __init__(self, output_dir: Path, reports_fqdn: str = "", app_config: AppConfig | None = None, database_url: str = "") -> None:
         self.output_dir = output_dir
         self.reports_fqdn = reports_fqdn.strip()
         self.app_config = app_config or load_app_config()
+        self.database_url = resolve_database_url(database_url)
 
     def get_latest_report(self) -> dict[str, Any]:
         report_dir = self._resolve_latest_report_dir()
@@ -298,9 +301,29 @@ class RrgService:
         return series_list, sorted(set(failures))
 
     def _history_frame(self, ticker: str, period: str) -> pd.DataFrame:
+        db_history = self._history_frame_from_db(ticker, period)
+        if db_history is not None and not db_history.empty:
+            return db_history
         history = fetch_history(ticker, period)
         if history is None or history.empty:
             raise ValueError(f"No history for {ticker}")
+        return history
+
+    def _history_frame_from_db(self, ticker: str, period: str) -> pd.DataFrame | None:
+        if not self.database_url:
+            return None
+        end_date = dt.date.today()
+        start_date = _period_start_date(end_date, period)
+        history = load_daily_bars_frame_from_db(
+            ticker,
+            start_date,
+            end_date,
+            database_url=self.database_url,
+        )
+        if history is None or history.empty:
+            return None
+        if not db_frame_has_recent_coverage(history, end_date, tolerance_days=7):
+            return None
         return history
 
     def _close_series(self, history: pd.DataFrame, cadence: CadenceName) -> pd.Series:
@@ -468,3 +491,21 @@ class RrgService:
         if self.reports_fqdn:
             return f"https://{self.reports_fqdn}/{normalized}"
         return f"/{normalized}"
+
+
+def _period_start_date(end_date: dt.date, period: str) -> dt.date:
+    normalized = str(period or "").strip().lower()
+    if not normalized:
+        return end_date - dt.timedelta(days=365 * 3)
+    digits = "".join(character for character in normalized if character.isdigit())
+    unit = normalized[len(digits) :] if digits else normalized
+    value = int(digits) if digits else 1
+    if unit == "d":
+        return end_date - dt.timedelta(days=value)
+    if unit == "w":
+        return end_date - dt.timedelta(days=value * 7)
+    if unit == "mo":
+        return end_date - dt.timedelta(days=value * 31)
+    if unit == "y":
+        return end_date - dt.timedelta(days=value * 366)
+    return end_date - dt.timedelta(days=365 * 3)

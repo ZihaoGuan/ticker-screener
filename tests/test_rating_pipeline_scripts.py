@@ -133,6 +133,61 @@ class RatingPipelineScriptTests(unittest.TestCase):
 
         self.assertEqual([item.symbol for item in universe], ["AAPL"])
 
+    def test_sync_postgres_market_data_default_universe_also_includes_rotation_etfs(self) -> None:
+        import scripts.sync_postgres_market_data as script
+
+        with patch.object(script, "load_app_config", return_value=object()), patch.object(
+            script,
+            "load_excluded_tickers",
+            return_value=set(),
+        ), patch(
+            "src.universe.load_universe",
+            return_value=[script.UniverseTicker(symbol="AAPL", sector="Technology")],
+        ), patch.object(
+            script,
+            "build_theme_universe",
+            return_value=[("AI Theme", "CHAT")],
+        ):
+            _config, universe = script._load_target_universe(
+                Namespace(
+                    tickers=None,
+                    config="",
+                    limit=None,
+                    include_excluded_tickers=False,
+                    rotation_only=False,
+                )
+            )
+
+        symbols = [item.symbol for item in universe]
+        self.assertIn("AAPL", symbols)
+        self.assertIn("XLK", symbols)
+        self.assertIn("SOXX", symbols)
+        self.assertIn("CHAT", symbols)
+
+    def test_sync_postgres_market_data_rotation_only_targets_rotation_universe(self) -> None:
+        import scripts.sync_postgres_market_data as script
+
+        with patch.object(script, "load_app_config", return_value=object()), patch.object(
+            script,
+            "load_excluded_tickers",
+            return_value={"XLK"},
+        ), patch.object(
+            script,
+            "build_theme_universe",
+            return_value=[("AI Theme", "CHAT")],
+        ):
+            _config, universe = script._load_target_universe(
+                Namespace(
+                    tickers=None,
+                    config="",
+                    limit=3,
+                    include_excluded_tickers=False,
+                    rotation_only=True,
+                )
+            )
+
+        self.assertEqual([item.symbol for item in universe], ["XLC", "XLY", "XLP"])
+
     def test_sync_finviz_fundamentals_does_not_skip_existing_failed_snapshot(self) -> None:
         import scripts.sync_finviz_fundamentals as script
 

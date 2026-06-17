@@ -18,6 +18,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.config import load_app_config, today_label
 from src.ticker_filters import load_excluded_tickers
 from src.webapp.config import load_webapp_config
+from src.universe import UniverseTicker, dedupe_tickers
+from scripts.render_sector_rotation_rrg import DEFAULT_INDUSTRY_ETFS, DEFAULT_SECTOR_ETFS, build_theme_universe
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -40,6 +42,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int, help="Optional universe limit for smoke runs.")
     parser.add_argument("--tickers", nargs="+", help="Optional explicit ticker list instead of the configured universe.")
+    parser.add_argument(
+        "--rotation-only",
+        action="store_true",
+        help="Sync only rotation ETFs used by the rotation page: sectors, industries, and theme ETFs.",
+    )
     parser.add_argument(
         "--include-excluded-tickers",
         action="store_true",
@@ -158,8 +165,6 @@ def _resolve_date_window(args: argparse.Namespace) -> tuple[str, str]:
 
 
 def _manual_tickers(symbols: list[str], excluded: set[str], *, include_excluded: bool = False) -> list["UniverseTicker"]:
-    from src.universe import UniverseTicker
-
     seen: set[str] = set()
     result: list[UniverseTicker] = []
     for raw in symbols:
@@ -173,6 +178,17 @@ def _manual_tickers(symbols: list[str], excluded: set[str], *, include_excluded:
     return result
 
 
+def _build_rotation_universe() -> list["UniverseTicker"]:
+    entries: list[UniverseTicker] = []
+    for label, ticker in DEFAULT_SECTOR_ETFS:
+        entries.append(UniverseTicker(symbol=ticker.upper(), sector=label, industry="Sector ETF", exchange="ETF"))
+    for label, ticker in DEFAULT_INDUSTRY_ETFS:
+        entries.append(UniverseTicker(symbol=ticker.upper(), sector="Industry ETF", industry=label, exchange="ETF"))
+    for label, ticker in build_theme_universe():
+        entries.append(UniverseTicker(symbol=ticker.upper(), sector="Theme ETF", industry=label, exchange="ETF"))
+    return dedupe_tickers(entries)
+
+
 def _load_target_universe(args: argparse.Namespace) -> tuple[Any, list["UniverseTicker"]]:
     from src.universe import load_universe
 
@@ -180,7 +196,14 @@ def _load_target_universe(args: argparse.Namespace) -> tuple[Any, list["Universe
     excluded = load_excluded_tickers(config)
     if args.tickers:
         return config, _manual_tickers(args.tickers, excluded, include_excluded=bool(args.include_excluded_tickers))
-    return config, load_universe(config, limit=args.limit)
+    if bool(getattr(args, "rotation_only", False)):
+        rotation_universe = _build_rotation_universe()
+        if args.limit is not None:
+            return config, rotation_universe[: max(0, int(args.limit))]
+        return config, rotation_universe
+    base_universe = load_universe(config, limit=args.limit)
+    combined = dedupe_tickers([*base_universe, *_build_rotation_universe()])
+    return config, combined
 
 
 def _chunked(items: Sequence[str], size: int) -> Iterable[Sequence[str]]:
