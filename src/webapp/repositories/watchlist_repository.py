@@ -89,6 +89,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("macd_dead_cross", "macd", "MACD"),
         ("rsi_ma_bb_bullish", "rsi_ma_bb", "RSI MA/BB"),
         ("rsi_ma_bb_bearish", "rsi_ma_bb", "RSI MA/BB"),
+        ("inside_dryup_v2", "inside_dryup_v2", "Inside Day + Extreme Dry-Up"),
         ("bb_squeeze", "bb_squeeze", "BB Squeeze"),
         ("high_tight_flag", "high_tight_flag", "High Tight Flag"),
         ("leif_high_tight_flag", "leif_high_tight_flag", "Leif High Tight Flag"),

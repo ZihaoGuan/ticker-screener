@@ -18,6 +18,7 @@ from .high_tight_flag_screen import HTF_SLOPE_LOOKBACK, HTF_SMA_LONG_PERIOD, fin
 from .hve_screen import find_recent_hve_hit
 from .htf_runup_screen import run_htf_runup_screen
 from .inside_dryup_screen import find_recent_inside_dryup_hit
+from .inside_dryup_v2_screen import HISTORY_DAYS as INSIDE_DRYUP_V2_HISTORY_DAYS, find_recent_inside_dryup_v2_hit
 from .leif_high_tight_flag_screen import LEIF_HTF_LOOKBACK_DAYS, find_leif_high_tight_flag_hit
 from .lost_21ema_screen import run_lost_21ema_screen
 from .macd_screen import find_recent_macd_hit
@@ -498,6 +499,24 @@ def _run_inside_dryup(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     )
 
 
+def _run_inside_dryup_v2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_inside_dryup_v2_hit(bundle.bars, ticker=_ticker_from_bundle(bundle))
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "price_volume_ratio": payload["price_volume_ratio"],
+            "dry_count": payload["dry_count"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_ftd_sweep(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     ticker = _ticker_from_bundle(bundle)
@@ -681,6 +700,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=260,
             warmup_trading_days=10,
             evaluator=_run_inside_dryup,
+        ),
+        "inside_dryup_v2": ScreenerSpec(
+            id="inside_dryup_v2",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=INSIDE_DRYUP_V2_HISTORY_DAYS,
+            warmup_trading_days=10,
+            evaluator=_run_inside_dryup_v2,
         ),
         "ftd_sweep": ScreenerSpec(
             id="ftd_sweep",

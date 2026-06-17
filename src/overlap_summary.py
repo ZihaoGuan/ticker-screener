@@ -74,6 +74,11 @@ PIPELINES = (
         "filename": "inside_dryup_{date}.json",
     },
     {
+        "id": "inside_dryup_v2",
+        "label": "Inside Day + Extreme Dry-Up",
+        "filename": "inside_dryup_v2_{date}.json",
+    },
+    {
         "id": "ftd_sweep",
         "label": "Sweep Success",
         "filename": "ftd_sweep_{date}.json",
@@ -173,6 +178,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "near_200ma": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "hve": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "inside_dryup": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "inside_dryup_v2": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "ftd_sweep": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "fearzone_zeiierman": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "bb_squeeze": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

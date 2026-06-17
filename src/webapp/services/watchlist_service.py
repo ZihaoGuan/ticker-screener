@@ -95,6 +95,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "amber",
     },
     {
+        "id": "inside_dryup_v2",
+        "strategy_id": "inside_dryup_v2",
+        "label": "Inside Day + Extreme Dry-Up",
+        "description": "Latest inside-day setups where current price-volume has collapsed into an extreme dry-up state.",
+        "timeframe": "Daily",
+        "accent": "violet",
+    },
+    {
         "id": "sepa_vcp",
         "strategy_id": "sepa_vcp",
         "label": "SEPA VCP",

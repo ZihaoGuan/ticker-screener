@@ -272,6 +272,19 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "leif_high_tight_flag_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "leif_high_tight_flag")
 
+    def test_group_key_supports_inside_dryup_v2(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="inside_dryup_v2",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "inside_dryup_v2_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "inside_dryup_v2")
+
     def test_group_key_supports_vcs_setup_stage(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",

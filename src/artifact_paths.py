@@ -99,6 +99,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("inside_dryup_{date_label}.json",),
         "legacy_summary_templates": ("inside_dryup_run_summary_{date_label}.json",),
     },
+    "inside_dryup_v2": {
+        "stem_template": "inside_dryup_v2_{date_label}",
+        "legacy_watchlist_templates": ("inside_dryup_v2_{date_label}.json",),
+        "legacy_raw_templates": ("inside_dryup_v2_{date_label}.json",),
+        "legacy_summary_templates": ("inside_dryup_v2_run_summary_{date_label}.json",),
+    },
     "ftd_sweep": {
         "stem_template": "ftd_sweep_{date_label}",
         "legacy_watchlist_templates": ("ftd_sweep_{date_label}.json",),
@@ -282,6 +288,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("pre_earnings_focus", "pre_earnings_focus"),
     ("earnings_weekly_criteria", "earnings_weekly_criteria"),
     ("earnings_growth", "earnings_growth"),
+    ("inside_dryup_v2", "inside_dryup_v2"),
     ("inside_dryup", "inside_dryup"),
     ("htf_8w_runup", "htf_8w_runup"),
     ("hve", "hve"),
