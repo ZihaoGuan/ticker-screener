@@ -13,6 +13,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
   ema21: true,
   sma50: true,
+  sma200: true,
   weeklyEma8: true,
   ipoVwap: true,
   marketExtension: true,
@@ -22,6 +23,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   rsLine: true,
   rsSignals: true,
   sellSignals: true,
+  wyckoffSignals: true,
   flexSr: false,
 };
 const CHART_CACHE_PREFIX = "chart-screen-cache-v4";
@@ -314,6 +316,7 @@ export function ChartsPage() {
     { key: "ema8", label: "EMA 8" },
     { key: "ema21", label: "EMA 21" },
     { key: "sma50", label: "SMA 50" },
+    { key: "sma200", label: "SMA 200" },
     { key: "weeklyEma8", label: "Weekly 8 EMA" },
     { key: "ipoVwap", label: "IPO VWAP" },
     { key: "marketExtension", label: "10W extension" },
@@ -323,6 +326,7 @@ export function ChartsPage() {
     { key: "rsLine", label: "RS line" },
     { key: "rsSignals", label: "RS markers" },
     { key: "sellSignals", label: "Sell signals" },
+    { key: "wyckoffSignals", label: "Wyckoff signals" },
     { key: "flexSr", label: "Flex SR (exp)" },
   ];
   const canManageExclusions = auth.hasCapability("manage_exclusions");
@@ -992,7 +996,7 @@ export function ChartsPage() {
               overlays={chartPayload ?? undefined}
               extraMarkers={[
                 ...atrExtensionMarkers,
-                ...wyckoffMarkers,
+                ...(chartVisibility.wyckoffSignals ? wyckoffMarkers : []),
                 ...(chartVisibility.sellSignals ? sellIntoStrengthMarkers : []),
               ]}
               visibility={chartVisibility}

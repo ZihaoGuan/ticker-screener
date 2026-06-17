@@ -11,6 +11,7 @@ export type ChartVisibility = {
   ema8: boolean;
   ema21: boolean;
   sma50: boolean;
+  sma200: boolean;
   weeklyEma8: boolean;
   ipoVwap: boolean;
   marketExtension: boolean;
@@ -20,6 +21,7 @@ export type ChartVisibility = {
   rsLine: boolean;
   rsSignals: boolean;
   sellSignals: boolean;
+  wyckoffSignals: boolean;
   flexSr: boolean;
 };
 
@@ -86,6 +88,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     ema8: true,
     ema21: true,
     sma50: true,
+    sma200: true,
     weeklyEma8: true,
     ipoVwap: true,
     marketExtension: true,
@@ -95,6 +98,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     rsLine: true,
     rsSignals: true,
     sellSignals: true,
+    wyckoffSignals: true,
     flexSr: false,
   };
 
@@ -296,7 +300,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     marketExtensionSeries.setData(options.marketExtension ? marketExtension.line : []);
     ma20Series.setData(options.maStack ? ma20 : []);
     ma50Series.setData(options.sma50 || options.maStack ? ma50 : []);
-    ma200Series.setData(options.maStack ? ma200 : []);
+    ma200Series.setData(options.sma200 || options.maStack ? ma200 : []);
     rsSeries.setData(showRsPane ? rsLine : []);
     flexResistanceSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.backfit ?? [] : []);
     flexResistanceProjectionSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.projection ?? [] : []);
