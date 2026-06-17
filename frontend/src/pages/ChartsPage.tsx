@@ -17,7 +17,6 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   weeklyEma8: true,
   ipoVwap: true,
   marketExtension: true,
-  maStack: true,
   gapZones: true,
   htfBox: true,
   rsLine: true,
@@ -320,7 +319,6 @@ export function ChartsPage() {
     { key: "weeklyEma8", label: "Weekly 8 EMA" },
     { key: "ipoVwap", label: "IPO VWAP" },
     { key: "marketExtension", label: "10W extension" },
-    { key: "maStack", label: "MA stack" },
     { key: "gapZones", label: "Gap zones" },
     { key: "htfBox", label: "HTF box" },
     { key: "rsLine", label: "RS line" },
@@ -654,7 +652,7 @@ export function ChartsPage() {
               ) : null}
             </div>
           ) : null}
-          {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, MA stack, 10W extension overlay, gap zones, HTF box, fearzone panel, and SEPA dashboard snapshot.</p>}
+          {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, SMA overlays, 10W extension overlay, gap zones, HTF box, fearzone panel, and SEPA dashboard snapshot.</p>}
           {canManageExclusions && requestedTicker ? (
             <p className="panel-copy">
               {isTickerListLoading
