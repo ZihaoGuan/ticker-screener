@@ -349,6 +349,8 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("three_weeks_tight", action_ids)
         self.assertIn("inside_dryup", action_ids)
         self.assertIn("inside_dryup_v2", action_ids)
+        self.assertIn("wyckoff_buy_signal", action_ids)
+        self.assertIn("wyckoff_sell_signal", action_ids)
         self.assertIn("weekly_rs_before_price", action_ids)
         self.assertNotIn("weekly_rs", action_ids)
         self.assertIn("earnings_weekly_criteria", action_ids)

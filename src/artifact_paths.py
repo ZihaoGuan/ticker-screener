@@ -105,6 +105,18 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("inside_dryup_v2_{date_label}.json",),
         "legacy_summary_templates": ("inside_dryup_v2_run_summary_{date_label}.json",),
     },
+    "wyckoff_buy_signal": {
+        "stem_template": "wyckoff_buy_signal_{date_label}",
+        "legacy_watchlist_templates": ("wyckoff_buy_signal_{date_label}.json",),
+        "legacy_raw_templates": ("wyckoff_buy_signal_{date_label}.json",),
+        "legacy_summary_templates": ("wyckoff_buy_signal_run_summary_{date_label}.json",),
+    },
+    "wyckoff_sell_signal": {
+        "stem_template": "wyckoff_sell_signal_{date_label}",
+        "legacy_watchlist_templates": ("wyckoff_sell_signal_{date_label}.json",),
+        "legacy_raw_templates": ("wyckoff_sell_signal_{date_label}.json",),
+        "legacy_summary_templates": ("wyckoff_sell_signal_run_summary_{date_label}.json",),
+    },
     "ftd_sweep": {
         "stem_template": "ftd_sweep_{date_label}",
         "legacy_watchlist_templates": ("ftd_sweep_{date_label}.json",),
@@ -289,6 +301,8 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("earnings_weekly_criteria", "earnings_weekly_criteria"),
     ("earnings_growth", "earnings_growth"),
     ("inside_dryup_v2", "inside_dryup_v2"),
+    ("wyckoff_buy_signal", "wyckoff_buy_signal"),
+    ("wyckoff_sell_signal", "wyckoff_sell_signal"),
     ("inside_dryup", "inside_dryup"),
     ("htf_8w_runup", "htf_8w_runup"),
     ("hve", "hve"),

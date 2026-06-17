@@ -10,6 +10,8 @@ const CARD_ART: Record<string, string> = {
   sean_gap_up: "M24 122 L96 64 L142 88 L188 42 L188 84 L276 84",
   gap_fill: "M24 116 L88 114 L142 112 L182 76 L228 76 L276 48",
   inside_dryup_v2: "M24 74 L92 74 L140 74 L188 76 L234 78 L276 80",
+  wyckoff_buy_signal: "M24 118 L72 120 L118 108 L152 126 L190 94 L228 84 L276 52",
+  wyckoff_sell_signal: "M24 48 L76 44 L118 58 L162 54 L208 82 L246 104 L276 118",
   sepa_vcp: "M24 120 L82 118 L126 116 L168 114 L210 98 L246 84 L276 52",
   trend_template: "M24 112 L76 100 L120 82 L164 70 L212 52 L276 34",
   fearzone: "M24 60 C72 20, 116 20, 156 62 S236 116, 276 92",
@@ -72,7 +74,7 @@ export function ScannerBoardPage() {
         <div className="scanner-board-console-row">
           <div>
             <span className="eyebrow">Board logic</span>
-            <p className="panel-copy">Weekly RS New High, Sean Gap Up, Gap Fill, Inside Day + Extreme Dry-Up, SEPA VCP, Trend Template, Fearzone, and TD9 Bullish.</p>
+            <p className="panel-copy">Weekly RS New High, Sean Gap Up, Gap Fill, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, SEPA VCP, Trend Template, Fearzone, and TD9 Bullish.</p>
           </div>
           <div>
             <span className="eyebrow">Navigation</span>

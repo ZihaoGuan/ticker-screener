@@ -312,6 +312,28 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["inside_dryup_v2"]["entry_count"], 2)
         self.assertEqual(cards["inside_dryup_v2"]["preview_tickers"], ["NVDA", "PLTR"])
 
+    def test_get_scanner_board_includes_wyckoff_cards(self) -> None:
+        self._write_watchlist(
+            "wyckoff_buy_signal_2026-06-12",
+            tickers=["AAPL", "MSFT"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "wyckoff_sell_signal_2026-06-12",
+            tickers=["TSLA"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 36, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertTrue(cards["wyckoff_buy_signal"]["available"])
+        self.assertEqual(cards["wyckoff_buy_signal"]["preview_tickers"], ["AAPL", "MSFT"])
+        self.assertTrue(cards["wyckoff_sell_signal"]["available"])
+        self.assertEqual(cards["wyckoff_sell_signal"]["preview_tickers"], ["TSLA"])
+
     def test_get_scanner_board_marks_card_unavailable_when_all_results_excluded(self) -> None:
         self._write_watchlist(
             "sepa_vcp_2026-06-12",
@@ -596,7 +618,10 @@ class WatchlistServiceTests(unittest.TestCase):
         ), patch(
             "src.webapp.services.watchlist_service._compute_ftd_sweep_markers",
             return_value=[{"time": "2025-03-24", "kind": "ftd_sweep_breakout", "label": "FTD Sweep"}],
-        ) as markers_patch:
+        ) as markers_patch, patch(
+            "src.webapp.services.watchlist_service.compute_wyckoff_markers",
+            return_value=[{"time": "2025-03-20", "kind": "wyckoff_buy_signal", "label": "BUY"}],
+        ) as wyckoff_patch:
             payload = service.get_chart_overlays_payload(
                 "NVDA",
                 period="6mo",
@@ -605,7 +630,8 @@ class WatchlistServiceTests(unittest.TestCase):
             )
 
         markers_patch.assert_called_once()
-        self.assertEqual(payload["setup_markers"][0]["kind"], "ftd_sweep_breakout")
+        wyckoff_patch.assert_called_once()
+        self.assertEqual([marker["kind"] for marker in payload["setup_markers"]], ["ftd_sweep_breakout", "wyckoff_buy_signal"])
 
     def test_get_chart_overlays_payload_computes_heavy_overlays(self) -> None:
         service = WatchlistService(

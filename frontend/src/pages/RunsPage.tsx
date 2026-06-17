@@ -1728,6 +1728,8 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     trend_template: "Minervini trend-template names stacked above 50, 150, and 200 day support.",
     gap_fill: "Post-earnings gap reversal candidates with reclaim or fill behavior.",
     inside_dryup_v2: "Latest inside day plus extreme price-volume dry-up, without requiring breakout follow-through.",
+    wyckoff_buy_signal: "Wyckoff accumulation-trigger scan for fresh BUY signals coming out of spring, LPS, or phase progression.",
+    wyckoff_sell_signal: "Wyckoff distribution-trigger scan for fresh SELL signals coming out of UTAD, LPSY, or phase deterioration.",
     leif_high_tight_flag: "Leif Soreide HTF breakout setup with scored pole, flag, volume, RS, and breakout rules.",
     fearzone: "High-velocity panic reversals where snapback asymmetry may appear.",
     td9_bullish: "Bullish TD Sequential exhaustion names where downside pressure may be spent.",

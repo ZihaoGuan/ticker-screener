@@ -398,6 +398,64 @@ def _inside_dryup_v2_frame(*, passes: bool) -> pd.DataFrame:
     )
 
 
+def _wyckoff_buy_frame() -> pd.DataFrame:
+    index = pd.date_range("2025-01-01", periods=230, freq="B")
+    rows: list[tuple[float, float, float, float, float]] = []
+    for i in range(180):
+        close_value = 200.0 - (i * 0.5)
+        open_value = close_value + 0.4
+        high_value = max(open_value, close_value) + 1.0
+        low_value = min(open_value, close_value) - 1.0
+        volume_value = 1_000_000.0 + ((i % 5) * 20_000.0)
+        rows.append((open_value, high_value, low_value, close_value, volume_value))
+    for j in range(40):
+        base_value = 110.0 + ((j % 4) * 0.2)
+        rows.append((base_value - 0.2, base_value + 0.8, base_value - 0.8, base_value + 0.1, 420_000.0 - (j * 2_000.0)))
+    rows.extend(
+        [
+            (110.2, 111.0, 108.6, 110.8, 650_000.0),
+            (110.8, 111.6, 110.1, 111.3, 680_000.0),
+            (111.3, 112.1, 110.8, 111.9, 700_000.0),
+            (111.8, 112.6, 111.2, 112.4, 740_000.0),
+            (112.4, 113.2, 111.8, 112.9, 760_000.0),
+            (112.8, 113.6, 112.2, 113.3, 790_000.0),
+            (113.4, 114.4, 112.9, 114.1, 820_000.0),
+            (114.1, 115.2, 113.8, 114.9, 850_000.0),
+            (114.8, 116.2, 114.4, 115.8, 900_000.0),
+            (115.6, 117.0, 115.2, 116.7, 950_000.0),
+        ]
+    )
+    frame = pd.DataFrame(rows, columns=["Open", "High", "Low", "Close", "Volume"], index=index[: len(rows)])
+    return frame.loc[: "2025-11-05"]
+
+
+def _wyckoff_sell_frame() -> pd.DataFrame:
+    index = pd.date_range("2025-01-01", periods=260, freq="B")
+    rows: list[tuple[float, float, float, float, float]] = []
+    for i in range(180):
+        close_value = 80.0 + (i * 0.5)
+        open_value = close_value - 0.4
+        high_value = max(open_value, close_value) + 1.0
+        low_value = min(open_value, close_value) - 1.0
+        volume_value = 1_000_000.0 + ((i % 5) * 20_000.0)
+        rows.append((open_value, high_value, low_value, close_value, volume_value))
+    for j in range(40):
+        base_value = 170.0 - ((j % 4) * 0.15)
+        rows.append((base_value + 0.2, base_value + 0.8, base_value - 0.8, base_value - 0.1, 430_000.0 - (j * 1_500.0)))
+    rows.extend(
+        [
+            (170.2, 172.6, 169.8, 170.1, 900_000.0),
+            (170.1, 172.8, 169.7, 169.4, 1_200_000.0),
+            (169.3, 170.0, 167.8, 168.1, 950_000.0),
+            (168.2, 168.7, 166.6, 167.0, 980_000.0),
+            (167.1, 167.6, 165.4, 165.9, 1_020_000.0),
+            (166.0, 166.4, 164.1, 164.7, 1_050_000.0),
+        ]
+    )
+    frame = pd.DataFrame(rows, columns=["Open", "High", "Low", "Close", "Volume"], index=index[: len(rows)])
+    return frame.loc[: "2025-11-05"]
+
+
 def _bearish_td9_frame() -> pd.DataFrame:
     index = pd.date_range(start="2026-01-02", periods=20, freq="B")
     close = [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 99.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0]
@@ -1431,6 +1489,52 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "inside_dryup_v2")
         self.assertLess(payload["screeners"][0]["hit"]["price_volume_ratio"], 0.30)
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_wyckoff_buy_signal_catalog_entry(self) -> None:
+        ticker_frame = _wyckoff_buy_frame()
+        benchmark_frame = _frame("2025-01-02", 260)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 11, 5),
+                screener_ids=["wyckoff_buy_signal"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "wyckoff_buy_signal")
+        self.assertEqual(payload["screeners"][0]["hit"]["signal_type"], "buy")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_wyckoff_sell_signal_catalog_entry(self) -> None:
+        ticker_frame = _wyckoff_sell_frame()
+        benchmark_frame = _frame("2025-01-02", 260)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 11, 5),
+                screener_ids=["wyckoff_sell_signal"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "wyckoff_sell_signal")
+        self.assertEqual(payload["screeners"][0]["hit"]["signal_type"], "sell")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_supports_td9_bullish_catalog_entry(self) -> None:

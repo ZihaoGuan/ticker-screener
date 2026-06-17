@@ -285,6 +285,32 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "inside_dryup_v2_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "inside_dryup_v2")
 
+    def test_group_key_supports_wyckoff_buy_signal(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="wyckoff_buy_signal",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "wyckoff_buy_signal_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "wyckoff_buy_signal")
+
+    def test_group_key_supports_wyckoff_sell_signal(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="wyckoff_sell_signal",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "wyckoff_sell_signal_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "wyckoff_sell_signal")
+
     def test_group_key_supports_vcs_setup_stage(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",

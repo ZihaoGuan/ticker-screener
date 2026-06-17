@@ -37,6 +37,7 @@ from .vcp_screen import run_vcp_screen
 from .vcs_screen import find_recent_vcs_hit
 from .weekly_tight_close_screen import find_weekly_tight_close_breakout_hit, find_weekly_tight_close_hit
 from .weekly_htf_pullback_screen import run_weekly_htf_pullback_screen
+from .wyckoff_analysis import WYCKOFF_HISTORY_DAYS, find_recent_wyckoff_signal_hit
 
 
 def _ticker_from_bundle(bundle: ScreenerInputBundle) -> UniverseTicker:
@@ -517,6 +518,50 @@ def _run_inside_dryup_v2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResul
     )
 
 
+def _run_wyckoff_buy_signal(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_wyckoff_signal_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        signal_type="buy",
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "phase": payload["phase"],
+            "accum_score": payload["accum_score"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_wyckoff_sell_signal(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_wyckoff_signal_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        signal_type="sell",
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "phase": payload["phase"],
+            "dist_score": payload["dist_score"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_ftd_sweep(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     ticker = _ticker_from_bundle(bundle)
@@ -707,6 +752,20 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=INSIDE_DRYUP_V2_HISTORY_DAYS,
             warmup_trading_days=10,
             evaluator=_run_inside_dryup_v2,
+        ),
+        "wyckoff_buy_signal": ScreenerSpec(
+            id="wyckoff_buy_signal",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=WYCKOFF_HISTORY_DAYS,
+            warmup_trading_days=10,
+            evaluator=_run_wyckoff_buy_signal,
+        ),
+        "wyckoff_sell_signal": ScreenerSpec(
+            id="wyckoff_sell_signal",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=WYCKOFF_HISTORY_DAYS,
+            warmup_trading_days=10,
+            evaluator=_run_wyckoff_sell_signal,
         ),
         "ftd_sweep": ScreenerSpec(
             id="ftd_sweep",

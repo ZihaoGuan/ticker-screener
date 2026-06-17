@@ -125,8 +125,8 @@ export function ChartsPage() {
       setOverlayPayload(null);
       return;
     }
-    const query = new URLSearchParams({ period: "18mo", asOfDate: payload.resolved_as_of_date });
-    const overlayCacheSuffix = `${payload.resolved_as_of_date}:base`;
+    const query = new URLSearchParams({ period: "18mo", asOfDate: payload.resolved_as_of_date, includeSetupMarkers: "true" });
+    const overlayCacheSuffix = `${payload.resolved_as_of_date}:setup-markers`;
     const cacheKey = buildChartCacheKey("overlays", requestedTicker, overlayCacheSuffix);
     const cached = refreshNonce === 0 ? readChartCache<ChartOverlaysResponse>(cacheKey) : null;
     if (cached) {
@@ -275,6 +275,27 @@ export function ChartsPage() {
     () => buildSellIntoStrengthMarkers(chartData, chartPayload?.ma50 ?? []),
     [chartData, chartPayload?.ma50],
   );
+  const wyckoffMarkers = useMemo(
+    () =>
+      (overlayPayload?.setup_markers ?? [])
+        .map((marker) => {
+          if (marker.kind === "wyckoff_buying_climax") {
+            return { time: marker.time, label: marker.label, color: "#fb923c", shape: "square" as const, position: "aboveBar" as const };
+          }
+          if (marker.kind === "wyckoff_buy_signal") {
+            return { time: marker.time, label: marker.label, color: "#4ade80", shape: "circle" as const, position: "belowBar" as const };
+          }
+          if (marker.kind === "wyckoff_sell_signal") {
+            return { time: marker.time, label: marker.label, color: "#fb7185", shape: "square" as const, position: "aboveBar" as const };
+          }
+          return null;
+        })
+        .filter((marker): marker is NonNullable<typeof marker> => marker !== null),
+    [overlayPayload?.setup_markers],
+  );
+  const wyckoffClimaxCount = wyckoffMarkers.filter((marker) => marker.label === "BC").length;
+  const wyckoffBuyCount = wyckoffMarkers.filter((marker) => marker.label === "BUY").length;
+  const wyckoffSellCount = wyckoffMarkers.filter((marker) => marker.label === "SELL").length;
   const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
     { key: "ema8", label: "EMA 8" },
     { key: "ema21", label: "EMA 21" },
@@ -865,6 +886,7 @@ export function ChartsPage() {
               overlays={chartPayload ?? undefined}
               extraMarkers={[
                 ...atrExtensionMarkers,
+                ...wyckoffMarkers,
                 ...(chartVisibility.sellSignals ? sellIntoStrengthMarkers : []),
               ]}
               visibility={chartVisibility}
@@ -892,6 +914,9 @@ export function ChartsPage() {
               {atrMultipleFrom50Ma != null ? <span className="chart-pill chart-pill-setup">50MA {formatAtrMultiple(atrMultipleFrom50Ma)}</span> : null}
               {hasTrimWarning ? <span className="chart-pill chart-pill-event">Trim warning: 3x ATR above 50MA</span> : null}
               {atrExtensionMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{atrExtensionMarkers.length} ATR extension dot(s)</span> : null}
+              {wyckoffClimaxCount > 0 ? <span className="chart-pill chart-pill-event">{wyckoffClimaxCount} Wyckoff BC</span> : null}
+              {wyckoffBuyCount > 0 ? <span className="chart-pill chart-pill-setup">{wyckoffBuyCount} Wyckoff BUY</span> : null}
+              {wyckoffSellCount > 0 ? <span className="chart-pill chart-pill-event">{wyckoffSellCount} Wyckoff SELL</span> : null}
               {sellIntoStrengthMarkers.length > 0 ? <span className="chart-pill chart-pill-event">{sellIntoStrengthMarkers.length} sell signal(s)</span> : null}
             </div>
             <div className="rs-rating-grid">

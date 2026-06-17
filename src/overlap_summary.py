@@ -79,6 +79,16 @@ PIPELINES = (
         "filename": "inside_dryup_v2_{date}.json",
     },
     {
+        "id": "wyckoff_buy_signal",
+        "label": "Wyckoff Buy Signal",
+        "filename": "wyckoff_buy_signal_{date}.json",
+    },
+    {
+        "id": "wyckoff_sell_signal",
+        "label": "Wyckoff Sell Signal",
+        "filename": "wyckoff_sell_signal_{date}.json",
+    },
+    {
         "id": "ftd_sweep",
         "label": "Sweep Success",
         "filename": "ftd_sweep_{date}.json",
@@ -179,6 +189,8 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "hve": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "inside_dryup": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "inside_dryup_v2": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "wyckoff_buy_signal": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "wyckoff_sell_signal": {"bias_group": "bearish"},
     "ftd_sweep": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "fearzone_zeiierman": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "bb_squeeze": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

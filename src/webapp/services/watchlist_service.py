@@ -36,6 +36,7 @@ from ...sepa_vcp_screen import build_sepa_dashboard_snapshot
 from ...ticker_filters import is_excluded_ticker, load_excluded_tickers, normalize_ticker_symbol
 from ...universe import UniverseTicker, load_universe
 from ...vcs_indicator import latest_vcs_snapshot
+from ...wyckoff_analysis import compute_wyckoff_markers
 from ...config import load_app_config
 from ..repositories.insider_repository import InsiderRepository
 from ..repositories.watchlist_repository import WatchlistRepository
@@ -101,6 +102,22 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": "Latest inside-day setups where current price-volume has collapsed into an extreme dry-up state.",
         "timeframe": "Daily",
         "accent": "violet",
+    },
+    {
+        "id": "wyckoff_buy_signal",
+        "strategy_id": "wyckoff_buy_signal",
+        "label": "Wyckoff Buy Signal",
+        "description": "Wyckoff accumulation names where the indicator flips into a fresh BUY state after spring, LPS, or phase progression.",
+        "timeframe": "Daily",
+        "accent": "lime",
+    },
+    {
+        "id": "wyckoff_sell_signal",
+        "strategy_id": "wyckoff_sell_signal",
+        "label": "Wyckoff Sell Signal",
+        "description": "Wyckoff distribution names where the indicator flips into a fresh SELL state after UTAD, LPSY, or phase deterioration.",
+        "timeframe": "Daily",
+        "accent": "rose",
     },
     {
         "id": "sepa_vcp",
@@ -468,16 +485,17 @@ class WatchlistService:
             visible_dates=visible_dates,
         )
         vcs_snapshot = latest_vcs_snapshot(frame)
-        setup_markers = (
-            _compute_ftd_sweep_markers(
-                frame=frame,
-                visible_dates=visible_dates,
-                ticker=normalized_ticker,
-                benchmark_ticker=self.benchmark_ticker,
+        setup_markers: list[dict[str, Any]] = []
+        if include_setup_markers:
+            setup_markers.extend(
+                _compute_ftd_sweep_markers(
+                    frame=frame,
+                    visible_dates=visible_dates,
+                    ticker=normalized_ticker,
+                    benchmark_ticker=self.benchmark_ticker,
+                )
             )
-            if include_setup_markers
-            else []
-        )
+            setup_markers.extend(compute_wyckoff_markers(frame, visible_dates=visible_dates))
         if benchmark_frame is not None and not benchmark_frame.empty:
             benchmark_frame = benchmark_frame.sort_index()
             benchmark_frame = benchmark_frame.loc[benchmark_frame.index <= pd.Timestamp(resolved_as_of_date)].copy()
