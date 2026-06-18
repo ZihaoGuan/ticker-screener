@@ -273,6 +273,7 @@ export function ChartsPage() {
   const latestMa50 = chartPayload?.ma50?.[chartPayload.ma50.length - 1]?.value ?? null;
   const latestMarketExtension = chartPayload?.market_extension?.latest ?? null;
   const marketExtensionLabel = chartPayload?.market_extension?.config?.label ?? "10W SMA";
+  const trendTemplate = chartPayload?.trend_template ?? null;
   const atrMultipleFrom50Ma =
     atr14 != null && latestMa50 != null && Number.isFinite(lastClose ?? NaN)
       ? ((lastClose ?? 0) - latestMa50) / atr14
@@ -392,6 +393,12 @@ export function ChartsPage() {
         title: "Structure",
         description: "Structure groups base quality and setup health. VCS measures contraction quality. SEPA fields like TPR, buy risk, pressure, RPR, and VCP tell whether the broader trend-template and breakout context still look constructive.",
         items: [
+          {
+            label: "Trend Template",
+            value: trendTemplate ? `${trendTemplate.matched ? "PASS" : "FAIL"} ${trendTemplate.criteria_passed}/${trendTemplate.criteria_total}` : "-",
+            className: trendTemplate ? `status-pill ${trendTemplate.matched ? "status-success" : "status-unknown"}` : undefined,
+          },
+          { label: "TT RS", value: trendTemplate ? trendTemplate.rs_rating.toFixed(1) : "-" },
           { label: "VCS", value: formatScore(vcs?.score) },
           {
             label: "VCS Stage",
@@ -461,6 +468,7 @@ export function ChartsPage() {
       latestMarketExtension,
       marketExtensionLabel,
       sepaDashboard,
+      trendTemplate,
       vcs,
     ],
   );

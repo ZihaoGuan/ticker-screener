@@ -34,6 +34,7 @@ from ...ratings.repository import RatingsRepository
 from ...rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
 from ...sepa_vcp_screen import build_sepa_dashboard_snapshot
 from ...ticker_filters import is_excluded_ticker, load_excluded_tickers, normalize_ticker_symbol
+from ...trend_template_screen import evaluate_trend_template
 from ...universe import UniverseTicker, load_universe
 from ...vcs_indicator import latest_vcs_snapshot
 from ...wyckoff_analysis import compute_wyckoff_markers
@@ -44,6 +45,18 @@ from .insider_fetcher import fetch_insider_trades_window
 
 
 logger = logging.getLogger(__name__)
+TREND_TEMPLATE_DESCRIPTION = (
+    'This screen is based on the Trend Template (TTP) by 2 times US Investing Champion Mark Minervini. '
+    'He uses the Trend Template as the first step for his stock selection. The criteria are described in his book '
+    '"Think and trade like a stock market wizard" : The current stock price is above both the 150-day (30-week) '
+    "and the 200-day (40-week) moving average price lines. The 150-day moving average is above the 200-day moving average. "
+    "The 200-day moving average line is trending up for at least 1 month (preferably 4–5 months minimum in most cases). "
+    "The 50-day (10-week) moving average is above both the 150-day and 200-day moving averages. "
+    "The current stock price is trading above the 50-day moving average. "
+    "The current stock price is at least 30% above its 52-week low. "
+    "The current stock price is within at least 25% of its 52-week high (the closer to a new high the better). "
+    "The Relative Strength ranking (RS ranking) is no less than 70."
+)
 _YAHOO_BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -131,7 +144,7 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "id": "trend_template",
         "strategy_id": "trend_template",
         "label": "Trend Template",
-        "description": "Minervini trend-template names already above stacked 50/150/200 moving averages and still near 52-week highs.",
+        "description": TREND_TEMPLATE_DESCRIPTION,
         "timeframe": "Daily",
         "accent": "lime",
     },
@@ -411,6 +424,7 @@ class WatchlistService:
             "rs_markers": [],
             "setup_markers": [],
             "fearzone_panel": {"rows": [], "signals": []},
+            "trend_template": None,
             "vcs": None,
             "sepa_dashboard": None,
         }
@@ -484,6 +498,7 @@ class WatchlistService:
             _compute_fearzone_panel(frame),
             visible_dates=visible_dates,
         )
+        trend_template_snapshot = evaluate_trend_template(frame)
         vcs_snapshot = latest_vcs_snapshot(frame)
         setup_markers: list[dict[str, Any]] = []
         if include_setup_markers:
@@ -563,6 +578,7 @@ class WatchlistService:
             "rs_markers": rs_markers,
             "setup_markers": setup_markers,
             "fearzone_panel": fearzone_panel,
+            "trend_template": trend_template_snapshot.to_dict() if trend_template_snapshot is not None else None,
             "vcs": vcs_snapshot.to_dict() if vcs_snapshot is not None else None,
             "sepa_dashboard": sepa_dashboard.to_dict() if sepa_dashboard is not None else None,
         }
@@ -991,6 +1007,7 @@ def _empty_chart_payload(
         "rs_markers": [],
         "setup_markers": [],
         "fearzone_panel": {"rows": [], "signals": []},
+        "trend_template": None,
         "vcs": None,
         "sepa_dashboard": None,
     }
@@ -1020,6 +1037,7 @@ def _empty_chart_overlay_payload(
         "rs_markers": [],
         "setup_markers": [],
         "fearzone_panel": {"rows": [], "signals": []},
+        "trend_template": None,
         "vcs": None,
         "sepa_dashboard": None,
     }

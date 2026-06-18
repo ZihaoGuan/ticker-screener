@@ -263,6 +263,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertTrue(cards["trend_template"]["available"])
         self.assertEqual(cards["trend_template"]["entry_count"], 2)
         self.assertEqual(cards["trend_template"]["preview_tickers"], ["NVDA", "CRWD"])
+        self.assertIn("Trend Template (TTP)", cards["trend_template"]["description"])
 
     def test_get_scanner_board_includes_sean_breakout_card(self) -> None:
         self._write_watchlist(
@@ -519,6 +520,38 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(dashboard["buy_risk_status"], "Low Risk")
         self.assertEqual(dashboard["pressure_status"], "Buying")
         self.assertEqual(dashboard["recent_vcp_signal_date"], "2025-03-24")
+
+    def test_get_chart_overlays_payload_includes_trend_template_snapshot(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "Open": [value - 1.0 for value in [100.0 + (idx * 0.45) for idx in range(300)] + [236.0, 238.0, 237.0, 239.0, 238.5, 240.0, 239.5, 241.0, 240.5, 242.0, 241.5, 243.0, 242.5, 244.0, 243.5, 245.0, 244.5, 246.0, 245.5, 247.0]],
+                "High": [value + 1.5 for value in [100.0 + (idx * 0.45) for idx in range(300)] + [236.0, 238.0, 237.0, 239.0, 238.5, 240.0, 239.5, 241.0, 240.5, 242.0, 241.5, 243.0, 242.5, 244.0, 243.5, 245.0, 244.5, 246.0, 245.5, 247.0]],
+                "Low": [value - 1.5 for value in [100.0 + (idx * 0.45) for idx in range(300)] + [236.0, 238.0, 237.0, 239.0, 238.5, 240.0, 239.5, 241.0, 240.5, 242.0, 241.5, 243.0, 242.5, 244.0, 243.5, 245.0, 244.5, 246.0, 245.5, 247.0]],
+                "Close": [100.0 + (idx * 0.45) for idx in range(300)] + [236.0, 238.0, 237.0, 239.0, 238.5, 240.0, 239.5, 241.0, 240.5, 242.0, 241.5, 243.0, 242.5, 244.0, 243.5, 245.0, 244.5, 246.0, 245.5, 247.0],
+                "Volume": [1_400_000.0 for _ in range(320)],
+            },
+            index=pd.date_range("2025-01-02", periods=320, freq="B"),
+        )
+        for start, end, delta in ((131, 139, 20.0), (287, 299, -60.0), (281, 300, -50.0)):
+            frame.loc[frame.index[start:end], "Close"] += delta
+            frame.loc[frame.index[start:end], "High"] += delta
+            frame.loc[frame.index[start:end], "Low"] += delta
+
+        def fake_download(*, tickers: str, **_: object):
+            if tickers in {"NVDA", "SPY"}:
+                return frame.copy()
+            return pd.DataFrame()
+
+        with patch("src.webapp.services.watchlist_service.yf.download", side_effect=fake_download):
+            payload = self.service.get_chart_overlays_payload("NVDA", as_of_date=dt.date(2026, 3, 25))
+
+        self.assertIn("trend_template", payload)
+        self.assertIsNotNone(payload["trend_template"])
+        snapshot = payload["trend_template"]
+        assert snapshot is not None
+        self.assertTrue(snapshot["matched"])
+        self.assertEqual(snapshot["criteria_passed"], snapshot["criteria_total"])
+        self.assertGreater(snapshot["rs_rating"], 70.0)
 
     def test_get_chart_payload_uses_backend_cache_for_repeat_requests(self) -> None:
         service = WatchlistService(

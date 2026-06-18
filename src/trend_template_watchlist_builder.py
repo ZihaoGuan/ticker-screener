@@ -8,7 +8,8 @@ def build_trend_template_watchlist(hits: list[TrendTemplateHit]) -> list[dict[st
     for hit in hits:
         summary = (
             f"Passed {hit.criteria_passed}/{hit.criteria_total} Minervini trend-template checks. "
-            f"{hit.distance_from_52wk_high_pct:.1f}% below 52-week high and {hit.distance_from_52wk_low_pct:.1f}% above 52-week low."
+            f"{hit.distance_from_52wk_high_pct:.1f}% below 52-week high, "
+            f"{hit.distance_from_52wk_low_pct:.1f}% above 52-week low, and RS {hit.rs_rating:.1f}."
         )
         watchlist.append(
             {
@@ -41,11 +42,13 @@ def build_trend_template_watchlist(hits: list[TrendTemplateHit]) -> list[dict[st
                 "low_52wk": round(hit.low_52wk, 4),
                 "distance_from_52wk_high_pct": round(hit.distance_from_52wk_high_pct, 2),
                 "distance_from_52wk_low_pct": round(hit.distance_from_52wk_low_pct, 2),
+                "rs_rating": round(hit.rs_rating, 2),
                 "signal_badges": [
                     "Trend Template",
                     "50>150>200",
                     "200D Up",
                     "Near 52W High",
+                    "RS > 70",
                 ],
             }
         )

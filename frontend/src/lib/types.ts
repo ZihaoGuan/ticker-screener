@@ -500,6 +500,28 @@ export type WatchlistChartResponse = {
     }>;
     signals: Array<{ time: string }>;
   };
+  trend_template?: {
+    matched: boolean;
+    current_price: number;
+    ma50: number;
+    ma150: number;
+    ma200: number;
+    ma200_lookback: number;
+    high_52wk: number;
+    low_52wk: number;
+    rs_rating: number;
+    avg_volume_20: number;
+    avg_dollar_volume_20: number;
+    distance_to_ma50_pct: number;
+    distance_to_ma150_pct: number;
+    distance_to_ma200_pct: number;
+    distance_from_52wk_high_pct: number;
+    distance_from_52wk_low_pct: number;
+    criteria_passed: number;
+    criteria_total: number;
+    criteria: Record<string, boolean>;
+    reasons: string[];
+  } | null;
   vcs?: {
     score: number;
     stage: "critical" | "setup" | "base";
@@ -563,6 +585,7 @@ export type ChartOverlaysResponse = Pick<
   | "rs_markers"
   | "setup_markers"
   | "fearzone_panel"
+  | "trend_template"
   | "vcs"
   | "sepa_dashboard"
 >;

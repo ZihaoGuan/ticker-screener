@@ -1725,7 +1725,8 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     weekly_rs_before_price: "Weekly RS leaders with room before price catches up to relative strength.",
     vcp: "Volatility contraction setups tightening into potential breakout pivots.",
     sepa_vcp: "SEPA VCP squeeze names with Minervini trend, pressure, and risk context.",
-    trend_template: "Minervini trend-template names stacked above 50, 150, and 200 day support.",
+    trend_template:
+      'This screen is based on the Trend Template (TTP) by 2 times US Investing Champion Mark Minervini. He uses the Trend Template as the first step for his stock selection. The criteria are described in his book "Think and trade like a stock market wizard" : The current stock price is above both the 150-day (30-week) and the 200-day (40-week) moving average price lines. The 150-day moving average is above the 200-day moving average. The 200-day moving average line is trending up for at least 1 month (preferably 4–5 months minimum in most cases). The 50-day (10-week) moving average is above both the 150-day and 200-day moving averages. The current stock price is trading above the 50-day moving average. The current stock price is at least 30% above its 52-week low. The current stock price is within at least 25% of its 52-week high (the closer to a new high the better). The Relative Strength ranking (RS ranking) is no less than 70.',
     gap_fill: "Post-earnings gap reversal candidates with reclaim or fill behavior.",
     inside_dryup_v2: "Latest inside day plus extreme price-volume dry-up, without requiring breakout follow-through.",
     wyckoff_buy_signal: "Wyckoff accumulation-trigger scan for fresh BUY signals coming out of spring, LPS, or phase progression.",
