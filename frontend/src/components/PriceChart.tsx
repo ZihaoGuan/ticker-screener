@@ -15,6 +15,7 @@ export type ChartVisibility = {
   weeklyEma8: boolean;
   ipoVwap: boolean;
   marketExtension: boolean;
+  fibOverlay: boolean;
   gapZones: boolean;
   htfBox: boolean;
   rsLine: boolean;
@@ -75,6 +76,39 @@ type FlexibleSrOverlay = {
   support: FlexibleSrCurve | null;
 };
 
+type FibLevel = {
+  label: string;
+  value: number;
+  color: string;
+  lineWidth: 1 | 2 | 3 | 4;
+  lineStyle: LineStyle;
+};
+
+type FibLevelTemplate = {
+  ratio: number;
+  label: string;
+  color: string;
+  lineWidth: 1 | 2 | 3 | 4;
+  lineStyle: LineStyle;
+};
+
+type StructuralFibCandidate = {
+  trend: "bullish" | "bearish";
+  anchorStart: SrAnchor;
+  anchorEnd: SrAnchor;
+  bosAnchor: SrAnchor;
+  atr: number;
+};
+
+type StructuralFibOverlay = {
+  trend: "bullish" | "bearish";
+  anchorStart: SrAnchor;
+  anchorEnd: SrAnchor;
+  levels: FibLevel[];
+  impulseLine: Array<{ time: string; value: number }>;
+  markers: Array<{ time: string; label?: string; color: string; shape: "circle" | "square"; position: "aboveBar" | "belowBar" }>;
+};
+
 export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations, extraMarkers, visibility, forceFearzonePanel = false }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
@@ -92,6 +126,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     weeklyEma8: true,
     ipoVwap: true,
     marketExtension: true,
+    fibOverlay: false,
     gapZones: true,
     htfBox: true,
     rsLine: true,
@@ -131,6 +166,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
   const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations, resolvedExtraAnnotations), [candles, annotations, resolvedExtraAnnotations]);
   const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, resolvedExtraAnnotations), [annotations, resolvedExtraAnnotations]);
   const flexibleSrOverlay = useMemo(() => (options.flexSr ? buildFlexibleSrOverlay(candles) : null), [candles, options.flexSr]);
+  const fibOverlay = useMemo(() => (options.fibOverlay ? buildStructuralFibOverlay(candles) : null), [candles, options.fibOverlay]);
   const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
     const point = param.point;
     const normalizedTime = normalizeCrosshairTime(param.time);
@@ -231,6 +267,14 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     const marketExtensionSeries = priceChart.addLineSeries({ color: "rgba(96, 165, 250, 0.95)", lineWidth: 2, lineStyle: LineStyle.Dashed, priceLineVisible: false });
     const ma50Series = priceChart.addLineSeries({ color: "rgba(251, 146, 60, 0.45)", lineWidth: 1, priceLineVisible: false });
     const ma200Series = priceChart.addLineSeries({ color: "rgba(167, 139, 250, 0.52)", lineWidth: 1, priceLineVisible: false });
+    const fibImpulseSeries = priceChart.addLineSeries({
+      color: "rgba(248, 250, 252, 0.75)",
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
     const rsSeries = rsChart.addLineSeries({ color: "#60a5fa", lineWidth: 2, priceLineVisible: false });
     const annotationSeries = annotationLines.map((line) =>
       priceChart.addLineSeries({
@@ -298,6 +342,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     marketExtensionSeries.setData(options.marketExtension ? marketExtension.line : []);
     ma50Series.setData(options.sma50 ? ma50 : []);
     ma200Series.setData(options.sma200 ? ma200 : []);
+    fibImpulseSeries.setData(options.fibOverlay ? fibOverlay?.impulseLine ?? [] : []);
     rsSeries.setData(showRsPane ? rsLine : []);
     flexResistanceSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.backfit ?? [] : []);
     flexResistanceProjectionSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.projection ?? [] : []);
@@ -383,6 +428,16 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         });
       }
     }
+    if (options.fibOverlay) {
+      for (const marker of fibOverlay?.markers ?? []) {
+        priceMarkers.push({
+          time: marker.time,
+          position: marker.position,
+          color: marker.color,
+          shape: marker.shape,
+        });
+      }
+    }
     if (options.flexSr) {
       for (const anchor of flexibleSrOverlay?.resistance?.anchors ?? []) {
         priceMarkers.push({
@@ -416,6 +471,18 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         title: line.label,
       });
     });
+    if (options.fibOverlay) {
+      for (const level of fibOverlay?.levels ?? []) {
+        fibImpulseSeries.createPriceLine({
+          price: level.value,
+          color: level.color,
+          lineWidth: level.lineWidth,
+          lineStyle: level.lineStyle,
+          axisLabelVisible: true,
+          title: level.label,
+        });
+      }
+    }
 
     if (options.rsSignals && rsMarkers.length > 0) {
       rsSeries.setMarkers(
@@ -521,6 +588,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     marketExtension,
     ma50,
     ma200,
+    fibOverlay,
     rsLine,
     rsMarkers,
     ticker,
@@ -531,6 +599,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     options.weeklyEma8,
     options.ipoVwap,
     options.marketExtension,
+    options.fibOverlay,
     options.gapZones,
     options.htfBox,
     options.rsSignals,
@@ -990,6 +1059,243 @@ function buildFlexibleSrOverlay(candles: CandlePoint[]): FlexibleSrOverlay {
     resistance: buildFlexibleSrCurve(candles, resistanceAnchors),
     support: buildFlexibleSrCurve(candles, supportAnchors),
   };
+}
+
+function buildStructuralFibOverlay(candles: CandlePoint[]): StructuralFibOverlay | null {
+  if (candles.length < 60) {
+    return null;
+  }
+
+  const atrValues = buildAtr14(candles);
+  const pivotHighs = detectPivotAnchors(candles, "high");
+  const pivotLows = detectPivotAnchors(candles, "low");
+  if (pivotHighs.length < 2 || pivotLows.length < 2) {
+    return null;
+  }
+
+  const bullish = findBullishFibCandidate(candles, pivotHighs, pivotLows, atrValues);
+  const bearish = findBearishFibCandidate(candles, pivotHighs, pivotLows, atrValues);
+  const candidate = pickBestFibCandidate(bullish, bearish, candles.length);
+  if (!candidate) {
+    return null;
+  }
+
+  const start = candidate.anchorStart;
+  const end = candidate.anchorEnd;
+  const zero = end.value;
+  const one = start.value;
+  const range = one - zero;
+  if (!Number.isFinite(range) || Math.abs(range) < 0.0001) {
+    return null;
+  }
+
+  const levelTemplates: FibLevelTemplate[] = [
+    { ratio: 0.0, label: "Fib 0.000", color: "rgba(226, 232, 240, 0.72)", lineWidth: 1, lineStyle: LineStyle.Solid },
+    { ratio: 0.382, label: "Fib 0.382", color: "rgba(96, 165, 250, 0.86)", lineWidth: 1, lineStyle: LineStyle.Dotted },
+    { ratio: 0.5, label: "Fib 0.500", color: "rgba(250, 204, 21, 0.9)", lineWidth: 2, lineStyle: LineStyle.Dashed },
+    { ratio: 0.618, label: "Fib 0.618", color: "rgba(245, 158, 11, 0.95)", lineWidth: 2, lineStyle: LineStyle.Solid },
+    { ratio: 0.786, label: "Fib 0.786", color: "rgba(217, 119, 6, 0.92)", lineWidth: 2, lineStyle: LineStyle.Solid },
+    { ratio: 1.0, label: "Fib 1.000", color: "rgba(226, 232, 240, 0.72)", lineWidth: 1, lineStyle: LineStyle.Solid },
+    { ratio: 1.272, label: "Fib 1.272", color: "rgba(192, 132, 252, 0.9)", lineWidth: 1, lineStyle: LineStyle.Dashed },
+    { ratio: 1.618, label: "Fib 1.618", color: "rgba(168, 85, 247, 0.95)", lineWidth: 2, lineStyle: LineStyle.Solid },
+    { ratio: 2.0, label: "Fib 2.000", color: "rgba(147, 51, 234, 0.88)", lineWidth: 1, lineStyle: LineStyle.Dotted },
+  ];
+  const levels: FibLevel[] = levelTemplates.map((level) => ({
+    label: level.label,
+    color: level.color,
+    lineWidth: level.lineWidth,
+    lineStyle: level.lineStyle,
+    value: Number((zero + (range * level.ratio)).toFixed(4)),
+  }));
+
+  return {
+    trend: candidate.trend,
+    anchorStart: start,
+    anchorEnd: end,
+    levels,
+    impulseLine: [
+      { time: start.time, value: start.value },
+      { time: end.time, value: end.value },
+    ],
+    markers: [
+      {
+        time: start.time,
+        label: candidate.trend === "bullish" ? "Fib low" : "Fib high",
+        color: candidate.trend === "bullish" ? "#22c55e" : "#f87171",
+        shape: "circle",
+        position: candidate.trend === "bullish" ? "belowBar" : "aboveBar",
+      },
+      {
+        time: end.time,
+        label: candidate.trend === "bullish" ? "Fib high" : "Fib low",
+        color: candidate.trend === "bullish" ? "#38bdf8" : "#f59e0b",
+        shape: "square",
+        position: candidate.trend === "bullish" ? "aboveBar" : "belowBar",
+      },
+      {
+        time: candidate.bosAnchor.time,
+        label: "BOS",
+        color: "#fde047",
+        shape: "circle",
+        position: candidate.trend === "bullish" ? "aboveBar" : "belowBar",
+      },
+    ],
+  };
+}
+
+function pickBestFibCandidate(
+  bullish: StructuralFibCandidate | null,
+  bearish: StructuralFibCandidate | null,
+  candleCount: number,
+): StructuralFibCandidate | null {
+  const maxAgeBars = Math.min(150, Math.max(45, Math.floor(candleCount * 0.55)));
+  const candidates = [bullish, bearish]
+    .filter((candidate): candidate is StructuralFibCandidate => candidate !== null)
+    .filter((candidate) => candleCount - 1 - candidate.anchorEnd.index <= maxAgeBars);
+  if (candidates.length === 0) {
+    return null;
+  }
+  candidates.sort((left, right) => {
+    if (left.anchorEnd.index !== right.anchorEnd.index) {
+      return right.anchorEnd.index - left.anchorEnd.index;
+    }
+    const leftMagnitude = Math.abs(left.anchorEnd.value - left.anchorStart.value) / Math.max(left.atr, 0.0001);
+    const rightMagnitude = Math.abs(right.anchorEnd.value - right.anchorStart.value) / Math.max(right.atr, 0.0001);
+    return rightMagnitude - leftMagnitude;
+  });
+  return candidates[0] ?? null;
+}
+
+function findBullishFibCandidate(
+  candles: CandlePoint[],
+  pivotHighs: SrAnchor[],
+  pivotLows: SrAnchor[],
+  atrValues: Array<number | null>,
+): StructuralFibCandidate | null {
+  for (let highIndex = pivotHighs.length - 1; highIndex >= 0; highIndex -= 1) {
+    const impulseHigh = pivotHighs[highIndex];
+    const priorLow = findLatestPivotBefore(pivotLows, impulseHigh.index);
+    if (!priorLow) {
+      continue;
+    }
+    const bosAnchor = findLatestPivotBefore(pivotHighs, priorLow.index);
+    if (!bosAnchor) {
+      continue;
+    }
+    const atr = atrValues[impulseHigh.index] ?? null;
+    if (atr == null || atr <= 0) {
+      continue;
+    }
+    if (impulseHigh.value <= bosAnchor.value) {
+      continue;
+    }
+    if (impulseHigh.value - priorLow.value < atr * 1.5) {
+      continue;
+    }
+    const invalidation = priorLow.value - (atr * 0.25);
+    let invalidated = false;
+    for (let index = impulseHigh.index + 1; index < candles.length; index += 1) {
+      if (candles[index].close < invalidation) {
+        invalidated = true;
+        break;
+      }
+    }
+    if (invalidated) {
+      continue;
+    }
+    return {
+      trend: "bullish",
+      anchorStart: priorLow,
+      anchorEnd: impulseHigh,
+      bosAnchor,
+      atr,
+    };
+  }
+  return null;
+}
+
+function findBearishFibCandidate(
+  candles: CandlePoint[],
+  pivotHighs: SrAnchor[],
+  pivotLows: SrAnchor[],
+  atrValues: Array<number | null>,
+): StructuralFibCandidate | null {
+  for (let lowIndex = pivotLows.length - 1; lowIndex >= 0; lowIndex -= 1) {
+    const impulseLow = pivotLows[lowIndex];
+    const priorHigh = findLatestPivotBefore(pivotHighs, impulseLow.index);
+    if (!priorHigh) {
+      continue;
+    }
+    const bosAnchor = findLatestPivotBefore(pivotLows, priorHigh.index);
+    if (!bosAnchor) {
+      continue;
+    }
+    const atr = atrValues[impulseLow.index] ?? null;
+    if (atr == null || atr <= 0) {
+      continue;
+    }
+    if (impulseLow.value >= bosAnchor.value) {
+      continue;
+    }
+    if (priorHigh.value - impulseLow.value < atr * 1.5) {
+      continue;
+    }
+    const invalidation = priorHigh.value + (atr * 0.25);
+    let invalidated = false;
+    for (let index = impulseLow.index + 1; index < candles.length; index += 1) {
+      if (candles[index].close > invalidation) {
+        invalidated = true;
+        break;
+      }
+    }
+    if (invalidated) {
+      continue;
+    }
+    return {
+      trend: "bearish",
+      anchorStart: priorHigh,
+      anchorEnd: impulseLow,
+      bosAnchor,
+      atr,
+    };
+  }
+  return null;
+}
+
+function findLatestPivotBefore(pivots: SrAnchor[], index: number): SrAnchor | null {
+  for (let cursor = pivots.length - 1; cursor >= 0; cursor -= 1) {
+    if (pivots[cursor].index < index) {
+      return pivots[cursor];
+    }
+  }
+  return null;
+}
+
+function buildAtr14(candles: CandlePoint[]): Array<number | null> {
+  const period = 14;
+  const atr: Array<number | null> = new Array(candles.length).fill(null);
+  let rolling = 0;
+
+  for (let index = 0; index < candles.length; index += 1) {
+    const current = candles[index];
+    const previousClose = index > 0 ? candles[index - 1].close : current.close;
+    const trueRange = Math.max(
+      current.high - current.low,
+      Math.abs(current.high - previousClose),
+      Math.abs(current.low - previousClose),
+    );
+    if (index < period) {
+      rolling += trueRange;
+      if (index === period - 1) {
+        atr[index] = rolling / period;
+      }
+      continue;
+    }
+    const previousAtr = atr[index - 1] ?? (rolling / period);
+    atr[index] = ((previousAtr * (period - 1)) + trueRange) / period;
+  }
+
+  return atr;
 }
 
 function selectFlexibleSrAnchors(candles: CandlePoint[], kind: "high" | "low"): SrAnchor[] {
