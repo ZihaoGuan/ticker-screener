@@ -173,7 +173,7 @@ export type OverlapPipelineStatus = {
   count: number;
   file_present: boolean;
   bias_group?: "bullish" | "bearish" | "other";
-  bullish_subgroup?: "leaders" | "bottoming" | "";
+  bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
 };
 
 export type DashboardResponse = {
@@ -276,7 +276,7 @@ export type RunAction = {
   id: string;
   label: string;
   bias_group?: "bullish" | "bearish" | "other";
-  bullish_subgroup?: "leaders" | "bottoming" | "";
+  bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
   command: string;
   supports_limit: boolean;
   fields: Array<{

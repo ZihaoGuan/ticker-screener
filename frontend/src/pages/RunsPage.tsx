@@ -481,7 +481,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       id: string;
       label: string;
       bias_group?: "bullish" | "bearish" | "other";
-      bullish_subgroup?: "leaders" | "bottoming" | "";
+      bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
       command: string;
       supports_limit: boolean;
       fields: Array<{
@@ -664,6 +664,11 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
             key: "leaders",
             label: "Leader Signals",
             match: (action) => (action.bias_group ?? "other") === "bullish" && (action.bullish_subgroup ?? "leaders") === "leaders",
+          },
+          {
+            key: "pullbacks",
+            label: "Pullback Signals",
+            match: (action) => (action.bias_group ?? "other") === "bullish" && (action.bullish_subgroup ?? "") === "pullbacks",
           },
           {
             key: "bottoming",
