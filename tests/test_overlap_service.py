@@ -53,6 +53,9 @@ class OverlapSummaryTests(unittest.TestCase):
         tight_root = self.artifacts_dir / "screeners" / date_label / "weekly_tight_close_breakout"
         tight_root.mkdir(parents=True, exist_ok=True)
         (tight_root / "watchlist.json").write_text(json.dumps([{"ticker": "NVDA"}]), encoding="utf-8")
+        weinstein_root = self.artifacts_dir / "screeners" / date_label / "weinstein_stage2_early"
+        weinstein_root.mkdir(parents=True, exist_ok=True)
+        (weinstein_root / "watchlist.json").write_text(json.dumps([{"ticker": "TSM"}]), encoding="utf-8")
         bb_root = self.artifacts_dir / "screeners" / date_label / "bb_squeeze"
         bb_root.mkdir(parents=True, exist_ok=True)
         (bb_root / "watchlist.json").write_text(json.dumps([{"ticker": "SHOP"}]), encoding="utf-8")
@@ -65,6 +68,9 @@ class OverlapSummaryTests(unittest.TestCase):
         vcs_root = self.artifacts_dir / "screeners" / date_label / "vcs_critical_tightness"
         vcs_root.mkdir(parents=True, exist_ok=True)
         (vcs_root / "watchlist.json").write_text(json.dumps([{"ticker": "PLTR"}]), encoding="utf-8")
+        sma200_root = self.artifacts_dir / "screeners" / date_label / "sma200_pullback_buy"
+        sma200_root.mkdir(parents=True, exist_ok=True)
+        (sma200_root / "watchlist.json").write_text(json.dumps([{"ticker": "AMD"}]), encoding="utf-8")
 
         payload = build_overlap_payload(date_label, self.watchlist_dir)
         pipeline_ids = [str(item["id"]) for item in payload["pipeline_status"]]
@@ -72,17 +78,21 @@ class OverlapSummaryTests(unittest.TestCase):
         self.assertIn("weekly_rs", pipeline_ids)
         self.assertIn("base_detection", pipeline_ids)
         self.assertIn("weekly_tight_close_breakout", pipeline_ids)
+        self.assertIn("weinstein_stage2_early", pipeline_ids)
         self.assertIn("bb_squeeze", pipeline_ids)
         self.assertIn("rti", pipeline_ids)
         self.assertIn("sean_breakout", pipeline_ids)
         self.assertIn("vcs_critical_tightness", pipeline_ids)
+        self.assertIn("sma200_pullback_buy", pipeline_ids)
         self.assertEqual(payload["pipeline_counts"]["weekly_rs"], 1)
         self.assertEqual(payload["pipeline_counts"]["base_detection"], 1)
         self.assertEqual(payload["pipeline_counts"]["weekly_tight_close_breakout"], 1)
+        self.assertEqual(payload["pipeline_counts"]["weinstein_stage2_early"], 1)
         self.assertEqual(payload["pipeline_counts"]["bb_squeeze"], 1)
         self.assertEqual(payload["pipeline_counts"]["rti"], 1)
         self.assertEqual(payload["pipeline_counts"]["sean_breakout"], 1)
         self.assertEqual(payload["pipeline_counts"]["vcs_critical_tightness"], 1)
+        self.assertEqual(payload["pipeline_counts"]["sma200_pullback_buy"], 1)
 
 
 if __name__ == "__main__":

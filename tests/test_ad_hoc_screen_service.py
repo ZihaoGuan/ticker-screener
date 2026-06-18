@@ -522,6 +522,27 @@ def _macd_dead_cross_frame() -> pd.DataFrame:
     )
 
 
+def _sma200_pullback_buy_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-01", periods=260, freq="B")
+    close = [100.0 + (idx * 0.45) for idx in range(255)]
+    close.extend([214.6, 214.9, 213.8, 214.4, 217.6])
+    open_values = [value - 0.35 for value in close]
+    high_values = [value + 0.9 for value in close]
+    low_values = [value - 0.95 for value in close]
+    low_values[-2] = close[-2] - 55.0
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high_values,
+            "Low": low_values,
+            "Close": close,
+            "Adj Close": close,
+            "Volume": [1_100_000.0 for _ in close],
+        },
+        index=index,
+    )
+
+
 def _rsi_ma_bb_bullish_frame() -> pd.DataFrame:
     frame = _rsi_ma_bb_unit_bullish_frame().copy()
     frame["Adj Close"] = frame["Close"]
@@ -814,6 +835,40 @@ def _weekly_tight_close_frame() -> pd.DataFrame:
             low_values.append(week_low + (0.1 * day_index))
             close_values.append(week_close if day_index == 4 else week_open + (day_index * 0.15))
             volume_values.append(1_000_000.0)
+
+    return pd.DataFrame(
+        {
+            "Open": open_values,
+            "High": high_values,
+            "Low": low_values,
+            "Close": close_values,
+            "Adj Close": close_values,
+            "Volume": volume_values,
+        },
+        index=index,
+    )
+
+
+def _weinstein_stage2_early_frame() -> pd.DataFrame:
+    index = pd.date_range(start="2025-01-06", periods=43 * 5, freq="B")
+    weekly_closes = [100.0 for _ in range(39)] + [100.8, 106.0, 108.0, 110.0]
+    open_values: list[float] = []
+    high_values: list[float] = []
+    low_values: list[float] = []
+    close_values: list[float] = []
+    volume_values: list[float] = []
+
+    for week, week_close in enumerate(weekly_closes):
+        week_dates = index[week * 5 : (week + 1) * 5]
+        week_open = week_close - 0.8
+        week_high = week_close + 1.2
+        week_low = week_close - 1.4
+        for day_index, _date in enumerate(week_dates):
+            open_values.append(week_open + (day_index * 0.05))
+            high_values.append(week_high - (0.08 * (4 - day_index)))
+            low_values.append(week_low + (0.08 * day_index))
+            close_values.append(week_close if day_index == 4 else week_open + (day_index * 0.12))
+            volume_values.append(1_200_000.0)
 
     return pd.DataFrame(
         {
@@ -1625,6 +1680,28 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["screeners"][0]["id"], "macd_dead_cross")
         self.assertTrue(payload["screeners"][0]["passed"])
 
+    def test_run_supports_sma200_pullback_buy_catalog_entry(self) -> None:
+        ticker_frame = _sma200_pullback_buy_frame()
+        benchmark_frame = _frame("2026-01-02", 105)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 11, 24),
+                screener_ids=["sma200_pullback_buy"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "sma200_pullback_buy")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
     def test_run_supports_rsi_ma_bb_bullish_catalog_entry(self) -> None:
         ticker_frame = _rsi_ma_bb_bullish_frame()
         benchmark_frame = _frame("2026-01-02", 80)
@@ -1777,6 +1854,28 @@ class AdHocScreenServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["passed_screener_count"], 1)
         self.assertEqual(payload["screeners"][0]["id"], "weekly_tight_close_breakout")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
+    def test_run_supports_weinstein_stage2_early_catalog_entry(self) -> None:
+        ticker_frame = _weinstein_stage2_early_frame()
+        benchmark_frame = _frame("2026-01-02", 105)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 10, 31),
+                screener_ids=["weinstein_stage2_early"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "weinstein_stage2_early")
         self.assertTrue(payload["screeners"][0]["passed"])
 
     def test_run_supports_three_weeks_tight_catalog_entry(self) -> None:

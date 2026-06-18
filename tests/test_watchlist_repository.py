@@ -194,6 +194,19 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "weekly_tight_close_breakout_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "weekly_tight_close_breakout")
 
+    def test_group_key_supports_weinstein_stage2_early(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="weinstein_stage2_early",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "weinstein_stage2_early_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "weinstein_stage2_early")
+
     def test_group_key_supports_rti(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",
@@ -232,6 +245,19 @@ class WatchlistRepositoryTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["stem"], "ema21_pullback_buy_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "ema21_pullback_buy")
+
+    def test_group_key_supports_sma200_pullback_buy(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="sma200_pullback_buy",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "sma200_pullback_buy_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "sma200_pullback_buy")
 
     def test_group_key_supports_sepa_vcp(self) -> None:
         self._write_new_watchlist(

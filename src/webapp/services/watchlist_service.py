@@ -109,6 +109,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "amber",
     },
     {
+        "id": "macd_golden_cross",
+        "strategy_id": "macd_golden_cross",
+        "label": "MACD Golden Cross",
+        "description": "Fresh bullish MACD crossovers where momentum flips positive with MACD moving above its signal line.",
+        "timeframe": "Daily",
+        "accent": "lime",
+    },
+    {
         "id": "inside_dryup_v2",
         "strategy_id": "inside_dryup_v2",
         "label": "Inside Day + Extreme Dry-Up",
@@ -149,12 +157,28 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "violet",
     },
     {
+        "id": "weinstein_stage2_early",
+        "strategy_id": "weinstein_stage2_early",
+        "label": "Weinstein Stage 2 Early",
+        "description": "Weekly regime names that just transitioned from Stage 1 base into early Stage 2 advance, with 30-week EMA slope and price band already aligned.",
+        "timeframe": "Weekly",
+        "accent": "lime",
+    },
+    {
         "id": "ema21_pullback_buy",
         "strategy_id": "ema21_pullback_buy",
         "label": "EMA21 Pullback Buy",
         "description": "Uptrend leaders that tested the 21 EMA, held the close, then triggered a first bullish breakout over the test-candle high.",
         "timeframe": "Daily",
         "accent": "lime",
+    },
+    {
+        "id": "sma200_pullback_buy",
+        "strategy_id": "sma200_pullback_buy",
+        "label": "200 SMA Pullback Buy",
+        "description": "Long-trend leaders that tested the 200 SMA from above, held the close, then triggered a bullish breakout over the test-candle high.",
+        "timeframe": "Daily",
+        "accent": "amber",
     },
     {
         "id": "trend_template",
@@ -297,9 +321,35 @@ class WatchlistService:
         }
 
     def get_watchlist_detail(self, stem: str) -> dict[str, Any]:
+        recent_watchlists = self.repository.list_recent_watchlists(limit=400)
+        current_meta = next((item for item in recent_watchlists if str(item.get("stem") or "") == stem), None)
+        current_strategy_id = _strategy_id_for_watchlist_meta(current_meta) if current_meta else _stem_strategy_id(stem)
+        previous_meta = _find_previous_watchlist_meta(
+            recent_watchlists,
+            stem=stem,
+            strategy_id=current_strategy_id,
+        )
+        previous_tickers = _watchlist_ticker_set(
+            self._filter_excluded_entries(
+                self.repository.load_watchlist(str(previous_meta.get("stem") or ""))
+            )
+        ) if previous_meta else set()
         entries = self._enrich_entries(self._filter_excluded_entries(self.repository.load_watchlist(stem)))
+        has_previous_scan = previous_meta is not None
+        if has_previous_scan:
+            for entry in entries:
+                ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
+                entry["is_new"] = bool(ticker) and ticker not in previous_tickers
+        else:
+            for entry in entries:
+                entry["is_new"] = False
+        new_ticker_count = sum(1 for entry in entries if bool(entry.get("is_new")))
         return {
             "stem": stem,
+            "strategy_id": current_strategy_id,
+            "has_previous_scan": has_previous_scan,
+            "previous_stem": str(previous_meta.get("stem") or "") if previous_meta else "",
+            "new_ticker_count": new_ticker_count,
             "entry_count": len(entries),
             "entries": entries,
         }
@@ -1788,6 +1838,32 @@ def _strategy_id_for_watchlist_meta(item: dict[str, Any]) -> str:
     if stem.startswith("fearzone_zeiierman_"):
         return "fearzone_zeiierman"
     return _stem_strategy_id(stem)
+
+
+def _find_previous_watchlist_meta(
+    items: list[dict[str, Any]],
+    *,
+    stem: str,
+    strategy_id: str,
+) -> dict[str, Any] | None:
+    if not stem or not strategy_id:
+        return None
+    same_strategy = [item for item in items if _strategy_id_for_watchlist_meta(item) == strategy_id]
+    for index, item in enumerate(same_strategy):
+        if str(item.get("stem") or "") != stem:
+            continue
+        if index + 1 < len(same_strategy):
+            return same_strategy[index + 1]
+        return None
+    return same_strategy[0] if same_strategy else None
+
+
+def _watchlist_ticker_set(entries: list[dict[str, Any]]) -> set[str]:
+    return {
+        normalize_ticker_symbol(str(item.get("ticker") or ""))
+        for item in entries
+        if isinstance(item, dict) and normalize_ticker_symbol(str(item.get("ticker") or ""))
+    }
 
 
 def _stem_strategy_id(stem: str) -> str:

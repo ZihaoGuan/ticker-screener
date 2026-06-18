@@ -195,6 +195,61 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["entry_count"], 1)
         self.assertEqual(payload["entries"][0]["ticker"], "NVDA")
 
+    def test_get_watchlist_detail_marks_tickers_new_vs_previous_scan(self) -> None:
+        self._write_watchlist(
+            "fearzone_2026-06-12",
+            tickers=["NVDA", "AAPL"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 30, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "fearzone_2026-06-13",
+            tickers=["NVDA", "MSFT"],
+            modified_at=dt.datetime(2026, 6, 13, 23, 30, tzinfo=dt.timezone.utc),
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_universe", return_value=[]), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.load_excluded_tickers",
+            return_value=set(),
+        ):
+            payload = self.service.get_watchlist_detail("fearzone_2026-06-13")
+
+        entries = {str(item["ticker"]): item for item in payload["entries"]}
+        self.assertTrue(payload["has_previous_scan"])
+        self.assertEqual(payload["previous_stem"], "fearzone_2026-06-12")
+        self.assertEqual(payload["new_ticker_count"], 1)
+        self.assertFalse(entries["NVDA"]["is_new"])
+        self.assertTrue(entries["MSFT"]["is_new"])
+
+    def test_get_watchlist_detail_leaves_new_false_without_previous_scan(self) -> None:
+        self._write_watchlist(
+            "fearzone_2026-06-13",
+            tickers=["NVDA"],
+            modified_at=dt.datetime(2026, 6, 13, 23, 30, tzinfo=dt.timezone.utc),
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_universe", return_value=[]), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.load_excluded_tickers",
+            return_value=set(),
+        ):
+            payload = self.service.get_watchlist_detail("fearzone_2026-06-13")
+
+        self.assertFalse(payload["has_previous_scan"])
+        self.assertEqual(payload["previous_stem"], "")
+        self.assertEqual(payload["new_ticker_count"], 0)
+        self.assertFalse(payload["entries"][0]["is_new"])
+
     def test_get_watchlist_detail_attaches_latest_db_volume_and_change(self) -> None:
         watchlists_dir = Path(self.temp_dir.name) / "watchlists"
         (watchlists_dir / "fearzone_2026-06-13.json").write_text(
@@ -297,6 +352,22 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["ema21_pullback_buy"]["entry_count"], 2)
         self.assertEqual(cards["ema21_pullback_buy"]["preview_tickers"], ["NVDA", "AAPL"])
 
+    def test_get_scanner_board_includes_sma200_pullback_buy_card(self) -> None:
+        self._write_watchlist(
+            "sma200_pullback_buy_2026-06-12",
+            tickers=["MSFT", "AAPL"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 31, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertTrue(cards["sma200_pullback_buy"]["available"])
+        self.assertEqual(cards["sma200_pullback_buy"]["entry_count"], 2)
+        self.assertEqual(cards["sma200_pullback_buy"]["preview_tickers"], ["MSFT", "AAPL"])
+
     def test_get_scanner_board_includes_weekly_tight_close_card(self) -> None:
         self._write_watchlist(
             "weekly_tight_close_2026-06-12",
@@ -314,6 +385,23 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["weekly_tight_close"]["preview_tickers"], ["NVDA", "PLTR"])
         self.assertEqual(cards["weekly_tight_close"]["timeframe"], "Weekly")
 
+    def test_get_scanner_board_includes_weinstein_stage2_early_card(self) -> None:
+        self._write_watchlist(
+            "weinstein_stage2_early_2026-06-12",
+            tickers=["TSM", "NVDA"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 31, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertTrue(cards["weinstein_stage2_early"]["available"])
+        self.assertEqual(cards["weinstein_stage2_early"]["entry_count"], 2)
+        self.assertEqual(cards["weinstein_stage2_early"]["preview_tickers"], ["TSM", "NVDA"])
+        self.assertEqual(cards["weinstein_stage2_early"]["timeframe"], "Weekly")
+
     def test_get_scanner_board_includes_gap_fill_card(self) -> None:
         self._write_watchlist(
             "gap_fill_2026-06-12",
@@ -329,6 +417,23 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertTrue(cards["gap_fill"]["available"])
         self.assertEqual(cards["gap_fill"]["entry_count"], 2)
         self.assertEqual(cards["gap_fill"]["preview_tickers"], ["PLTR", "NET"])
+
+    def test_get_scanner_board_includes_macd_golden_cross_card(self) -> None:
+        self._write_watchlist(
+            "macd_golden_cross_2026-06-12",
+            tickers=["NVDA", "AAPL"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 33, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertTrue(cards["macd_golden_cross"]["available"])
+        self.assertEqual(cards["macd_golden_cross"]["entry_count"], 2)
+        self.assertEqual(cards["macd_golden_cross"]["preview_tickers"], ["NVDA", "AAPL"])
+        self.assertEqual(cards["macd_golden_cross"]["timeframe"], "Daily")
 
     def test_get_scanner_board_includes_inside_dryup_v2_card(self) -> None:
         self._write_watchlist(

@@ -30,6 +30,7 @@ type ScannerRow = {
   faScore: number | null;
   arsScore: number | null;
   alsScore: number | null;
+  isNew: boolean;
 };
 
 const MAX_RATINGS_ROWS = 500;
@@ -120,6 +121,8 @@ export function ScannerResultPage() {
   const rows = useMemo(() => {
     return (detail?.entries ?? []).map((entry) => buildScannerRow(entry, card?.stem ?? "", fundamentalMap, technicalMap));
   }, [card?.stem, detail?.entries, fundamentalMap, technicalMap]);
+
+  const newTickerCount = useMemo(() => rows.filter((row) => row.isNew).length, [rows]);
 
   const sectors = useMemo(() => {
     return Array.from(new Set(rows.map((row) => row.sector).filter((sector) => sector && sector !== "Unknown sector"))).sort();
@@ -227,6 +230,10 @@ export function ScannerResultPage() {
             <strong>{formatCount(filteredRows.length)}</strong>
           </div>
           <div className="scanner-result-metric">
+            <span className="eyebrow">New Vs Prev</span>
+            <strong>{detail?.has_previous_scan ? formatCount(newTickerCount) : "--"}</strong>
+          </div>
+          <div className="scanner-result-metric">
             <span className="eyebrow">Dataset</span>
             <strong>{card?.stem ?? "--"}</strong>
           </div>
@@ -322,6 +329,7 @@ export function ScannerResultPage() {
                       <td data-label="Symbol">
                         <Link className="scanner-result-symbol" to={row.chartHref}>
                           <span>{row.ticker}</span>
+                          {row.isNew ? <span className="scanner-inline-badge is-new">New</span> : null}
                           {row.setupLabel ? <span className="scanner-inline-badge">{row.setupLabel}</span> : null}
                         </Link>
                       </td>
@@ -405,6 +413,7 @@ function buildScannerRow(
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,
     alsScore: averagePresent([technicalOverall, fundamentalOverall, leadershipOverall]),
+    isNew: Boolean(entry.is_new),
   };
 }
 

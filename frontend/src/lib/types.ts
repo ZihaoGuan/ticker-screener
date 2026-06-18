@@ -386,6 +386,10 @@ export type WatchlistsResponse = {
 
 export type WatchlistDetailResponse = {
   stem: string;
+  strategy_id?: string;
+  has_previous_scan?: boolean;
+  previous_stem?: string;
+  new_ticker_count?: number;
   entry_count: number;
   entries: Record<string, unknown>[];
 };

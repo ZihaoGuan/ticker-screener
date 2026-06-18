@@ -28,6 +28,7 @@ from .rti_screen import find_recent_rti_hit
 from .sean_breakout_screen import find_recent_sean_breakout_hit
 from .rsi_ma_bb_screen import find_recent_rsi_ma_bb_hit
 from .rs_screen import run_rs_screen
+from .sma200_pullback_buy_screen import find_recent_sma200_pullback_buy_hit
 from .sepa_vcp_screen import SEPA_HISTORY_DAYS, find_recent_sepa_vcp_hit
 from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, ScreenerSpec
 from .td_sequential_screen import find_recent_td_sequential_hit
@@ -36,6 +37,10 @@ from .trend_template_screen import run_trend_template_screen
 from .universe import UniverseTicker
 from .vcp_screen import run_vcp_screen
 from .vcs_screen import find_recent_vcs_hit
+from .weinstein_stage2_early_screen import (
+    WEINSTEIN_STAGE2_EARLY_HISTORY_DAYS,
+    find_weinstein_stage2_early_hit,
+)
 from .weekly_tight_close_screen import find_weekly_tight_close_breakout_hit, find_weekly_tight_close_hit
 from .weekly_htf_pullback_screen import run_weekly_htf_pullback_screen
 from .wyckoff_analysis import WYCKOFF_HISTORY_DAYS, find_recent_wyckoff_signal_hit
@@ -219,6 +224,27 @@ def _run_bb_squeeze(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
 
 def _run_ema21_pullback_buy(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     hit = find_recent_ema21_pullback_buy_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "test_date": payload["test_date"],
+            "test_count": payload["test_count"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_sma200_pullback_buy(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_sma200_pullback_buy_hit(
         bundle.bars,
         ticker=_ticker_from_bundle(bundle),
     )
@@ -441,6 +467,27 @@ def _run_weekly_tight_close(bundle: ScreenerInputBundle) -> ScreenerEvaluationRe
     return ScreenerEvaluationResult(
         passed=True,
         metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "breakout_price": payload["breakout_price"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_weinstein_stage2_early(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_weinstein_stage2_early_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "run_length_weeks": payload["run_length_weeks"],
+            "weekly_ma30": payload["weekly_ma30"],
+        },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
     )
@@ -870,6 +917,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             warmup_trading_days=20,
             evaluator=_run_ema21_pullback_buy,
         ),
+        "sma200_pullback_buy": ScreenerSpec(
+            id="sma200_pullback_buy",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=320,
+            warmup_trading_days=20,
+            evaluator=_run_sma200_pullback_buy,
+        ),
         "high_tight_flag": ScreenerSpec(
             id="high_tight_flag",
             required_inputs=("daily_bars", "metadata"),
@@ -946,6 +1000,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=220,
             warmup_trading_days=20,
             evaluator=_run_weekly_tight_close,
+        ),
+        "weinstein_stage2_early": ScreenerSpec(
+            id="weinstein_stage2_early",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=WEINSTEIN_STAGE2_EARLY_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_weinstein_stage2_early,
         ),
         "weekly_tight_close_breakout": ScreenerSpec(
             id="weekly_tight_close_breakout",

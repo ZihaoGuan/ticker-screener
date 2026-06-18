@@ -69,6 +69,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("ema21_pullback_buy_{date_label}.json",),
         "legacy_summary_templates": ("ema21_pullback_buy_run_summary_{date_label}.json",),
     },
+    "sma200_pullback_buy": {
+        "stem_template": "sma200_pullback_buy_{date_label}",
+        "legacy_watchlist_templates": ("sma200_pullback_buy_{date_label}.json",),
+        "legacy_raw_templates": ("sma200_pullback_buy_{date_label}.json",),
+        "legacy_summary_templates": ("sma200_pullback_buy_run_summary_{date_label}.json",),
+    },
     "sepa_vcp": {
         "stem_template": "sepa_vcp_{date_label}",
         "legacy_watchlist_templates": ("sepa_vcp_{date_label}.json",),
@@ -201,6 +207,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("weekly_tight_close_{date_label}.json",),
         "legacy_summary_templates": ("weekly_tight_close_run_summary_{date_label}.json",),
     },
+    "weinstein_stage2_early": {
+        "stem_template": "weinstein_stage2_early_{date_label}",
+        "legacy_watchlist_templates": ("weinstein_stage2_early_{date_label}.json",),
+        "legacy_raw_templates": ("weinstein_stage2_early_{date_label}.json",),
+        "legacy_summary_templates": ("weinstein_stage2_early_run_summary_{date_label}.json",),
+    },
     "weekly_tight_close_breakout": {
         "stem_template": "weekly_tight_close_breakout_{date_label}",
         "legacy_watchlist_templates": ("weekly_tight_close_breakout_{date_label}.json",),
@@ -295,6 +307,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("base_detection", "base_detection"),
     ("cup_detection", "cup_detection"),
     ("double_bottom_detection", "double_bottom_detection"),
+    ("weinstein_stage2_early", "weinstein_stage2_early"),
     ("weekly_tight_close", "weekly_tight_close"),
     ("weekly_tight_close_breakout", "weekly_tight_close_breakout"),
     ("three_weeks_tight", "three_weeks_tight"),
@@ -314,6 +327,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("hve", "hve"),
     ("bb_squeeze", "bb_squeeze"),
     ("ema21_pullback_buy", "ema21_pullback_buy"),
+    ("sma200_pullback_buy", "sma200_pullback_buy"),
     ("sepa_vcp", "sepa_vcp"),
     ("rti", "rti"),
     ("sean_breakout", "sean_breakout"),

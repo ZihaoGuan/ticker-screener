@@ -169,6 +169,16 @@ PIPELINES = (
         "filename": "weekly_tight_close_{date}.json",
     },
     {
+        "id": "weinstein_stage2_early",
+        "label": "Weinstein Stage 2 Early",
+        "filename": "weinstein_stage2_early_{date}.json",
+    },
+    {
+        "id": "sma200_pullback_buy",
+        "label": "200 SMA Pullback Buy",
+        "filename": "sma200_pullback_buy_{date}.json",
+    },
+    {
         "id": "weekly_tight_close_breakout",
         "label": "Weekly Tight Close Breakout",
         "filename": "weekly_tight_close_breakout_{date}.json",
@@ -207,6 +217,8 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "cup_detection": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "double_bottom_detection": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "weekly_tight_close": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "weinstein_stage2_early": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "sma200_pullback_buy": {"bias_group": "bullish", "bullish_subgroup": "pullbacks"},
     "weekly_tight_close_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
 }
 
