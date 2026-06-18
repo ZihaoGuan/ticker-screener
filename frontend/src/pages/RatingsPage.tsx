@@ -14,7 +14,7 @@ function formatScore(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
-function buildFundamentalRequestPath(asOfDate: string, limit: number, ratingStatus: string) {
+function buildFundamentalRequestPath(asOfDate: string, limit: number, ratingStatus: string, sector: string) {
   const query = new URLSearchParams();
   if (asOfDate.trim()) {
     query.set("asOfDate", asOfDate.trim());
@@ -23,10 +23,13 @@ function buildFundamentalRequestPath(asOfDate: string, limit: number, ratingStat
   if (ratingStatus.trim()) {
     query.set("ratingStatus", ratingStatus.trim());
   }
+  if (sector.trim()) {
+    query.set("sector", sector.trim());
+  }
   return `/api/ratings/top?${query.toString()}`;
 }
 
-function buildTechnicalRequestPath(asOfDate: string, limit: number, technicalStatus: string) {
+function buildTechnicalRequestPath(asOfDate: string, limit: number, technicalStatus: string, sector: string) {
   const query = new URLSearchParams();
   if (asOfDate.trim()) {
     query.set("asOfDate", asOfDate.trim());
@@ -34,6 +37,9 @@ function buildTechnicalRequestPath(asOfDate: string, limit: number, technicalSta
   query.set("limit", String(limit));
   if (technicalStatus.trim()) {
     query.set("technicalStatus", technicalStatus.trim());
+  }
+  if (sector.trim()) {
+    query.set("sector", sector.trim());
   }
   return `/api/ratings/technical/top?${query.toString()}`;
 }
@@ -72,6 +78,7 @@ export function RatingsPage() {
   const mode = normalizeMode(searchParams.get("mode"));
   const requestedDate = (searchParams.get("date") ?? "").trim();
   const requestedStatus = (searchParams.get("status") ?? "ok").trim().toLowerCase() || "ok";
+  const requestedSector = (searchParams.get("sector") ?? "").trim();
   const requestedLimit = Math.min(500, Math.max(1, Number(searchParams.get("limit") ?? "100") || 100));
   const [fundamentalPayload, setFundamentalPayload] = useState<TopRatingsResponse | null>(null);
   const [technicalPayload, setTechnicalPayload] = useState<TopTechnicalRatingsResponse | null>(null);
@@ -83,8 +90,8 @@ export function RatingsPage() {
     setNotice("");
     const request =
       mode === "technical"
-        ? fetchJson<TopTechnicalRatingsResponse>(buildTechnicalRequestPath(requestedDate, requestedLimit, requestedStatus))
-        : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedDate, requestedLimit, requestedStatus));
+        ? fetchJson<TopTechnicalRatingsResponse>(buildTechnicalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
+        : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector));
     void request
       .then((response) => {
         if (mode === "technical") {
@@ -102,10 +109,11 @@ export function RatingsPage() {
         setNotice(error instanceof Error ? error.message : `Failed to load ${mode} ratings.`);
       })
       .finally(() => setIsLoading(false));
-  }, [mode, requestedDate, requestedLimit, requestedStatus]);
+  }, [mode, requestedDate, requestedLimit, requestedSector, requestedStatus]);
 
   const payload = mode === "technical" ? technicalPayload : fundamentalPayload;
   const rows = mode === "technical" ? (technicalPayload?.rows ?? []) : (fundamentalPayload?.rows ?? []);
+  const visibleSectors = payload?.sector_options ?? [];
   const bestOverall = useMemo(
     () => rows.reduce<number | null>((best, row) => (row.overall_rating != null && (best == null || row.overall_rating > best) ? row.overall_rating : best), null),
     [rows],
@@ -192,6 +200,17 @@ export function RatingsPage() {
               ))}
             </select>
           </label>
+          <label className="field">
+            <span>Sector</span>
+            <select value={requestedSector} onChange={(event) => updateParam("sector", event.target.value || null)}>
+              <option value="">All sectors</option>
+              {visibleSectors.map((sector) => (
+                <option key={sector} value={sector}>
+                  {sector}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="weekly-watchlist-actions">
             <Link className="ghost-button" to="/scanner">
               Back To Scanner
@@ -205,6 +224,7 @@ export function RatingsPage() {
             .map(([status, count]) => `${status} ${formatCount(count)}`)
             .join(" · ") || "No ratings status counts yet."}
         </p>
+        {requestedSector ? <p className="panel-copy earnings-console-note">Sector filter: {requestedSector}</p> : null}
         {notice ? <p className="panel-copy earnings-console-note">{notice}</p> : null}
       </section>
 

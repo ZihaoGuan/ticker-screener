@@ -686,6 +686,28 @@ class RatingsRepository:
             missing_metric_names,
             insufficient_baseline_metrics,
         ) = row
+        fundamental_rank: int | None = None
+        if as_of_date is not None:
+            rank_sql = """
+                WITH ranked AS (
+                    SELECT
+                      ticker,
+                      ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
+                    FROM ticker_rating_snapshots
+                    WHERE as_of_date = %s
+                      AND rating_status = 'ok'
+                )
+                SELECT current_rank
+                FROM ranked
+                WHERE ticker = %s
+                  AND current_rank <= 200
+            """
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(rank_sql, (as_of_date, ticker.upper()))
+                    rank_row = cursor.fetchone()
+            if rank_row and rank_row[0] is not None:
+                fundamental_rank = int(rank_row[0])
         return {
             "fundamentals_snapshot": {
                 "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date),
@@ -733,6 +755,11 @@ class RatingsRepository:
                 "performance_grade": performance_grade,
                 "rating_status": rating_status,
                 "rating_status_reason": rating_status_reason,
+            },
+            "fundamental_rank": {
+                "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date),
+                "current_rank": fundamental_rank,
+                "list_limit": 200,
             },
             "rating_diagnostics": {
                 "missing_metric_names": list(missing_metric_names or []),
@@ -892,12 +919,14 @@ class RatingsRepository:
         as_of_date: dt.date | None = None,
         limit: int = 100,
         rating_status: str = "ok",
+        sector: str = "",
     ) -> dict[str, Any]:
         connection = self._connect()
         if connection is None:
             return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
         normalized_limit = max(1, min(int(limit), 500))
         normalized_status = str(rating_status or "").strip().lower()
+        normalized_sector = str(sector or "").strip().lower()
         date_sql = """
             SELECT COALESCE(%s::date, (SELECT MAX(as_of_date) FROM ticker_rating_snapshots))
         """
@@ -910,6 +939,19 @@ class RatingsRepository:
                     return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
                 cursor.execute(
                     """
+                    SELECT DISTINCT COALESCE(r.sector, f.sector) AS sector
+                    FROM ticker_rating_snapshots r
+                    LEFT JOIN ticker_fundamentals_snapshots f
+                      ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
+                    WHERE r.as_of_date = %s
+                      AND COALESCE(r.sector, f.sector, '') <> ''
+                    ORDER BY sector ASC
+                    """,
+                    (target_date,),
+                )
+                sector_options = [str(sector) for (sector,) in cursor.fetchall() if sector]
+                cursor.execute(
+                    """
                     SELECT MAX(as_of_date)
                     FROM ticker_rating_snapshots
                     WHERE as_of_date < %s
@@ -920,12 +962,15 @@ class RatingsRepository:
                 previous_date = previous_date_row[0] if previous_date_row else None
                 cursor.execute(
                     """
-                    SELECT rating_status, COUNT(*)
-                    FROM ticker_rating_snapshots
-                    WHERE as_of_date = %s
+                    SELECT r.rating_status, COUNT(*)
+                    FROM ticker_rating_snapshots r
+                    LEFT JOIN ticker_fundamentals_snapshots f
+                      ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
+                    WHERE r.as_of_date = %s
+                      AND (%s = '' OR LOWER(COALESCE(r.sector, f.sector, '')) = %s)
                     GROUP BY rating_status
                     """,
-                    (target_date,),
+                    (target_date, normalized_sector, normalized_sector),
                 )
                 status_counts = {
                     str(status or "unknown"): int(count or 0)
@@ -955,6 +1000,7 @@ class RatingsRepository:
                         ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
                       WHERE r.as_of_date = %s
                         AND (%s = '' OR LOWER(COALESCE(r.rating_status, '')) = %s)
+                        AND (%s = '' OR LOWER(COALESCE(r.sector, f.sector, '')) = %s)
                     ),
                     ranked AS (
                       SELECT
@@ -983,7 +1029,7 @@ class RatingsRepository:
                     ORDER BY current_rank ASC
                     LIMIT %s
                     """,
-                    (target_date, normalized_status, normalized_status, normalized_limit),
+                    (target_date, normalized_status, normalized_status, normalized_sector, normalized_sector, normalized_limit),
                 )
                 rows = cursor.fetchall()
                 previous_ranks: dict[str, int] = {}
@@ -994,9 +1040,12 @@ class RatingsRepository:
                           SELECT
                             ticker,
                             overall_rating
-                          FROM ticker_rating_snapshots
+                          FROM ticker_rating_snapshots r
+                          LEFT JOIN ticker_fundamentals_snapshots f
+                            ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
                           WHERE as_of_date = %s
                             AND (%s = '' OR LOWER(COALESCE(rating_status, '')) = %s)
+                            AND (%s = '' OR LOWER(COALESCE(r.sector, f.sector, '')) = %s)
                         ),
                         ranked AS (
                           SELECT
@@ -1007,7 +1056,7 @@ class RatingsRepository:
                         SELECT ticker, previous_rank
                         FROM ranked
                         """,
-                        (previous_date, normalized_status, normalized_status),
+                        (previous_date, normalized_status, normalized_status, normalized_sector, normalized_sector),
                     )
                     previous_ranks = {
                         str(ticker or "").upper(): int(previous_rank)
@@ -1059,6 +1108,7 @@ class RatingsRepository:
             "previous_as_of_date": previous_date.isoformat() if isinstance(previous_date, dt.date) else None,
             "rows": ranked_rows,
             "status_counts": dict(sorted(status_counts.items())),
+            "sector_options": sector_options,
         }
 
     def list_top_technical_rating_snapshots(
@@ -1067,12 +1117,14 @@ class RatingsRepository:
         as_of_date: dt.date | None = None,
         limit: int = 100,
         technical_status: str = "ok",
+        sector: str = "",
     ) -> dict[str, Any]:
         connection = self._connect()
         if connection is None:
             return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
         normalized_limit = max(1, min(int(limit), 500))
         normalized_status = str(technical_status or "").strip().lower()
+        normalized_sector = str(sector or "").strip().lower()
         date_sql = """
             SELECT COALESCE(%s::date, (SELECT MAX(as_of_date) FROM ticker_technical_rating_snapshots))
         """
@@ -1085,6 +1137,19 @@ class RatingsRepository:
                     return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
                 cursor.execute(
                     """
+                    SELECT DISTINCT tm.sector
+                    FROM ticker_technical_rating_snapshots r
+                    LEFT JOIN ticker_metadata tm
+                      ON tm.ticker = r.ticker
+                    WHERE r.as_of_date = %s
+                      AND COALESCE(tm.sector, '') <> ''
+                    ORDER BY tm.sector ASC
+                    """,
+                    (target_date,),
+                )
+                sector_options = [str(sector) for (sector,) in cursor.fetchall() if sector]
+                cursor.execute(
+                    """
                     SELECT MAX(as_of_date)
                     FROM ticker_technical_rating_snapshots
                     WHERE as_of_date < %s
@@ -1095,12 +1160,15 @@ class RatingsRepository:
                 previous_date = previous_date_row[0] if previous_date_row else None
                 cursor.execute(
                     """
-                    SELECT technical_status, COUNT(*)
-                    FROM ticker_technical_rating_snapshots
-                    WHERE as_of_date = %s
+                    SELECT r.technical_status, COUNT(*)
+                    FROM ticker_technical_rating_snapshots r
+                    LEFT JOIN ticker_metadata tm
+                      ON tm.ticker = r.ticker
+                    WHERE r.as_of_date = %s
+                      AND (%s = '' OR LOWER(COALESCE(tm.sector, '')) = %s)
                     GROUP BY technical_status
                     """,
-                    (target_date,),
+                    (target_date, normalized_sector, normalized_sector),
                 )
                 status_counts = {
                     str(status or "unknown"): int(count or 0)
@@ -1129,6 +1197,7 @@ class RatingsRepository:
                         ON tm.ticker = r.ticker
                       WHERE r.as_of_date = %s
                         AND (%s = '' OR LOWER(COALESCE(r.technical_status, '')) = %s)
+                        AND (%s = '' OR LOWER(COALESCE(tm.sector, '')) = %s)
                     ),
                     ranked AS (
                       SELECT
@@ -1156,7 +1225,7 @@ class RatingsRepository:
                     ORDER BY current_rank ASC
                     LIMIT %s
                     """,
-                    (target_date, normalized_status, normalized_status, normalized_limit),
+                    (target_date, normalized_status, normalized_status, normalized_sector, normalized_sector, normalized_limit),
                 )
                 rows = cursor.fetchall()
                 previous_ranks: dict[str, int] = {}
@@ -1167,9 +1236,12 @@ class RatingsRepository:
                           SELECT
                             ticker,
                             overall_rating
-                          FROM ticker_technical_rating_snapshots
+                          FROM ticker_technical_rating_snapshots r
+                          LEFT JOIN ticker_metadata tm
+                            ON tm.ticker = r.ticker
                           WHERE as_of_date = %s
                             AND (%s = '' OR LOWER(COALESCE(technical_status, '')) = %s)
+                            AND (%s = '' OR LOWER(COALESCE(tm.sector, '')) = %s)
                         ),
                         ranked AS (
                           SELECT
@@ -1180,7 +1252,7 @@ class RatingsRepository:
                         SELECT ticker, previous_rank
                         FROM ranked
                         """,
-                        (previous_date, normalized_status, normalized_status),
+                        (previous_date, normalized_status, normalized_status, normalized_sector, normalized_sector),
                     )
                     previous_ranks = {
                         str(ticker or "").upper(): int(previous_rank)
@@ -1230,6 +1302,7 @@ class RatingsRepository:
             "previous_as_of_date": previous_date.isoformat() if isinstance(previous_date, dt.date) else None,
             "rows": ranked_rows,
             "status_counts": dict(sorted(status_counts.items())),
+            "sector_options": sector_options,
         }
 
 

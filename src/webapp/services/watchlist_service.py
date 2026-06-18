@@ -600,6 +600,7 @@ class WatchlistService:
                 "implied_move": cached_entry.get("implied_move"),
                 "fundamentals_snapshot": ratings_bundle.get("fundamentals_snapshot") if ratings_bundle else None,
                 "rating_snapshot": ratings_bundle.get("rating_snapshot") if ratings_bundle else None,
+                "fundamental_rank": ratings_bundle.get("fundamental_rank") if ratings_bundle else None,
                 "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
                 "diagnostics": _chart_cache_diagnostics(cached_entry),
             }
@@ -647,6 +648,7 @@ class WatchlistService:
             "implied_move": merged_payload["implied_move"],
             "fundamentals_snapshot": ratings_bundle.get("fundamentals_snapshot") if ratings_bundle else None,
             "rating_snapshot": ratings_bundle.get("rating_snapshot") if ratings_bundle else None,
+            "fundamental_rank": ratings_bundle.get("fundamental_rank") if ratings_bundle else None,
             "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
             "diagnostics": {
                 "earnings": browser_diagnostics["earnings"],
@@ -662,12 +664,14 @@ class WatchlistService:
         as_of_date: dt.date | None = None,
         limit: int = 100,
         rating_status: str = "ok",
+        sector: str = "",
     ) -> dict[str, Any]:
         if not self.database_url:
             return {
                 "as_of_date": None,
                 "limit": limit,
                 "rating_status": rating_status,
+                "sector": sector,
                 "rows": [],
                 "status_counts": {},
                 "database_configured": False,
@@ -676,9 +680,11 @@ class WatchlistService:
             as_of_date=as_of_date,
             limit=limit,
             rating_status=rating_status,
+            sector=sector,
         )
         payload["limit"] = max(1, min(int(limit), 500))
         payload["rating_status"] = str(rating_status or "").strip().lower() or "ok"
+        payload["sector"] = str(sector or "").strip()
         payload["database_configured"] = True
         return payload
 
@@ -688,12 +694,14 @@ class WatchlistService:
         as_of_date: dt.date | None = None,
         limit: int = 100,
         technical_status: str = "ok",
+        sector: str = "",
     ) -> dict[str, Any]:
         if not self.database_url:
             return {
                 "as_of_date": None,
                 "limit": limit,
                 "technical_status": technical_status,
+                "sector": sector,
                 "rows": [],
                 "status_counts": {},
                 "database_configured": False,
@@ -702,9 +710,11 @@ class WatchlistService:
             as_of_date=as_of_date,
             limit=limit,
             technical_status=technical_status,
+            sector=sector,
         )
         payload["limit"] = max(1, min(int(limit), 500))
         payload["technical_status"] = str(technical_status or "").strip().lower() or "ok"
+        payload["sector"] = str(sector or "").strip()
         payload["database_configured"] = True
         return payload
 

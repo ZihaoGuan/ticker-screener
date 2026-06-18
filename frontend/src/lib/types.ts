@@ -654,6 +654,11 @@ export type ChartFundamentalsResponse = {
     rating_status: string | null;
     rating_status_reason: string | null;
   } | null;
+  fundamental_rank?: {
+    as_of_date: string;
+    current_rank: number | null;
+    list_limit: number;
+  } | null;
   rating_diagnostics?: {
     missing_metric_names: string[];
     insufficient_baseline_metrics: string[];
@@ -711,6 +716,7 @@ export type TopRatingsResponse = {
   rating_status: string;
   rows: TopRatingEntry[];
   status_counts: Record<string, number>;
+  sector_options?: string[];
   database_configured: boolean;
 };
 
@@ -742,6 +748,7 @@ export type TopTechnicalRatingsResponse = {
   technical_status: string;
   rows: TopTechnicalRatingEntry[];
   status_counts: Record<string, number>;
+  sector_options?: string[];
   database_configured: boolean;
 };
 

@@ -703,6 +703,7 @@ class WatchlistServiceTests(unittest.TestCase):
             return_value={
                 "fundamentals_snapshot": {"as_of_date": "2026-06-13", "sector": "Technology"},
                 "rating_snapshot": {"overall_rating": 88.5, "rating_status": "ok"},
+                "fundamental_rank": {"as_of_date": "2026-06-13", "current_rank": 42, "list_limit": 200},
                 "rating_diagnostics": {"missing_metric_names": [], "insufficient_baseline_metrics": []},
             },
         ):
@@ -711,6 +712,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["ticker"], "NVDA")
         self.assertEqual(payload["fundamentals_snapshot"]["sector"], "Technology")
         self.assertEqual(payload["rating_snapshot"]["overall_rating"], 88.5)
+        self.assertEqual(payload["fundamental_rank"]["current_rank"], 42)
         self.assertEqual(payload["rating_diagnostics"]["missing_metric_names"], [])
 
     def test_get_chart_fundamentals_payload_uses_db_cache_when_complete(self) -> None:

@@ -112,8 +112,10 @@ type StructuralFibOverlay = {
 export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations, extraMarkers, visibility, forceFearzonePanel = false }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
+  const fibRootRef = useRef<HTMLDivElement | null>(null);
   const priceChartApiRef = useRef<IChartApi | null>(null);
   const rsChartApiRef = useRef<IChartApi | null>(null);
+  const fibChartApiRef = useRef<IChartApi | null>(null);
   const [visibleIndexRange, setVisibleIndexRange] = useState<{ from: number; to: number } | null>(null);
   const [hoverGuide, setHoverGuide] = useState<{ time: string; xRatio: number } | null>(null);
   const resolvedExtraAnnotations = extraAnnotations ?? EMPTY_ANNOTATIONS;
@@ -157,7 +159,9 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
   const rsMarkers = useMemo(() => overlays?.rs_markers ?? [], [overlays?.rs_markers]);
   const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
+  const fibOverlay = useMemo(() => (options.fibOverlay ? buildStructuralFibOverlay(candles) : null), [candles, options.fibOverlay]);
   const showRsPane = options.rsLine && rsLine.length > 0;
+  const showFibPane = options.fibOverlay && fibOverlay !== null;
   const showFearzonePanel = useMemo(() => forceFearzonePanel || fearzonePanel.rows.length > 0, [fearzonePanel.rows.length, forceFearzonePanel]);
   const visibleGapZones = useMemo(
     () => detectGapZones(candles).filter((zone) => zone.remainingUpperPrice > zone.remainingLowerPrice + 1e-6).slice(-4),
@@ -166,7 +170,6 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
   const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations, resolvedExtraAnnotations), [candles, annotations, resolvedExtraAnnotations]);
   const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, resolvedExtraAnnotations), [annotations, resolvedExtraAnnotations]);
   const flexibleSrOverlay = useMemo(() => (options.flexSr ? buildFlexibleSrOverlay(candles) : null), [candles, options.flexSr]);
-  const fibOverlay = useMemo(() => (options.fibOverlay ? buildStructuralFibOverlay(candles) : null), [candles, options.fibOverlay]);
   const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
     const point = param.point;
     const normalizedTime = normalizeCrosshairTime(param.time);
@@ -191,7 +194,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
   };
 
   useEffect(() => {
-    if (!priceRootRef.current || !rsRootRef.current) {
+    if (!priceRootRef.current || !rsRootRef.current || !fibRootRef.current) {
       return;
     }
 
@@ -237,12 +240,41 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         mode: 0,
       },
     });
+    const fibChart = createChart(fibRootRef.current, {
+      height: 228,
+      layout: {
+        background: { type: ColorType.Solid, color: "#101015" },
+        textColor: "#e4e4e7",
+      },
+      grid: {
+        vertLines: { color: "#27272a" },
+        horzLines: { color: "#27272a" },
+      },
+      rightPriceScale: {
+        borderColor: "#3f3f46",
+      },
+      timeScale: {
+        borderColor: "#3f3f46",
+        visible: true,
+      },
+      crosshair: {
+        mode: 0,
+      },
+    });
     priceChartApiRef.current = priceChart;
     rsChartApiRef.current = rsChart;
+    fibChartApiRef.current = fibChart;
 
-    priceChart.timeScale().applyOptions({ visible: !showRsPane });
+    priceChart.timeScale().applyOptions({ visible: !showRsPane && !showFibPane });
 
     const candleSeries = priceChart.addCandlestickSeries({
+      upColor: "#10b981",
+      downColor: "#f43f5e",
+      wickUpColor: "#10b981",
+      wickDownColor: "#f43f5e",
+      borderVisible: false,
+    });
+    const fibCandleSeries = fibChart.addCandlestickSeries({
       upColor: "#10b981",
       downColor: "#f43f5e",
       wickUpColor: "#10b981",
@@ -267,7 +299,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     const marketExtensionSeries = priceChart.addLineSeries({ color: "rgba(96, 165, 250, 0.95)", lineWidth: 2, lineStyle: LineStyle.Dashed, priceLineVisible: false });
     const ma50Series = priceChart.addLineSeries({ color: "rgba(251, 146, 60, 0.45)", lineWidth: 1, priceLineVisible: false });
     const ma200Series = priceChart.addLineSeries({ color: "rgba(167, 139, 250, 0.52)", lineWidth: 1, priceLineVisible: false });
-    const fibImpulseSeries = priceChart.addLineSeries({
+    const fibImpulseSeries = fibChart.addLineSeries({
       color: "rgba(248, 250, 252, 0.75)",
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
@@ -328,6 +360,17 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         close: item.close,
       })),
     );
+    fibCandleSeries.setData(
+      showFibPane
+        ? candles.map((item) => ({
+            time: item.time,
+            open: item.open,
+            high: item.high,
+            low: item.low,
+            close: item.close,
+          }))
+        : [],
+    );
     volumeSeries.setData(
       candles.map((item) => ({
         time: item.time,
@@ -342,7 +385,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     marketExtensionSeries.setData(options.marketExtension ? marketExtension.line : []);
     ma50Series.setData(options.sma50 ? ma50 : []);
     ma200Series.setData(options.sma200 ? ma200 : []);
-    fibImpulseSeries.setData(options.fibOverlay ? fibOverlay?.impulseLine ?? [] : []);
+    fibImpulseSeries.setData(showFibPane ? fibOverlay?.impulseLine ?? [] : []);
     rsSeries.setData(showRsPane ? rsLine : []);
     flexResistanceSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.backfit ?? [] : []);
     flexResistanceProjectionSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.projection ?? [] : []);
@@ -388,6 +431,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     }
 
     const priceMarkers = [];
+    const fibPaneMarkers: Array<{ time: string; position: "aboveBar" | "belowBar"; color: string; shape: "circle" | "square" }> = [];
     const eventAnnotations = [annotations, ...resolvedExtraAnnotations].filter((item): item is ChartAnnotations => Boolean(item?.eventDate));
     for (const eventAnnotation of eventAnnotations) {
       if (!eventAnnotation.eventDate) {
@@ -428,9 +472,9 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         });
       }
     }
-    if (options.fibOverlay) {
+    if (showFibPane) {
       for (const marker of fibOverlay?.markers ?? []) {
-        priceMarkers.push({
+        fibPaneMarkers.push({
           time: marker.time,
           position: marker.position,
           color: marker.color,
@@ -459,6 +503,9 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     if (priceMarkers.length > 0) {
       candleSeries.setMarkers(priceMarkers);
     }
+    if (showFibPane && fibPaneMarkers.length > 0) {
+      fibCandleSeries.setMarkers(fibPaneMarkers);
+    }
 
     annotationSeries.forEach((series, index) => {
       const line = annotationLines[index];
@@ -471,7 +518,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
         title: line.label,
       });
     });
-    if (options.fibOverlay) {
+    if (showFibPane) {
       for (const level of fibOverlay?.levels ?? []) {
         fibImpulseSeries.createPriceLine({
           price: level.value,
@@ -499,16 +546,28 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     if (showRsPane) {
       rsChart.timeScale().fitContent();
     }
+    if (showFibPane) {
+      fibChart.timeScale().fitContent();
+    }
     rsChart.timeScale().applyOptions({ visible: showRsPane });
+    fibChart.timeScale().applyOptions({ visible: showFibPane });
     rsChart.applyOptions({ handleScroll: showRsPane, handleScale: showRsPane });
+    fibChart.applyOptions({ handleScroll: showFibPane, handleScale: showFibPane });
     if (!showRsPane && rsRootRef.current) {
       rsRootRef.current.style.display = "none";
     } else if (rsRootRef.current) {
       rsRootRef.current.style.display = "";
     }
+    if (!showFibPane && fibRootRef.current) {
+      fibRootRef.current.style.display = "none";
+    } else if (fibRootRef.current) {
+      fibRootRef.current.style.display = "";
+    }
 
     let syncingPriceToRs = false;
     let syncingRsToPrice = false;
+    let syncingPriceToFib = false;
+    let syncingFibToPrice = false;
     const syncVisibleIndexRange = (from: number, to: number) => {
       if (candles.length === 0) {
         return;
@@ -529,12 +588,16 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
       syncVisibleIndexRange(0, candles.length - 1);
     }
     priceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-      if (!showRsPane || !range || syncingRsToPrice) {
-        return;
+      if (showRsPane && range && !syncingRsToPrice) {
+        syncingPriceToRs = true;
+        rsChart.timeScale().setVisibleRange(range);
+        syncingPriceToRs = false;
       }
-      syncingPriceToRs = true;
-      rsChart.timeScale().setVisibleRange(range);
-      syncingPriceToRs = false;
+      if (showFibPane && range && !syncingFibToPrice) {
+        syncingPriceToFib = true;
+        fibChart.timeScale().setVisibleRange(range);
+        syncingPriceToFib = false;
+      }
     });
     priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (!range) {
@@ -554,11 +617,26 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
       priceChart.timeScale().setVisibleRange(range);
       syncingRsToPrice = false;
     });
+    fibChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+      if (!showFibPane || !range || syncingPriceToFib) {
+        return;
+      }
+      syncingFibToPrice = true;
+      priceChart.timeScale().setVisibleRange(range);
+      syncingFibToPrice = false;
+    });
     rsChart.subscribeCrosshairMove((param) => {
       if (!showRsPane) {
         return;
       }
       const width = rsRootRef.current?.clientWidth ?? 0;
+      updateHoverGuideFromSurface({ point: param.point, time: param.time }, width);
+    });
+    fibChart.subscribeCrosshairMove((param) => {
+      if (!showFibPane) {
+        return;
+      }
+      const width = fibRootRef.current?.clientWidth ?? 0;
       updateHoverGuideFromSurface({ point: param.point, time: param.time }, width);
     });
 
@@ -567,6 +645,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
       if (width > 0) {
         priceChart.applyOptions({ width });
         rsChart.applyOptions({ width });
+        fibChart.applyOptions({ width });
       }
     });
     resizeObserver.observe(priceRootRef.current);
@@ -575,8 +654,10 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
       resizeObserver.disconnect();
       priceChartApiRef.current = null;
       rsChartApiRef.current = null;
+      fibChartApiRef.current = null;
       priceChart.remove();
       rsChart.remove();
+      fibChart.remove();
     };
   }, [
     annotations,
@@ -612,6 +693,7 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     weeklyEma8,
     options.flexSr,
     flexibleSrOverlay,
+    showFibPane,
   ]);
 
   const handleZoom = (direction: "in" | "out" | "reset") => {
@@ -623,6 +705,9 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
       priceChart.timeScale().fitContent();
       if (showRsPane && rsChartApiRef.current) {
         rsChartApiRef.current.timeScale().fitContent();
+      }
+      if (showFibPane && fibChartApiRef.current) {
+        fibChartApiRef.current.timeScale().fitContent();
       }
       return;
     }
@@ -656,6 +741,11 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
       <div className="chart-pane">
         <div ref={priceRootRef} className="chart-card chart-card-price" />
         {hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
+      </div>
+      {showFibPane ? <div className="chart-rs-header">Fib structure pane</div> : null}
+      <div className="chart-pane">
+        <div ref={fibRootRef} className="chart-card chart-card-rs" />
+        {showFibPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
       <div className="chart-pane">
@@ -1096,9 +1186,6 @@ function buildStructuralFibOverlay(candles: CandlePoint[]): StructuralFibOverlay
     { ratio: 0.618, label: "Fib 0.618", color: "rgba(245, 158, 11, 0.95)", lineWidth: 2, lineStyle: LineStyle.Solid },
     { ratio: 0.786, label: "Fib 0.786", color: "rgba(217, 119, 6, 0.92)", lineWidth: 2, lineStyle: LineStyle.Solid },
     { ratio: 1.0, label: "Fib 1.000", color: "rgba(226, 232, 240, 0.72)", lineWidth: 1, lineStyle: LineStyle.Solid },
-    { ratio: 1.272, label: "Fib 1.272", color: "rgba(192, 132, 252, 0.9)", lineWidth: 1, lineStyle: LineStyle.Dashed },
-    { ratio: 1.618, label: "Fib 1.618", color: "rgba(168, 85, 247, 0.95)", lineWidth: 2, lineStyle: LineStyle.Solid },
-    { ratio: 2.0, label: "Fib 2.000", color: "rgba(147, 51, 234, 0.88)", lineWidth: 1, lineStyle: LineStyle.Dotted },
   ];
   const levels: FibLevel[] = levelTemplates.map((level) => ({
     label: level.label,

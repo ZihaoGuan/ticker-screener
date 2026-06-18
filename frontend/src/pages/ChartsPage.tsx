@@ -285,6 +285,7 @@ export function ChartsPage() {
   const earningsRows = fundamentalsPayload?.earnings_eps_history ?? [];
   const latestFundamentalsSnapshot = fundamentalsPayload?.fundamentals_snapshot ?? null;
   const latestRatingSnapshot = fundamentalsPayload?.rating_snapshot ?? null;
+  const latestFundamentalRank = fundamentalsPayload?.fundamental_rank ?? null;
   const latestRatingDiagnostics = fundamentalsPayload?.rating_diagnostics ?? null;
   const sectorLabel = latestFundamentalsSnapshot?.sector?.trim() || null;
   const industryLabel = latestFundamentalsSnapshot?.industry?.trim() || null;
@@ -449,6 +450,7 @@ export function ChartsPage() {
         title: "Fundamentals",
         description: "Quick fundamental pressure-check. These numbers help frame sponsorship, growth quality, and near-term event risk around the technical setup.",
         items: [
+          { label: "FA Rank", value: latestFundamentalRank?.current_rank != null ? `#${latestFundamentalRank.current_rank}` : "-" },
           { label: "Inst Float", value: formatPercent(fundamentalsPayload?.holders_float_held_by_institutions_pct) },
           { label: "Rev YoY", value: formatPercent(fundamentalsPayload?.revenue_yoy_pct) },
           { label: "Imp Move", value: formatPercent(fundamentalsPayload?.implied_move?.percent_move) },
@@ -469,6 +471,7 @@ export function ChartsPage() {
       hasTrimWarning,
       latestMarketExtension,
       marketExtensionLabel,
+      latestFundamentalRank,
       sepaDashboard,
       trendTemplate,
       vcs,
@@ -784,6 +787,12 @@ export function ChartsPage() {
               Status: {latestRatingSnapshot.rating_status || "-"}
               {" · "}
               Overall: {formatMetric(latestRatingSnapshot.overall_rating)}
+              {latestFundamentalRank?.current_rank != null ? (
+                <>
+                  {" · "}
+                  FA Rank: #{latestFundamentalRank.current_rank}/{latestFundamentalRank.list_limit}
+                </>
+              ) : null}
               {" · "}
               As Of: {formatLocalDate(latestRatingSnapshot.as_of_date)}
               {" · "}
