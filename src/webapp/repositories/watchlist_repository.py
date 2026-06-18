@@ -93,6 +93,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("wyckoff_buy_signal", "wyckoff_buy_signal", "Wyckoff Buy Signal"),
         ("wyckoff_sell_signal", "wyckoff_sell_signal", "Wyckoff Sell Signal"),
         ("bb_squeeze", "bb_squeeze", "BB Squeeze"),
+        ("ema21_pullback_buy", "ema21_pullback_buy", "EMA21 Pullback Buy"),
         ("high_tight_flag", "high_tight_flag", "High Tight Flag"),
         ("leif_high_tight_flag", "leif_high_tight_flag", "Leif High Tight Flag"),
         ("sepa_vcp", "sepa_vcp", "SEPA VCP"),

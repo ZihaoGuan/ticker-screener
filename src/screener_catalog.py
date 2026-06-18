@@ -9,6 +9,7 @@ from .config import AppConfig
 from .base_detection_screen import find_active_base_detection_hit
 from .cup_detection_screen import find_active_cup_detection_hit
 from .double_bottom_detection_screen import find_active_double_bottom_detection_hit
+from .ema21_pullback_buy_screen import find_recent_ema21_pullback_buy_hit
 from .cup_handle_screen import run_cup_handle_screen
 from .fearzone_zeiierman_screen import find_recent_fearzone_zeiierman_hit
 from .fearzone_screen import find_recent_fearzone_hit
@@ -210,6 +211,27 @@ def _run_bb_squeeze(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
             "signal_date": payload["signal_date"],
             "signal_kind": payload["signal_kind"],
             "bb_squeeze_ratio": payload["bb_squeeze_ratio"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_ema21_pullback_buy(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_ema21_pullback_buy_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "test_date": payload["test_date"],
+            "test_count": payload["test_count"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
@@ -840,6 +862,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=90,
             warmup_trading_days=20,
             evaluator=_run_bb_squeeze,
+        ),
+        "ema21_pullback_buy": ScreenerSpec(
+            id="ema21_pullback_buy",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=140,
+            warmup_trading_days=20,
+            evaluator=_run_ema21_pullback_buy,
         ),
         "high_tight_flag": ScreenerSpec(
             id="high_tight_flag",

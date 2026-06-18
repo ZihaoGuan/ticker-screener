@@ -141,6 +141,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "ema21_pullback_buy",
+        "strategy_id": "ema21_pullback_buy",
+        "label": "EMA21 Pullback Buy",
+        "description": "Uptrend leaders that tested the 21 EMA, held the close, then triggered a first bullish breakout over the test-candle high.",
+        "timeframe": "Daily",
+        "accent": "lime",
+    },
+    {
         "id": "trend_template",
         "strategy_id": "trend_template",
         "label": "Trend Template",
