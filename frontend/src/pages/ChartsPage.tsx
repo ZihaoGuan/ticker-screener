@@ -298,6 +298,9 @@ export function ChartsPage() {
     () =>
       (overlayPayload?.setup_markers ?? [])
         .map((marker) => {
+          if (marker.kind === "mark_daily_extend") {
+            return { time: marker.time, label: marker.label, color: "#fb923c", shape: "square" as const, position: "aboveBar" as const };
+          }
           if (marker.kind === "wyckoff_buying_climax") {
             return { time: marker.time, label: marker.label, color: "#fb923c", shape: "square" as const, position: "aboveBar" as const };
           }
@@ -315,8 +318,10 @@ export function ChartsPage() {
         .filter((marker): marker is NonNullable<typeof marker> => marker !== null),
     [overlayPayload?.setup_markers],
   );
-  const wyckoffPrimaryMarkers = wyckoffMarkers.filter((marker) => marker.label !== "HOLD");
-  const wyckoffHoldMarkers = wyckoffMarkers.filter((marker) => marker.label === "HOLD");
+  const markDailyExtendMarkers = wyckoffMarkers.filter((marker) => marker.label === "Mark Extend");
+  const nonMarkMarkers = wyckoffMarkers.filter((marker) => marker.label !== "Mark Extend");
+  const wyckoffPrimaryMarkers = nonMarkMarkers.filter((marker) => marker.label !== "HOLD");
+  const wyckoffHoldMarkers = nonMarkMarkers.filter((marker) => marker.label === "HOLD");
   const wyckoffClimaxCount = wyckoffPrimaryMarkers.filter((marker) => marker.label === "BC").length;
   const wyckoffBuyCount = wyckoffPrimaryMarkers.filter((marker) => marker.label === "BUY").length;
   const wyckoffSellCount = wyckoffPrimaryMarkers.filter((marker) => marker.label === "SELL").length;
@@ -1021,6 +1026,7 @@ export function ChartsPage() {
               overlays={chartPayload ?? undefined}
               extraMarkers={[
                 ...atrExtensionMarkers,
+                ...markDailyExtendMarkers,
                 ...(chartVisibility.wyckoffSignals ? wyckoffPrimaryMarkers : []),
                 ...(chartVisibility.wyckoffHoldSignals ? wyckoffHoldMarkers : []),
                 ...(chartVisibility.sellSignals ? sellIntoStrengthMarkers : []),
@@ -1045,6 +1051,7 @@ export function ChartsPage() {
               {latestMarketExtension?.distance != null ? (
                 <span className="chart-pill chart-pill-setup">Dist {formatPrice(latestMarketExtension.distance)}</span>
               ) : null}
+              {markDailyExtendMarkers.length > 0 ? <span className="chart-pill chart-pill-event">{markDailyExtendMarkers.length} Mark extend</span> : null}
               {vcs ? <span className={`chart-pill ${vcsChartPillClass(vcs.stage)}`}>VCS {formatScore(vcs.score)} {vcs.stage_label}</span> : null}
               {atr14 != null ? <span className="chart-pill chart-pill-setup">ATR14 {formatPrice(atr14)}</span> : null}
               {atrMultipleFrom50Ma != null ? <span className="chart-pill chart-pill-setup">50MA {formatAtrMultiple(atrMultipleFrom50Ma)}</span> : null}

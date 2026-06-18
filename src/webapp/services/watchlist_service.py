@@ -141,6 +141,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "weekly_tight_close",
+        "strategy_id": "weekly_tight_close",
+        "label": "Weekly Tight Close",
+        "description": "Three weekly bars with ATR-scaled tight closes plus tight highs or lows, while first bar still passes wick and range filter.",
+        "timeframe": "Weekly",
+        "accent": "violet",
+    },
+    {
         "id": "ema21_pullback_buy",
         "strategy_id": "ema21_pullback_buy",
         "label": "EMA21 Pullback Buy",
@@ -510,6 +518,7 @@ class WatchlistService:
         vcs_snapshot = latest_vcs_snapshot(frame)
         setup_markers: list[dict[str, Any]] = []
         if include_setup_markers:
+            setup_markers.extend(_compute_mark_daily_extend_markers(frame, visible_dates=visible_dates))
             setup_markers.extend(
                 _compute_ftd_sweep_markers(
                     frame=frame,
@@ -2096,6 +2105,57 @@ def _compute_market_extension_overlay(frame: pd.DataFrame, *, visible_dates: set
         "signals": signals,
         "latest": latest,
     }
+
+
+def _compute_mark_daily_extend_markers(frame: pd.DataFrame, *, visible_dates: set[str]) -> list[dict[str, Any]]:
+    if frame.empty or not visible_dates:
+        return []
+
+    bars = frame.copy()
+    if not isinstance(bars.index, pd.DatetimeIndex):
+        bars.index = pd.to_datetime(bars.index)
+    bars = bars.sort_index()
+    for column in ("Open", "High", "Low", "Close"):
+        if column not in bars.columns:
+            return []
+        bars[column] = pd.to_numeric(bars[column], errors="coerce")
+
+    ema10 = bars["Close"].ewm(span=10, adjust=False).mean()
+    prev_close = bars["Close"].shift(1)
+    true_range = pd.concat(
+        [
+            bars["High"] - bars["Low"],
+            (bars["High"] - prev_close).abs(),
+            (bars["Low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    atr14 = true_range.rolling(window=14, min_periods=14).mean()
+    extension_distance = bars["High"] - ema10
+    triggered = extension_distance > (2.1 * atr14)
+
+    markers: list[dict[str, Any]] = []
+    for index in bars.index[triggered.fillna(False)]:
+        time_value = pd.Timestamp(index).date().isoformat()
+        if time_value not in visible_dates:
+            continue
+        ema_value = ema10.loc[index]
+        atr_value = atr14.loc[index]
+        distance_value = extension_distance.loc[index]
+        if pd.isna(ema_value) or pd.isna(atr_value) or pd.isna(distance_value):
+            continue
+        markers.append(
+            {
+                "time": time_value,
+                "kind": "mark_daily_extend",
+                "label": "Mark Extend",
+                "ema10": round(float(ema_value), 2),
+                "atr14": round(float(atr_value), 2),
+                "distance": round(float(distance_value), 2),
+                "threshold": round(float(2.1 * atr_value), 2),
+            }
+        )
+    return markers
 
 
 def _coalesce_text(*values: object) -> str | None:

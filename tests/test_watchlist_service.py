@@ -297,6 +297,23 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["ema21_pullback_buy"]["entry_count"], 2)
         self.assertEqual(cards["ema21_pullback_buy"]["preview_tickers"], ["NVDA", "AAPL"])
 
+    def test_get_scanner_board_includes_weekly_tight_close_card(self) -> None:
+        self._write_watchlist(
+            "weekly_tight_close_2026-06-12",
+            tickers=["NVDA", "PLTR"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 31, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertTrue(cards["weekly_tight_close"]["available"])
+        self.assertEqual(cards["weekly_tight_close"]["entry_count"], 2)
+        self.assertEqual(cards["weekly_tight_close"]["preview_tickers"], ["NVDA", "PLTR"])
+        self.assertEqual(cards["weekly_tight_close"]["timeframe"], "Weekly")
+
     def test_get_scanner_board_includes_gap_fill_card(self) -> None:
         self._write_watchlist(
             "gap_fill_2026-06-12",
@@ -504,6 +521,40 @@ class WatchlistServiceTests(unittest.TestCase):
         assert latest is not None
         self.assertIn(latest["state"], {"warning", "extreme"})
         self.assertGreater(latest["extension_pct"], 11.0)
+
+    def test_get_chart_overlays_payload_includes_mark_daily_extend_marker(self) -> None:
+        index = pd.date_range(start="2026-01-05", periods=40, freq="B")
+        close_values = [100.0 + (idx * 0.4) for idx in range(len(index) - 1)] + [118.0]
+        high_values = [value + 0.8 for value in close_values[:-1]] + [128.0]
+        low_values = [value - 0.8 for value in close_values[:-1]] + [117.0]
+        frame = pd.DataFrame(
+            {
+                "Open": [value - 0.5 for value in close_values],
+                "High": high_values,
+                "Low": low_values,
+                "Close": close_values,
+                "Volume": [1_500_000 for _ in close_values],
+            },
+            index=index,
+        )
+
+        def fake_download(*, tickers: str, **_: object):
+            if tickers in {"NVDA", "SPY"}:
+                return frame.copy()
+            return pd.DataFrame()
+
+        with patch("src.webapp.services.watchlist_service.yf.download", side_effect=fake_download):
+            payload = self.service.get_chart_overlays_payload(
+                "NVDA",
+                as_of_date=dt.date(2026, 2, 27),
+                include_setup_markers=True,
+            )
+
+        markers = [marker for marker in payload["setup_markers"] if marker["kind"] == "mark_daily_extend"]
+        self.assertEqual(len(markers), 1)
+        self.assertEqual(markers[0]["time"], "2026-02-27")
+        self.assertEqual(markers[0]["label"], "Mark Extend")
+        self.assertGreater(markers[0]["distance"], markers[0]["threshold"])
 
     def test_get_chart_payload_includes_sepa_dashboard_snapshot(self) -> None:
         ticker_frame = self._long_price_frame()

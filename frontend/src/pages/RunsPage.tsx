@@ -1737,6 +1737,8 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     wyckoff_buy_signal: "Wyckoff accumulation-trigger scan for fresh BUY signals coming out of spring, LPS, or phase progression.",
     wyckoff_sell_signal: "Wyckoff distribution-trigger scan for fresh SELL signals coming out of UTAD, LPSY, or phase deterioration.",
     leif_high_tight_flag: "Leif Soreide HTF breakout setup with scored pole, flag, volume, RS, and breakout rules.",
+    weekly_tight_close: "Three weekly bars with ATR-scaled tight closes plus tight highs or lows, while first bar still passes wick and range filter.",
+    weekly_tight_close_breakout: "Names already breaking above the three-week tight-close box after the weekly tight-close detector formed.",
     ema21_pullback_buy: "Strict-uptrend leaders that tag the 21 EMA, hold the close, then fire first bullish break above the test-candle high.",
     fearzone: "High-velocity panic reversals where snapback asymmetry may appear.",
     td9_bullish: "Bullish TD Sequential exhaustion names where downside pressure may be spent.",
