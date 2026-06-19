@@ -18,6 +18,7 @@ import { RrgPage } from "./pages/RrgPage";
 import { RunsPage } from "./pages/RunsPage";
 import { ScannerBoardPage } from "./pages/ScannerBoardPage";
 import { ScannerResultPage } from "./pages/ScannerResultPage";
+import { ScannerTopHitsPage } from "./pages/ScannerTopHitsPage";
 import { WarmupPage } from "./pages/WarmupPage";
 import { WeeklyWatchlistPage } from "./pages/WeeklyWatchlistPage";
 import { WatchlistsPage } from "./pages/WatchlistsPage";
@@ -43,6 +44,14 @@ export default function App() {
           element={
             <RoleRoute allowedRoles={["premium", "admin"]}>
               <ScannerBoardPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/scanner/top-hits"
+          element={
+            <RoleRoute allowedRoles={["premium", "admin"]}>
+              <ScannerTopHitsPage />
             </RoleRoute>
           }
         />

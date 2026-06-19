@@ -132,6 +132,45 @@ export type ScannerBoardResponse = {
   cards: ScannerBoardCard[];
 };
 
+export type ScannerTopHitScanner = {
+  id: string;
+  strategy_id: string;
+  label: string;
+  timeframe: string;
+  stem: string;
+  sort_date: string;
+};
+
+export type ScannerTopHitRow = {
+  ticker: string;
+  company: string;
+  sector: string;
+  industry: string;
+  day_close: number | null;
+  change_pct: number | null;
+  rs_rating: number | null;
+  ta_rating: number | null;
+  fa_rating: number | null;
+  scanner_count: number;
+  scanner_labels: string[];
+  scanners: ScannerTopHitScanner[];
+  sector_momentum?: {
+    sector: string;
+    etf_ticker: string;
+    quadrant: "Leading" | "Weakening" | "Lagging" | "Improving" | string;
+    rs_ratio: number | null;
+    momentum: number | null;
+    as_of_date: string | null;
+  } | null;
+};
+
+export type ScannerTopHitsResponse = ScannerBoardResponse & {
+  total_live_scanners: number;
+  total_unique_tickers: number;
+  overlapping_ticker_count: number;
+  rows: ScannerTopHitRow[];
+};
+
 export type WatchlistTicker = {
   ticker: string;
   company?: string;

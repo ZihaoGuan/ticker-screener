@@ -3758,6 +3758,33 @@ a {
   flex-wrap: wrap;
 }
 
+.scanner-top-hits-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  color: #a1a1aa;
+}
+
+.scanner-top-hit-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scanner-top-hits-momentum {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 144px;
+}
+
+.scanner-top-hits-table td {
+  vertical-align: top;
+}
+
 .scanner-result-note {
   display: grid;
   gap: 16px;
@@ -3887,5 +3914,10 @@ a {
 
   .scanner-result-note {
     grid-template-columns: 1fr;
+  }
+
+  .scanner-top-hits-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

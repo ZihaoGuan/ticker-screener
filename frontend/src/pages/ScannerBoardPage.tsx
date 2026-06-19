@@ -38,7 +38,6 @@ export function ScannerBoardPage() {
   }, []);
 
   const cards = payload?.cards ?? [];
-  const totalHits = useMemo(() => cards.reduce((sum, card) => sum + (card.entry_count || 0), 0), [cards]);
   const availableCards = useMemo(() => cards.filter((card) => card.available), [cards]);
 
   return (
@@ -65,10 +64,6 @@ export function ScannerBoardPage() {
             <span className="eyebrow">Scanners Live</span>
             <strong>{formatCount(availableCards.length)}</strong>
           </div>
-          <div className="earnings-metric earnings-metric-highlight">
-            <span className="eyebrow">Total Hits</span>
-            <strong>{formatCount(totalHits)}</strong>
-          </div>
         </div>
       </section>
 
@@ -84,6 +79,9 @@ export function ScannerBoardPage() {
           </div>
         </div>
         <div className="weekly-watchlist-actions">
+          <Link className="primary-button" to="/scanner/top-hits">
+            Open Top Hits
+          </Link>
           <Link className="ghost-button" to="/ratings">
             Open Fundamental Ratings
           </Link>

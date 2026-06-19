@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -160,6 +161,127 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-12")
         self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-12")
         self.assertEqual(cards["fearzone"]["preview_tickers"], ["TSLA", "HOOD"])
+
+    def test_get_scanner_top_hits_payload_aggregates_overlap_and_sector_momentum(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        watchlists_dir = Path(self.temp_dir.name) / "watchlists"
+        (watchlists_dir / "rs_new_high_before_price_2026-06-12.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "PLTR",
+                        "company_name": "Palantir",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "current_price": 132.45,
+                        "daily_change_pct": 2.1,
+                    },
+                    {
+                        "ticker": "CRWD",
+                        "company_name": "CrowdStrike",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "current_price": 421.0,
+                        "daily_change_pct": 1.2,
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (watchlists_dir / "fearzone_2026-06-12.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "PLTR",
+                        "company_name": "Palantir",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "current_price": 132.45,
+                        "daily_change_pct": 2.1,
+                    },
+                    {
+                        "ticker": "TSLA",
+                        "company_name": "Tesla",
+                        "sector": "Consumer Discretionary",
+                        "industry": "Auto Manufacturers",
+                        "current_price": 188.0,
+                        "daily_change_pct": -1.8,
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self._write_watchlist(
+            "weekly_rs_new_high_2026-06-06",
+            tickers=["MSFT"],
+            modified_at=dt.datetime(2026, 6, 8, 0, 0, tzinfo=dt.timezone.utc),
+        )
+        import os
+
+        os.utime(
+            watchlists_dir / "rs_new_high_before_price_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+        os.utime(
+            watchlists_dir / "fearzone_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+
+        class _FakeRrgService:
+            def get_universe_report(self, *args: object, **kwargs: object) -> dict[str, object]:
+                return {
+                    "series": [
+                        {
+                            "ticker": "XLK",
+                            "label": "Information Technology",
+                            "quadrant": "Leading",
+                            "latest": {"x": 103.4, "y": 101.8, "date": "2026-06-12"},
+                        }
+                    ]
+                }
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()), patch(
+            "src.webapp.services.watchlist_service.load_universe",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch(
+            "src.ratings.repository.RatingsRepository.load_latest_rating_snapshots_for_tickers",
+            return_value={
+                "PLTR": {"overall_rating": 91.0, "sector": "Information Technology", "industry": "Software"},
+                "CRWD": {"overall_rating": 88.0, "sector": "Information Technology", "industry": "Software"},
+                "TSLA": {"overall_rating": 74.0, "sector": "Consumer Discretionary", "industry": "Auto Manufacturers"},
+            },
+        ), patch(
+            "src.ratings.repository.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
+            return_value={
+                "PLTR": {"overall_rating": 95.0, "leadership_score": 97.0, "sector": "Information Technology", "industry": "Software"},
+                "CRWD": {"overall_rating": 90.0, "leadership_score": 92.0, "sector": "Information Technology", "industry": "Software"},
+                "TSLA": {"overall_rating": 68.0, "leadership_score": 71.0, "sector": "Consumer Discretionary", "industry": "Auto Manufacturers"},
+            },
+        ):
+            payload = service.get_scanner_top_hits_payload(
+                rrg_service=_FakeRrgService(),
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc),
+            )
+
+        self.assertEqual(payload["total_unique_tickers"], 4)
+        self.assertEqual(payload["overlapping_ticker_count"], 1)
+        pltr = payload["rows"][0]
+        self.assertEqual(pltr["ticker"], "PLTR")
+        self.assertEqual(pltr["scanner_count"], 2)
+        self.assertEqual(pltr["scanner_labels"], ["RS New High Before Price", "Fearzone"])
+        self.assertEqual(pltr["day_close"], 132.45)
+        self.assertEqual(pltr["change_pct"], 2.1)
+        self.assertEqual(pltr["rs_rating"], 97.0)
+        self.assertEqual(pltr["ta_rating"], 95.0)
+        self.assertEqual(pltr["fa_rating"], 91.0)
+        self.assertEqual(pltr["sector_momentum"]["quadrant"], "Leading")
+        self.assertEqual(pltr["sector_momentum"]["etf_ticker"], "XLK")
 
     def test_get_chart_payload_snaps_to_latest_available_trading_day(self) -> None:
         frame = pd.DataFrame(

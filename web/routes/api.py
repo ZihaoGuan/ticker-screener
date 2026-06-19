@@ -929,6 +929,15 @@ def scanner_board_data(
     return JSONResponse(service.get_scanner_board())
 
 
+@router.get("/scanner-board/top-hits", response_class=JSONResponse)
+def scanner_top_hits_data(
+    service: WatchlistService = Depends(get_watchlist_service),
+    rrg_service: RrgService = Depends(get_rrg_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    return JSONResponse(service.get_scanner_top_hits_payload(rrg_service=rrg_service))
+
+
 @router.get("/watchlists/weekly", response_class=JSONResponse)
 def weekly_watchlist_data(
     stem: str | None = Query(default=None),

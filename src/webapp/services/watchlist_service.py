@@ -300,6 +300,76 @@ class WatchlistService:
             "cards": cards,
         }
 
+    def get_scanner_top_hits_payload(self, *, rrg_service: Any | None = None, now: dt.datetime | None = None) -> dict[str, Any]:
+        board_payload = self.get_scanner_board(now=now)
+        cards = [dict(item) for item in board_payload.get("cards", []) if isinstance(item, dict)]
+        live_cards = [item for item in cards if item.get("available") and str(item.get("stem") or "").strip()]
+        sector_momentum_map = self._load_sector_momentum_map(rrg_service)
+        aggregated: dict[str, dict[str, Any]] = {}
+
+        for card in live_cards:
+            stem = str(card.get("stem") or "").strip()
+            if not stem:
+                continue
+            entries = self._enrich_entries(self._filter_excluded_entries(self.repository.load_watchlist(stem)))
+            scanner_meta = {
+                "id": str(card.get("id") or ""),
+                "strategy_id": str(card.get("strategy_id") or ""),
+                "label": str(card.get("label") or ""),
+                "timeframe": str(card.get("timeframe") or ""),
+                "stem": stem,
+                "sort_date": str(card.get("sort_date") or ""),
+            }
+            for entry in entries:
+                ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
+                if not ticker:
+                    continue
+                bucket = aggregated.setdefault(
+                    ticker,
+                    {
+                        "ticker": ticker,
+                        "company": "",
+                        "sector": "",
+                        "industry": "",
+                        "day_close": None,
+                        "change_pct": None,
+                        "rs_rating": None,
+                        "ta_rating": None,
+                        "fa_rating": None,
+                        "scanner_count": 0,
+                        "scanners": [],
+                    },
+                )
+                self._merge_scanner_top_hit_entry(bucket, entry)
+                scanners = bucket["scanners"]
+                if scanner_meta["id"] and not any(str(item.get("id") or "") == scanner_meta["id"] for item in scanners):
+                    scanners.append(dict(scanner_meta))
+
+        tickers = sorted(aggregated.keys())
+        self._attach_latest_rating_snapshots(aggregated, tickers)
+        rows = []
+        for ticker in tickers:
+            row = aggregated[ticker]
+            row["scanner_count"] = len(row["scanners"])
+            sector_key = _coalesce_text(row.get("sector"))
+            if sector_key:
+                row["sector_momentum"] = copy.deepcopy(sector_momentum_map.get(sector_key) or None)
+            else:
+                row["sector_momentum"] = None
+            row["scanner_labels"] = [str(item.get("label") or "") for item in row["scanners"] if str(item.get("label") or "").strip()]
+            rows.append(row)
+
+        rows.sort(key=lambda item: (-int(item.get("scanner_count") or 0), str(item.get("ticker") or "")))
+        top_hit_rows = [item for item in rows if int(item.get("scanner_count") or 0) >= 2]
+        overlapping_count = len(top_hit_rows)
+        return {
+            **board_payload,
+            "total_live_scanners": len(live_cards),
+            "total_unique_tickers": len(rows),
+            "overlapping_ticker_count": overlapping_count,
+            "rows": top_hit_rows,
+        }
+
     def get_weekly_watchlist_board(self, stem: str | None = None) -> dict[str, Any]:
         weekly_files = [item for item in self.repository.list_recent_watchlists(limit=200) if item.get("group_key") == "weekly_rs"]
         selected_meta = None
@@ -962,6 +1032,7 @@ class WatchlistService:
             if latest_market:
                 entry["latest_trade_date"] = latest_market["trade_date"]
                 entry["current_volume"] = latest_market["volume"]
+                entry["current_close"] = latest_market["close"]
                 entry["daily_change_pct"] = latest_market["change_pct"]
             enriched.append(entry)
         return enriched
@@ -1004,10 +1075,80 @@ class WatchlistService:
                 change_pct = ((latest_close / previous_close) - 1.0) * 100.0
             snapshots[ticker] = {
                 "trade_date": latest_date,
+                "close": latest_close,
                 "volume": int(round(_coerce_float(latest.get("Volume")))),
                 "change_pct": change_pct,
             }
         return snapshots
+
+    def _merge_scanner_top_hit_entry(self, bucket: dict[str, Any], entry: dict[str, Any]) -> None:
+        company = _coalesce_text(bucket.get("company"), entry.get("company_name"), entry.get("company"))
+        sector = _coalesce_text(bucket.get("sector"), entry.get("sector"))
+        industry = _coalesce_text(bucket.get("industry"), entry.get("industry"))
+        day_close = bucket.get("day_close")
+        if day_close is None:
+            day_close = _resolve_entry_display_price(entry)
+        change_pct = bucket.get("change_pct")
+        if change_pct is None:
+            change_pct = _resolve_entry_change_pct(entry)
+        if company:
+            bucket["company"] = company
+        if sector:
+            bucket["sector"] = sector
+        if industry:
+            bucket["industry"] = industry
+        bucket["day_close"] = day_close
+        bucket["change_pct"] = change_pct
+
+    def _attach_latest_rating_snapshots(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
+        if not self.database_url or not tickers:
+            return
+        repository = RatingsRepository(self.database_url)
+        fundamental_map = repository.load_latest_rating_snapshots_for_tickers(tickers)
+        technical_map = repository.load_latest_technical_rating_snapshots_for_tickers(tickers)
+        for ticker in tickers:
+            row = rows_by_ticker.get(ticker)
+            if row is None:
+                continue
+            fundamental = fundamental_map.get(ticker) or {}
+            technical = technical_map.get(ticker) or {}
+            if not row.get("sector"):
+                row["sector"] = _coalesce_text(row.get("sector"), fundamental.get("sector"), technical.get("sector"))
+            row["fa_rating"] = _coerce_optional_float(fundamental.get("overall_rating"))
+            row["ta_rating"] = _coerce_optional_float(technical.get("overall_rating"))
+            row["rs_rating"] = _coerce_optional_float(technical.get("leadership_score"))
+
+    def _load_sector_momentum_map(self, rrg_service: Any | None) -> dict[str, dict[str, Any]]:
+        if rrg_service is None:
+            return {}
+        try:
+            payload = rrg_service.get_universe_report(
+                "sector",
+                benchmark=self.benchmark_ticker,
+                period="3y",
+                trail_weeks=12,
+                cadence="weekly",
+            )
+        except Exception as exc:
+            logger.warning("Scanner top hits sector momentum unavailable; continuing without RRG enrichment: %s", exc)
+            return {}
+        result: dict[str, dict[str, Any]] = {}
+        for item in payload.get("series", []):
+            if not isinstance(item, dict):
+                continue
+            sector = _coalesce_text(item.get("label"))
+            latest = item.get("latest") if isinstance(item.get("latest"), dict) else {}
+            if not sector:
+                continue
+            result[sector] = {
+                "sector": sector,
+                "etf_ticker": str(item.get("ticker") or "").strip().upper(),
+                "quadrant": str(item.get("quadrant") or "").strip(),
+                "rs_ratio": _coerce_optional_float(latest.get("x")),
+                "momentum": _coerce_optional_float(latest.get("y")),
+                "as_of_date": str(latest.get("date") or "").strip() or None,
+            }
+        return result
 
     def _get_universe_index(self) -> dict[str, UniverseTicker]:
         if self._universe_index is not None:
@@ -2247,6 +2388,32 @@ def _coalesce_text(*values: object) -> str | None:
         text = str(value or "").strip()
         if text:
             return text
+    return None
+
+
+def _resolve_entry_display_price(entry: dict[str, Any]) -> float | None:
+    for key in (
+        "current_close",
+        "current_price",
+        "last_price",
+        "signal_close",
+        "close",
+        "close_price",
+        "entry_price",
+        "trigger_price",
+        "secondary_entry_price",
+    ):
+        value = _coerce_optional_float(entry.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _resolve_entry_change_pct(entry: dict[str, Any]) -> float | None:
+    for key in ("price_change_pct", "daily_change_pct", "change_pct", "pct_change"):
+        value = _coerce_optional_float(entry.get(key))
+        if value is not None:
+            return value
     return None
 
 

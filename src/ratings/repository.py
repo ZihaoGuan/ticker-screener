@@ -830,6 +830,8 @@ class RatingsRepository:
             SELECT DISTINCT ON (ticker)
               ticker,
               as_of_date,
+              sector,
+              industry,
               overall_rating,
               valuation_grade,
               profitability_grade,
@@ -849,6 +851,8 @@ class RatingsRepository:
         for (
             ticker,
             as_of_date,
+            sector,
+            industry,
             overall_rating,
             valuation_grade,
             profitability_grade,
@@ -859,6 +863,8 @@ class RatingsRepository:
         ) in rows:
             result[str(ticker).upper()] = {
                 "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date or ""),
+                "sector": sector,
+                "industry": industry,
                 "overall_rating": float(overall_rating) if overall_rating is not None else None,
                 "valuation_grade": valuation_grade,
                 "profitability_grade": profitability_grade,
@@ -877,17 +883,22 @@ class RatingsRepository:
         if connection is None:
             return {}
         sql = """
-            SELECT DISTINCT ON (ticker)
-              ticker,
-              as_of_date,
-              overall_rating,
-              rating_band,
-              technical_status,
-              technical_status_reason,
-              flags
-            FROM ticker_technical_rating_snapshots
-            WHERE ticker = ANY(%s)
-            ORDER BY ticker, as_of_date DESC, updated_at DESC
+            SELECT DISTINCT ON (r.ticker)
+              r.ticker,
+              r.as_of_date,
+              tm.sector,
+              tm.industry,
+              r.overall_rating,
+              r.leadership_score,
+              r.rating_band,
+              r.technical_status,
+              r.technical_status_reason,
+              r.flags
+            FROM ticker_technical_rating_snapshots r
+            LEFT JOIN ticker_metadata tm
+              ON tm.ticker = r.ticker
+            WHERE r.ticker = ANY(%s)
+            ORDER BY r.ticker, r.as_of_date DESC, r.updated_at DESC
         """
         with connection:
             with connection.cursor() as cursor:
@@ -897,7 +908,10 @@ class RatingsRepository:
         for (
             ticker,
             as_of_date,
+            sector,
+            industry,
             overall_rating,
+            leadership_score,
             rating_band,
             technical_status,
             technical_status_reason,
@@ -905,7 +919,10 @@ class RatingsRepository:
         ) in rows:
             result[str(ticker).upper()] = {
                 "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date or ""),
+                "sector": sector,
+                "industry": industry,
                 "overall_rating": float(overall_rating) if overall_rating is not None else None,
+                "leadership_score": float(leadership_score) if leadership_score is not None else None,
                 "rating_band": rating_band,
                 "technical_status": technical_status,
                 "technical_status_reason": technical_status_reason,
