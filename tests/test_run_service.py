@@ -336,6 +336,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("ema21_pullback_buy", action_ids)
         self.assertIn("sma200_pullback_buy", action_ids)
         self.assertIn("high_tight_flag", action_ids)
+        self.assertIn("high_tight_flag_setup", action_ids)
         self.assertIn("leif_high_tight_flag", action_ids)
         self.assertIn("sepa_vcp", action_ids)
         self.assertIn("rti", action_ids)

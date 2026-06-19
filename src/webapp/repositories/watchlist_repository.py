@@ -159,6 +159,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("bb_squeeze", "bb_squeeze", "BB Squeeze"),
         ("ema21_pullback_buy", "ema21_pullback_buy", "EMA21 Pullback Buy"),
         ("sma200_pullback_buy", "sma200_pullback_buy", "200 SMA Pullback Buy"),
+        ("high_tight_flag_setup", "high_tight_flag_setup", "High Tight Flag Setup"),
         ("high_tight_flag", "high_tight_flag", "High Tight Flag"),
         ("leif_high_tight_flag", "leif_high_tight_flag", "Leif High Tight Flag"),
         ("sepa_vcp", "sepa_vcp", "SEPA VCP"),

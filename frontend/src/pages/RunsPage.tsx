@@ -1948,6 +1948,7 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     inside_dryup_v2: "Latest inside day plus extreme price-volume dry-up, without requiring breakout follow-through.",
     wyckoff_buy_signal: "Wyckoff accumulation-trigger scan for fresh BUY signals coming out of spring, LPS, or phase progression.",
     wyckoff_sell_signal: "Wyckoff distribution-trigger scan for fresh SELL signals coming out of UTAD, LPSY, or phase deterioration.",
+    high_tight_flag_setup: "Pre-breakout HTF setups with a completed pole, tight upper-range flag, volume dry-up, and constructive trend context.",
     leif_high_tight_flag: "Leif Soreide HTF breakout setup with scored pole, flag, volume, RS, and breakout rules.",
     weekly_tight_close: "Three weekly bars with ATR-scaled tight closes plus tight highs or lows, while first bar still passes wick and range filter.",
     weinstein_stage2_early: "Weekly regime names that just shifted from Stage 1 base into early Stage 2 advance above a rising 30-week EMA band.",
