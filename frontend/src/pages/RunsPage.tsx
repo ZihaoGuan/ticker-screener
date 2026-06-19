@@ -25,6 +25,23 @@ type RunsPageProps = {
   mode?: RunsPageMode;
 };
 
+type ScheduledActionOption = {
+  id: string;
+  label: string;
+  bias_group?: "bullish" | "bearish" | "other";
+  bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
+  fields: Array<{
+    id: string;
+    label: string;
+    type: "text" | "number" | "date" | "select" | "multiselect";
+    placeholder?: string | null;
+    help_text?: string | null;
+    options: Array<{ value: string; label: string }>;
+  }>;
+};
+
+type ScheduleCadence = "weekdays" | "weekly_saturday";
+
 export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const screenersMode = mode === "screeners";
   const schedulesMode = mode === "schedules";
@@ -44,20 +61,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJobSummary[]>([]);
   const [isLoadingScheduledJobs, setIsLoadingScheduledJobs] = useState(true);
   const [scheduledConfigs, setScheduledConfigs] = useState<ScheduledJobConfig[]>([]);
-  const [availableScheduledActions, setAvailableScheduledActions] = useState<
-    Array<{
-      id: string;
-      label: string;
-      fields: Array<{
-        id: string;
-        label: string;
-        type: "text" | "number" | "date" | "select" | "multiselect";
-        placeholder?: string | null;
-        help_text?: string | null;
-        options: Array<{ value: string; label: string }>;
-      }>;
-    }>
-  >([]);
+  const [availableScheduledActions, setAvailableScheduledActions] = useState<ScheduledActionOption[]>([]);
   const [commonTimezones, setCommonTimezones] = useState<string[]>([]);
   const [schedulerCommand, setSchedulerCommand] = useState("");
   const [maxParallelJobs, setMaxParallelJobs] = useState("5");
@@ -66,10 +70,15 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [scheduleJobLabel, setScheduleJobLabel] = useState("");
   const [scheduleActionId, setScheduleActionId] = useState("weekly_rs");
   const [scheduleCronExpr, setScheduleCronExpr] = useState("30 16 * * 1-5");
+  const [scheduleCadence, setScheduleCadence] = useState<ScheduleCadence>("weekdays");
+  const [scheduleTime, setScheduleTime] = useState("16:30");
+  const [scheduleHasUnsupportedCron, setScheduleHasUnsupportedCron] = useState(false);
+  const [scheduleCadenceTouched, setScheduleCadenceTouched] = useState(false);
   const [scheduleCronTz, setScheduleCronTz] = useState("America/New_York");
   const [scheduleEnabled, setScheduleEnabled] = useState(true);
   const [scheduleOptionsJson, setScheduleOptionsJson] = useState("{}");
   const [lastSuggestedOptionsJson, setLastSuggestedOptionsJson] = useState("{}");
+  const [scheduleActionSearch, setScheduleActionSearch] = useState("");
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const [isSavingScheduleSettings, setIsSavingScheduleSettings] = useState(false);
   const [scheduleNotice, setScheduleNotice] = useState("");
@@ -90,6 +99,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [batchRunNotice, setBatchRunNotice] = useState("");
   const consoleRef = useRef<HTMLPreElement | null>(null);
   const shouldAutoScrollConsoleRef = useRef(true);
+  const lastAutoScheduleIdentityRef = useRef<{ jobId: string; jobLabel: string }>({ jobId: "", jobLabel: "" });
 
   const loadScheduledJobs = () => {
     if (!canManageSchedules) {
@@ -305,6 +315,27 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     () => availableScheduledActions.find((item) => item.id === scheduleActionId) ?? null,
     [availableScheduledActions, scheduleActionId],
   );
+  const sortedScheduledActions = useMemo(
+    () => [...availableScheduledActions].sort((left, right) => left.label.localeCompare(right.label)),
+    [availableScheduledActions],
+  );
+  const filteredScheduledActions = useMemo(() => {
+    const needle = scheduleActionSearch.trim().toLowerCase();
+    if (!needle) {
+      return sortedScheduledActions;
+    }
+    return sortedScheduledActions.filter((item) => {
+      const haystack = `${item.label} ${item.id}`.toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [scheduleActionSearch, sortedScheduledActions]);
+  const groupedScheduledActions = useMemo(() => groupScheduledActions(filteredScheduledActions), [filteredScheduledActions]);
+  const scheduleCronPreview = useMemo(() => {
+    if (scheduleHasUnsupportedCron && !scheduleCadenceTouched) {
+      return scheduleCronExpr;
+    }
+    return buildScheduleCronExpr(scheduleCadence, scheduleTime);
+  }, [scheduleCadence, scheduleCadenceTouched, scheduleCronExpr, scheduleHasUnsupportedCron, scheduleTime]);
 
   useEffect(() => {
     const element = consoleRef.current;
@@ -370,11 +401,32 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 
   useEffect(() => {
     const trimmed = scheduleOptionsJson.trim();
-    if (trimmed === "" || trimmed === "{}" || trimmed === lastSuggestedOptionsJson.trim()) {
+    if (trimmed === "{}" || trimmed === lastSuggestedOptionsJson.trim()) {
       setScheduleOptionsJson(suggestedScheduleOptionsJson);
     }
     setLastSuggestedOptionsJson(suggestedScheduleOptionsJson);
   }, [lastSuggestedOptionsJson, scheduleActionId, scheduleOptionsJson, suggestedScheduleOptionsJson]);
+
+  useEffect(() => {
+    if (!isScheduleEditorOpen) {
+      return;
+    }
+    const nextIdentity = buildDefaultScheduleIdentity(selectedScheduledAction);
+    const lastIdentity = lastAutoScheduleIdentityRef.current;
+    setScheduleJobId((current) => {
+      if (!current || current === lastIdentity.jobId) {
+        return nextIdentity.jobId;
+      }
+      return current;
+    });
+    setScheduleJobLabel((current) => {
+      if (!current || current === lastIdentity.jobLabel) {
+        return nextIdentity.jobLabel;
+      }
+      return current;
+    });
+    lastAutoScheduleIdentityRef.current = nextIdentity;
+  }, [isScheduleEditorOpen, selectedScheduledAction]);
 
   useEffect(() => {
     if (mode !== "warmup") {
@@ -538,16 +590,24 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   };
 
   const resetScheduleForm = () => {
-    const nextActionId = availableScheduledActions[0]?.id ?? "weekly_rs";
-    setScheduleJobId("");
-    setScheduleJobLabel("");
+    const nextActionId = sortedScheduledActions[0]?.id ?? "weekly_rs";
+    const nextAction = sortedScheduledActions.find((item) => item.id === nextActionId) ?? null;
+    const nextIdentity = buildDefaultScheduleIdentity(nextAction);
+    setScheduleJobId(nextIdentity.jobId);
+    setScheduleJobLabel(nextIdentity.jobLabel);
     setScheduleActionId(nextActionId);
     setScheduleCronExpr("30 16 * * 1-5");
-    setScheduleCronTz(commonTimezones[0] ?? "America/New_York");
+    setScheduleCadence("weekdays");
+    setScheduleTime("16:30");
+    setScheduleHasUnsupportedCron(false);
+    setScheduleCadenceTouched(false);
+    setScheduleCronTz("America/New_York");
     setScheduleEnabled(true);
+    setScheduleActionSearch("");
     const nextSuggested = buildScheduleOptionsTemplate(nextActionId);
     setScheduleOptionsJson(nextSuggested);
     setLastSuggestedOptionsJson(nextSuggested);
+    lastAutoScheduleIdentityRef.current = nextIdentity;
   };
 
   const handleSaveSchedule = async (event: FormEvent<HTMLFormElement>) => {
@@ -555,14 +615,14 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setIsSavingSchedule(true);
     setScheduleNotice("");
     try {
-      const parsedOptions = JSON.parse(scheduleOptionsJson || "{}") as Record<string, unknown>;
+      const parsedOptions = parseScheduleOptionsJson(scheduleOptionsJson);
       await fetchJson<{ ok: boolean }>("/api/admin/schedules", {
         method: "POST",
         body: JSON.stringify({
           job_id: scheduleJobId,
           job_label: scheduleJobLabel,
           action_id: scheduleActionId,
-          cron_expr: scheduleCronExpr,
+          cron_expr: scheduleCronPreview,
           cron_tz: scheduleCronTz,
           enabled: scheduleEnabled,
           options: parsedOptions,
@@ -580,15 +640,22 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   };
 
   const handleEditSchedule = (job: ScheduledJobConfig) => {
+    const parsedCron = parseSimpleScheduleCron(job.cron_expr);
     setScheduleJobId(job.job_id);
     setScheduleJobLabel(job.job_label);
     setScheduleActionId(job.action_id);
     setScheduleCronExpr(job.cron_expr);
+    setScheduleCadence(parsedCron.cadence);
+    setScheduleTime(parsedCron.time);
+    setScheduleHasUnsupportedCron(!parsedCron.supported);
+    setScheduleCadenceTouched(false);
     setScheduleCronTz(job.cron_tz);
     setScheduleEnabled(job.enabled);
+    setScheduleActionSearch("");
     const serialized = JSON.stringify(job.options ?? {}, null, 2);
     setScheduleOptionsJson(serialized);
     setLastSuggestedOptionsJson(serialized);
+    lastAutoScheduleIdentityRef.current = { jobId: job.job_id, jobLabel: job.job_label };
     setIsScheduleEditorOpen(true);
   };
 
@@ -1498,17 +1565,54 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                   </label>
                   <label className="field">
                     <span>Screener</span>
-                    <select value={scheduleActionId} onChange={(event) => setScheduleActionId(event.target.value)}>
-                      {availableScheduledActions.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.label}
-                        </option>
+                    <input
+                      type="search"
+                      value={scheduleActionSearch}
+                      onChange={(event) => setScheduleActionSearch(event.target.value)}
+                      placeholder="Search screener by name or id"
+                    />
+                    <select
+                      className="schedule-action-chooser"
+                      value={scheduleActionId}
+                      onChange={(event) => setScheduleActionId(event.target.value)}
+                      size={Math.min(Math.max(filteredScheduledActions.length, 6), 12)}
+                    >
+                      {groupedScheduledActions.length === 0 ? <option value={scheduleActionId}>No matching screeners</option> : null}
+                      {groupedScheduledActions.map((group) => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.actions.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.label}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                   </label>
                   <label className="field">
-                    <span>Cron Expr</span>
-                    <input type="text" value={scheduleCronExpr} onChange={(event) => setScheduleCronExpr(event.target.value)} placeholder="30 16 * * 1-5" required />
+                    <span>Schedule</span>
+                    <select
+                      value={scheduleCadence}
+                      onChange={(event) => {
+                        setScheduleCadence(event.target.value as ScheduleCadence);
+                        setScheduleCadenceTouched(true);
+                      }}
+                    >
+                      <option value="weekdays">Weekdays (Mon-Fri)</option>
+                      <option value="weekly_saturday">Weekly (Saturday)</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Time</span>
+                    <input
+                      type="time"
+                      value={scheduleTime}
+                      onChange={(event) => {
+                        setScheduleTime(event.target.value);
+                        setScheduleCadenceTouched(true);
+                      }}
+                      required
+                    />
                   </label>
                   <label className="field">
                     <span>Timezone</span>
@@ -1540,8 +1644,15 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                 <div className="detail-card">
                   <div className="eyebrow">Templates</div>
                   <p className="panel-copy">
+                    Cron preview: <code>{scheduleCronPreview}</code>
+                  </p>
+                  {scheduleHasUnsupportedCron && !scheduleCadenceTouched ? (
+                    <p className="file-meta">Existing cron does not match simplified daily/weekly rules yet. Save keeps raw cron unless you change schedule above.</p>
+                  ) : null}
+                  <p className="panel-copy">
                     Supported date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
                   </p>
+                  <p className="panel-copy">Action Options JSON may be left blank or set to <code>null</code> when no options are needed.</p>
                   <p className="panel-copy">Suggested options:</p>
                   <pre className="panel-copy"><code>{suggestedScheduleOptionsJson}</code></pre>
                   {selectedScheduledAction?.fields?.length ? (
@@ -1976,6 +2087,117 @@ function summarizeGroupStatus(summary: { queued: number; running: number; succes
     return "success";
   }
   return "queued";
+}
+
+function buildDefaultScheduleIdentity(action: ScheduledActionOption | null): { jobId: string; jobLabel: string } {
+  if (!action) {
+    return { jobId: "", jobLabel: "" };
+  }
+  const normalizedId = action.id.trim().replace(/[^a-z0-9_]+/g, "_");
+  return {
+    jobId: normalizedId,
+    jobLabel: action.label.trim(),
+  };
+}
+
+function buildScheduleCronExpr(cadence: ScheduleCadence, timeValue: string): string {
+  const normalizedTime = /^\d{2}:\d{2}$/.test(timeValue) ? timeValue : "16:30";
+  const [hours, minutes] = normalizedTime.split(":");
+  const weekday = cadence === "weekly_saturday" ? "6" : "1-5";
+  return `${Number(minutes)} ${Number(hours)} * * ${weekday}`;
+}
+
+function parseSimpleScheduleCron(cronExpr: string): { supported: boolean; cadence: ScheduleCadence; time: string } {
+  const parts = cronExpr.trim().split(/\s+/);
+  if (parts.length !== 5) {
+    return { supported: false, cadence: "weekdays", time: "16:30" };
+  }
+  const [minutePart, hourPart, dayPart, monthPart, weekdayPart] = parts;
+  if (!/^\d{1,2}$/.test(minutePart) || !/^\d{1,2}$/.test(hourPart) || dayPart !== "*" || monthPart !== "*") {
+    return { supported: false, cadence: "weekdays", time: "16:30" };
+  }
+  if (weekdayPart !== "1-5" && weekdayPart !== "6") {
+    return { supported: false, cadence: "weekdays", time: "16:30" };
+  }
+  const hours = Number(hourPart);
+  const minutes = Number(minutePart);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return { supported: false, cadence: "weekdays", time: "16:30" };
+  }
+  return {
+    supported: true,
+    cadence: weekdayPart === "6" ? "weekly_saturday" : "weekdays",
+    time: `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`,
+  };
+}
+
+function parseScheduleOptionsJson(value: string): Record<string, unknown> {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "null") {
+    return {};
+  }
+  const parsed = JSON.parse(trimmed) as unknown;
+  if (parsed === null) {
+    return {};
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Action Options JSON must be an object, null, or blank.");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function groupScheduledActions(actions: ScheduledActionOption[]): Array<{ label: string; actions: ScheduledActionOption[] }> {
+  const groups = new Map<string, ScheduledActionOption[]>();
+  for (const action of actions) {
+    const label = scheduledActionGroupLabel(action);
+    const current = groups.get(label) ?? [];
+    current.push(action);
+    groups.set(label, current);
+  }
+  return Array.from(groups.entries())
+    .map(([label, items]) => ({
+      label,
+      actions: [...items].sort((left, right) => left.label.localeCompare(right.label)),
+    }))
+    .sort((left, right) => scheduledGroupRank(left.label) - scheduledGroupRank(right.label) || left.label.localeCompare(right.label));
+}
+
+function scheduledActionGroupLabel(action: ScheduledActionOption): string {
+  if ((action.bias_group ?? "other") === "bullish") {
+    if ((action.bullish_subgroup ?? "") === "leaders") {
+      return "Bullish / Leader Signals";
+    }
+    if ((action.bullish_subgroup ?? "") === "pullbacks") {
+      return "Bullish / Pullback Signals";
+    }
+    if ((action.bullish_subgroup ?? "") === "bottoming") {
+      return "Bullish / Bottoming Breakouts";
+    }
+    return "Bullish / Other";
+  }
+  if ((action.bias_group ?? "other") === "bearish") {
+    return "Bearish";
+  }
+  return "Other";
+}
+
+function scheduledGroupRank(label: string): number {
+  if (label === "Bullish / Leader Signals") {
+    return 0;
+  }
+  if (label === "Bullish / Pullback Signals") {
+    return 1;
+  }
+  if (label === "Bullish / Bottoming Breakouts") {
+    return 2;
+  }
+  if (label === "Bullish / Other") {
+    return 3;
+  }
+  if (label === "Bearish") {
+    return 4;
+  }
+  return 5;
 }
 
 function buildScheduleOptionsTemplate(actionId: string): string {

@@ -1098,6 +1098,8 @@ export type ScheduledJobConfigResponse = {
   available_actions: Array<{
     id: string;
     label: string;
+    bias_group?: "bullish" | "bearish" | "other";
+    bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
     fields: Array<{
       id: string;
       label: string;

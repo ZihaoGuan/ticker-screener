@@ -523,6 +523,12 @@
   border: 1px solid #27272a;
 }
 
+.schedule-action-chooser {
+  height: auto;
+  min-height: 220px;
+  padding: 8px 12px;
+}
+
 .backtest-detail-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

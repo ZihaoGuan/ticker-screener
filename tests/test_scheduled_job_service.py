@@ -40,6 +40,12 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertIn("sync_postgres_market_data", actions)
         self.assertIn("reload_postgres_market_data_date", actions)
 
+    def test_available_actions_include_grouping_metadata(self) -> None:
+        actions = {item["id"]: item for item in self.service.get_context()["available_actions"]}
+
+        self.assertEqual(actions["rs"]["bias_group"], "bullish")
+        self.assertEqual(actions["rs"]["bullish_subgroup"], "leaders")
+
     def test_get_context_loads_even_with_stale_removed_action_in_jobs_file(self) -> None:
         config_path = self.project_root / "config" / "scheduled_jobs.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,6 +100,30 @@ class ScheduledJobServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(job["options"]["as_of_date"], "{{local_date}}")
+
+    def test_upsert_job_allows_clearing_existing_options(self) -> None:
+        self.service.upsert_job(
+            job_id="rs_daily",
+            job_label="RS Daily",
+            action_id="rs",
+            cron_expr="30 16 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            options={"market_data_source": "database-first"},
+        )
+
+        job = self.service.upsert_job(
+            job_id="rs_daily",
+            job_label="RS Daily",
+            action_id="rs",
+            cron_expr="30 16 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            options={},
+        )
+
+        self.assertEqual(job["options"], {})
+        self.assertEqual(self.service.list_jobs()[0]["options"], {})
 
     def test_template_resolution_expands_date_tokens(self) -> None:
         local_now = dt.datetime(2026, 6, 6, 8, 15)

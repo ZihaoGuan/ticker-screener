@@ -98,8 +98,6 @@ class ScheduledJobService:
         next_jobs: list[dict[str, Any]] = []
         for item in jobs:
             if str(item.get("job_id") or "").strip() == clean_job_id:
-                if not next_job["options"] and isinstance(item.get("options"), dict):
-                    next_job["options"] = dict(item.get("options") or {})
                 next_jobs.append(next_job)
                 replaced = True
             else:
@@ -140,33 +138,39 @@ class ScheduledJobService:
 
     def _available_actions(self) -> list[dict[str, Any]]:
         filter_catalog = self.run_service._get_filter_catalog()
-        return [
-            {"id": item["id"], "label": item["label"], "fields": item.get("fields", [])}
-            for item in (
-                self.run_service.list_actions()
-                + [
+        actions = self.run_service.list_actions() + [
+            {
+                "id": action.action_id,
+                "label": action.label,
+                "bias_group": action.bias_group,
+                "bullish_subgroup": action.bullish_subgroup,
+                "fields": [
                     {
-                        "id": action.action_id,
-                        "label": action.label,
-                        "fields": [
-                            {
-                                "id": field.field_id,
-                                "label": field.label,
-                                "type": field.field_type,
-                                "placeholder": field.placeholder,
-                                "help_text": field.help_text,
-                                "options": self.run_service._field_options(
-                                    field,
-                                    filter_catalog,
-                                ),
-                            }
-                            for field in action.fields
-                        ],
+                        "id": field.field_id,
+                        "label": field.label,
+                        "type": field.field_type,
+                        "placeholder": field.placeholder,
+                        "help_text": field.help_text,
+                        "options": self.run_service._field_options(
+                            field,
+                            filter_catalog,
+                        ),
                     }
-                    for action in self.run_service._actions.values()
-                    if action.action_id == "sync_postgres_market_data"
-                ]
-            )
+                    for field in action.fields
+                ],
+            }
+            for action in self.run_service._actions.values()
+            if action.action_id == "sync_postgres_market_data"
+        ]
+        return [
+            {
+                "id": item["id"],
+                "label": item["label"],
+                "bias_group": item.get("bias_group") or "other",
+                "bullish_subgroup": item.get("bullish_subgroup") or "",
+                "fields": item.get("fields", []),
+            }
+            for item in actions
         ]
 
     def _load_jobs(self) -> dict[str, Any]:
