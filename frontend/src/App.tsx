@@ -80,6 +80,14 @@ export default function App() {
           }
         />
         <Route
+          path="/screeners/schedules"
+          element={
+            <RoleRoute allowedRoles={["admin"]}>
+              <RunsPage mode="schedules" />
+            </RoleRoute>
+          }
+        />
+        <Route
           path="/warmup"
           element={
             <RoleRoute allowedRoles={["admin"]}>

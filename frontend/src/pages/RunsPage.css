@@ -5,6 +5,8 @@
 }
 
 .screeners-launcher-panel,
+.screeners-subnav-panel,
+.screeners-automation-hero-panel,
 .screeners-progress-panel,
 .screeners-history-panel,
 .screeners-console-panel,
@@ -15,6 +17,8 @@
 }
 
 .screeners-launcher-panel .panel-head,
+.screeners-subnav-panel .panel-head,
+.screeners-automation-hero-panel .panel-head,
 .screeners-progress-panel .panel-head,
 .screeners-history-panel .panel-head,
 .screeners-console-panel .panel-head,
@@ -26,6 +30,8 @@
 }
 
 .screeners-launcher-panel .panel-head h2,
+.screeners-subnav-panel .panel-head h2,
+.screeners-automation-hero-panel .panel-head h2,
 .screeners-progress-panel .panel-head h2,
 .screeners-history-panel .panel-head h2,
 .screeners-console-panel .panel-head h2,
@@ -46,6 +52,61 @@
   letter-spacing: 0.14em;
   padding: 6px 10px;
   text-transform: uppercase;
+}
+
+.screeners-subnav-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  background:
+    radial-gradient(circle at top left, rgba(74, 222, 128, 0.12), transparent 36%),
+    linear-gradient(180deg, #18181b, #131316);
+}
+
+.screeners-subnav-copy h1 {
+  margin: 4px 0 10px;
+  color: #f4f4f5;
+  font-size: 32px;
+  letter-spacing: -0.03em;
+}
+
+.screeners-subnav-copy .panel-copy {
+  margin: 0;
+  max-width: 620px;
+}
+
+.screeners-subnav-links {
+  display: inline-flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.screeners-subnav-link {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  color: #d4d4d8;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 10px 16px;
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+}
+
+.screeners-subnav-link:hover {
+  border-color: rgba(74, 222, 128, 0.32);
+  color: #f4f4f5;
+}
+
+.screeners-subnav-link.is-active {
+  background: rgba(74, 222, 128, 0.14);
+  border-color: rgba(74, 222, 128, 0.34);
+  color: #baf7d9;
 }
 
 .screener-group-section + .screener-group-section {
@@ -506,6 +567,11 @@
 @media (max-width: 768px) {
   .screeners-history-console-grid {
     grid-template-columns: 1fr;
+  }
+
+  .screeners-subnav-panel {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .screeners-scheduler-toolbar {

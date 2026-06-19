@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
@@ -19,7 +19,7 @@ import type {
 } from "../lib/types";
 import "./RunsPage.css";
 
-type RunsPageMode = "screeners" | "warmup" | "backtests";
+type RunsPageMode = "screeners" | "schedules" | "warmup" | "backtests";
 
 type RunsPageProps = {
   mode?: RunsPageMode;
@@ -27,6 +27,8 @@ type RunsPageProps = {
 
 export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const screenersMode = mode === "screeners";
+  const schedulesMode = mode === "schedules";
+  const screenersSectionMode = screenersMode || schedulesMode;
   const auth = useAuth();
   const canManageSchedules = auth.hasCapability("manage_exclusions");
   const [payload, setPayload] = useState<JobsResponse | null>(null);
@@ -135,6 +137,12 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   };
 
   useEffect(() => {
+    if (schedulesMode) {
+      setPayload(null);
+      setIsLoading(false);
+      setHasError(false);
+      return;
+    }
     setIsLoading(true);
     setHasError(false);
     const source = new EventSource("/api/jobs/stream", { withCredentials: true });
@@ -159,7 +167,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     };
 
     return () => source.close();
-  }, []);
+  }, [schedulesMode]);
 
   useEffect(() => {
     loadScheduledJobs();
@@ -174,6 +182,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     if (mode === "backtests") {
       return actions.filter((action) => action.id === "overlap_backtest_v1");
     }
+    if (mode === "schedules") {
+      return [];
+    }
     return actions.filter((action) => !["signal_warm_batch", "overlap_backtest_v1"].includes(action.id));
   }, [mode, payload]);
 
@@ -184,6 +195,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     }
     if (mode === "backtests") {
       return jobs.filter((job) => job.action_id === "overlap_backtest_v1");
+    }
+    if (mode === "schedules") {
+      return [];
     }
     return jobs.filter((job) => !["signal_warm_batch", "screener_history_batch", "overlap_backtest_v1"].includes(job.action_id));
   }, [mode, payload]);
@@ -671,7 +685,13 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   };
 
   const pageTitle =
-    mode === "warmup" ? "Warmup Batch" : mode === "backtests" ? "Backtest Runner" : "Available Screeners";
+    mode === "warmup"
+      ? "Warmup Batch"
+      : mode === "backtests"
+        ? "Backtest Runner"
+        : schedulesMode
+          ? "Screener Automation"
+          : "Available Screeners";
   const jobsPanelTitle =
     mode === "warmup" ? "Recent Warmup Jobs" : mode === "backtests" ? "Recent Backtest Jobs" : "Recent Screener Jobs";
   const groupedVisibleActions = useMemo(() => {
@@ -735,6 +755,8 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   return (
     <>
       <div className="page-grid">
+        {screenersSectionMode ? <ScreenersSubnav activeMode={mode} /> : null}
+        {!schedulesMode ? (
         <Panel
           title={screenersMode ? "Screener Launcher v2" : pageTitle}
           aside={screenersMode ? <span className="screeners-operator-badge">Operator Mode</span> : undefined}
@@ -801,7 +823,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
             </div>
           ))}
         </Panel>
+        ) : null}
 
+        {!schedulesMode ? (
         <Panel
           title={screenersMode ? "Active Job Monitor" : "Current Progress"}
           aside={visibleActiveJob ? <span className="eyebrow">{visibleActiveJob.label}</span> : <span className="eyebrow">Idle</span>}
@@ -835,6 +859,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
             ) : null}
           </div>
         </Panel>
+        ) : null}
 
         {mode === "warmup" ? (
         <Panel title="Warm Coverage" aside={<span className="eyebrow">{coveragePayload?.days.length ?? 0} dates</span>}>
@@ -1001,6 +1026,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         </Panel>
         ) : null}
 
+        {!schedulesMode ? (
         <div className={screenersMode ? "screeners-history-console-grid" : ""}>
         <Panel title={screenersMode ? "Batch Tracking & History" : jobsPanelTitle} className={screenersMode ? "screeners-history-panel" : ""}>
           {isLoading && !payload ? <LoadingBlock label="Loading recent jobs…" /> : null}
@@ -1267,9 +1293,19 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
           )}
         </Panel>
         </div>
+        ) : null}
 
-        {canManageSchedules && screenersMode ? (
+        {canManageSchedules && schedulesMode ? (
           <>
+            <Panel
+              title="Screener Automation"
+              aside={<span className="screeners-operator-badge">Automation</span>}
+              className="screeners-automation-hero-panel"
+            >
+              <p className="panel-copy">
+                Manage recurring scanner runs here. Track last scheduled execution, DB persistence, cron settings, and scheduler capacity without mixing it into live run operations.
+              </p>
+            </Panel>
             <Panel title="Scheduled Screeners" aside={<span className="eyebrow">{scheduledJobs.length} tracked</span>} className="screeners-scheduled-panel">
               {isLoadingScheduledJobs ? <LoadingBlock label="Loading scheduled job status…" compact /> : null}
               <div className="data-table-responsive">
@@ -1576,6 +1612,39 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         isLoading={isRunning}
       />
     </>
+  );
+}
+
+function ScreenersSubnav({ activeMode }: { activeMode: RunsPageMode }) {
+  const isSchedules = activeMode === "schedules";
+
+  return (
+    <section className="panel screeners-subnav-panel">
+      <div className="screeners-subnav-copy">
+        <span className="eyebrow">Screeners Workspace</span>
+        <h1>{isSchedules ? "Automation" : "Run Center"}</h1>
+        <p className="panel-copy">
+          {isSchedules
+            ? "Scheduled screeners, cron config, and scheduler controls live here."
+            : "Launch scans, watch active jobs, inspect history, and open fresh results."}
+        </p>
+      </div>
+      <div className="screeners-subnav-links" role="tablist" aria-label="Screeners sections">
+        <NavLink
+          to="/screeners"
+          end
+          className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}
+        >
+          Run Center
+        </NavLink>
+        <NavLink
+          to="/screeners/schedules"
+          className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}
+        >
+          Automation
+        </NavLink>
+      </div>
+    </section>
   );
 }
 
