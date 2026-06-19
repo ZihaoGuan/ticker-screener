@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from src.webapp.services.watchlist_service import WatchlistService
@@ -22,7 +22,7 @@ def watchlists(
         "watchlists.html",
         {
             "page_title": "Watchlists",
-            "watchlists": service.list_recent(),
+            "watchlists": service.list_recent(include_deprecated=False),
         },
     )
 
@@ -33,7 +33,12 @@ def watchlist_detail(
     request: Request,
     service: WatchlistService = Depends(get_watchlist_service),
 ) -> HTMLResponse:
-    detail = service.get_watchlist_detail(stem)
+    try:
+        detail = service.get_watchlist_detail(stem, allow_deprecated=False)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 403 if message.startswith("Deprecated watchlist is admin-only:") else 404
+        raise HTTPException(status_code=status_code, detail=message) from exc
     return templates.TemplateResponse(
         request,
         "watchlist_detail.html",

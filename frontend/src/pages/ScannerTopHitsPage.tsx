@@ -7,6 +7,7 @@ import type { ScannerTopHitRow, ScannerTopHitsResponse } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "close" | "change" | "rs" | "ta" | "fa";
 type SortDirection = "asc" | "desc";
+const PAGE_SIZE = 50;
 
 export function ScannerTopHitsPage() {
   const [payload, setPayload] = useState<ScannerTopHitsResponse | null>(null);
@@ -16,6 +17,7 @@ export function ScannerTopHitsPage() {
   const [sectorFilter, setSectorFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("hits");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     setIsLoading(true);
@@ -48,6 +50,23 @@ export function ScannerTopHitsPage() {
     }
     return [...nextRows].sort((left, right) => compareRows(left, right, sortBy, sortDirection));
   }, [rows, search, sectorFilter, sortBy, sortDirection]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, sectorFilter, sortBy, sortDirection]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const normalizedPage = Math.min(currentPage, totalPages);
+  const pagedRows = useMemo(() => {
+    const startIndex = (normalizedPage - 1) * PAGE_SIZE;
+    return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredRows, normalizedPage]);
+
+  useEffect(() => {
+    if (currentPage !== normalizedPage) {
+      setCurrentPage(normalizedPage);
+    }
+  }, [currentPage, normalizedPage]);
 
   return (
     <div className="page-grid scanner-top-hits-page">
@@ -124,6 +143,25 @@ export function ScannerTopHitsPage() {
               <span>{formatCount(filteredRows.length)} names</span>
               <span>Latest board date {formatLocalDate(payload?.target_trading_date)}</span>
             </div>
+            <div className="scanner-result-pagination">
+              <span className="scanner-result-pagination-status">
+                Showing {formatCount((normalizedPage - 1) * PAGE_SIZE + 1)}-{formatCount(Math.min(normalizedPage * PAGE_SIZE, filteredRows.length))} of {formatCount(filteredRows.length)}
+              </span>
+              <div className="scanner-result-pagination-actions">
+                <button className="ghost-button" type="button" onClick={() => setCurrentPage(1)} disabled={normalizedPage <= 1}>
+                  First
+                </button>
+                <button className="ghost-button" type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={normalizedPage <= 1}>
+                  Prev
+                </button>
+                <button className="ghost-button" type="button" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={normalizedPage >= totalPages}>
+                  Next
+                </button>
+                <button className="ghost-button" type="button" onClick={() => setCurrentPage(totalPages)} disabled={normalizedPage >= totalPages}>
+                  Last
+                </button>
+              </div>
+            </div>
             <div className="data-table-responsive scanner-result-table-wrap">
               <table className="data-table scanner-result-table scanner-top-hits-table">
                 <thead>
@@ -141,7 +179,7 @@ export function ScannerTopHitsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((row) => (
+                  {pagedRows.map((row) => (
                     <tr key={row.ticker}>
                       <td data-label="Ticker">
                         <div className="scanner-result-company">

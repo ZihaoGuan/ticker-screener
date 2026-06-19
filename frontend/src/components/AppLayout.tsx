@@ -13,7 +13,7 @@ const navItems = [
   { to: "/watchlists", label: "Watchlists", icon: "◌", roles: ["premium", "admin"] as RoleName[] },
   { to: "/rotation/sector", label: "Rotation", icon: "◎", roles: ["premium", "admin"] as RoleName[] },
   { to: "/report", label: "Report", icon: "◈", roles: ["premium", "admin"] as RoleName[] },
-  { to: "/screeners", label: "Screeners", icon: "◉", capability: "run_screeners" as CapabilityName },
+  { to: "/screeners", label: "Screeners", icon: "◉", roles: ["admin"] as RoleName[], capability: "run_screeners" as CapabilityName },
   { to: "/warmup", label: "Warmup", icon: "◍", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
   { to: "/backtests", label: "Backtests", icon: "◌", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
   { to: "/portfolio", label: "Portfolio", icon: "◐", roles: ["admin"] as RoleName[], expo: true, capability: "manage_exclusions" as CapabilityName },

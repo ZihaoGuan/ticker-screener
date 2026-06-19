@@ -123,7 +123,10 @@ export function WatchlistsPage() {
           {groupedWatchlists.map((group) => (
             <section key={group.groupKey} className="watchlist-group">
               <div className="watchlist-group-head">
-                <span className="eyebrow">{group.label}</span>
+                <span className="eyebrow">
+                  {group.label}
+                  {group.items.some((item) => item.is_deprecated) ? " · Deprecated includes legacy report watchlists" : ""}
+                </span>
                 <span className="file-meta">{group.items.length}</span>
               </div>
               <div className="file-list">
@@ -134,10 +137,14 @@ export function WatchlistsPage() {
                     onClick={() => handleSelectStem(file.stem)}
                     type="button"
                   >
-                    <div className="file-name">{file.name}</div>
+                    <div className="file-name">
+                      {file.name}
+                      {file.is_deprecated ? " · DEPRECATED" : ""}
+                    </div>
                     <div className="file-meta">
                       {formatLocalDateTime(file.captured_at)}
                       {file.sort_date ? ` · ${formatLocalDate(file.sort_date)}` : ""}
+                      {file.is_deprecated && file.deprecation_reason ? ` · ${file.deprecation_reason}` : ""}
                     </div>
                   </button>
                 ))}
@@ -164,6 +171,9 @@ export function WatchlistsPage() {
             <p className="panel-copy">
               Read list here. Open full chart on click.
             </p>
+            {selectedWatchlist?.is_deprecated ? (
+              <p className="panel-copy">Deprecated legacy report watchlist. Prefer scanner boards, dated screener artifacts, or report page.</p>
+            ) : null}
             {selectedWatchlist?.captured_at ? (
               <p className="panel-copy">Captured {formatLocalDateTime(selectedWatchlist.captured_at)}</p>
             ) : null}

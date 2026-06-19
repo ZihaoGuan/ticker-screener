@@ -16,8 +16,10 @@ class WatchlistRepository:
         self.watchlist_dir = artifacts_dir / "watchlists"
         self.history_repository = HistoryRepository(database_url=database_url, artifacts_dir=artifacts_dir)
 
-    def list_recent_watchlists(self, limit: int = 200) -> list[dict[str, Any]]:
+    def list_recent_watchlists(self, limit: int = 200, *, include_deprecated: bool = True) -> list[dict[str, Any]]:
         rows = list(self._build_watchlist_index().values())
+        if not include_deprecated:
+            rows = [item for item in rows if not bool(item.get("is_deprecated"))]
         rows.sort(key=lambda item: str(item.get("captured_at") or ""), reverse=True)
         return rows[:limit]
 
@@ -37,6 +39,10 @@ class WatchlistRepository:
         metadata = self._build_watchlist_index().get(stem)
         path_value = str(metadata.get("path") or "") if isinstance(metadata, dict) else ""
         return Path(path_value) if path_value else (self.watchlist_dir / f"{stem}.json")
+
+    def get_watchlist_metadata(self, stem: str) -> dict[str, Any] | None:
+        metadata = self._build_watchlist_index().get(stem)
+        return dict(metadata) if isinstance(metadata, dict) else None
 
     def _build_watchlist_index(self) -> dict[str, dict[str, Any]]:
         index: dict[str, dict[str, Any]] = {}
@@ -81,6 +87,8 @@ class WatchlistRepository:
             "captured_at": captured_at.isoformat(),
             "sort_date": _first_date_in_stem(stem),
             "layout": layout,
+            "is_deprecated": layout == "legacy",
+            "deprecation_reason": _deprecation_reason_for_layout(layout),
         }
 
     def _upsert_db_entry(self, index: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:
@@ -104,6 +112,8 @@ class WatchlistRepository:
             "captured_at": _isoformat_or_empty(row.get("created_at")),
             "sort_date": _date_or_empty(row.get("run_date")) or _first_date_in_stem(stem),
             "layout": "db",
+            "is_deprecated": False,
+            "deprecation_reason": None,
             "screen_run_id": int(row["id"]) if row.get("id") is not None else None,
             "strategy_id": str(row.get("strategy_id") or ""),
         }
@@ -198,3 +208,9 @@ def _date_or_empty(value: Any) -> str:
     if isinstance(value, dt.date):
         return value.isoformat()
     return str(value or "")
+
+
+def _deprecation_reason_for_layout(layout: str) -> str | None:
+    if layout == "legacy":
+        return "Legacy report watchlist from artifacts/watchlists. Deprecated in favor of scanner boards, dated screener artifacts, and the report page."
+    return None

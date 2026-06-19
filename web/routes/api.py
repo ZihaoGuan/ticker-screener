@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
@@ -300,9 +300,9 @@ def _record_audit(
 @router.get("/dashboard", response_class=JSONResponse)
 def dashboard_data(
     service: DashboardService = Depends(get_dashboard_service),
-    _: Principal = Depends(require_member_access),
+    principal: Principal = Depends(require_member_access),
 ) -> JSONResponse:
-    return JSONResponse(service.get_dashboard_context())
+    return JSONResponse(service.get_dashboard_context(include_deprecated_watchlists=principal.role == "admin"))
 
 
 @router.get("/earnings-calendar", response_class=JSONResponse)
@@ -916,9 +916,9 @@ def backtest_v1_detail(
 @router.get("/watchlists", response_class=JSONResponse)
 def watchlists_data(
     service: WatchlistService = Depends(get_watchlist_service),
-    _: Principal = Depends(require_member_access),
+    principal: Principal = Depends(require_member_access),
 ) -> JSONResponse:
-    return JSONResponse({"watchlists": service.list_recent()})
+    return JSONResponse({"watchlists": service.list_recent(include_deprecated=principal.role == "admin")})
 
 
 @router.get("/scanner-board", response_class=JSONResponse)
@@ -951,9 +951,14 @@ def weekly_watchlist_data(
 def watchlist_detail_data(
     stem: str,
     service: WatchlistService = Depends(get_watchlist_service),
-    _: Principal = Depends(require_member_access),
+    principal: Principal = Depends(require_member_access),
 ) -> JSONResponse:
-    return JSONResponse(service.get_watchlist_detail(stem))
+    try:
+        return JSONResponse(service.get_watchlist_detail(stem, allow_deprecated=principal.role == "admin"))
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 403 if message.startswith("Deprecated watchlist is admin-only:") else 404
+        raise HTTPException(status_code=status_code, detail=message) from exc
 
 
 @router.get("/watchlists/{stem}/chart/{ticker}", response_class=JSONResponse)

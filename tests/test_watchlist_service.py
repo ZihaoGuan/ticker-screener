@@ -74,6 +74,34 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["entry_count"], 1)
         self.assertEqual(payload["entries"][0]["ticker"], "NVDA")
 
+    def test_list_recent_can_hide_deprecated_legacy_watchlists(self) -> None:
+        self._write_watchlist(
+            "fearzone_2026-06-18",
+            tickers=["NVDA"],
+            modified_at=dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.timezone.utc),
+        )
+        (Path(self.temp_dir.name) / "screeners" / "2026-06-18" / "rs").mkdir(parents=True, exist_ok=True)
+        dated_path = Path(self.temp_dir.name) / "screeners" / "2026-06-18" / "rs" / "watchlist.json"
+        dated_path.write_text('[{"ticker":"PLTR"}]', encoding="utf-8")
+
+        all_rows = self.service.list_recent(include_deprecated=True)
+        visible_rows = self.service.list_recent(include_deprecated=False)
+
+        legacy = next(item for item in all_rows if item["stem"] == "fearzone_2026-06-18")
+        self.assertTrue(legacy["is_deprecated"])
+        self.assertTrue(any(item["stem"] == "fearzone_2026-06-18" for item in all_rows))
+        self.assertFalse(any(item["stem"] == "fearzone_2026-06-18" for item in visible_rows))
+        self.assertTrue(any(not item["is_deprecated"] for item in visible_rows))
+
+    def test_get_watchlist_detail_blocks_deprecated_for_non_admin(self) -> None:
+        self._write_watchlist(
+            "fearzone_2026-06-18",
+            tickers=["NVDA"],
+            modified_at=dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.timezone.utc),
+        )
+        with self.assertRaisesRegex(ValueError, "Deprecated watchlist is admin-only"):
+            self.service.get_watchlist_detail("fearzone_2026-06-18", allow_deprecated=False)
+
     def test_get_scanner_board_uses_previous_trading_day_before_new_york_cutoff(self) -> None:
         self._write_watchlist(
             "rs_new_high_before_price_2026-06-11",

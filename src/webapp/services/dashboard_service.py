@@ -22,9 +22,9 @@ class DashboardService:
         self.dashboard_repository = DashboardRepository(database_url=database_url, artifacts_dir=artifacts_dir)
         self.watchlist_repository = WatchlistRepository(artifacts_dir=artifacts_dir)
 
-    def get_dashboard_context(self) -> dict[str, Any]:
+    def get_dashboard_context(self, *, include_deprecated_watchlists: bool = True) -> dict[str, Any]:
         overview = self.dashboard_repository.get_overview()
-        recent_watchlists = self.watchlist_repository.list_recent_watchlists(limit=8)
+        recent_watchlists = self.watchlist_repository.list_recent_watchlists(limit=8, include_deprecated=include_deprecated_watchlists)
         try:
             market_health = self._build_market_health()
         except Exception:

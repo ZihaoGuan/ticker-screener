@@ -103,6 +103,8 @@ export type WatchlistFile = {
   group_label: string;
   captured_at: string;
   sort_date?: string | null;
+  is_deprecated?: boolean;
+  deprecation_reason?: string | null;
 };
 
 export type ScannerBoardCard = {
@@ -431,6 +433,8 @@ export type WatchlistDetailResponse = {
   new_ticker_count?: number;
   entry_count: number;
   entries: Record<string, unknown>[];
+  is_deprecated?: boolean;
+  deprecation_reason?: string;
 };
 
 export type WeeklyWatchlistEntry = Record<string, unknown> & {

@@ -15,7 +15,7 @@ def dashboard(
     request: Request,
     service: DashboardService = Depends(get_dashboard_service),
 ) -> HTMLResponse:
-    context = service.get_dashboard_context()
+    context = service.get_dashboard_context(include_deprecated_watchlists=False)
     return templates.TemplateResponse(
         request,
         "dashboard.html",

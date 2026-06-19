@@ -241,8 +241,8 @@ class WatchlistService:
         self.benchmark_ticker = str(benchmark_ticker or "SPY").strip().upper() or "SPY"
         self._excluded_tickers: set[str] | None = None
 
-    def list_recent(self) -> list[dict[str, Any]]:
-        return self.repository.list_recent_watchlists(limit=50)
+    def list_recent(self, *, include_deprecated: bool = True) -> list[dict[str, Any]]:
+        return self.repository.list_recent_watchlists(limit=50, include_deprecated=include_deprecated)
 
     def get_scanner_board(self, *, now: dt.datetime | None = None) -> dict[str, Any]:
         reference_now = _normalize_scanner_now(now)
@@ -371,7 +371,7 @@ class WatchlistService:
         }
 
     def get_weekly_watchlist_board(self, stem: str | None = None) -> dict[str, Any]:
-        weekly_files = [item for item in self.repository.list_recent_watchlists(limit=200) if item.get("group_key") == "weekly_rs"]
+        weekly_files = [item for item in self.repository.list_recent_watchlists(limit=200, include_deprecated=False) if item.get("group_key") == "weekly_rs"]
         selected_meta = None
         normalized_stem = str(stem or "").strip()
         if normalized_stem:
@@ -398,8 +398,11 @@ class WatchlistService:
             "available_files": weekly_files[:24],
         }
 
-    def get_watchlist_detail(self, stem: str) -> dict[str, Any]:
-        recent_watchlists = self.repository.list_recent_watchlists(limit=400)
+    def get_watchlist_detail(self, stem: str, *, allow_deprecated: bool = True) -> dict[str, Any]:
+        metadata = self.repository.get_watchlist_metadata(stem)
+        if metadata and bool(metadata.get("is_deprecated")) and not allow_deprecated:
+            raise ValueError(f"Deprecated watchlist is admin-only: {stem}")
+        recent_watchlists = self.repository.list_recent_watchlists(limit=400, include_deprecated=allow_deprecated)
         current_meta = next((item for item in recent_watchlists if str(item.get("stem") or "") == stem), None)
         current_strategy_id = _strategy_id_for_watchlist_meta(current_meta) if current_meta else _stem_strategy_id(stem)
         previous_meta = _find_previous_watchlist_meta(
@@ -430,6 +433,8 @@ class WatchlistService:
             "new_ticker_count": new_ticker_count,
             "entry_count": len(entries),
             "entries": entries,
+            "is_deprecated": bool(metadata.get("is_deprecated")) if isinstance(metadata, dict) else False,
+            "deprecation_reason": str(metadata.get("deprecation_reason") or "") if isinstance(metadata, dict) else "",
         }
 
     def get_chart_payload(

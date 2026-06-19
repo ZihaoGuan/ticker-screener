@@ -74,9 +74,9 @@ export default function App() {
         <Route
           path="/screeners"
           element={
-            <ProtectedRoute capability="run_screeners">
+            <RoleRoute allowedRoles={["admin"]}>
               <RunsPage mode="screeners" />
-            </ProtectedRoute>
+            </RoleRoute>
           }
         />
         <Route
