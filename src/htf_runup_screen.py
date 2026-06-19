@@ -5,6 +5,7 @@ import datetime as dt
 
 from .config import AppConfig
 from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
+from .high_tight_flag_setup_screen import find_high_tight_flag_setup_hit
 from .universe import UniverseTicker
 
 
@@ -24,10 +25,11 @@ class HtfRunupHit:
     runup_high: float
     runup_low_date: str
     runup_high_date: str
-    has_htf_shape: bool
-    htf_grade: str | None
-    htf_score: float | None
-    htf_trade_plan: str | None
+    has_htf_setup: bool
+    htf_setup_pivot_price: float | None
+    htf_setup_distance_to_pivot_pct: float | None
+    htf_setup_flag_days: int | None
+    htf_setup_pole_gain_ratio: float | None
     reasons: list[str]
 
     def to_dict(self) -> dict[str, object]:
@@ -59,18 +61,22 @@ def _to_hit(ticker: UniverseTicker, benchmark_ticker: str, summary: dict[str, ob
     pullback_pct = float(summary["pullback_from_high_pct"])
     current_price = float(summary["current_price"])
     ema_21 = float(summary["ema_21"])
-    htf_grade = summary.get("htf_grade")
-    htf_score = summary.get("htf_score")
-    htf_trade_plan = summary.get("htf_trade_plan")
-    has_htf_shape = bool(summary.get("has_htf_shape"))
+    has_htf_setup = bool(summary.get("has_htf_setup"))
+    htf_setup_pivot_price = summary.get("htf_setup_pivot_price")
+    htf_setup_distance_to_pivot_pct = summary.get("htf_setup_distance_to_pivot_pct")
+    htf_setup_flag_days = summary.get("htf_setup_flag_days")
+    htf_setup_pole_gain_ratio = summary.get("htf_setup_pole_gain_ratio")
     reasons = [
         f"{runup_pct:.1f}% runup in {int(summary['window_days'])} sessions",
         f"{pullback_pct:.1f}% off the runup high",
         f"holding above 21 EMA ({ema_21:.2f})",
         "monitor for HTF setup",
     ]
-    if has_htf_shape and htf_grade:
-        reasons.append(f"current HTF shape {str(htf_grade).upper()}")
+    if has_htf_setup:
+        distance_text = ""
+        if htf_setup_distance_to_pivot_pct is not None:
+            distance_text = f" {float(htf_setup_distance_to_pivot_pct) * 100.0:.1f}% below pivot"
+        reasons.append(f"current HTF setup detected{distance_text}")
     return HtfRunupHit(
         ticker=ticker.symbol,
         sector=ticker.sector,
@@ -86,10 +92,13 @@ def _to_hit(ticker: UniverseTicker, benchmark_ticker: str, summary: dict[str, ob
         runup_high=float(summary["runup_high"]),
         runup_low_date=str(summary.get("runup_low_date") or "NA"),
         runup_high_date=str(summary.get("runup_high_date") or "NA"),
-        has_htf_shape=has_htf_shape,
-        htf_grade=str(htf_grade) if htf_grade else None,
-        htf_score=float(htf_score) if htf_score is not None else None,
-        htf_trade_plan=str(htf_trade_plan) if htf_trade_plan else None,
+        has_htf_setup=has_htf_setup,
+        htf_setup_pivot_price=float(htf_setup_pivot_price) if htf_setup_pivot_price is not None else None,
+        htf_setup_distance_to_pivot_pct=float(htf_setup_distance_to_pivot_pct)
+        if htf_setup_distance_to_pivot_pct is not None
+        else None,
+        htf_setup_flag_days=int(htf_setup_flag_days) if htf_setup_flag_days is not None else None,
+        htf_setup_pole_gain_ratio=float(htf_setup_pole_gain_ratio) if htf_setup_pole_gain_ratio is not None else None,
         reasons=reasons,
     )
 
@@ -156,22 +165,38 @@ def run_htf_runup_screen(
                             f"runup {runup_pct:.1f}% < {min_runup_pct:.1f}% | passed={len(hits)}"
                         )
                         continue
-                    htf_summary = financials.get_htf_leader_summary(
-                        sectorName=ticker.sector,
-                        benchmarkTicker=config.benchmark_ticker,
+                    frame = financials._get_clean_price_data()
+                    setup_frame = None
+                    if frame:
+                        import pandas as pd
+
+                        setup_frame = pd.DataFrame(
+                            {
+                                "Date": pd.to_datetime([row.get("formatted_date") for row in frame]),
+                                "Open": [row.get("open") for row in frame],
+                                "High": [row.get("high") for row in frame],
+                                "Low": [row.get("low") for row in frame],
+                                "Close": [row.get("close") for row in frame],
+                                "Volume": [row.get("volume") for row in frame],
+                            }
+                        ).dropna(subset=["Date", "Open", "High", "Low", "Close", "Volume"]).set_index("Date").sort_index()
+                    setup_hit = find_high_tight_flag_setup_hit(setup_frame, ticker=ticker) if setup_frame is not None else None
+                    runup_summary["has_htf_setup"] = setup_hit is not None
+                    runup_summary["htf_setup_pivot_price"] = setup_hit.pivot_price if setup_hit is not None else None
+                    runup_summary["htf_setup_distance_to_pivot_pct"] = (
+                        setup_hit.distance_to_pivot_pct if setup_hit is not None else None
                     )
-                    htf_grade = str(htf_summary.get("htf_grade", "")).upper() if htf_summary else ""
-                    runup_summary["has_htf_shape"] = htf_grade in {"A", "B"}
-                    runup_summary["htf_grade"] = htf_grade or None
-                    runup_summary["htf_score"] = htf_summary.get("htf_score") if htf_summary else None
-                    runup_summary["htf_trade_plan"] = htf_summary.get("trade_plan") if htf_summary else None
+                    runup_summary["htf_setup_flag_days"] = setup_hit.flag_days if setup_hit is not None else None
+                    runup_summary["htf_setup_pole_gain_ratio"] = setup_hit.pole_gain_ratio if setup_hit is not None else None
                     runup_summary["ema_21"] = float(ema_21)
                     runup_summary["price_above_ema21"] = True
                     hits.append(_to_hit(ticker, config.benchmark_ticker, runup_summary))
                     latest_hit = hits[-1]
                     htf_suffix = ""
-                    if latest_hit.has_htf_shape and latest_hit.htf_score is not None:
-                        htf_suffix = f" | HTF {latest_hit.htf_grade} {latest_hit.htf_score:.1f}"
+                    if latest_hit.has_htf_setup and latest_hit.htf_setup_distance_to_pivot_pct is not None:
+                        htf_suffix = (
+                            f" | HTF setup pivot gap {latest_hit.htf_setup_distance_to_pivot_pct * 100.0:.1f}%"
+                        )
                     print(
                         f"[{position}/{total_tickers}] {ticker.symbol} passed: "
                         f"runup {latest_hit.runup_pct:.1f}% pullback {latest_hit.pullback_from_high_pct:.1f}% "
@@ -183,9 +208,9 @@ def run_htf_runup_screen(
 
     hits.sort(
         key=lambda hit: (
-            0 if hit.has_htf_shape else 1,
-            0 if hit.htf_grade == "A" else 1 if hit.htf_grade == "B" else 2,
-            -(hit.htf_score if hit.htf_score is not None else -1.0),
+            0 if hit.has_htf_setup else 1,
+            hit.htf_setup_distance_to_pivot_pct if hit.htf_setup_distance_to_pivot_pct is not None else 999.0,
+            -(hit.htf_setup_pole_gain_ratio if hit.htf_setup_pole_gain_ratio is not None else -1.0),
             -hit.runup_pct,
             hit.pullback_from_high_pct,
             hit.ticker,

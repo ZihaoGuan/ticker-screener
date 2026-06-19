@@ -16,9 +16,14 @@ def build_htf_runup_watchlist(hits: list[HtfRunupHit]) -> list[dict[str, object]
     watchlist: list[dict[str, object]] = []
     for hit in hits:
         htf_clause = ""
-        if hit.has_htf_shape:
-            score_text = f" {hit.htf_score:.1f}" if hit.htf_score is not None else ""
-            htf_clause = f" Current HTF shape: {hit.htf_grade}{score_text}."
+        if hit.has_htf_setup:
+            pivot_text = f"{hit.htf_setup_pivot_price:.2f}" if hit.htf_setup_pivot_price is not None else "n/a"
+            gap_text = (
+                f"{hit.htf_setup_distance_to_pivot_pct * 100.0:.1f}%"
+                if hit.htf_setup_distance_to_pivot_pct is not None
+                else "n/a"
+            )
+            htf_clause = f" Current HTF setup detected: pivot {pivot_text}, gap {gap_text} below pivot."
         summary = (
             f"{hit.runup_pct:.1f}% runup in the last {hit.runup_window_days} sessions. "
             f"Current close is above 21 EMA {hit.ema_21:.2f}. "
@@ -44,6 +49,11 @@ def build_htf_runup_watchlist(hits: list[HtfRunupHit]) -> list[dict[str, object]
                 "stop_price": round(hit.runup_low, 4),
                 "stop_label": "8W runup low",
                 "stop_timeframe": "weekly",
+                "has_htf_setup": hit.has_htf_setup,
+                "htf_setup_pivot_price": round(hit.htf_setup_pivot_price, 4) if hit.htf_setup_pivot_price is not None else None,
+                "htf_setup_gap_pct": round(hit.htf_setup_distance_to_pivot_pct * 100.0, 2)
+                if hit.htf_setup_distance_to_pivot_pct is not None
+                else None,
             }
         )
     return watchlist
