@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.config import AppConfig
-from src.webapp.services.rrg_service import RrgService
+from src.webapp.services.rrg_service import RrgPoint, RrgService, RrgSeries
 
 
 def _rotation_frame(start: str, count: int, close_start: float = 100.0, close_step: float = 0.8) -> pd.DataFrame:
@@ -273,6 +273,42 @@ class RrgServiceTests(unittest.TestCase):
 
         self.assertEqual(list(history.columns), list(db_frame.columns))
         self.assertEqual(len(history), len(db_frame))
+
+    def test_theme_group_titles_use_semantic_labels(self) -> None:
+        batch = [
+            RrgSeries(
+                ticker="BITS",
+                label="Global X Blockchain & Bitcoin Strategy ETF",
+                points=[RrgPoint(x=100.0, y=100.0, date="2026-06-19")],
+                latest=RrgPoint(x=100.0, y=100.0, date="2026-06-19"),
+                quadrant="Leading",
+                distance=1.0,
+                fearzone={"active": False, "signal_date": None, "signal_age_bars": None, "trigger_labels": [], "conditions": []},
+            ),
+            RrgSeries(
+                ticker="CHAT",
+                label="Roundhill Generative AI & Technology ETF",
+                points=[RrgPoint(x=100.0, y=100.0, date="2026-06-19")],
+                latest=RrgPoint(x=100.0, y=100.0, date="2026-06-19"),
+                quadrant="Leading",
+                distance=1.0,
+                fearzone={"active": False, "signal_date": None, "signal_age_bars": None, "trigger_labels": [], "conditions": []},
+            ),
+            RrgSeries(
+                ticker="HUMN",
+                label="Roundhill Humanoid Robotics ETF",
+                points=[RrgPoint(x=100.0, y=100.0, date="2026-06-19")],
+                latest=RrgPoint(x=100.0, y=100.0, date="2026-06-19"),
+                quadrant="Improving",
+                distance=1.0,
+                fearzone={"active": False, "signal_date": None, "signal_age_bars": None, "trigger_labels": [], "conditions": []},
+            ),
+        ]
+
+        title = self.service._theme_group_title(batch)
+
+        self.assertIn("/", title)
+        self.assertNotIn("Batch", title)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,18 @@ DAILY_PERIOD = "2mo"
 DAILY_TRAIL_POINTS = 40
 DEFAULT_RATIO_WINDOW = 10
 DEFAULT_MOMENTUM_WINDOW = 4
+THEME_GROUP_TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Resources", ("copper", "gold", "silver", "lithium", "uranium", "rare earth", "metals", "mining", "steel", "natural resources")),
+    ("Energy", ("electrification", "energy", "oil", "gas", "battery", "low carbon")),
+    ("Health Care", ("health", "heart", "oncology", "glp-1", "pharma", "pharmaceutical", "biotech", "medical devices", "cannabis")),
+    ("AI & Automation", ("ai", "robot", "robotics", "robotaxi", "humanoid", "autonomous")),
+    ("Semis & Software", ("technology", "semiconductor", "software", "memory", "telecom")),
+    ("Digital Assets", ("bitcoin", "blockchain", "digital", "metaverse", "meme", "social sentiment")),
+    ("Space & Defense", ("space", "aerospace", "defense")),
+    ("Financials", ("asset manager", "asset managers", "bank", "capital markets", "insurance")),
+    ("Consumer Themes", ("retail", "sports betting", "gaming", "video games", "esports", "magnificent seven")),
+    ("Macro Themes", ("reshoring", "africa", "agribusiness", "transportation")),
+)
 
 
 @dataclass(frozen=True)
@@ -227,7 +239,7 @@ class RrgService:
             groups.append(
                 RrgGroup(
                     id=f"theme-batch-{index:02d}",
-                    title=f"Theme Batch {index:02d}",
+                    title=self._theme_group_title(batch),
                     series=batch,
                 )
             )
@@ -457,6 +469,23 @@ class RrgService:
             "title": group.title,
             "series": [self._series_payload(series) for series in group.series],
         }
+
+    def _theme_group_title(self, batch: list[RrgSeries]) -> str:
+        topic_order = {label: index for index, (label, _) in enumerate(THEME_GROUP_TOPICS)}
+        scores: dict[str, int] = {label: 0 for label, _ in THEME_GROUP_TOPICS}
+        for series in batch:
+            haystack = f"{series.label} {series.ticker}".lower()
+            for topic, keywords in THEME_GROUP_TOPICS:
+                if any(keyword in haystack for keyword in keywords):
+                    scores[topic] += 1
+        ranked = [(topic, count) for topic, count in scores.items() if count > 0]
+        ranked.sort(key=lambda item: (-item[1], topic_order[item[0]]))
+        if len(ranked) >= 2:
+            return f"{ranked[0][0]} / {ranked[1][0]}"
+        if ranked:
+            return f"{ranked[0][0]} Focus"
+        lead = batch[0].label.strip() if batch else "Theme"
+        return f"{lead} Focus"
 
     def _quadrants_payload(self) -> dict[str, Any]:
         return {
