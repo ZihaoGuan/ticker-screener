@@ -24,6 +24,12 @@ import { WeeklyWatchlistPage } from "./pages/WeeklyWatchlistPage";
 import { WatchlistsPage } from "./pages/WatchlistsPage";
 
 export default function App() {
+  const auth = useAuth();
+
+  if (auth.isMaintenance) {
+    return <MaintenancePage />;
+  }
+
   return (
     <AppLayout>
       <Routes>
@@ -107,7 +113,7 @@ export default function App() {
         <Route
           path="/watchlists/weekly"
           element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
+            <RoleRoute allowedRoles={["admin"]}>
               <WeeklyWatchlistPage />
             </RoleRoute>
           }
@@ -115,7 +121,7 @@ export default function App() {
         <Route
           path="/watchlists"
           element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
+            <RoleRoute allowedRoles={["admin"]}>
               <WatchlistsPage />
             </RoleRoute>
           }
@@ -141,7 +147,7 @@ export default function App() {
         <Route
           path="/report"
           element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
+            <RoleRoute allowedRoles={["admin"]}>
               <OverlapPage />
             </RoleRoute>
           }
@@ -166,6 +172,22 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppLayout>
+  );
+}
+
+function MaintenancePage() {
+  return (
+    <div className="maintenance-shell">
+      <section className="maintenance-card">
+        <span className="eyebrow">Ticker Screener</span>
+        <h1>Under maintenance</h1>
+        <p className="panel-copy">
+          Auth service is temporarily unavailable. The web UI switched to maintenance mode after <code>/api/auth/me</code> returned{" "}
+          <code>502</code>.
+        </p>
+        <p className="file-meta">Please try again after backend service recovers.</p>
+      </section>
+    </div>
   );
 }
 

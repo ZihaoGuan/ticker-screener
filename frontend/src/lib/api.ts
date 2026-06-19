@@ -1,3 +1,13 @@
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -16,7 +26,7 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     } catch {
       // Ignore non-JSON error responses and keep status-based message.
     }
-    throw new Error(message);
+    throw new ApiError(response.status, message);
   }
   return (await response.json()) as T;
 }

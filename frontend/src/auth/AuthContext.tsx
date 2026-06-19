@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useState, type PropsWithChildren } from "react";
-import { fetchJson } from "../lib/api";
+import { ApiError, fetchJson } from "../lib/api";
 import type { AuthMeResponse, CapabilityName, RoleName, UserSummary } from "../lib/types";
 
 type AuthContextValue = {
   isLoading: boolean;
+  isMaintenance: boolean;
   authenticated: boolean;
   user: UserSummary | null;
   role: RoleName;
@@ -26,10 +27,19 @@ const DEFAULT_AUTH: AuthMeResponse = {
 export function AuthProvider({ children }: PropsWithChildren) {
   const [payload, setPayload] = useState<AuthMeResponse>(DEFAULT_AUTH);
   const [isLoading, setIsLoading] = useState(true);
+  const [isMaintenance, setIsMaintenance] = useState(false);
 
   const refresh = async () => {
-    const next = await fetchJson<AuthMeResponse>("/api/auth/me");
-    setPayload(next);
+    try {
+      const next = await fetchJson<AuthMeResponse>("/api/auth/me");
+      setPayload(next);
+      setIsMaintenance(false);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 502) {
+        setIsMaintenance(true);
+      }
+      throw error;
+    }
   };
 
   useEffect(() => {
@@ -53,6 +63,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const value: AuthContextValue = {
     isLoading,
+    isMaintenance,
     authenticated: payload.authenticated,
     user: payload.user,
     role: payload.role,
