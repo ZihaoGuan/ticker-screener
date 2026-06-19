@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import datetime as dt
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.webapp.repositories.watchlist_repository import WatchlistRepository
 
@@ -141,6 +143,45 @@ class WatchlistRepositoryTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["stem"], "base_detection_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "base_detection")
+
+    def test_list_recent_watchlists_reads_db_screen_runs(self) -> None:
+        repository = WatchlistRepository(self.artifacts_dir, database_url="postgres://example")
+        with patch.object(repository.history_repository, "is_configured", return_value=True), patch.object(
+            repository.history_repository,
+            "list_screen_runs",
+            return_value=[
+                {
+                    "id": 41,
+                    "strategy_id": "rs",
+                    "run_date": dt.date(2026, 6, 18),
+                    "watchlist_artifact_path": str(self.artifacts_dir / "screeners" / "2026-06-18" / "rs" / "watchlist.json"),
+                    "created_at": dt.datetime(2026, 6, 19, 1, 2, tzinfo=dt.timezone.utc),
+                }
+            ],
+        ):
+            rows = repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "rs_new_high_before_price_2026-06-18")
+        self.assertEqual(rows[0]["layout"], "db")
+        self.assertEqual(rows[0]["screen_run_id"], 41)
+
+    def test_load_watchlist_reads_db_hits(self) -> None:
+        repository = WatchlistRepository(self.artifacts_dir, database_url="postgres://example")
+        with patch.object(repository.history_repository, "is_configured", return_value=True), patch.object(
+            repository.history_repository,
+            "find_screen_run_by_watchlist_stem",
+            return_value={
+                "id": 52,
+                "hits": [
+                    {"passed": True, "hit_payload_json": {"ticker": "NVDA", "summary": "Leader"}},
+                    {"passed": False, "hit_payload_json": {"ticker": "FAIL"}},
+                    {"passed": True, "hit_payload_json": {"ticker": "AAPL", "summary": "Also leader"}},
+                ],
+            },
+        ):
+            payload = repository.load_watchlist("rs_new_high_before_price_2026-06-18")
+
+        self.assertEqual([item["ticker"] for item in payload], ["NVDA", "AAPL"])
 
     def test_group_key_supports_cup_detection(self) -> None:
         self._write_new_watchlist(

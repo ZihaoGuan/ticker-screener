@@ -627,6 +627,33 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     return <span className="status-pill status-unknown">{status || "unknown"}</span>;
   };
 
+  const renderScheduledPersistenceStatus = (job: ScheduledJobSummary) => {
+    if (job.persisted_to_db === true) {
+      return (
+        <div className="schedule-cell-stack">
+          <span className="schedule-state-pill schedule-state-pill-enabled">DB Persisted</span>
+          <span className="file-meta">
+            {job.screen_run_id != null ? `screen_run_id ${job.screen_run_id}` : job.persistence_message || "Persisted successfully."}
+          </span>
+        </div>
+      );
+    }
+    if (job.persisted_to_db === false) {
+      return (
+        <div className="schedule-cell-stack">
+          <span className="schedule-state-pill schedule-state-pill-disabled">DB Not Persisted</span>
+          <span className="file-meta">{job.persistence_message || "Persistence was not confirmed."}</span>
+        </div>
+      );
+    }
+    return (
+      <div className="schedule-cell-stack">
+        <span className="schedule-chip schedule-chip-soft">DB Pending</span>
+        <span className="file-meta">{job.persistence_message || "Persistence status not available yet."}</span>
+      </div>
+    );
+  };
+
   const formatDuration = (seconds: number) => {
     if (!Number.isFinite(seconds) || seconds <= 0) {
       return "-";
@@ -1251,6 +1278,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     <tr>
                       <th>Job</th>
                       <th>Status</th>
+                      <th>DB Persist</th>
                       <th>Last Start</th>
                       <th>Last Finish</th>
                       <th>Exit Code</th>
@@ -1261,7 +1289,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                   <tbody>
                     {scheduledJobs.length === 0 ? (
                       <tr>
-                        <td colSpan={7}>{isLoadingScheduledJobs ? "Loading scheduled jobs..." : "No scheduled job status files found."}</td>
+                        <td colSpan={8}>{isLoadingScheduledJobs ? "Loading scheduled jobs..." : "No scheduled job status files found."}</td>
                       </tr>
                     ) : (
                       scheduledJobs.map((job) => (
@@ -1277,6 +1305,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                               {renderScheduledJobStatus(job.status)}
                               <span className="file-meta">{job.exit_code == null ? "Exit pending" : `exit ${job.exit_code}`}</span>
                             </div>
+                          </td>
+                          <td data-label="DB Persist">
+                            {renderScheduledPersistenceStatus(job)}
                           </td>
                           <td data-label="Last Start">
                             <div className="schedule-cell-stack">

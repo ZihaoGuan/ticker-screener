@@ -238,6 +238,9 @@ class AdminService:
                     "exit_code": _coerce_int(payload.get("exit_code")),
                     "log_file": str(payload.get("log_file") or ""),
                     "artifact_file": str(payload.get("artifact_file") or ""),
+                    "persisted_to_db": payload.get("persisted_to_db"),
+                    "screen_run_id": _coerce_int(payload.get("screen_run_id")),
+                    "persistence_message": str(payload.get("persistence_message") or ""),
                     "message": str(payload.get("message") or ""),
                     "status_file": str(path),
                 }

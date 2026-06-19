@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -25,6 +26,7 @@ STATUS_DIR = ARTIFACTS_DIR / "status"
 STATE_FILE = STATUS_DIR / "scheduler-state.json"
 DEPLOY_DIR = PROJECT_ROOT / "deploy"
 WRAPPER_SCRIPT = PROJECT_ROOT / "scripts" / "run_with_status.sh"
+_PERSISTED_SCREEN_RUN_PATTERN = re.compile(r"Persisted screen run id=(\d+)")
 
 
 def _load_state() -> dict[str, str]:
@@ -49,6 +51,9 @@ def _write_scheduler_status(
     status: str,
     message: str,
     artifact_file: str = "",
+    persisted_to_db: bool | None = None,
+    screen_run_id: int | None = None,
+    persistence_message: str | None = None,
 ) -> None:
     STATUS_DIR.mkdir(parents=True, exist_ok=True)
     status_path = STATUS_DIR / f"{job_id}.json"
@@ -62,10 +67,110 @@ def _write_scheduler_status(
         "log_file": "",
         "artifact_file": artifact_file or None,
         "message": message,
+        "persisted_to_db": persisted_to_db,
+        "screen_run_id": screen_run_id,
+        "persistence_message": persistence_message,
     }
     tmp_path = status_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     tmp_path.replace(status_path)
+
+
+def _update_scheduler_persistence_status(
+    *,
+    job_id: str,
+    persisted_to_db: bool | None,
+    screen_run_id: int | None,
+    persistence_message: str,
+) -> None:
+    status_path = STATUS_DIR / f"{job_id}.json"
+    if not status_path.exists():
+        return
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+    payload["persisted_to_db"] = persisted_to_db
+    payload["screen_run_id"] = screen_run_id
+    payload["persistence_message"] = persistence_message
+    tmp_path = status_path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(status_path)
+
+
+def _sync_scheduler_persistence_from_status(job_id: str) -> None:
+    status_path = STATUS_DIR / f"{job_id}.json"
+    if not status_path.exists():
+        return
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+    status = str(payload.get("status") or "")
+    if status in {"queued", "running"}:
+        _update_scheduler_persistence_status(
+            job_id=job_id,
+            persisted_to_db=None,
+            screen_run_id=None,
+            persistence_message="Persistence pending.",
+        )
+        return
+    if status != "success":
+        _update_scheduler_persistence_status(
+            job_id=job_id,
+            persisted_to_db=False,
+            screen_run_id=None,
+            persistence_message="Job failed before DB persistence completed.",
+        )
+        return
+    log_file = str(payload.get("log_file") or "").strip()
+    if not log_file:
+        _update_scheduler_persistence_status(
+            job_id=job_id,
+            persisted_to_db=False,
+            screen_run_id=None,
+            persistence_message="Missing log file; could not confirm DB persistence.",
+        )
+        return
+    log_path = Path(log_file)
+    if not log_path.exists():
+        _update_scheduler_persistence_status(
+            job_id=job_id,
+            persisted_to_db=False,
+            screen_run_id=None,
+            persistence_message="Log file missing; could not confirm DB persistence.",
+        )
+        return
+    try:
+        log_text = log_path.read_text(encoding="utf-8")
+    except Exception:
+        _update_scheduler_persistence_status(
+            job_id=job_id,
+            persisted_to_db=False,
+            screen_run_id=None,
+            persistence_message="Could not read log file to confirm DB persistence.",
+        )
+        return
+    match = _PERSISTED_SCREEN_RUN_PATTERN.search(log_text)
+    if match:
+        screen_run_id = int(match.group(1))
+        _update_scheduler_persistence_status(
+            job_id=job_id,
+            persisted_to_db=True,
+            screen_run_id=screen_run_id,
+            persistence_message=f"Persisted screen run id={screen_run_id}.",
+        )
+        return
+    _update_scheduler_persistence_status(
+        job_id=job_id,
+        persisted_to_db=False,
+        screen_run_id=None,
+        persistence_message="No persisted screen run id found in job log.",
+    )
 
 
 def _matches_field(field: str, value: int, *, minimum: int, maximum: int) -> bool:
@@ -188,6 +293,9 @@ def main() -> int:
                 status="queued",
                 message=f"Queued remote job {job_id} for worker execution.",
                 artifact_file=str(env.get("TICKER_SCREENER_STATUS_ARTIFACT") or ""),
+                persisted_to_db=None,
+                screen_run_id=None,
+                persistence_message="Waiting for remote worker completion.",
             )
             print(f"queued scheduled remote job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")
             continue
@@ -233,6 +341,9 @@ def main() -> int:
                     status="queued",
                     message="Queued behind other scheduled jobs for this time slot.",
                     artifact_file=str(env.get("TICKER_SCREENER_STATUS_ARTIFACT") or ""),
+                    persisted_to_db=None,
+                    screen_run_id=None,
+                    persistence_message="Waiting for local execution slot.",
                 )
 
         while pending_runs or running_processes:
@@ -253,6 +364,7 @@ def main() -> int:
                 if return_code != 0:
                     print(f"scheduled job {job['job_id']} exited with {return_code}")
                     exit_code = return_code if exit_code == 0 else exit_code
+                _sync_scheduler_persistence_from_status(str(job["job_id"]))
             running_processes = next_running
             if running_processes:
                 time.sleep(1)

@@ -7,12 +7,14 @@ import re
 from typing import Any
 
 from src.artifact_paths import strategy_id_from_legacy_stem, watchlist_stem_from_path
+from .history_repository import HistoryRepository
 
 
 class WatchlistRepository:
-    def __init__(self, artifacts_dir: Path) -> None:
+    def __init__(self, artifacts_dir: Path, database_url: str = "") -> None:
         self.artifacts_dir = artifacts_dir
         self.watchlist_dir = artifacts_dir / "watchlists"
+        self.history_repository = HistoryRepository(database_url=database_url, artifacts_dir=artifacts_dir)
 
     def list_recent_watchlists(self, limit: int = 200) -> list[dict[str, Any]]:
         rows = list(self._build_watchlist_index().values())
@@ -20,6 +22,9 @@ class WatchlistRepository:
         return rows[:limit]
 
     def load_watchlist(self, stem: str) -> list[dict[str, Any]]:
+        db_payload = self._load_watchlist_from_db(stem)
+        if db_payload is not None:
+            return db_payload
         path = self.resolve_watchlist_path(stem)
         if not path.exists():
             return []
@@ -35,6 +40,10 @@ class WatchlistRepository:
 
     def _build_watchlist_index(self) -> dict[str, dict[str, Any]]:
         index: dict[str, dict[str, Any]] = {}
+
+        if self.history_repository.is_configured():
+            for item in self.history_repository.list_screen_runs(limit=2000, has_hits=True):
+                self._upsert_db_entry(index, item)
 
         for path in sorted(self.watchlist_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
             self._upsert_index_entry(index, path, layout="legacy")
@@ -55,6 +64,8 @@ class WatchlistRepository:
         if not stem:
             return
         existing = index.get(stem)
+        if existing is not None and existing.get("layout") == "db":
+            return
         if existing is not None and existing.get("layout") == "dated":
             return
         if existing is not None and layout != "dated":
@@ -71,6 +82,49 @@ class WatchlistRepository:
             "sort_date": _first_date_in_stem(stem),
             "layout": layout,
         }
+
+    def _upsert_db_entry(self, index: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:
+        raw_path = str(row.get("watchlist_artifact_path") or "").strip()
+        stem = watchlist_stem_from_path(raw_path)
+        if not stem:
+            return
+        existing = index.get(stem)
+        if existing is not None and existing.get("layout") == "db":
+            existing_created_at = str(existing.get("captured_at") or "")
+            current_created_at = _isoformat_or_empty(row.get("created_at"))
+            if existing_created_at >= current_created_at:
+                return
+        group_key, group_label = _group_for_stem(stem)
+        index[stem] = {
+            "name": Path(raw_path).name if raw_path else f"{stem}.json",
+            "stem": stem,
+            "path": raw_path or str(self.watchlist_dir / f"{stem}.json"),
+            "group_key": group_key,
+            "group_label": group_label,
+            "captured_at": _isoformat_or_empty(row.get("created_at")),
+            "sort_date": _date_or_empty(row.get("run_date")) or _first_date_in_stem(stem),
+            "layout": "db",
+            "screen_run_id": int(row["id"]) if row.get("id") is not None else None,
+            "strategy_id": str(row.get("strategy_id") or ""),
+        }
+
+    def _load_watchlist_from_db(self, stem: str) -> list[dict[str, Any]] | None:
+        if not self.history_repository.is_configured():
+            return None
+        run_payload = self.history_repository.find_screen_run_by_watchlist_stem(stem, include_hits=True)
+        if run_payload is None:
+            return None
+        hits = run_payload.get("hits")
+        if not isinstance(hits, list):
+            return []
+        entries: list[dict[str, Any]] = []
+        for item in hits:
+            if not isinstance(item, dict) or not bool(item.get("passed")):
+                continue
+            payload = item.get("hit_payload_json")
+            if isinstance(payload, dict):
+                entries.append(payload)
+        return entries
 
 
 def _group_for_stem(stem: str) -> tuple[str, str]:
@@ -132,3 +186,15 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
 def _first_date_in_stem(stem: str) -> str | None:
     match = re.search(r"\d{4}-\d{2}-\d{2}", stem)
     return match.group(0) if match else None
+
+
+def _isoformat_or_empty(value: Any) -> str:
+    if isinstance(value, dt.datetime):
+        return value.isoformat()
+    return str(value or "")
+
+
+def _date_or_empty(value: Any) -> str:
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    return str(value or "")

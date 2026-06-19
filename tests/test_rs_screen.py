@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
-import types
 import unittest
 from unittest.mock import patch
 
+import pandas as pd
+
 from src.config import AppConfig
-from src.rs_screen import run_rs_screen
+from src.rs_screen import _compute_rs_new_high_flags, run_rs_screen
 from src.universe import UniverseTicker
 
 
@@ -93,6 +94,26 @@ class _FakeCookstockModule:
 
 
 class RsScreenTests(unittest.TestCase):
+    def test_compute_rs_new_high_flags_matches_pine_before_price_rule(self) -> None:
+        index = pd.date_range("2026-01-05", periods=5, freq="B")
+        rs_line = pd.Series([1.00, 1.05, 1.08, 1.12, 1.20], index=index)
+        price_high = pd.Series([10.0, 10.4, 10.8, 11.5, 11.1], index=index)
+
+        new_high, before_price = _compute_rs_new_high_flags(rs_line, price_high, lookback=5)
+
+        self.assertTrue(bool(new_high.iloc[-1]))
+        self.assertTrue(bool(before_price.iloc[-1]))
+
+    def test_compute_rs_new_high_flags_rejects_when_price_also_sets_high(self) -> None:
+        index = pd.date_range("2026-01-05", periods=5, freq="B")
+        rs_line = pd.Series([1.00, 1.05, 1.08, 1.12, 1.20], index=index)
+        price_high = pd.Series([10.0, 10.4, 10.8, 11.5, 11.8], index=index)
+
+        new_high, before_price = _compute_rs_new_high_flags(rs_line, price_high, lookback=5)
+
+        self.assertTrue(bool(new_high.iloc[-1]))
+        self.assertFalse(bool(before_price.iloc[-1]))
+
     def test_run_rs_screen_uses_clean_stock_rows_for_rs_rating(self) -> None:
         stock_closes = [100.0 + (idx * 0.9) for idx in range(320)]
         benchmark_closes = [100.0 + (idx * 0.2) for idx in range(320)]

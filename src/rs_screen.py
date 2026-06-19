@@ -211,6 +211,25 @@ def _compute_latest_rs_rating(
     return float(latest_score), float(latest_rating)
 
 
+def _compute_rs_new_high_flags(
+    rs_line: pd.Series,
+    price_reference: pd.Series,
+    *,
+    lookback: int,
+) -> tuple[pd.Series, pd.Series]:
+    aligned = pd.concat([rs_line, price_reference], axis=1, join="inner").dropna()
+    if aligned.empty:
+        empty = pd.Series(dtype=bool)
+        return empty, empty
+    aligned.columns = ["rs_line", "price_reference"]
+    rolling_rs_high = aligned["rs_line"].rolling(window=max(1, int(lookback)), min_periods=1).max()
+    rolling_price_high = aligned["price_reference"].rolling(window=max(1, int(lookback)), min_periods=1).max()
+    tolerance = 1e-12
+    new_high = aligned["rs_line"] >= (rolling_rs_high - tolerance)
+    new_high_before_price = new_high & (aligned["price_reference"] < (rolling_price_high - tolerance))
+    return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
+
+
 def _compute_weekly_rs_before_price_context(
     stock_rows: list[dict[str, object]],
     benchmark_rows: list[dict[str, object]],
@@ -234,11 +253,10 @@ def _compute_weekly_rs_before_price_context(
         return None
 
     weekly_rs_line = weekly_aligned["Close"] / weekly_aligned["benchmark_close"]
-    rolling_rs_high = weekly_rs_line.rolling(window=max(1, int(weekly_lookback_weeks)), min_periods=1).max()
-    rolling_price_high = weekly_aligned["High"].rolling(window=max(1, int(weekly_lookback_weeks)), min_periods=1).max()
-    tolerance = 1e-12
-    weekly_before_price = (weekly_rs_line >= (rolling_rs_high - tolerance)) & (
-        weekly_aligned["High"] < (rolling_price_high - tolerance)
+    _, weekly_before_price = _compute_rs_new_high_flags(
+        weekly_rs_line,
+        weekly_aligned["High"],
+        lookback=max(1, int(weekly_lookback_weeks)),
     )
 
     latest_flag = bool(weekly_before_price.iloc[-1])

@@ -364,6 +364,22 @@ class _FakeWatchlistService:
             "latest_signal_date": "2026-06-12",
             "cards": [
                 {
+                    "id": "rs",
+                    "strategy_id": "rs",
+                    "label": "RS New High Before Price",
+                    "description": "Daily RS leaders",
+                    "timeframe": "Daily",
+                    "accent": "cyan",
+                    "available": True,
+                    "stem": "rs_new_high_before_price_2026-06-12",
+                    "group_label": "RS",
+                    "captured_at": "2026-06-13T00:55:00+00:00",
+                    "sort_date": "2026-06-12",
+                    "entry_count": 4,
+                    "preview_tickers": ["AAPL", "CRWD"],
+                    "list_href": "/watchlists?stem=rs_new_high_before_price_2026-06-12",
+                },
+                {
                     "id": "weekly_rs",
                     "strategy_id": "weekly_rs",
                     "label": "Weekly RS New High",
@@ -789,8 +805,9 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["target_trading_date"], "2026-06-12")
-        self.assertEqual(payload["cards"][0]["id"], "weekly_rs")
-        self.assertEqual(payload["cards"][0]["entry_count"], 6)
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["weekly_rs"]["entry_count"], 6)
+        self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
 
     def test_get_chart_fundamentals(self) -> None:
         response = self.client.get("/api/chart-fundamentals/nvda?earningsLimit=1")

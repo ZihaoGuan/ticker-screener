@@ -1033,6 +1033,9 @@ export type ScheduledJobSummary = {
   exit_code: number | null;
   log_file: string;
   artifact_file: string;
+  persisted_to_db?: boolean | null;
+  screen_run_id?: number | null;
+  persistence_message?: string;
   message: string;
   status_file: string;
 };

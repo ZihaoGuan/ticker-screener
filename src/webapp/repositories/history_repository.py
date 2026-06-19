@@ -669,6 +669,50 @@ class HistoryRepository:
                     payload["hits"] = self._rows_to_dicts(cursor, cursor.fetchall())
         return payload
 
+    def find_screen_run_by_watchlist_stem(self, stem: str, *, include_hits: bool = False, hit_limit: int = 5000) -> dict[str, Any] | None:
+        normalized_stem = str(stem or "").strip()
+        if not normalized_stem:
+            return None
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            SELECT id, strategy_id, run_date, job_run_id, config_json, config_hash, scope_json, scope_hash,
+                   market_data_mode, source_kind, hit_count, failure_count, result_summary_json,
+                   raw_artifact_path, watchlist_artifact_path, report_artifact_path, notes,
+                   deleted_at, deleted_reason, created_at
+            FROM screen_runs
+            WHERE deleted_at IS NULL
+              AND watchlist_artifact_path IS NOT NULL
+              AND (
+                watchlist_artifact_path LIKE %s
+                OR watchlist_artifact_path LIKE %s
+              )
+            ORDER BY run_date DESC, created_at DESC, id DESC
+            LIMIT 1
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (f"%/{normalized_stem}.json", f"%/{normalized_stem}/watchlist.json"))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+                if not rows:
+                    return None
+                payload = rows[0]
+                if include_hits:
+                    cursor.execute(
+                        """
+                        SELECT id, strategy_id, signal_date, ticker, passed, rank,
+                               metrics_json, reasons_json, hit_payload_json, created_at
+                        FROM screen_run_hits
+                        WHERE screen_run_id = %s
+                        ORDER BY signal_date DESC, rank NULLS LAST, ticker ASC
+                        LIMIT %s
+                        """,
+                        (int(payload["id"]), max(1, int(hit_limit))),
+                    )
+                    payload["hits"] = self._rows_to_dicts(cursor, cursor.fetchall())
+        return payload
+
     def soft_delete_screen_run(self, run_id: int, *, reason: str) -> bool:
         connection = self._connect()
         if connection is None:

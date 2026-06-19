@@ -13,6 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from scripts._screen_run_persistence import persist_screen_run_artifacts_if_configured
+
 from src.artifact_paths import build_screener_artifact_paths
 from src.config import load_app_config, override_config, today_label
 from src.ftd_sweep_screen import run_ftd_sweep_screen
@@ -86,6 +88,12 @@ def main() -> int:
     print(f"Wrote raw results to {raw_path}")
     print(f"Wrote watchlist to {watchlist_path}")
     print(f"Wrote run summary to {summary_path}")
+    persisted_run_id = persist_screen_run_artifacts_if_configured(
+        args=args,
+        summary_path=summary_path,
+    )
+    if persisted_run_id is not None:
+        print(f"Persisted screen run id={persisted_run_id}")
     return 0
 
 

@@ -93,6 +93,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "violet",
     },
     {
+        "id": "rs",
+        "strategy_id": "rs",
+        "label": "RS New High Before Price",
+        "description": "Daily RS line clears its lookback high before price itself breaks to a new high.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+    },
+    {
         "id": "sean_gap_up",
         "strategy_id": "sean_peg",
         "label": "Sean Gap Up",
@@ -224,7 +232,7 @@ class WatchlistService:
         market_data_source: str | None = None,
         benchmark_ticker: str = "SPY",
     ) -> None:
-        self.repository = WatchlistRepository(artifacts_dir=artifacts_dir)
+        self.repository = WatchlistRepository(artifacts_dir=artifacts_dir, database_url=database_url or "")
         self.insider_repository = InsiderRepository(artifacts_dir=artifacts_dir)
         self._universe_index: dict[str, UniverseTicker] | None = None
         self._theme_catalog: list[dict[str, object]] | None = None

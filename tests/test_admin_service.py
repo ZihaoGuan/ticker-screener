@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -169,6 +172,39 @@ class AdminServiceTests(unittest.TestCase):
 
         mocked.assert_called_once_with(ticker="NVDA", sector="Technology")
         self.assertEqual(payload["sector"], "Technology")
+
+    def test_list_scheduled_jobs_exposes_db_persistence_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            status_dir = artifacts_dir / "status"
+            status_dir.mkdir(parents=True, exist_ok=True)
+            (status_dir / "weekly_rs_close.json").write_text(
+                json.dumps(
+                    {
+                        "job_id": "weekly_rs_close",
+                        "job_label": "Weekly RS Close",
+                        "status": "success",
+                        "last_started_at": "2026-06-19T20:30:00Z",
+                        "last_finished_at": "2026-06-19T20:31:00Z",
+                        "exit_code": 0,
+                        "log_file": "/tmp/weekly-rs.log",
+                        "artifact_file": "/tmp/weekly-rs-summary.json",
+                        "persisted_to_db": True,
+                        "screen_run_id": 812,
+                        "persistence_message": "Persisted screen run id=812.",
+                        "message": "Job completed successfully.",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = AdminService(database_url="postgres://example", artifacts_dir=artifacts_dir)
+
+            payload = service.list_scheduled_jobs()
+
+        self.assertEqual(len(payload), 1)
+        self.assertTrue(bool(payload[0]["persisted_to_db"]))
+        self.assertEqual(payload[0]["screen_run_id"], 812)
+        self.assertEqual(payload[0]["persistence_message"], "Persisted screen run id=812.")
 
     def test_build_missing_ranges_combines_edge_windows_and_internal_gaps(self) -> None:
         payload = _build_missing_ranges(

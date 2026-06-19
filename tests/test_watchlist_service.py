@@ -75,6 +75,11 @@ class WatchlistServiceTests(unittest.TestCase):
 
     def test_get_scanner_board_uses_previous_trading_day_before_new_york_cutoff(self) -> None:
         self._write_watchlist(
+            "rs_new_high_before_price_2026-06-11",
+            tickers=["CRWD", "PLTR"],
+            modified_at=dt.datetime(2026, 6, 12, 0, 45, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
             "sean_peg_earnings_gap_2026-06-11",
             tickers=["APP", "NVDA"],
             modified_at=dt.datetime(2026, 6, 12, 0, 30, tzinfo=dt.timezone.utc),
@@ -107,6 +112,8 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["target_trading_date"], "2026-06-11")
         cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-11")
+        self.assertEqual(cards["rs"]["entry_count"], 2)
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-11")
         self.assertEqual(cards["sean_gap_up"]["entry_count"], 2)
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-11")
@@ -114,6 +121,11 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["weekly_rs"]["stem"], "weekly_rs_new_high_2026-06-06")
 
     def test_get_scanner_board_uses_same_day_after_new_york_cutoff(self) -> None:
+        self._write_watchlist(
+            "rs_new_high_before_price_2026-06-12",
+            tickers=["PLTR", "CRWV"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc),
+        )
         self._write_watchlist(
             "sean_peg_earnings_gap_2026-06-12",
             tickers=["PLTR"],
@@ -142,6 +154,8 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["target_trading_date"], "2026-06-12")
         cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
+        self.assertEqual(cards["rs"]["preview_tickers"], ["PLTR", "CRWV"])
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-12")
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-12")
         self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-12")
@@ -175,6 +189,70 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["data_source"], "internet")
         self.assertIn("market_extension", payload)
         self.assertIn("vcs", payload)
+
+    def test_get_watchlist_detail_prefers_db_previous_scan_comparison(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        db_rows = [
+            {
+                "id": 101,
+                "strategy_id": "rs",
+                "run_date": dt.date(2026, 6, 18),
+                "watchlist_artifact_path": str(Path(self.temp_dir.name) / "screeners" / "2026-06-18" / "rs" / "watchlist.json"),
+                "created_at": dt.datetime(2026, 6, 19, 0, 15, tzinfo=dt.timezone.utc),
+            },
+            {
+                "id": 100,
+                "strategy_id": "rs",
+                "run_date": dt.date(2026, 6, 17),
+                "watchlist_artifact_path": str(Path(self.temp_dir.name) / "screeners" / "2026-06-17" / "rs" / "watchlist.json"),
+                "created_at": dt.datetime(2026, 6, 18, 0, 15, tzinfo=dt.timezone.utc),
+            },
+        ]
+        db_hits = {
+            "rs_new_high_before_price_2026-06-18": {
+                "id": 101,
+                "hits": [
+                    {"passed": True, "hit_payload_json": {"ticker": "NVDA"}},
+                    {"passed": True, "hit_payload_json": {"ticker": "CRWD"}},
+                ],
+            },
+            "rs_new_high_before_price_2026-06-17": {
+                "id": 100,
+                "hits": [
+                    {"passed": True, "hit_payload_json": {"ticker": "NVDA"}},
+                ],
+            },
+        }
+
+        with patch.object(service.repository.history_repository, "is_configured", return_value=True), patch.object(
+            service.repository.history_repository,
+            "list_screen_runs",
+            return_value=db_rows,
+        ), patch.object(
+            service.repository.history_repository,
+            "find_screen_run_by_watchlist_stem",
+            side_effect=lambda stem, include_hits=True: db_hits.get(stem),
+        ), patch(
+            "src.webapp.services.watchlist_service.load_universe",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.load_excluded_tickers",
+            return_value=set(),
+        ):
+            payload = service.get_watchlist_detail("rs_new_high_before_price_2026-06-18")
+
+        self.assertTrue(payload["has_previous_scan"])
+        self.assertEqual(payload["previous_stem"], "rs_new_high_before_price_2026-06-17")
+        self.assertEqual(payload["new_ticker_count"], 1)
+        entry_map = {entry["ticker"]: entry for entry in payload["entries"]}
+        self.assertFalse(bool(entry_map["NVDA"]["is_new"]))
+        self.assertTrue(bool(entry_map["CRWD"]["is_new"]))
 
     def test_get_watchlist_detail_filters_excluded_tickers(self) -> None:
         watchlists_dir = Path(self.temp_dir.name) / "watchlists"

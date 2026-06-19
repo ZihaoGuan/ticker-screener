@@ -53,6 +53,9 @@ payload = {
     "log_file": os.environ["LOG_FILE"],
     "artifact_file": os.environ["ARTIFACT_FILE"] or None,
     "message": os.environ["MESSAGE_VALUE"],
+    "persisted_to_db": None,
+    "screen_run_id": None,
+    "persistence_message": None,
 }
 status_path = Path(os.environ["STATUS_FILE"])
 tmp_path = status_path.with_suffix(".tmp")
