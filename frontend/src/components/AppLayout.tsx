@@ -25,6 +25,7 @@ export function AppLayout({ children }: PropsWithChildren) {
   const navigate = useNavigate();
   const auth = useAuth();
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const showInfraStatus = auth.role === "admin";
 
   useEffect(() => {
     setIsMobileNavOpen(false);
@@ -90,12 +91,11 @@ export function AppLayout({ children }: PropsWithChildren) {
             >
               {isMobileNavOpen ? "Close" : "Menu"}
             </button>
-            <div className="search-box">CMD + K to search…</div>
           </div>
           <div className="topbar-status">
-            <span className="status-chip">WEB: HEALTHY</span>
-            <span className="status-chip">DB: CONNECTED</span>
-            <span className="status-chip">ARTIFACTS: REACHABLE</span>
+            {showInfraStatus ? <span className="status-chip">WEB: HEALTHY</span> : null}
+            {showInfraStatus ? <span className="status-chip">DB: CONNECTED</span> : null}
+            {showInfraStatus ? <span className="status-chip">ARTIFACTS: REACHABLE</span> : null}
             <span className="status-chip">{auth.authenticated ? `ROLE: ${auth.role.toUpperCase()}` : "ROLE: VISITOR"}</span>
           </div>
         </header>

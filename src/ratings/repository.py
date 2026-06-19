@@ -827,21 +827,25 @@ class RatingsRepository:
         if connection is None:
             return {}
         sql = """
-            SELECT DISTINCT ON (ticker)
-              ticker,
-              as_of_date,
-              sector,
-              industry,
-              overall_rating,
-              valuation_grade,
-              profitability_grade,
-              growth_grade,
-              performance_grade,
-              rating_status,
-              rating_status_reason
-            FROM ticker_rating_snapshots
-            WHERE ticker = ANY(%s)
-            ORDER BY ticker, as_of_date DESC, updated_at DESC
+            SELECT DISTINCT ON (r.ticker)
+              r.ticker,
+              r.as_of_date,
+              COALESCE(r.sector, f.sector, tm.sector) AS sector,
+              COALESCE(f.industry, tm.industry) AS industry,
+              r.overall_rating,
+              r.valuation_grade,
+              r.profitability_grade,
+              r.growth_grade,
+              r.performance_grade,
+              r.rating_status,
+              r.rating_status_reason
+            FROM ticker_rating_snapshots r
+            LEFT JOIN ticker_fundamentals_snapshots f
+              ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
+            LEFT JOIN ticker_metadata tm
+              ON tm.ticker = r.ticker
+            WHERE r.ticker = ANY(%s)
+            ORDER BY r.ticker, r.as_of_date DESC, r.updated_at DESC
         """
         with connection:
             with connection.cursor() as cursor:
