@@ -198,6 +198,10 @@ def _last_value(series: pd.Series) -> float | None:
     return None if pd.isna(value) else float(value)
 
 
+def _safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    return numerator.astype(float) / denominator.astype(float).where(denominator.astype(float) != 0.0)
+
+
 def _signal_from_bool(buy: bool, sell: bool) -> float:
     if buy and not sell:
         return 1.0
@@ -252,7 +256,7 @@ def _rsi(close: pd.Series, length: int) -> pd.Series:
     losses = -delta.clip(upper=0.0)
     avg_gain = gains.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
     avg_loss = losses.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
-    rs = avg_gain / avg_loss.replace(0.0, pd.NA)
+    rs = _safe_divide(avg_gain, avg_loss)
     rsi = 100.0 - (100.0 / (1.0 + rs))
     return rsi.astype(float)
 
@@ -271,7 +275,7 @@ def _rsi_signal(close: pd.Series, length: int) -> float:
 def _stoch_signal(high: pd.Series, low: pd.Series, close: pd.Series) -> float:
     lowest = low.rolling(14).min()
     highest = high.rolling(14).max()
-    raw_k = 100.0 * (close - lowest) / (highest - lowest).replace(0.0, pd.NA)
+    raw_k = 100.0 * _safe_divide(close - lowest, highest - lowest)
     k = raw_k.rolling(3).mean()
     d = k.rolling(3).mean()
     k_value = _last_value(k)
@@ -287,7 +291,7 @@ def _cci_signal(high: pd.Series, low: pd.Series, close: pd.Series, length: int) 
     typical = (high + low + close) / 3.0
     sma = typical.rolling(length).mean()
     mad = typical.rolling(length).apply(lambda values: float((abs(values - values.mean())).mean()), raw=True)
-    cci = (typical - sma) / (0.015 * mad.replace(0.0, pd.NA))
+    cci = _safe_divide(typical - sma, 0.015 * mad)
     current = _last_value(cci)
     previous = _last_value(cci.shift(1))
     if current is None or previous is None:
@@ -304,9 +308,9 @@ def _adx_components(high: pd.Series, low: pd.Series, close: pd.Series, length: i
     minus_dm = down_move.where((down_move > up_move) & (down_move > 0.0), 0.0)
     true_range = pd.concat([(high - low), (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
     atr = true_range.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
-    plus_di = 100.0 * plus_dm.ewm(alpha=1 / length, adjust=False, min_periods=length).mean() / atr.replace(0.0, pd.NA)
-    minus_di = 100.0 * minus_dm.ewm(alpha=1 / length, adjust=False, min_periods=length).mean() / atr.replace(0.0, pd.NA)
-    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0.0, pd.NA)
+    plus_di = 100.0 * _safe_divide(plus_dm.ewm(alpha=1 / length, adjust=False, min_periods=length).mean(), atr)
+    minus_di = 100.0 * _safe_divide(minus_dm.ewm(alpha=1 / length, adjust=False, min_periods=length).mean(), atr)
+    dx = 100.0 * _safe_divide((plus_di - minus_di).abs(), plus_di + minus_di)
     adx = dx.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
     return plus_di.astype(float), minus_di.astype(float), adx.astype(float)
 
@@ -367,7 +371,7 @@ def _stoch_rsi_signal(close: pd.Series) -> float:
     rsi = _rsi(close, 14)
     lowest = rsi.rolling(14).min()
     highest = rsi.rolling(14).max()
-    raw = 100.0 * (rsi - lowest) / (highest - lowest).replace(0.0, pd.NA)
+    raw = 100.0 * _safe_divide(rsi - lowest, highest - lowest)
     k = raw.rolling(3).mean()
     d = k.rolling(3).mean()
     close_sma50 = close.rolling(50).mean()
@@ -385,7 +389,7 @@ def _stoch_rsi_signal(close: pd.Series) -> float:
 def _williams_r_signal(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> float:
     highest = high.rolling(length).max()
     lowest = low.rolling(length).min()
-    wr = -100.0 * (highest - close) / (highest - lowest).replace(0.0, pd.NA)
+    wr = -100.0 * _safe_divide(highest - close, highest - lowest)
     current = _last_value(wr)
     previous = _last_value(wr.shift(1))
     if current is None or previous is None:
@@ -418,9 +422,9 @@ def _ultimate_oscillator_signal(high: pd.Series, low: pd.Series, close: pd.Serie
     prev_close = close.shift(1)
     buying_pressure = close - pd.concat([low, prev_close], axis=1).min(axis=1)
     true_range = pd.concat([high, prev_close], axis=1).max(axis=1) - pd.concat([low, prev_close], axis=1).min(axis=1)
-    avg7 = buying_pressure.rolling(7).sum() / true_range.rolling(7).sum().replace(0.0, pd.NA)
-    avg14 = buying_pressure.rolling(14).sum() / true_range.rolling(14).sum().replace(0.0, pd.NA)
-    avg28 = buying_pressure.rolling(28).sum() / true_range.rolling(28).sum().replace(0.0, pd.NA)
+    avg7 = _safe_divide(buying_pressure.rolling(7).sum(), true_range.rolling(7).sum())
+    avg14 = _safe_divide(buying_pressure.rolling(14).sum(), true_range.rolling(14).sum())
+    avg28 = _safe_divide(buying_pressure.rolling(28).sum(), true_range.rolling(28).sum())
     uo = 100.0 * ((4.0 * avg7) + (2.0 * avg14) + avg28) / 7.0
     value = _last_value(uo)
     if value is None:
