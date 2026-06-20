@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.config import AppConfig
 from src.peg_screen import EarningsEvent, assess_peg_event_quality, run_peg_screen
+from src.peg_strategy import assess_sean_post_earnings_gap_setup
 
 
 def _price_data(*, hv_signal: str | None = "HVE") -> tuple[list[dict[str, object]], str]:
@@ -82,11 +83,43 @@ def _peg_setup(price_data: list[dict[str, object]], peg_date: str) -> dict[str, 
     }
 
 
+def _make_recent_pullback_light_volume(price_data: list[dict[str, object]], *, days: int = 8, volume: float = 450_000.0) -> None:
+    start_index = max(0, len(price_data) - days)
+    for idx in range(start_index, len(price_data)):
+        price_data[idx]["volume"] = volume
+
+
+def _extend_quiet_post_gap_bars(price_data: list[dict[str, object]], *, extra_days: int = 8, volume: float = 450_000.0) -> None:
+    last_date = dt.date.fromisoformat(str(price_data[-1]["formatted_date"]))
+    last_close = float(price_data[-1]["close"])
+    for offset in range(1, extra_days + 1):
+        next_date = last_date + dt.timedelta(days=offset)
+        close_value = round(last_close + (offset * 0.15), 4)
+        price_data.append(
+            {
+                "formatted_date": next_date.isoformat(),
+                "open": round(close_value - 0.4, 4),
+                "high": round(close_value + 2.4, 4),
+                "low": round(close_value - 2.4, 4),
+                "close": close_value,
+                "volume": volume,
+            }
+        )
+
+
 class _FakeFinancials:
-    def __init__(self, price_data: list[dict[str, object]], peg_setup: dict[str, object], *, ema50: float = 105.0) -> None:
+    def __init__(
+        self,
+        price_data: list[dict[str, object]],
+        peg_setup: dict[str, object],
+        *,
+        ema50: float = 105.0,
+        demand_dry: bool = True,
+    ) -> None:
         self._price_rows = price_data
         self._peg_setup = peg_setup
         self._ema50 = ema50
+        self._demand_dry = demand_dry
 
     def _get_clean_price_data(self) -> list[dict[str, object]]:
         return self._price_rows
@@ -99,7 +132,7 @@ class _FakeFinancials:
         return None
 
     def is_demand_dry(self) -> tuple[bool, dict[str, object]]:
-        return True, {}
+        return self._demand_dry, {}
 
     def find_recent_power_earnings_gap_event(self, recency_days: int = 30) -> dict[str, object] | None:
         return self._peg_setup
@@ -215,6 +248,61 @@ class PegScreenTests(unittest.TestCase):
         self.assertEqual(result.passed_tickers, 1)
         self.assertEqual(result.recent_event_tickers, 1)
         self.assertEqual(result.hits[0].peg_volume_signal_kind, "HVE")
+
+    def test_sean_gap_up_can_qualify_even_with_distribution_warning(self) -> None:
+        price_data, peg_date = _price_data(hv_signal="HVE")
+        financials = _FakeFinancials(price_data, _peg_setup(price_data, peg_date))
+
+        assessment = assess_sean_post_earnings_gap_setup(
+            financials,
+            peg_date,
+            True,
+            AppConfig(),
+        )
+
+        self.assertTrue(assessment.qualifies)
+        self.assertIn("recent distribution warning", assessment.notes)
+
+    def test_sean_gap_up_can_qualify_without_breakout_or_dema_support_ready(self) -> None:
+        price_data, peg_date = _price_data(hv_signal="HVE")
+        financials = _FakeFinancials(price_data, _peg_setup(price_data, peg_date))
+        config = AppConfig(
+            peg_sean_tight_range_max_pct=0.000001,
+            peg_sean_breakout_proximity_pct=0.0,
+            peg_sean_dema_tolerance_pct=0.0,
+        )
+
+        assessment = assess_sean_post_earnings_gap_setup(
+            financials,
+            peg_date,
+            False,
+            config,
+        )
+
+        self.assertTrue(assessment.qualifies)
+        self.assertFalse(assessment.breakout_ready)
+        self.assertFalse(assessment.dema_support_ready)
+        self.assertIn("not near breakout or 8 DEMA support entry", assessment.notes)
+
+    def test_sean_gap_up_does_not_require_demand_dry_or_pullback_volume_check(self) -> None:
+        price_data, peg_date = _price_data(hv_signal="HVE")
+        financials = _FakeFinancials(
+            price_data,
+            _peg_setup(price_data, peg_date),
+            demand_dry=False,
+        )
+
+        assessment = assess_sean_post_earnings_gap_setup(
+            financials,
+            peg_date,
+            False,
+            AppConfig(),
+        )
+
+        self.assertFalse(assessment.demand_dry)
+        self.assertFalse(assessment.low_volume_pullback)
+        self.assertTrue(assessment.qualifies)
+        self.assertIn("pullback volume not drying up", assessment.notes)
 
 
 if __name__ == "__main__":

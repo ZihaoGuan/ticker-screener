@@ -147,6 +147,7 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": "Wyckoff distribution names where the indicator flips into a fresh SELL state after UTAD, LPSY, or phase deterioration.",
         "timeframe": "Daily",
         "accent": "rose",
+        "bias_group": "bearish",
     },
     {
         "id": "sepa_vcp",
@@ -197,6 +198,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "lime",
     },
     {
+        "id": "vcs_critical_tightness",
+        "strategy_id": "vcs_critical_tightness",
+        "label": "VCS Critical Tightness",
+        "description": "Advanced volatility contraction names where price, spread, and volume have all compressed into a high-readiness state.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+        "bias_group": "bullish",
+    },
+    {
         "id": "sean_breakout",
         "strategy_id": "sean_breakout",
         "label": "Sean Breakout",
@@ -211,6 +221,7 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": "High-velocity dislocation setups where panic can create asymmetric snapback entries.",
         "timeframe": "Daily",
         "accent": "cyan",
+        "bias_group": "bullish",
     },
     {
         "id": "td9_bullish",
@@ -219,6 +230,7 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": "Bullish TD Sequential exhaustion names where downside pressure may be finishing.",
         "timeframe": "Daily",
         "accent": "lime",
+        "bias_group": "bullish",
     },
 )
 
@@ -303,7 +315,18 @@ class WatchlistService:
     def get_scanner_top_hits_payload(self, *, rrg_service: Any | None = None, now: dt.datetime | None = None) -> dict[str, Any]:
         board_payload = self.get_scanner_board(now=now)
         cards = [dict(item) for item in board_payload.get("cards", []) if isinstance(item, dict)]
-        live_cards = [item for item in cards if item.get("available") and str(item.get("stem") or "").strip()]
+        card_config_by_id = {
+            str(item.get("id") or ""): item
+            for item in _SCANNER_BOARD_CONFIG
+            if str(item.get("id") or "").strip()
+        }
+        live_cards = [
+            item
+            for item in cards
+            if item.get("available")
+            and str(item.get("stem") or "").strip()
+            and str(card_config_by_id.get(str(item.get("id") or ""), {}).get("bias_group") or "bullish") != "bearish"
+        ]
         sector_momentum_map = self._load_sector_momentum_map(rrg_service)
         aggregated: dict[str, dict[str, Any]] = {}
 

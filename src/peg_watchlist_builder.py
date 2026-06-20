@@ -14,11 +14,7 @@ def _format_note(hit: PegHit) -> str:
     if hit.peg_volume_signal_kind:
         note_parts.append(hit.peg_volume_signal_kind)
     if hit.strategy_profile == "sean-peg":
-        if hit.strategy_inside_day_at_ema21:
-            note_parts.insert(1, "Sean inside day at 21 EMA")
-        elif hit.strategy_breakout_ready:
-            note_parts.insert(1, "Sean breakout-ready")
-        elif hit.strategy_dema_support_ready:
+        if hit.strategy_dema_support_ready:
             note_parts.insert(1, "Sean 8 DEMA support-ready")
         else:
             note_parts.insert(1, "Sean qualified setup")
@@ -57,20 +53,7 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
         ]
         filtered_hits.sort(
             key=lambda hit: (
-                not (hit.strategy_inside_day and hit.strategy_price_above_ema21),
-                (
-                    hit.strategy_ema21_distance_pct
-                    if (
-                        hit.strategy_inside_day
-                        and hit.strategy_price_above_ema21
-                        and hit.strategy_ema21_distance_pct is not None
-                        and hit.strategy_ema21_distance_pct >= 0
-                    )
-                    else float("inf")
-                ),
-                not hit.strategy_inside_day_at_ema21,
                 -(hit.strategy_setup_score or 0),
-                not hit.strategy_breakout_ready,
                 not hit.strategy_dema_support_ready,
                 -(hit.strategy_peg_age_days or 0),
             ),
@@ -82,15 +65,14 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
     for hit in filtered_hits:
         status_text = "Actionable now" if hit.actionable_now else "Event only"
         if strategy_profile == "sean-peg":
-            setup_text = "Breakout watch" if hit.strategy_breakout_ready else "8 DEMA support watch"
+            setup_text = "8 DEMA support watch" if hit.strategy_dema_support_ready else "Qualified setup watch"
             summary = (
                 f"PEG event {hit.peg_date}. {setup_text}. "
                 f"Gap-day volume signal {hit.peg_volume_signal_kind or 'none'}. "
                 f"Age {hit.strategy_peg_age_days or 0} bars since gap. "
                 f"ADR20 {hit.strategy_adr_pct_20:.2f}%. "
                 f"Avg vol20 {hit.strategy_avg_volume_20:,.0f}. "
-                f"Low-volume pullback {'yes' if hit.strategy_low_volume_pullback else 'no'}. "
-                f"Inside day at 21 EMA {'yes' if hit.strategy_inside_day_at_ema21 else 'no'}."
+                f"Low-volume pullback {'yes' if hit.strategy_low_volume_pullback else 'no'}."
             )
             if hit.strategy_ema21_distance_pct is not None:
                 summary += f" 21 EMA distance {hit.strategy_ema21_distance_pct:+.2f}%."
@@ -115,7 +97,7 @@ def build_peg_watchlist(hits: list[PegHit], *, strategy_profile: str = "legacy")
         if strategy_profile == "sean-peg":
             trigger_price = round(hit.strategy_breakout_trigger or hit.gdh, 4)
             trigger_label = "Post-gap breakout trigger"
-            entry_style = "post_earnings_gap_breakout" if hit.strategy_breakout_ready else "post_earnings_gap_dema_support"
+            entry_style = "post_earnings_gap_dema_support" if hit.strategy_dema_support_ready else "post_earnings_gap_watch"
             if hit.strategy_inside_day and hit.strategy_price_above_ema21 and hit.strategy_ema_21 is not None:
                 entry_price = hit.strategy_ema_21
                 entry_label = "Inside day at 21 EMA" if hit.strategy_inside_day_at_ema21 else "Inside day above 21 EMA"

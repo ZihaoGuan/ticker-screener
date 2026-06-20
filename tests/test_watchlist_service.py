@@ -166,6 +166,11 @@ class WatchlistServiceTests(unittest.TestCase):
             modified_at=dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc),
         )
         self._write_watchlist(
+            "vcs_critical_tightness_2026-06-12",
+            tickers=["APP", "NVDA"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 42, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
             "td9_bullish_2026-06-12",
             tickers=["SHOP"],
             modified_at=dt.datetime(2026, 6, 12, 23, 45, tzinfo=dt.timezone.utc),
@@ -187,6 +192,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["rs"]["preview_tickers"], ["PLTR", "CRWV"])
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-12")
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-12")
+        self.assertEqual(cards["vcs_critical_tightness"]["stem"], "vcs_critical_tightness_2026-06-12")
+        self.assertEqual(cards["vcs_critical_tightness"]["preview_tickers"], ["APP", "NVDA"])
         self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-12")
         self.assertEqual(cards["fearzone"]["preview_tickers"], ["TSLA", "HOOD"])
 
@@ -239,6 +246,21 @@ class WatchlistServiceTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        (watchlists_dir / "wyckoff_sell_signal_2026-06-12.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "PLTR",
+                        "company_name": "Palantir",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "current_price": 132.45,
+                        "daily_change_pct": 2.1,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
         self._write_watchlist(
             "weekly_rs_new_high_2026-06-06",
             tickers=["MSFT"],
@@ -253,6 +275,10 @@ class WatchlistServiceTests(unittest.TestCase):
         os.utime(
             watchlists_dir / "fearzone_2026-06-12.json",
             (dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+        os.utime(
+            watchlists_dir / "wyckoff_sell_signal_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 41, tzinfo=dt.timezone.utc).timestamp(),) * 2,
         )
 
         class _FakeRrgService:
@@ -299,6 +325,7 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["total_unique_tickers"], 4)
         self.assertEqual(payload["overlapping_ticker_count"], 1)
+        self.assertEqual(payload["total_live_scanners"], 3)
         pltr = payload["rows"][0]
         self.assertEqual(pltr["ticker"], "PLTR")
         self.assertEqual(pltr["scanner_count"], 2)

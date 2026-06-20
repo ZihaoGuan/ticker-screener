@@ -160,14 +160,11 @@ def assess_sean_post_earnings_gap_setup(
     demand_dry = bool(financials.is_demand_dry()[0])  # type: ignore[attr-defined]
     recent_avg_volume = float(np.mean(recent_volumes)) if recent_volumes else None
     low_volume_pullback = bool(
-        demand_dry
-        or (
-            recent_avg_volume is not None
-            and avg_volume_20 is not None
-            and recent_avg_volume <= avg_volume_20
-            and peg_volume is not None
-            and recent_avg_volume < float(peg_volume)
-        )
+        recent_avg_volume is not None
+        and avg_volume_20 is not None
+        and recent_avg_volume <= avg_volume_20
+        and peg_volume is not None
+        and recent_avg_volume < float(peg_volume)
     )
 
     breakout_trigger = None
@@ -216,19 +213,18 @@ def assess_sean_post_earnings_gap_setup(
     else:
         notes.append("price not above 50 EMA")
     if low_volume_pullback:
-        score += 1
+        notes.append("pullback volume drying up")
     else:
         notes.append("pullback volume not drying up")
-    if not distribution_warning:
-        score += 1
-    else:
+    if distribution_warning:
         notes.append("recent distribution warning")
-    if breakout_ready or dema_support_ready:
+    if dema_support_ready:
         score += 1
+    elif breakout_ready:
+        notes.append("near breakout trigger")
     else:
         notes.append("not near breakout or 8 DEMA support entry")
     if inside_day_at_ema21:
-        score += 1
         notes.append("inside day at 21 EMA")
     elif inside_day:
         notes.append("inside day but extended from 21 EMA")
@@ -243,13 +239,10 @@ def assess_sean_post_earnings_gap_setup(
         and avg_volume_20 is not None
         and avg_volume_20 >= int(config.peg_sean_min_avg_volume)
         and price_above_ema50
-        and low_volume_pullback
-        and not distribution_warning
-        and (breakout_ready or dema_support_ready)
     )
 
-    setup_label = "post_earnings_gap_breakout" if breakout_ready else "post_earnings_gap_dema_support"
-    if not (breakout_ready or dema_support_ready):
+    setup_label = "post_earnings_gap_dema_support" if dema_support_ready else "post_earnings_gap_watch"
+    if not dema_support_ready:
         setup_label = "post_earnings_gap_watch"
 
     return SeanPegAssessment(
