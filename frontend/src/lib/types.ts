@@ -720,6 +720,7 @@ export type ChartFundamentalsResponse = {
     missing_metric_names: string[];
     insufficient_baseline_metrics: string[];
   } | null;
+  technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
   diagnostics: {
     earnings: {
       status: string;
@@ -742,6 +743,17 @@ export type ChartFundamentalsResponse = {
       attempts: Array<Record<string, unknown>>;
     };
   };
+};
+
+export type TechnicalIndicatorRatingCell = {
+  timeframe: string;
+  as_of_date: string;
+  moving_average_score: number | null;
+  oscillator_score: number | null;
+  overall_score: number | null;
+  rating_label: string | null;
+  technical_status: string | null;
+  technical_status_reason: string | null;
 };
 
 export type TopRatingEntry = {
@@ -806,6 +818,32 @@ export type TopTechnicalRatingsResponse = {
   limit: number;
   technical_status: string;
   rows: TopTechnicalRatingEntry[];
+  status_counts: Record<string, number>;
+  sector_options?: string[];
+  database_configured: boolean;
+};
+
+export type TopTechnicalIndicatorRatingEntry = {
+  ticker: string;
+  as_of_date: string;
+  sector: string | null;
+  industry: string | null;
+  current_rank: number;
+  previous_rank: number | null;
+  rank_change: "up" | "down" | "same" | "new";
+  rank_delta: number | null;
+  combined_status: string;
+  daily: TechnicalIndicatorRatingCell;
+  weekly: TechnicalIndicatorRatingCell;
+  monthly: TechnicalIndicatorRatingCell;
+};
+
+export type TopTechnicalIndicatorRatingsResponse = {
+  as_of_date: string | null;
+  previous_as_of_date: string | null;
+  limit: number;
+  technical_status: string;
+  rows: TopTechnicalIndicatorRatingEntry[];
   status_counts: Record<string, number>;
   sector_options?: string[];
   database_configured: boolean;
@@ -1426,6 +1464,7 @@ export type EarningsCalendarEntry = {
     technical_status_reason?: string | null;
     flags?: string[];
   } | null;
+  technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell> | null;
   implied_move_signal?: {
     threshold_pct: number;
     near_earnings: boolean;

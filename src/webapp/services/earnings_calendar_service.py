@@ -62,6 +62,7 @@ class EarningsCalendarService:
         )
         rating_snapshots = self.ratings_repository.load_latest_rating_snapshots_for_tickers(ticker_list)
         technical_rating_snapshots = self.ratings_repository.load_latest_technical_rating_snapshots_for_tickers(ticker_list)
+        technical_indicator_ratings = self.ratings_repository.load_latest_technical_indicator_ratings_for_tickers(ticker_list)
 
         grouped_days: dict[str, dict[str, Any]] = {}
         available_sector_labels: set[str] = set()
@@ -123,6 +124,7 @@ class EarningsCalendarService:
                     "exchange": exchange,
                     "fundamental_rating": rating_snapshots.get(ticker),
                     "technical_rating": technical_rating_snapshots.get(ticker),
+                    "technical_indicator_ratings": technical_indicator_ratings.get(ticker, {}),
                     "criteria": criteria_by_ticker.get(ticker),
                     "implied_move_signal": criteria_by_ticker.get(ticker, {}).get("implied_move_signal")
                     if isinstance(criteria_by_ticker.get(ticker), dict)

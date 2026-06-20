@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from src.market_data_access import resolve_database_url
 
 from .constants import RATING_STATUS_SCRAPE_FAILED
-from .models import FundamentalsSnapshot, RatingSnapshot, SectorMetricBaseline, TechnicalRatingSnapshot
+from .models import FundamentalsSnapshot, RatingSnapshot, SectorMetricBaseline, TechnicalIndicatorRatingSnapshot, TechnicalRatingSnapshot
 
 
 class RatingsRepository:
@@ -505,6 +505,60 @@ class RatingsRepository:
             connection.commit()
         return len(rows)
 
+    def replace_technical_indicator_rating_snapshots(
+        self,
+        as_of_date: dt.date,
+        ratings: Iterable[TechnicalIndicatorRatingSnapshot],
+        *,
+        tickers: Iterable[str] | None = None,
+    ) -> int:
+        rows = list(ratings)
+        connection = self._connect()
+        if connection is None:
+            return 0
+        normalized_tickers = [str(item).strip().upper() for item in (tickers or []) if str(item).strip()]
+        with connection:
+            with connection.cursor() as cursor:
+                if normalized_tickers:
+                    cursor.execute(
+                        """
+                        DELETE FROM ticker_technical_indicator_rating_snapshots
+                        WHERE as_of_date = %s
+                          AND ticker = ANY(%s)
+                        """,
+                        (as_of_date, normalized_tickers),
+                    )
+                else:
+                    cursor.execute("DELETE FROM ticker_technical_indicator_rating_snapshots WHERE as_of_date = %s", (as_of_date,))
+                if rows:
+                    cursor.executemany(
+                        """
+                        INSERT INTO ticker_technical_indicator_rating_snapshots (
+                          ticker, as_of_date, timeframe, moving_average_score, oscillator_score, overall_score,
+                          rating_label, technical_status, technical_status_reason, missing_metric_names
+                        ) VALUES (
+                          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb
+                        )
+                        """,
+                        [
+                            (
+                                item.ticker.upper(),
+                                item.as_of_date,
+                                item.timeframe,
+                                item.moving_average_score,
+                                item.oscillator_score,
+                                item.overall_score,
+                                item.rating_label,
+                                item.technical_status,
+                                item.technical_status_reason,
+                                json.dumps(item.missing_metric_names),
+                            )
+                            for item in rows
+                        ],
+                    )
+            connection.commit()
+        return len(rows)
+
     def load_fundamentals_for_date(
         self,
         as_of_date: dt.date,
@@ -972,6 +1026,69 @@ class RatingsRepository:
             }
         return result
 
+    def load_latest_technical_indicator_ratings_for_tickers(self, tickers: Iterable[str]) -> dict[str, dict[str, dict[str, Any]]]:
+        normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
+        if not normalized:
+            return {}
+        connection = self._connect()
+        if connection is None:
+            return {}
+        sql = """
+            SELECT DISTINCT ON (r.ticker, r.timeframe)
+              r.ticker,
+              r.timeframe,
+              r.as_of_date,
+              tm.sector,
+              tm.industry,
+              r.moving_average_score,
+              r.oscillator_score,
+              r.overall_score,
+              r.rating_label,
+              r.technical_status,
+              r.technical_status_reason,
+              r.missing_metric_names
+            FROM ticker_technical_indicator_rating_snapshots r
+            LEFT JOIN ticker_metadata tm
+              ON tm.ticker = r.ticker
+            WHERE r.ticker = ANY(%s)
+            ORDER BY r.ticker, r.timeframe, r.as_of_date DESC, r.updated_at DESC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized,))
+                rows = cursor.fetchall()
+        result: dict[str, dict[str, dict[str, Any]]] = {}
+        for (
+            ticker,
+            timeframe,
+            as_of_date,
+            sector,
+            industry,
+            moving_average_score,
+            oscillator_score,
+            overall_score,
+            rating_label,
+            technical_status,
+            technical_status_reason,
+            missing_metric_names,
+        ) in rows:
+            ticker_key = str(ticker).upper()
+            result.setdefault(ticker_key, {})[str(timeframe)] = {
+                "ticker": ticker_key,
+                "timeframe": str(timeframe),
+                "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date or ""),
+                "sector": sector,
+                "industry": industry,
+                "moving_average_score": float(moving_average_score) if moving_average_score is not None else None,
+                "oscillator_score": float(oscillator_score) if oscillator_score is not None else None,
+                "overall_score": float(overall_score) if overall_score is not None else None,
+                "rating_label": rating_label,
+                "technical_status": technical_status,
+                "technical_status_reason": technical_status_reason,
+                "missing_metric_names": list(missing_metric_names or []),
+            }
+        return result
+
     def list_top_rating_snapshots(
         self,
         *,
@@ -1372,6 +1489,264 @@ class RatingsRepository:
             "sector_options": sector_options,
         }
 
+    def list_top_technical_indicator_rating_snapshots(
+        self,
+        *,
+        as_of_date: dt.date | None = None,
+        limit: int = 100,
+        technical_status: str = "ok",
+        sector: str = "",
+    ) -> dict[str, Any]:
+        connection = self._connect()
+        if connection is None:
+            return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
+        normalized_limit = max(1, min(int(limit), 500))
+        normalized_status = str(technical_status or "").strip().lower()
+        normalized_sector = str(sector or "").strip().lower()
+        date_sql = """
+            SELECT COALESCE(%s::date, (SELECT MAX(as_of_date) FROM ticker_technical_indicator_rating_snapshots))
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(date_sql, (as_of_date,))
+                date_row = cursor.fetchone()
+                target_date = date_row[0] if date_row else None
+                if not isinstance(target_date, dt.date):
+                    return {"as_of_date": None, "previous_as_of_date": None, "rows": [], "status_counts": {}}
+                cursor.execute(
+                    """
+                    SELECT DISTINCT tm.sector
+                    FROM ticker_technical_indicator_rating_snapshots r
+                    LEFT JOIN ticker_metadata tm
+                      ON tm.ticker = r.ticker
+                    WHERE r.as_of_date = %s
+                      AND COALESCE(tm.sector, '') <> ''
+                    ORDER BY tm.sector ASC
+                    """,
+                    (target_date,),
+                )
+                sector_options = [str(value) for (value,) in cursor.fetchall() if value]
+                cursor.execute(
+                    """
+                    SELECT MAX(as_of_date)
+                    FROM ticker_technical_indicator_rating_snapshots
+                    WHERE as_of_date < %s
+                    """,
+                    (target_date,),
+                )
+                previous_date_row = cursor.fetchone()
+                previous_date = previous_date_row[0] if previous_date_row else None
+                cursor.execute(
+                    """
+                    WITH pivoted AS (
+                      SELECT
+                        r.ticker,
+                        MAX(CASE WHEN r.timeframe = '1d' THEN LOWER(COALESCE(r.technical_status, '')) END) AS daily_status,
+                        MAX(CASE WHEN r.timeframe = '1w' THEN LOWER(COALESCE(r.technical_status, '')) END) AS weekly_status,
+                        MAX(CASE WHEN r.timeframe = '1m' THEN LOWER(COALESCE(r.technical_status, '')) END) AS monthly_status
+                      FROM ticker_technical_indicator_rating_snapshots r
+                      LEFT JOIN ticker_metadata tm
+                        ON tm.ticker = r.ticker
+                      WHERE r.as_of_date = %s
+                        AND (%s = '' OR LOWER(COALESCE(tm.sector, '')) = %s)
+                      GROUP BY r.ticker
+                    )
+                    SELECT
+                      CASE
+                        WHEN COALESCE(daily_status, '') = 'ok'
+                         AND COALESCE(weekly_status, '') = 'ok'
+                         AND COALESCE(monthly_status, '') = 'ok' THEN 'ok'
+                        ELSE 'missing_metrics'
+                      END AS combined_status,
+                      COUNT(*)
+                    FROM pivoted
+                    GROUP BY combined_status
+                    """,
+                    (target_date, normalized_sector, normalized_sector),
+                )
+                status_counts = {str(status or "unknown"): int(count or 0) for status, count in cursor.fetchall()}
+                rows = self._fetch_top_technical_indicator_rows(
+                    cursor,
+                    target_date=target_date,
+                    normalized_status=normalized_status,
+                    normalized_sector=normalized_sector,
+                    limit=normalized_limit,
+                )
+                previous_ranks: dict[str, int] = {}
+                if isinstance(previous_date, dt.date):
+                    previous_rows = self._fetch_top_technical_indicator_rows(
+                        cursor,
+                        target_date=previous_date,
+                        normalized_status=normalized_status,
+                        normalized_sector=normalized_sector,
+                        limit=5000,
+                    )
+                    previous_ranks = {
+                        str(row[0] or "").upper(): index
+                        for index, row in enumerate(previous_rows, start=1)
+                    }
+        ranked_rows = [
+            _attach_rank_change(
+                {
+                    "ticker": str(ticker or "").upper(),
+                    "as_of_date": snapshot_date.isoformat() if isinstance(snapshot_date, dt.date) else str(snapshot_date or ""),
+                    "sector": sector_value,
+                    "industry": industry_value,
+                    "current_rank": index,
+                    "combined_status": combined_status,
+                    "daily": _technical_indicator_cell(
+                        "1d",
+                        snapshot_date,
+                        daily_ma,
+                        daily_osc,
+                        daily_overall,
+                        daily_label,
+                        daily_status,
+                        daily_reason,
+                    ),
+                    "weekly": _technical_indicator_cell(
+                        "1w",
+                        snapshot_date,
+                        weekly_ma,
+                        weekly_osc,
+                        weekly_overall,
+                        weekly_label,
+                        weekly_status,
+                        weekly_reason,
+                    ),
+                    "monthly": _technical_indicator_cell(
+                        "1m",
+                        snapshot_date,
+                        monthly_ma,
+                        monthly_osc,
+                        monthly_overall,
+                        monthly_label,
+                        monthly_status,
+                        monthly_reason,
+                    ),
+                },
+                previous_ranks,
+            )
+            for index, (
+                ticker,
+                snapshot_date,
+                sector_value,
+                industry_value,
+                combined_status,
+                daily_ma,
+                daily_osc,
+                daily_overall,
+                daily_label,
+                daily_status,
+                daily_reason,
+                weekly_ma,
+                weekly_osc,
+                weekly_overall,
+                weekly_label,
+                weekly_status,
+                weekly_reason,
+                monthly_ma,
+                monthly_osc,
+                monthly_overall,
+                monthly_label,
+                monthly_status,
+                monthly_reason,
+            ) in enumerate(rows, start=1)
+        ]
+        return {
+            "as_of_date": target_date.isoformat(),
+            "previous_as_of_date": previous_date.isoformat() if isinstance(previous_date, dt.date) else None,
+            "rows": ranked_rows,
+            "status_counts": dict(sorted(status_counts.items())),
+            "sector_options": sector_options,
+        }
+
+    def _fetch_top_technical_indicator_rows(
+        self,
+        cursor: Any,
+        *,
+        target_date: dt.date,
+        normalized_status: str,
+        normalized_sector: str,
+        limit: int,
+    ) -> list[tuple[Any, ...]]:
+        cursor.execute(
+            """
+            WITH pivoted AS (
+              SELECT
+                r.ticker,
+                r.as_of_date,
+                tm.sector,
+                tm.industry,
+                MAX(CASE WHEN r.timeframe = '1d' THEN r.moving_average_score END) AS daily_ma,
+                MAX(CASE WHEN r.timeframe = '1d' THEN r.oscillator_score END) AS daily_osc,
+                MAX(CASE WHEN r.timeframe = '1d' THEN r.overall_score END) AS daily_overall,
+                MAX(CASE WHEN r.timeframe = '1d' THEN r.rating_label END) AS daily_label,
+                MAX(CASE WHEN r.timeframe = '1d' THEN LOWER(COALESCE(r.technical_status, '')) END) AS daily_status,
+                MAX(CASE WHEN r.timeframe = '1d' THEN r.technical_status_reason END) AS daily_reason,
+                MAX(CASE WHEN r.timeframe = '1w' THEN r.moving_average_score END) AS weekly_ma,
+                MAX(CASE WHEN r.timeframe = '1w' THEN r.oscillator_score END) AS weekly_osc,
+                MAX(CASE WHEN r.timeframe = '1w' THEN r.overall_score END) AS weekly_overall,
+                MAX(CASE WHEN r.timeframe = '1w' THEN r.rating_label END) AS weekly_label,
+                MAX(CASE WHEN r.timeframe = '1w' THEN LOWER(COALESCE(r.technical_status, '')) END) AS weekly_status,
+                MAX(CASE WHEN r.timeframe = '1w' THEN r.technical_status_reason END) AS weekly_reason,
+                MAX(CASE WHEN r.timeframe = '1m' THEN r.moving_average_score END) AS monthly_ma,
+                MAX(CASE WHEN r.timeframe = '1m' THEN r.oscillator_score END) AS monthly_osc,
+                MAX(CASE WHEN r.timeframe = '1m' THEN r.overall_score END) AS monthly_overall,
+                MAX(CASE WHEN r.timeframe = '1m' THEN r.rating_label END) AS monthly_label,
+                MAX(CASE WHEN r.timeframe = '1m' THEN LOWER(COALESCE(r.technical_status, '')) END) AS monthly_status,
+                MAX(CASE WHEN r.timeframe = '1m' THEN r.technical_status_reason END) AS monthly_reason
+              FROM ticker_technical_indicator_rating_snapshots r
+              LEFT JOIN ticker_metadata tm
+                ON tm.ticker = r.ticker
+              WHERE r.as_of_date = %s
+                AND (%s = '' OR LOWER(COALESCE(tm.sector, '')) = %s)
+              GROUP BY r.ticker, r.as_of_date, tm.sector, tm.industry
+            ),
+            filtered AS (
+              SELECT
+                *,
+                CASE
+                  WHEN COALESCE(daily_status, '') = 'ok'
+                   AND COALESCE(weekly_status, '') = 'ok'
+                   AND COALESCE(monthly_status, '') = 'ok' THEN 'ok'
+                  ELSE 'missing_metrics'
+                END AS combined_status
+              FROM pivoted
+            )
+            SELECT
+              ticker,
+              as_of_date,
+              sector,
+              industry,
+              combined_status,
+              daily_ma,
+              daily_osc,
+              daily_overall,
+              daily_label,
+              daily_status,
+              daily_reason,
+              weekly_ma,
+              weekly_osc,
+              weekly_overall,
+              weekly_label,
+              weekly_status,
+              weekly_reason,
+              monthly_ma,
+              monthly_osc,
+              monthly_overall,
+              monthly_label,
+              monthly_status,
+              monthly_reason
+            FROM filtered
+            WHERE (%s = '' OR combined_status = %s)
+            ORDER BY daily_overall DESC NULLS LAST, weekly_overall DESC NULLS LAST, monthly_overall DESC NULLS LAST, ticker ASC
+            LIMIT %s
+            """,
+            (target_date, normalized_sector, normalized_sector, normalized_status, normalized_status, max(1, int(limit))),
+        )
+        return list(cursor.fetchall())
+
 
 def _normalize_text_values(values: Iterable[str] | None) -> list[str]:
     if not values:
@@ -1398,6 +1773,28 @@ def _attach_rank_change(row: dict[str, Any], previous_ranks: dict[str, int]) -> 
     row["rank_change"] = rank_change
     row["rank_delta"] = rank_delta
     return row
+
+
+def _technical_indicator_cell(
+    timeframe: str,
+    as_of_date: dt.date | str | None,
+    moving_average_score: Any,
+    oscillator_score: Any,
+    overall_score: Any,
+    rating_label: Any,
+    technical_status: Any,
+    technical_status_reason: Any,
+) -> dict[str, Any]:
+    return {
+        "timeframe": timeframe,
+        "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date or ""),
+        "moving_average_score": float(moving_average_score) if moving_average_score is not None else None,
+        "oscillator_score": float(oscillator_score) if oscillator_score is not None else None,
+        "overall_score": float(overall_score) if overall_score is not None else None,
+        "rating_label": rating_label,
+        "technical_status": technical_status,
+        "technical_status_reason": technical_status_reason,
+    }
 
 
 def _coerce_json_payload(value: Any, *, default: Any) -> Any:

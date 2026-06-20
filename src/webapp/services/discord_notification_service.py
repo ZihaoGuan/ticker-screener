@@ -156,6 +156,7 @@ class DiscordNotificationService:
             "build_sector_rating_baselines",
             "build_ticker_ratings",
             "build_technical_ratings",
+            "build_technical_indicator_ratings",
             "run_finviz_ratings_pipeline",
         }:
             return "admin_sync"

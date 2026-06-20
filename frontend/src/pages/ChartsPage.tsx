@@ -287,6 +287,10 @@ export function ChartsPage() {
   const latestRatingSnapshot = fundamentalsPayload?.rating_snapshot ?? null;
   const latestFundamentalRank = fundamentalsPayload?.fundamental_rank ?? null;
   const latestRatingDiagnostics = fundamentalsPayload?.rating_diagnostics ?? null;
+  const technicalIndicatorRatings = fundamentalsPayload?.technical_indicator_ratings ?? {};
+  const orderedTechnicalIndicatorRatings = ["1d", "1w", "1m"]
+    .map((timeframe) => technicalIndicatorRatings[timeframe] ?? null)
+    .filter((item): item is NonNullable<typeof item> => item != null);
   const sectorLabel = latestFundamentalsSnapshot?.sector?.trim() || null;
   const industryLabel = latestFundamentalsSnapshot?.industry?.trim() || null;
   const atrExtensionMarkers = useMemo(() => buildAtrExtensionMarkers(chartData, chartPayload?.ma50 ?? [], 14), [chartData, chartPayload?.ma50]);
@@ -850,6 +854,45 @@ export function ChartsPage() {
                 </pre>
               </details>
             ) : null}
+          </>
+        ) : null}
+      </Panel>
+
+      <Panel title="Technical Ratings" aside={<span className="eyebrow">Latest DB-backed daily / weekly / monthly composite labels</span>}>
+        {!requestedTicker ? <p className="panel-copy">Load ticker to inspect multi-timeframe technical ratings.</p> : null}
+        {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading technical ratings…" compact /> : null}
+        {requestedTicker && !isFundamentalsLoading && orderedTechnicalIndicatorRatings.length === 0 ? (
+          <p className="panel-copy">No multi-timeframe technical ratings returned for this ticker yet.</p>
+        ) : null}
+        {orderedTechnicalIndicatorRatings.length > 0 ? (
+          <>
+            <p className="panel-copy">TradingView-style composite score across 26 indicator conditions, stored per timeframe.</p>
+            <div className="data-table-responsive">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Timeframe</th>
+                    <th>Label</th>
+                    <th>Overall</th>
+                    <th>MAs</th>
+                    <th>Oscillators</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderedTechnicalIndicatorRatings.map((rating) => (
+                    <tr key={`${rating.timeframe}-${rating.as_of_date}`}>
+                      <td>{rating.timeframe.toUpperCase()}</td>
+                      <td>{rating.rating_label ?? "-"}</td>
+                      <td>{formatMetric(rating.overall_score)}</td>
+                      <td>{formatMetric(rating.moving_average_score)}</td>
+                      <td>{formatMetric(rating.oscillator_score)}</td>
+                      <td>{rating.technical_status ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         ) : null}
       </Panel>

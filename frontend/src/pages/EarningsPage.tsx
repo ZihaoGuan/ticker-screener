@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
-import type { EarningsCalendarDay, EarningsCalendarEntry, EarningsCalendarResponse } from "../lib/types";
+import type { EarningsCalendarDay, EarningsCalendarEntry, EarningsCalendarResponse, TechnicalIndicatorRatingCell } from "../lib/types";
 
 const CRITERIA_LABELS: Array<{ key: string; label: string; shortLabel: string }> = [
   { key: "institutional_ownership_ge_10", label: "Institutional ownership >= 10%", shortLabel: "Inst > 10%" },
@@ -73,6 +73,12 @@ function formatRatingValue(value: number | null | undefined) {
   return value == null ? "--" : value.toFixed(1);
 }
 
+function orderedTechnicalIndicatorRatings(ratings: Record<string, TechnicalIndicatorRatingCell> | null | undefined) {
+  return ["1d", "1w", "1m"]
+    .map((timeframe) => ratings?.[timeframe] ?? null)
+    .filter((item): item is TechnicalIndicatorRatingCell => item != null);
+}
+
 function filterEntries(
   entries: EarningsCalendarEntry[],
   {
@@ -116,7 +122,7 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
             <span className="earnings-exchange-badge">{entry.exchange ?? "-"}</span>
           </div>
           <p className="earnings-entry-meta">{[entry.sector, entry.industry].filter(Boolean).join(" / ") || "No sector or industry"}</p>
-          {entry.fundamental_rating || entry.technical_rating ? (
+          {entry.fundamental_rating || entry.technical_rating || orderedTechnicalIndicatorRatings(entry.technical_indicator_ratings).length > 0 ? (
             <div className="earnings-criteria-pill-row">
               {entry.fundamental_rating ? (
                 <span
@@ -134,6 +140,15 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
                   {`T ${formatRatingValue(entry.technical_rating.overall_rating)}${entry.technical_rating.rating_band ? ` ${entry.technical_rating.rating_band}` : ""}`}
                 </span>
               ) : null}
+              {orderedTechnicalIndicatorRatings(entry.technical_indicator_ratings).map((rating) => (
+                <span
+                  key={`${entry.ticker}-${rating.timeframe}`}
+                  className={`earnings-criteria-pill${rating.technical_status === "ok" ? " is-match" : " is-miss"}`}
+                  title={`Tech rating ${rating.timeframe.toUpperCase()} ${rating.as_of_date}${rating.overall_score != null ? ` · ${rating.overall_score.toFixed(2)}` : ""}${rating.technical_status ? ` · ${rating.technical_status}` : ""}`}
+                >
+                  {`${rating.timeframe.toUpperCase()} ${rating.rating_label ?? "--"}`}
+                </span>
+              ))}
             </div>
           ) : null}
           {entry.summary ? <p className="earnings-entry-summary">"{entry.summary}"</p> : null}

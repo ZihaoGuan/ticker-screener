@@ -192,6 +192,27 @@ CREATE INDEX IF NOT EXISTS idx_ticker_technical_rating_snapshots_date_status
 CREATE INDEX IF NOT EXISTS idx_ticker_technical_rating_snapshots_date_overall
   ON ticker_technical_rating_snapshots(as_of_date, overall_rating DESC);
 
+CREATE TABLE IF NOT EXISTS ticker_technical_indicator_rating_snapshots (
+  ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
+  as_of_date DATE NOT NULL,
+  timeframe TEXT NOT NULL,
+  moving_average_score NUMERIC(18,6),
+  oscillator_score NUMERIC(18,6),
+  overall_score NUMERIC(18,6),
+  rating_label TEXT,
+  technical_status TEXT NOT NULL,
+  technical_status_reason TEXT,
+  missing_metric_names JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (ticker, as_of_date, timeframe)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_technical_indicator_rating_snapshots_date_tf_status
+  ON ticker_technical_indicator_rating_snapshots(as_of_date, timeframe, technical_status);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_technical_indicator_rating_snapshots_date_tf_overall
+  ON ticker_technical_indicator_rating_snapshots(as_of_date, timeframe, overall_score DESC);
+
 CREATE TABLE IF NOT EXISTS earnings_events (
   ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
   earnings_date DATE NOT NULL,

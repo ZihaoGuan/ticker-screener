@@ -571,6 +571,7 @@ class WatchlistService:
             )
         ) if previous_meta else set()
         entries = self._enrich_entries(self._filter_excluded_entries(self.repository.load_watchlist(stem)))
+        self._attach_entry_technical_indicator_ratings(entries)
         has_previous_scan = previous_meta is not None
         if has_previous_scan:
             for entry in entries:
@@ -894,6 +895,7 @@ class WatchlistService:
         normalized_ticker = str(ticker or "").strip().upper()
         ratings_repository = RatingsRepository(self.database_url) if self.database_url else None
         ratings_bundle = ratings_repository.load_latest_ticker_rating_bundle(normalized_ticker) if ratings_repository else None
+        technical_indicator_ratings = ratings_repository.load_latest_technical_indicator_ratings_for_tickers([normalized_ticker]).get(normalized_ticker, {}) if ratings_repository else {}
         cached_entry = ratings_repository.load_latest_chart_fundamentals_cache_entry(normalized_ticker) if ratings_repository else None
         if _chart_fundamentals_cache_is_complete(cached_entry):
             return {
@@ -907,6 +909,7 @@ class WatchlistService:
                 "rating_snapshot": ratings_bundle.get("rating_snapshot") if ratings_bundle else None,
                 "fundamental_rank": ratings_bundle.get("fundamental_rank") if ratings_bundle else None,
                 "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
+                "technical_indicator_ratings": technical_indicator_ratings,
                 "diagnostics": _chart_cache_diagnostics(cached_entry),
             }
 
@@ -955,6 +958,7 @@ class WatchlistService:
             "rating_snapshot": ratings_bundle.get("rating_snapshot") if ratings_bundle else None,
             "fundamental_rank": ratings_bundle.get("fundamental_rank") if ratings_bundle else None,
             "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
+            "technical_indicator_ratings": technical_indicator_ratings,
             "diagnostics": {
                 "earnings": browser_diagnostics["earnings"],
                 "holders": browser_diagnostics["holders"],
@@ -1012,6 +1016,36 @@ class WatchlistService:
                 "database_configured": False,
             }
         payload = RatingsRepository(self.database_url).list_top_technical_rating_snapshots(
+            as_of_date=as_of_date,
+            limit=limit,
+            technical_status=technical_status,
+            sector=sector,
+        )
+        payload["limit"] = max(1, min(int(limit), 500))
+        payload["technical_status"] = str(technical_status or "").strip().lower() or "ok"
+        payload["sector"] = str(sector or "").strip()
+        payload["database_configured"] = True
+        return payload
+
+    def get_top_technical_indicator_ratings_payload(
+        self,
+        *,
+        as_of_date: dt.date | None = None,
+        limit: int = 100,
+        technical_status: str = "ok",
+        sector: str = "",
+    ) -> dict[str, Any]:
+        if not self.database_url:
+            return {
+                "as_of_date": None,
+                "limit": limit,
+                "technical_status": technical_status,
+                "sector": sector,
+                "rows": [],
+                "status_counts": {},
+                "database_configured": False,
+            }
+        payload = RatingsRepository(self.database_url).list_top_technical_indicator_rating_snapshots(
             as_of_date=as_of_date,
             limit=limit,
             technical_status=technical_status,
@@ -1277,6 +1311,25 @@ class WatchlistService:
             row["fa_rating"] = _coerce_optional_float(fundamental.get("overall_rating"))
             row["ta_rating"] = _coerce_optional_float(technical.get("overall_rating"))
             row["rs_rating"] = _coerce_optional_float(technical.get("leadership_score"))
+
+    def _attach_entry_technical_indicator_ratings(self, entries: list[dict[str, Any]]) -> None:
+        if not self.database_url or not entries:
+            return
+        tickers = sorted(
+            {
+                normalize_ticker_symbol(str(entry.get("ticker") or ""))
+                for entry in entries
+                if normalize_ticker_symbol(str(entry.get("ticker") or ""))
+            }
+        )
+        if not tickers:
+            return
+        technical_indicator_map = RatingsRepository(self.database_url).load_latest_technical_indicator_ratings_for_tickers(tickers)
+        for entry in entries:
+            ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
+            if not ticker:
+                continue
+            entry["technical_indicator_ratings"] = technical_indicator_map.get(ticker, {})
 
     def _load_sector_momentum_map(self, rrg_service: Any | None) -> dict[str, dict[str, Any]]:
         if rrg_service is None:

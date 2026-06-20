@@ -58,6 +58,7 @@ class RunService:
         "build_sector_rating_baselines",
         "build_ticker_ratings",
         "build_technical_ratings",
+        "build_technical_indicator_ratings",
         "run_finviz_ratings_pipeline",
     }
     _progress_pattern = re.compile(r"\[(\d{1,6})/(\d{1,6})\]")
@@ -436,6 +437,19 @@ class RunService:
             "build_technical_ratings",
             "Build Technical Ratings",
             "scripts/build_technical_ratings.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _include_sectors_field,
+                _execution_mode_field,
+                _target_worker_field,
+                _as_of_date_field,
+            ),
+        ),
+        "build_technical_indicator_ratings": RunAction(
+            "build_technical_indicator_ratings",
+            "Build Multi-Timeframe Technical Ratings",
+            "scripts/build_technical_indicator_ratings.py",
             fields=(
                 _limit_field,
                 _tickers_field,
@@ -2560,7 +2574,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "run_finviz_ratings_pipeline"}:
+        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline"}:
             return "admin_sync"
         return "screen_run"
 
@@ -2590,7 +2604,7 @@ class RunService:
             self._notify_completed_job(job)
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "overlap_backtest_v1"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "overlap_backtest_v1"}:
             self._notify_completed_job(job)
             return
         summary_file = str(job.get("summary_file") or "").strip()

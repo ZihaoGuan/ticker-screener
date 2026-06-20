@@ -152,3 +152,20 @@ class TechnicalRatingSnapshot:
 
     def to_record(self) -> dict[str, Any]:
         return dict(self.__dict__)
+
+
+@dataclass
+class TechnicalIndicatorRatingSnapshot:
+    ticker: str
+    as_of_date: dt.date
+    timeframe: str
+    moving_average_score: float | None = None
+    oscillator_score: float | None = None
+    overall_score: float | None = None
+    rating_label: str | None = None
+    technical_status: str = "ok"
+    technical_status_reason: str | None = None
+    missing_metric_names: list[str] = field(default_factory=list)
+
+    def to_record(self) -> dict[str, Any]:
+        return dict(self.__dict__)

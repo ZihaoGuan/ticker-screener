@@ -3,9 +3,16 @@ import { Link, useSearchParams } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate } from "../lib/format";
-import type { TopRatingEntry, TopRatingsResponse, TopTechnicalRatingEntry, TopTechnicalRatingsResponse } from "../lib/types";
+import type {
+  TopRatingEntry,
+  TopRatingsResponse,
+  TopTechnicalIndicatorRatingEntry,
+  TopTechnicalIndicatorRatingsResponse,
+  TopTechnicalRatingEntry,
+  TopTechnicalRatingsResponse,
+} from "../lib/types";
 
-type RatingsMode = "fundamental" | "technical";
+type RatingsMode = "fundamental" | "technical" | "technical-indicator";
 
 function formatScore(value: number | null | undefined): string {
   if (value == null) {
@@ -51,13 +58,34 @@ function buildTechnicalRequestPath(asOfDate: string, limit: number, technicalSta
   return `/api/ratings/technical/top?${query.toString()}`;
 }
 
-function statusOptions(response: TopRatingsResponse | TopTechnicalRatingsResponse | null, preferredKey: "ok" = "ok") {
+function buildTechnicalIndicatorRequestPath(asOfDate: string, limit: number, technicalStatus: string, sector: string) {
+  const query = new URLSearchParams();
+  if (asOfDate.trim()) {
+    query.set("asOfDate", asOfDate.trim());
+  }
+  query.set("limit", String(limit));
+  if (technicalStatus.trim()) {
+    query.set("technicalStatus", technicalStatus.trim());
+  }
+  if (sector.trim()) {
+    query.set("sector", sector.trim());
+  }
+  return `/api/ratings/technical-indicator/top?${query.toString()}`;
+}
+
+function statusOptions(response: TopRatingsResponse | TopTechnicalRatingsResponse | TopTechnicalIndicatorRatingsResponse | null, preferredKey: "ok" = "ok") {
   const counts = response?.status_counts ?? {};
   return [preferredKey, ...Object.keys(counts).filter((key) => key !== preferredKey).sort()];
 }
 
 function normalizeMode(value: string | null): RatingsMode {
-  return value === "technical" ? "technical" : "fundamental";
+  if (value === "technical") {
+    return "technical";
+  }
+  if (value === "technical-indicator") {
+    return "technical-indicator";
+  }
+  return "fundamental";
 }
 
 function formatRankChange(row: Pick<TopRatingEntry, "current_rank" | "previous_rank" | "rank_change" | "rank_delta">): string {
@@ -89,6 +117,7 @@ export function RatingsPage() {
   const requestedLimit = Math.min(500, Math.max(1, Number(searchParams.get("limit") ?? "100") || 100));
   const [fundamentalPayload, setFundamentalPayload] = useState<TopRatingsResponse | null>(null);
   const [technicalPayload, setTechnicalPayload] = useState<TopTechnicalRatingsResponse | null>(null);
+  const [technicalIndicatorPayload, setTechnicalIndicatorPayload] = useState<TopTechnicalIndicatorRatingsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
 
@@ -98,11 +127,15 @@ export function RatingsPage() {
     const request =
       mode === "technical"
         ? fetchJson<TopTechnicalRatingsResponse>(buildTechnicalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
-        : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector));
+        : mode === "technical-indicator"
+          ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildTechnicalIndicatorRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
+          : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector));
     void request
       .then((response) => {
         if (mode === "technical") {
           setTechnicalPayload(response as TopTechnicalRatingsResponse);
+        } else if (mode === "technical-indicator") {
+          setTechnicalIndicatorPayload(response as TopTechnicalIndicatorRatingsResponse);
         } else {
           setFundamentalPayload(response as TopRatingsResponse);
         }
@@ -110,6 +143,8 @@ export function RatingsPage() {
       .catch((error) => {
         if (mode === "technical") {
           setTechnicalPayload(null);
+        } else if (mode === "technical-indicator") {
+          setTechnicalIndicatorPayload(null);
         } else {
           setFundamentalPayload(null);
         }
@@ -118,18 +153,32 @@ export function RatingsPage() {
       .finally(() => setIsLoading(false));
   }, [mode, requestedDate, requestedLimit, requestedSector, requestedStatus]);
 
-  const payload = mode === "technical" ? technicalPayload : fundamentalPayload;
-  const rows = mode === "technical" ? (technicalPayload?.rows ?? []) : (fundamentalPayload?.rows ?? []);
+  const payload = mode === "technical" ? technicalPayload : mode === "technical-indicator" ? technicalIndicatorPayload : fundamentalPayload;
+  const rows = mode === "technical" ? (technicalPayload?.rows ?? []) : mode === "technical-indicator" ? (technicalIndicatorPayload?.rows ?? []) : (fundamentalPayload?.rows ?? []);
   const visibleSectors = payload?.sector_options ?? [];
   const bestOverall = useMemo(
-    () => rows.reduce<number | null>((best, row) => (row.overall_rating != null && (best == null || row.overall_rating > best) ? row.overall_rating : best), null),
-    [rows],
+    () =>
+      rows.reduce<number | null>((best, row) => {
+        const candidate =
+          mode === "technical-indicator"
+            ? (row as TopTechnicalIndicatorRatingEntry).daily.overall_score
+            : (row as TopRatingEntry | TopTechnicalRatingEntry).overall_rating;
+        return candidate != null && (best == null || candidate > best) ? candidate : best;
+      }, null),
+    [mode, rows],
   );
   const visibleStatuses = statusOptions(payload);
-  const heroTitle = mode === "technical" ? "Top technical rated tickers" : "Top rated tickers";
+  const heroTitle =
+    mode === "technical"
+      ? "Top technical rated tickers"
+      : mode === "technical-indicator"
+        ? "Multi-timeframe technical ratings"
+        : "Top rated tickers";
   const heroCopy =
     mode === "technical"
       ? "Fast review board for technical leadership snapshots. Focus on trend health, MA behavior, RS leadership, and extension risk."
+      : mode === "technical-indicator"
+        ? "TradingView-style composite ratings across daily, weekly, and monthly timeframes. Review labels and raw scores side by side."
       : "Fast review board for the latest ticker ratings snapshots. Open charts from here, inspect grade balance, and sanity-check which names rise to the top.";
 
   function updateParam(key: string, value: string | null) {
@@ -181,6 +230,7 @@ export function RatingsPage() {
             <select value={mode} onChange={(event) => updateParam("mode", event.target.value === "fundamental" ? null : event.target.value)}>
               <option value="fundamental">fundamental</option>
               <option value="technical">technical</option>
+              <option value="technical-indicator">technical-indicator</option>
             </select>
           </label>
           <label className="field">
@@ -238,11 +288,11 @@ export function RatingsPage() {
       <section className="panel earnings-calendar-panel">
         <div className="panel-head earnings-calendar-head">
           <div>
-            <h2>{mode === "technical" ? "Technical Leaderboard" : "Leaderboard"}</h2>
+            <h2>{mode === "technical" ? "Technical Leaderboard" : mode === "technical-indicator" ? "Multi-Timeframe Technical Ratings" : "Leaderboard"}</h2>
             <span className="eyebrow">{rows.length} names</span>
           </div>
         </div>
-        {isLoading ? <LoadingBlock label={mode === "technical" ? "Loading top technical ratings…" : "Loading top ratings…"} /> : null}
+        {isLoading ? <LoadingBlock label={mode === "technical" ? "Loading top technical ratings…" : mode === "technical-indicator" ? "Loading multi-timeframe technical ratings…" : "Loading top ratings…"} /> : null}
         {!isLoading && rows.length === 0 ? <p className="panel-copy">No {mode} ratings found for this date or status filter.</p> : null}
         {rows.length > 0 && mode === "fundamental" ? (
           <div className="data-table-responsive">
@@ -328,6 +378,48 @@ export function RatingsPage() {
                     <td data-label="Structure / Volume">{formatScore(row.structure_volume_score)}</td>
                     <td data-label="Flags">{row.flags.length > 0 ? row.flags.join(", ") : "-"}</td>
                     <td data-label="Status">{row.technical_status ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {rows.length > 0 && mode === "technical-indicator" ? (
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Rank Change</th>
+                  <th>Ticker</th>
+                  <th>Sector / Industry</th>
+                  <th>1D</th>
+                  <th>1D Score</th>
+                  <th>1W</th>
+                  <th>1W Score</th>
+                  <th>1M</th>
+                  <th>1M Score</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(rows as TopTechnicalIndicatorRatingEntry[]).map((row, index) => (
+                  <tr key={`${row.ticker}-${row.as_of_date}`}>
+                    <td data-label="#">{row.current_rank ?? index + 1}</td>
+                    <td data-label="Rank Change" title={rankChangeTitle(row)}>{formatRankChange(row)}</td>
+                    <td data-label="Ticker">
+                      <Link to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
+                    </td>
+                    <td data-label="Sector / Industry">
+                      {[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}
+                    </td>
+                    <td data-label="1D">{row.daily.rating_label ?? "-"}</td>
+                    <td data-label="1D Score">{formatScore(row.daily.overall_score)}</td>
+                    <td data-label="1W">{row.weekly.rating_label ?? "-"}</td>
+                    <td data-label="1W Score">{formatScore(row.weekly.overall_score)}</td>
+                    <td data-label="1M">{row.monthly.rating_label ?? "-"}</td>
+                    <td data-label="1M Score">{formatScore(row.monthly.overall_score)}</td>
+                    <td data-label="Status">{row.combined_status}</td>
                   </tr>
                 ))}
               </tbody>
