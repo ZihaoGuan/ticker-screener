@@ -434,6 +434,7 @@ class WatchlistService:
             for item in cards
             if item.get("available")
             and str(item.get("stem") or "").strip()
+            and str(item.get("timeframe") or "").strip().lower() != "weekly"
             and str(card_config_by_id.get(str(item.get("id") or ""), {}).get("bias_group") or "bullish") != "bearish"
         ]
         sector_momentum_map = self._load_sector_momentum_map(rrg_service)

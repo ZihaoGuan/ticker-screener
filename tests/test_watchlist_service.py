@@ -422,9 +422,9 @@ class WatchlistServiceTests(unittest.TestCase):
                 now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc),
             )
 
-        self.assertEqual(payload["total_unique_tickers"], 4)
+        self.assertEqual(payload["total_unique_tickers"], 3)
         self.assertEqual(payload["overlapping_ticker_count"], 1)
-        self.assertEqual(payload["total_live_scanners"], 3)
+        self.assertEqual(payload["total_live_scanners"], 2)
         pltr = payload["rows"][0]
         self.assertEqual(pltr["ticker"], "PLTR")
         self.assertEqual(pltr["scanner_count"], 2)

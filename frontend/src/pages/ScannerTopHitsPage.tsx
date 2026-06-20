@@ -85,7 +85,7 @@ export function ScannerTopHitsPage() {
           </div>
           <span className={`scanner-result-status${rows.length > 0 ? " is-live" : ""}`}>{rows.length > 0 ? "Overlap Found" : "No Overlap"}</span>
         </div>
-        <p className="scanner-result-copy">Top hit = same ticker flagged by multiple live scanner boards. Sector momentum uses weekly sector RRG snapshot.</p>
+        <p className="scanner-result-copy">Top hit = same ticker flagged by multiple live daily scanner boards. Sector momentum uses weekly sector RRG snapshot.</p>
         <div className="scanner-result-metrics">
           <div className="scanner-result-metric">
             <span className="eyebrow">Unique Tickers</span>
@@ -96,7 +96,7 @@ export function ScannerTopHitsPage() {
             <strong>{formatCount(payload?.overlapping_ticker_count ?? 0)}</strong>
           </div>
           <div className="scanner-result-metric">
-            <span className="eyebrow">Scanners Live</span>
+            <span className="eyebrow">Daily Scanners</span>
             <strong>{formatCount(payload?.total_live_scanners ?? 0)}</strong>
           </div>
           <div className="scanner-result-metric">
