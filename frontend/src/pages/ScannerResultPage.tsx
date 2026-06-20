@@ -28,6 +28,8 @@ type ScannerRow = {
   changePct: number | null;
   taScore: number | null;
   faScore: number | null;
+  perfYearPct: number | null;
+  perfYtdPct: number | null;
   arsScore: number | null;
   alsScore: number | null;
   isNew: boolean;
@@ -171,7 +173,7 @@ export function ScannerResultPage() {
       return;
     }
     const lines = [
-      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "TA", "FA", "ARS", "ALS Score", "Setup", "Summary"].join(","),
+      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "1Y %", "YTD %", "TA", "FA", "ARS", "ALS Score", "Setup", "Summary"].join(","),
       ...filteredRows.map((row) =>
         [
           row.ticker,
@@ -180,6 +182,8 @@ export function ScannerResultPage() {
           csvValue(row.industry),
           row.dayVolume == null ? "" : row.dayVolume.toString(),
           row.changePct == null ? "" : row.changePct.toFixed(2),
+          row.perfYearPct == null ? "" : row.perfYearPct.toFixed(2),
+          row.perfYtdPct == null ? "" : row.perfYtdPct.toFixed(2),
           row.taScore == null ? "" : row.taScore.toFixed(1),
           row.faScore == null ? "" : row.faScore.toFixed(1),
           row.arsScore == null ? "" : Math.round(row.arsScore).toString(),
@@ -318,6 +322,8 @@ export function ScannerResultPage() {
                     <th>{renderSortHeader("Sector", "sector", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortHeader("Day Vol", "volume", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortHeader("Change %", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>1Y %</th>
+                    <th>YTD %</th>
                     <th>{renderSortHeader("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortHeader("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
@@ -349,6 +355,8 @@ export function ScannerResultPage() {
                       </td>
                       <td data-label="Day Vol">{formatVolume(row.dayVolume)}</td>
                       <td data-label="Change %">{renderChange(row.changePct)}</td>
+                      <td data-label="1Y %">{renderChange(row.perfYearPct)}</td>
+                      <td data-label="YTD %">{renderChange(row.perfYtdPct)}</td>
                       <td data-label="TA">
                         <span className={`scanner-score-pill ${toneForScore(row.taScore, 10)}`}>{formatTenPointScore(row.taScore)}</span>
                       </td>
@@ -411,6 +419,8 @@ function buildScannerRow(
     chartHref: buildChartHref(ticker, stem),
     dayVolume: resolveDisplayVolume(entry),
     changePct: resolveDisplayChangePct(entry),
+    perfYearPct: fundamental?.perf_year_pct ?? null,
+    perfYtdPct: fundamental?.perf_ytd_pct ?? null,
     taScore: technicalOverall != null ? technicalOverall / 10 : null,
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,

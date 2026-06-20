@@ -749,6 +749,8 @@ export type TopRatingEntry = {
   as_of_date: string;
   sector: string | null;
   industry: string | null;
+  perf_year_pct: number | null;
+  perf_ytd_pct: number | null;
   current_rank: number;
   previous_rank: number | null;
   rank_change: "up" | "down" | "same" | "new";

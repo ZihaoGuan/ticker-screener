@@ -14,6 +14,13 @@ function formatScore(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
+function formatPercent(value: number | null | undefined): string {
+  if (value == null) {
+    return "--";
+  }
+  return `${value.toFixed(2)}%`;
+}
+
 function buildFundamentalRequestPath(asOfDate: string, limit: number, ratingStatus: string, sector: string) {
   const query = new URLSearchParams();
   if (asOfDate.trim()) {
@@ -246,6 +253,8 @@ export function RatingsPage() {
                   <th>Rank Change</th>
                   <th>Ticker</th>
                   <th>Sector / Industry</th>
+                  <th>1Y %</th>
+                  <th>YTD %</th>
                   <th>Overall</th>
                   <th>Valuation</th>
                   <th>Profitability</th>
@@ -265,6 +274,8 @@ export function RatingsPage() {
                     <td data-label="Sector / Industry">
                       {[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}
                     </td>
+                    <td data-label="1Y %">{formatPercent(row.perf_year_pct)}</td>
+                    <td data-label="YTD %">{formatPercent(row.perf_ytd_pct)}</td>
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
                     <td data-label="Valuation">{row.valuation_grade ?? "-"} ({formatScore(row.valuation_score)})</td>
                     <td data-label="Profitability">{row.profitability_grade ?? "-"} ({formatScore(row.profitability_score)})</td>

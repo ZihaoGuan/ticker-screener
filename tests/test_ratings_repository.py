@@ -60,9 +60,9 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
                 {"fetchall": [("ok", 3), ("missing_metrics", 1)]},
                 {
                     "fetchall": [
-                        ("NVDA", dt.date(2026, 6, 13), "Technology", "Semiconductors", 98.2, 15.0, 16.0, 17.0, 18.0, "A", "A", "A", "A", "ok", None, 1),
-                        ("MSFT", dt.date(2026, 6, 13), "Technology", "Software", 96.4, 14.0, 15.0, 16.0, 17.0, "A", "A", "A", "B", "ok", None, 2),
-                        ("PLTR", dt.date(2026, 6, 13), "Technology", "Software", 93.0, 12.0, 13.0, 14.0, 15.0, "B", "A", "B", "B", "ok", None, 3),
+                        ("NVDA", dt.date(2026, 6, 13), "Technology", "Semiconductors", 55.0, 33.0, 98.2, 15.0, 16.0, 17.0, 18.0, "A", "A", "A", "A", "ok", None, 1),
+                        ("MSFT", dt.date(2026, 6, 13), "Technology", "Software", 41.0, 20.0, 96.4, 14.0, 15.0, 16.0, 17.0, "A", "A", "A", "B", "ok", None, 2),
+                        ("PLTR", dt.date(2026, 6, 13), "Technology", "Software", 88.0, 45.0, 93.0, 12.0, 13.0, 14.0, 15.0, "B", "A", "B", "B", "ok", None, 3),
                     ]
                 },
                 {"fetchall": [("MSFT", 1), ("NVDA", 2), ("AMD", 3)]},
@@ -86,6 +86,8 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
         self.assertEqual(payload["rows"][2]["rank_change"], "new")
         self.assertIsNone(payload["rows"][2]["previous_rank"])
         self.assertIsNone(payload["rows"][2]["rank_delta"])
+        self.assertEqual(payload["rows"][0]["perf_year_pct"], 55.0)
+        self.assertEqual(payload["rows"][0]["perf_ytd_pct"], 33.0)
 
     def test_load_latest_ticker_rating_bundle_includes_top_200_fa_rank(self) -> None:
         cursor = _FakeCursor(
@@ -240,8 +242,8 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
                 {"fetchall": [("ok", 2)]},
                 {
                     "fetchall": [
-                        ("NVDA", dt.date(2026, 6, 13), "Technology", "Semiconductors", 98.2, 15.0, 16.0, 17.0, 18.0, "A", "A", "A", "A", "ok", None, 1),
-                        ("MSFT", dt.date(2026, 6, 13), "Technology", "Software", 96.4, 14.0, 15.0, 16.0, 17.0, "A", "A", "A", "B", "ok", None, 2),
+                        ("NVDA", dt.date(2026, 6, 13), "Technology", "Semiconductors", 55.0, 33.0, 98.2, 15.0, 16.0, 17.0, 18.0, "A", "A", "A", "A", "ok", None, 1),
+                        ("MSFT", dt.date(2026, 6, 13), "Technology", "Software", 41.0, 20.0, 96.4, 14.0, 15.0, 16.0, 17.0, "A", "A", "A", "B", "ok", None, 2),
                     ]
                 },
                 {"fetchall": [("NVDA", 2), ("MSFT", 1)]},
@@ -270,7 +272,7 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
                 {"fetchall": [("ok", 1)]},
                 {
                     "fetchall": [
-                        ("NVDA", dt.date(2026, 6, 13), "Technology", "Semiconductors", 98.2, 15.0, 16.0, 17.0, 18.0, "A", "A", "A", "A", "ok", None, 1),
+                        ("NVDA", dt.date(2026, 6, 13), "Technology", "Semiconductors", 55.0, 33.0, 98.2, 15.0, 16.0, 17.0, 18.0, "A", "A", "A", "A", "ok", None, 1),
                     ]
                 },
                 {"fetchall": [("NVDA", 2)]},
