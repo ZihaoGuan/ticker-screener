@@ -1059,13 +1059,13 @@ class RatingsRepository:
                         """
                         WITH filtered AS (
                           SELECT
-                            ticker,
-                            overall_rating
+                            r.ticker,
+                            r.overall_rating
                           FROM ticker_rating_snapshots r
                           LEFT JOIN ticker_fundamentals_snapshots f
                             ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
-                          WHERE as_of_date = %s
-                            AND (%s = '' OR LOWER(COALESCE(rating_status, '')) = %s)
+                          WHERE r.as_of_date = %s
+                            AND (%s = '' OR LOWER(COALESCE(r.rating_status, '')) = %s)
                             AND (%s = '' OR LOWER(COALESCE(r.sector, f.sector, '')) = %s)
                         ),
                         ranked AS (

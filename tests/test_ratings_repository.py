@@ -10,6 +10,7 @@ class _FakeCursor:
     def __init__(self, scripted_results: list[dict[str, object]]) -> None:
         self.scripted_results = list(scripted_results)
         self.current_result: dict[str, object] | None = None
+        self.executed_sql: list[str] = []
 
     def __enter__(self) -> _FakeCursor:
         return self
@@ -18,9 +19,10 @@ class _FakeCursor:
         return False
 
     def execute(self, sql: str, params: object = None) -> None:
-        del sql, params
+        del params
         if not self.scripted_results:
             raise AssertionError("No scripted result left for execute call.")
+        self.executed_sql.append(sql)
         self.current_result = self.scripted_results.pop(0)
 
     def fetchone(self):
@@ -177,6 +179,31 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
         self.assertEqual([row["ticker"] for row in payload["rows"]], ["NVDA", "MSFT"])
         self.assertEqual(payload["status_counts"], {"ok": 2})
         self.assertEqual(payload["sector_options"], ["Technology"])
+
+    def test_list_top_rating_snapshots_qualifies_previous_rank_columns(self) -> None:
+        cursor = _FakeCursor(
+            [
+                {"fetchone": (dt.date(2026, 6, 13),)},
+                {"fetchall": [("Technology",)]},
+                {"fetchone": (dt.date(2026, 6, 6),)},
+                {"fetchall": [("ok", 1)]},
+                {
+                    "fetchall": [
+                        ("NVDA", dt.date(2026, 6, 13), "Technology", "Semiconductors", 98.2, 15.0, 16.0, 17.0, 18.0, "A", "A", "A", "A", "ok", None, 1),
+                    ]
+                },
+                {"fetchall": [("NVDA", 2)]},
+            ]
+        )
+        repository = RatingsRepository()
+        repository._connect = lambda: _FakeConnection(cursor)
+
+        repository.list_top_rating_snapshots(as_of_date=dt.date(2026, 6, 13), limit=25, rating_status="ok")
+
+        previous_rank_sql = cursor.executed_sql[-1]
+        self.assertIn("SELECT\n                            r.ticker,\n                            r.overall_rating", previous_rank_sql)
+        self.assertIn("WHERE r.as_of_date = %s", previous_rank_sql)
+        self.assertIn("COALESCE(r.rating_status, '')", previous_rank_sql)
 
     def test_list_top_technical_rating_snapshots_adds_rank_change_fields(self) -> None:
         cursor = _FakeCursor(
