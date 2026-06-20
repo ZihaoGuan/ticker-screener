@@ -429,14 +429,36 @@ class WatchlistService:
             for item in _SCANNER_BOARD_CONFIG
             if str(item.get("id") or "").strip()
         }
-        live_cards = [
+        candidate_cards = [
             item
             for item in cards
             if item.get("available")
             and str(item.get("stem") or "").strip()
-            and str(item.get("timeframe") or "").strip().lower() != "weekly"
             and str(card_config_by_id.get(str(item.get("id") or ""), {}).get("bias_group") or "bullish") != "bearish"
         ]
+        candidate_cards_by_id = {
+            str(item.get("id") or ""): item
+            for item in candidate_cards
+            if str(item.get("id") or "").strip()
+        }
+        live_cards = [
+            item
+            for item in candidate_cards
+            if str(item.get("timeframe") or "").strip().lower() != "weekly"
+        ]
+        fallback_pairs = (
+            ("daily_rs_new_high", "weekly_rs_new_high"),
+            ("rs", "weekly_rs_before_price"),
+        )
+        live_card_ids = {str(item.get("id") or "") for item in live_cards}
+        for primary_id, fallback_id in fallback_pairs:
+            if primary_id in live_card_ids:
+                continue
+            fallback_card = candidate_cards_by_id.get(fallback_id)
+            if fallback_card is None:
+                continue
+            live_cards.append(fallback_card)
+            live_card_ids.add(fallback_id)
         sector_momentum_map = self._load_sector_momentum_map(rrg_service)
         aggregated: dict[str, dict[str, Any]] = {}
 

@@ -437,6 +437,121 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["sector_momentum"]["quadrant"], "Leading")
         self.assertEqual(pltr["sector_momentum"]["etf_ticker"], "XLK")
 
+    def test_get_scanner_top_hits_payload_falls_back_to_weekly_rs_when_daily_missing(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        watchlists_dir = Path(self.temp_dir.name) / "watchlists"
+        (watchlists_dir / "weekly_rs_new_high_all_2026-06-06.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "PLTR",
+                        "company_name": "Palantir",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "current_price": 132.45,
+                        "daily_change_pct": 2.1,
+                    },
+                    {
+                        "ticker": "MSFT",
+                        "company_name": "Microsoft",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "current_price": 421.0,
+                        "daily_change_pct": 0.8,
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (watchlists_dir / "weekly_rs_new_high_2026-06-06.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "PLTR",
+                        "company_name": "Palantir",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "current_price": 132.45,
+                        "daily_change_pct": 2.1,
+                    },
+                    {
+                        "ticker": "NVDA",
+                        "company_name": "NVIDIA",
+                        "sector": "Information Technology",
+                        "industry": "Semiconductors",
+                        "current_price": 155.0,
+                        "daily_change_pct": 1.1,
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (watchlists_dir / "fearzone_2026-06-12.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "PLTR",
+                        "company_name": "Palantir",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "current_price": 132.45,
+                        "daily_change_pct": 2.1,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        import os
+
+        os.utime(
+            watchlists_dir / "weekly_rs_new_high_all_2026-06-06.json",
+            (dt.datetime(2026, 6, 8, 0, 5, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+        os.utime(
+            watchlists_dir / "weekly_rs_new_high_2026-06-06.json",
+            (dt.datetime(2026, 6, 8, 0, 0, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+        os.utime(
+            watchlists_dir / "fearzone_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+
+        class _FakeRrgService:
+            def get_universe_report(self, *args: object, **kwargs: object) -> dict[str, object]:
+                return {"series": []}
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()), patch(
+            "src.webapp.services.watchlist_service.load_universe",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch(
+            "src.ratings.repository.RatingsRepository.load_latest_rating_snapshots_for_tickers",
+            return_value={},
+        ), patch(
+            "src.ratings.repository.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
+            return_value={},
+        ):
+            payload = service.get_scanner_top_hits_payload(
+                rrg_service=_FakeRrgService(),
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc),
+            )
+
+        self.assertEqual(payload["total_unique_tickers"], 3)
+        self.assertEqual(payload["overlapping_ticker_count"], 1)
+        self.assertEqual(payload["total_live_scanners"], 3)
+        pltr = payload["rows"][0]
+        self.assertEqual(pltr["ticker"], "PLTR")
+        self.assertEqual(pltr["scanner_count"], 3)
+        self.assertEqual(
+            pltr["scanner_labels"],
+            ["Fearzone", "Weekly RS New High", "Weekly RS New High Before Price"],
+        )
+
     def test_get_chart_payload_snaps_to_latest_available_trading_day(self) -> None:
         frame = pd.DataFrame(
             {
