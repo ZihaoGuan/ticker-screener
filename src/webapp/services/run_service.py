@@ -458,6 +458,7 @@ class RunService:
                 _target_worker_field,
                 _as_of_date_field,
             ),
+            bias_group="other",
         ),
         "run_finviz_ratings_pipeline": RunAction(
             "run_finviz_ratings_pipeline",
