@@ -573,6 +573,57 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertTrue(cards["trend_template"]["available"])
         self.assertEqual(cards["trend_template"]["entry_count"], 2)
         self.assertEqual(cards["trend_template"]["preview_tickers"], ["NVDA", "CRWD"])
+
+    def test_get_scanner_board_includes_range_tightness_index_card(self) -> None:
+        self._write_watchlist(
+            "rti_2026-06-12",
+            tickers=["NVDA", "CRWD"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 36, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["rti"]["label"], "Range Tightness Index")
+        self.assertTrue(cards["rti"]["available"])
+        self.assertEqual(cards["rti"]["entry_count"], 2)
+        self.assertEqual(cards["rti"]["preview_tickers"], ["NVDA", "CRWD"])
+
+    def test_get_scanner_board_includes_double_bottom_card(self) -> None:
+        self._write_watchlist(
+            "double_bottom_detection_2026-06-12",
+            tickers=["APP", "NVDA"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 37, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["double_bottom_detection"]["label"], "Double Bottom")
+        self.assertTrue(cards["double_bottom_detection"]["available"])
+        self.assertEqual(cards["double_bottom_detection"]["entry_count"], 2)
+        self.assertEqual(cards["double_bottom_detection"]["preview_tickers"], ["APP", "NVDA"])
+
+    def test_get_scanner_board_includes_ftd_successful_sweep_card(self) -> None:
+        self._write_watchlist(
+            "ftd_sweep_2026-06-12",
+            tickers=["PLTR", "APP"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 38, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["ftd_sweep"]["label"], "FTD Successful Sweep")
+        self.assertTrue(cards["ftd_sweep"]["available"])
+        self.assertEqual(cards["ftd_sweep"]["entry_count"], 2)
+        self.assertEqual(cards["ftd_sweep"]["preview_tickers"], ["PLTR", "APP"])
         self.assertIn("Trend Template (TTP)", cards["trend_template"]["description"])
 
     def test_get_scanner_board_includes_sean_breakout_card(self) -> None:

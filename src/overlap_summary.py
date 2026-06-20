@@ -125,7 +125,7 @@ PIPELINES = (
     },
     {
         "id": "rti",
-        "label": "RTI",
+        "label": "Range Tightness Index",
         "filename": "rti_{date}.json",
     },
     {

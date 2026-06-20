@@ -13,7 +13,9 @@ const CARD_ART: Record<string, string> = {
   inside_dryup_v2: "M24 74 L92 74 L140 74 L188 76 L234 78 L276 80",
   wyckoff_buy_signal: "M24 118 L72 120 L118 108 L152 126 L190 94 L228 84 L276 52",
   wyckoff_sell_signal: "M24 48 L76 44 L118 58 L162 54 L208 82 L246 104 L276 118",
+  ftd_sweep: "M24 118 L74 124 L126 92 L168 104 L214 68 L248 72 L276 42",
   sepa_vcp: "M24 120 L82 118 L126 116 L168 114 L210 98 L246 84 L276 52",
+  double_bottom_detection: "M24 74 L76 108 L128 60 L176 106 L228 68 L276 46",
   ema21_pullback_buy: "M24 102 L74 72 L122 50 L164 74 L206 96 L248 70 L276 40",
   trend_template: "M24 112 L76 100 L120 82 L164 70 L212 52 L276 34",
   fearzone: "M24 60 C72 20, 116 20, 156 62 S236 116, 276 92",
@@ -71,7 +73,7 @@ export function ScannerBoardPage() {
         <div className="scanner-board-console-row">
           <div>
             <span className="eyebrow">Board logic</span>
-            <p className="panel-copy">Weekly RS New High, RS New High Before Price, Sean Gap Up, Gap Fill, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, SEPA VCP, EMA21 Pullback Buy, Trend Template, Fearzone, and TD9 Bullish.</p>
+            <p className="panel-copy">Weekly RS New High, RS New High Before Price, Sean Gap Up, Gap Fill, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Fearzone, and TD9 Bullish.</p>
           </div>
           <div>
             <span className="eyebrow">Navigation</span>

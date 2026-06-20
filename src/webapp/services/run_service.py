@@ -981,7 +981,7 @@ class RunService:
         ),
         "rti": RunAction(
             "rti",
-            "Run RTI",
+            "Run Range Tightness Index",
             "scripts/run_rti_screen.py",
             fields=(
                 _limit_field,

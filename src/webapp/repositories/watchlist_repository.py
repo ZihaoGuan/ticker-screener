@@ -164,7 +164,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("high_tight_flag", "high_tight_flag", "High Tight Flag"),
         ("leif_high_tight_flag", "leif_high_tight_flag", "Leif High Tight Flag"),
         ("sepa_vcp", "sepa_vcp", "SEPA VCP"),
-        ("rti", "rti", "RTI"),
+        ("rti", "rti", "Range Tightness Index"),
         ("sean_breakout", "sean_breakout", "Sean Breakout"),
         ("vcs_critical_tightness", "vcs", "VCS"),
         ("vcs_setup_stage", "vcs", "VCS"),
