@@ -123,6 +123,14 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
                         "finviz",
                         "ok",
                         None,
+                    )
+                },
+                {
+                    "fetchone": (
+                        dt.date(2026, 6, 13),
+                        "NVDA",
+                        "Technology",
+                        "Semiconductors",
                         15.0,
                         16.0,
                         17.0,
@@ -149,6 +157,79 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
         assert payload is not None
         self.assertEqual(payload["fundamental_rank"]["current_rank"], 17)
         self.assertEqual(payload["fundamental_rank"]["list_limit"], 200)
+
+    def test_load_latest_ticker_rating_bundle_keeps_latest_rating_when_fundamentals_date_differs(self) -> None:
+        cursor = _FakeCursor(
+            [
+                {
+                    "fetchone": (
+                        dt.date(2026, 6, 12),
+                        "NVDA",
+                        "Technology",
+                        "Semiconductors",
+                        100.0,
+                        120.0,
+                        25.0,
+                        1.8,
+                        20.0,
+                        15.0,
+                        30.0,
+                        22.0,
+                        33.0,
+                        70.0,
+                        11.0,
+                        18.0,
+                        35.0,
+                        28.0,
+                        22.0,
+                        44.0,
+                        50.0,
+                        8.0,
+                        14.0,
+                        21.0,
+                        55.0,
+                        33.0,
+                        3.2,
+                        4.1,
+                        "finviz",
+                        "ok",
+                        None,
+                    )
+                },
+                {
+                    "fetchone": (
+                        dt.date(2026, 6, 13),
+                        "NVDA",
+                        "Technology",
+                        "Semiconductors",
+                        15.0,
+                        16.0,
+                        17.0,
+                        18.0,
+                        98.2,
+                        "A",
+                        "A",
+                        "A",
+                        "A",
+                        "ok",
+                        None,
+                        [],
+                        [],
+                    )
+                },
+                {"fetchone": (17,)},
+            ]
+        )
+        repository = RatingsRepository()
+        repository._connect = lambda: _FakeConnection(cursor)
+
+        payload = repository.load_latest_ticker_rating_bundle("NVDA")
+
+        assert payload is not None
+        self.assertEqual(payload["fundamentals_snapshot"]["as_of_date"], "2026-06-12")
+        self.assertEqual(payload["rating_snapshot"]["as_of_date"], "2026-06-13")
+        self.assertEqual(payload["rating_snapshot"]["overall_rating"], 98.2)
+        self.assertEqual(payload["fundamental_rank"]["as_of_date"], "2026-06-13")
 
     def test_list_top_rating_snapshots_supports_sector_filter(self) -> None:
         cursor = _FakeCursor(

@@ -581,7 +581,7 @@ class RatingsRepository:
         connection = self._connect()
         if connection is None:
             return None
-        sql = """
+        fundamentals_sql = """
             SELECT
               f.as_of_date,
               f.ticker,
@@ -613,7 +613,18 @@ class RatingsRepository:
               f.volatility_month_pct,
               f.source,
               f.parse_status,
-              f.parse_error,
+              f.parse_error
+            FROM ticker_fundamentals_snapshots f
+            WHERE f.ticker = %s
+            ORDER BY f.as_of_date DESC
+            LIMIT 1
+        """
+        rating_sql = """
+            SELECT
+              r.as_of_date,
+              r.ticker,
+              COALESCE(r.sector, f.sector, tm.sector) AS sector,
+              COALESCE(f.industry, tm.industry) AS industry,
               r.valuation_score,
               r.profitability_score,
               r.growth_score,
@@ -627,93 +638,64 @@ class RatingsRepository:
               r.rating_status_reason,
               r.missing_metric_names,
               r.insufficient_baseline_metrics
-            FROM ticker_fundamentals_snapshots f
-            LEFT JOIN ticker_rating_snapshots r
-              ON r.ticker = f.ticker AND r.as_of_date = f.as_of_date
-            WHERE f.ticker = %s
-            ORDER BY f.as_of_date DESC
+            FROM ticker_rating_snapshots r
+            LEFT JOIN ticker_fundamentals_snapshots f
+              ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
+            LEFT JOIN ticker_metadata tm
+              ON tm.ticker = r.ticker
+            WHERE r.ticker = %s
+            ORDER BY r.as_of_date DESC, r.updated_at DESC
             LIMIT 1
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (ticker.upper(),))
-                row = cursor.fetchone()
-        if not row:
+                cursor.execute(fundamentals_sql, (ticker.upper(),))
+                fundamentals_row = cursor.fetchone()
+                cursor.execute(rating_sql, (ticker.upper(),))
+                rating_row = cursor.fetchone()
+        if not fundamentals_row and not rating_row:
             return None
-        (
-            as_of_date,
-            normalized_ticker,
-            sector,
-            industry,
-            market_cap,
-            enterprise_value,
-            forward_pe,
-            peg_ratio_5y,
-            price_to_sales,
-            price_to_book,
-            price_to_fcf,
-            profit_margin_pct,
-            operating_margin_pct,
-            gross_margin_pct,
-            roa_pct,
-            roe_pct,
-            eps_this_y_pct,
-            eps_next_y_pct,
-            eps_next_5y_pct,
-            sales_qq_pct,
-            eps_qq_pct,
-            perf_month_pct,
-            perf_quarter_pct,
-            perf_half_pct,
-            perf_year_pct,
-            perf_ytd_pct,
-            volatility_week_pct,
-            volatility_month_pct,
-            source,
-            parse_status,
-            parse_error,
-            valuation_score,
-            profitability_score,
-            growth_score,
-            performance_score,
-            overall_rating,
-            valuation_grade,
-            profitability_grade,
-            growth_grade,
-            performance_grade,
-            rating_status,
-            rating_status_reason,
-            missing_metric_names,
-            insufficient_baseline_metrics,
-        ) = row
-        fundamental_rank: int | None = None
-        if as_of_date is not None:
-            rank_sql = """
-                WITH ranked AS (
-                    SELECT
-                      ticker,
-                      ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
-                    FROM ticker_rating_snapshots
-                    WHERE as_of_date = %s
-                      AND rating_status = 'ok'
-                )
-                SELECT current_rank
-                FROM ranked
-                WHERE ticker = %s
-                  AND current_rank <= 200
-            """
-            with connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(rank_sql, (as_of_date, ticker.upper()))
-                    rank_row = cursor.fetchone()
-            if rank_row and rank_row[0] is not None:
-                fundamental_rank = int(rank_row[0])
-        return {
-            "fundamentals_snapshot": {
-                "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date),
-                "ticker": normalized_ticker,
-                "sector": sector,
-                "industry": industry,
+
+        fundamentals_snapshot: dict[str, Any] | None = None
+        if fundamentals_row:
+            (
+                fundamentals_as_of_date,
+                fundamentals_ticker,
+                fundamentals_sector,
+                fundamentals_industry,
+                market_cap,
+                enterprise_value,
+                forward_pe,
+                peg_ratio_5y,
+                price_to_sales,
+                price_to_book,
+                price_to_fcf,
+                profit_margin_pct,
+                operating_margin_pct,
+                gross_margin_pct,
+                roa_pct,
+                roe_pct,
+                eps_this_y_pct,
+                eps_next_y_pct,
+                eps_next_5y_pct,
+                sales_qq_pct,
+                eps_qq_pct,
+                perf_month_pct,
+                perf_quarter_pct,
+                perf_half_pct,
+                perf_year_pct,
+                perf_ytd_pct,
+                volatility_week_pct,
+                volatility_month_pct,
+                source,
+                parse_status,
+                parse_error,
+            ) = fundamentals_row
+            fundamentals_snapshot = {
+                "as_of_date": fundamentals_as_of_date.isoformat() if isinstance(fundamentals_as_of_date, dt.date) else str(fundamentals_as_of_date),
+                "ticker": fundamentals_ticker,
+                "sector": fundamentals_sector,
+                "industry": fundamentals_industry,
                 "market_cap": float(market_cap) if market_cap is not None else None,
                 "enterprise_value": float(enterprise_value) if enterprise_value is not None else None,
                 "forward_pe": float(forward_pe) if forward_pe is not None else None,
@@ -741,9 +723,36 @@ class RatingsRepository:
                 "source": source,
                 "parse_status": parse_status,
                 "parse_error": parse_error,
-            },
-            "rating_snapshot": {
-                "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date),
+            }
+
+        rating_snapshot: dict[str, Any] | None = None
+        rating_diagnostics = {
+            "missing_metric_names": [],
+            "insufficient_baseline_metrics": [],
+        }
+        rating_as_of_date: dt.date | None = None
+        if rating_row:
+            (
+                rating_as_of_date,
+                normalized_ticker,
+                sector,
+                industry,
+                valuation_score,
+                profitability_score,
+                growth_score,
+                performance_score,
+                overall_rating,
+                valuation_grade,
+                profitability_grade,
+                growth_grade,
+                performance_grade,
+                rating_status,
+                rating_status_reason,
+                missing_metric_names,
+                insufficient_baseline_metrics,
+            ) = rating_row
+            rating_snapshot = {
+                "as_of_date": rating_as_of_date.isoformat() if isinstance(rating_as_of_date, dt.date) else str(rating_as_of_date),
                 "valuation_score": float(valuation_score) if valuation_score is not None else None,
                 "profitability_score": float(profitability_score) if profitability_score is not None else None,
                 "growth_score": float(growth_score) if growth_score is not None else None,
@@ -755,16 +764,43 @@ class RatingsRepository:
                 "performance_grade": performance_grade,
                 "rating_status": rating_status,
                 "rating_status_reason": rating_status_reason,
-            },
+            }
+            rating_diagnostics = {
+                "missing_metric_names": list(missing_metric_names or []),
+                "insufficient_baseline_metrics": list(insufficient_baseline_metrics or []),
+            }
+
+        fundamental_rank: int | None = None
+        if rating_as_of_date is not None:
+            rank_sql = """
+                WITH ranked AS (
+                    SELECT
+                      ticker,
+                      ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
+                    FROM ticker_rating_snapshots
+                    WHERE as_of_date = %s
+                      AND rating_status = 'ok'
+                )
+                SELECT current_rank
+                FROM ranked
+                WHERE ticker = %s
+                  AND current_rank <= 200
+            """
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(rank_sql, (rating_as_of_date, ticker.upper()))
+                    rank_row = cursor.fetchone()
+            if rank_row and rank_row[0] is not None:
+                fundamental_rank = int(rank_row[0])
+        return {
+            "fundamentals_snapshot": fundamentals_snapshot,
+            "rating_snapshot": rating_snapshot,
             "fundamental_rank": {
-                "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date),
+                "as_of_date": rating_as_of_date.isoformat() if isinstance(rating_as_of_date, dt.date) else str(rating_as_of_date),
                 "current_rank": fundamental_rank,
                 "list_limit": 200,
             },
-            "rating_diagnostics": {
-                "missing_metric_names": list(missing_metric_names or []),
-                "insufficient_baseline_metrics": list(insufficient_baseline_metrics or []),
-            },
+            "rating_diagnostics": rating_diagnostics,
         }
 
     def load_latest_fundamentals_dates(self, tickers: Iterable[str]) -> dict[str, dt.date]:
