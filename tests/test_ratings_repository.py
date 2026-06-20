@@ -233,6 +233,10 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["rank_delta"], 0)
         self.assertEqual(payload["rows"][1]["rank_change"], "same")
         self.assertEqual(payload["rows"][1]["flags"], [])
+        previous_rank_sql = cursor.executed_sql[-1]
+        self.assertIn("SELECT\n                            r.ticker,\n                            r.overall_rating", previous_rank_sql)
+        self.assertIn("WHERE r.as_of_date = %s", previous_rank_sql)
+        self.assertIn("COALESCE(r.technical_status, '')", previous_rank_sql)
 
 
 if __name__ == "__main__":
