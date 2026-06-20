@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
@@ -26,9 +27,11 @@ const CARD_ART: Record<string, string> = {
 };
 
 export function ScannerBoardPage() {
+  const auth = useAuth();
   const [payload, setPayload] = useState<ScannerBoardResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [isRefreshingBoard, setIsRefreshingBoard] = useState(false);
 
   useEffect(() => {
     setIsLoading(true);
@@ -44,6 +47,21 @@ export function ScannerBoardPage() {
 
   const cards = payload?.cards ?? [];
   const availableCards = useMemo(() => cards.filter((card) => card.available), [cards]);
+  const isAdmin = auth.role === "admin";
+
+  const handleManualRefresh = async () => {
+    setIsRefreshingBoard(true);
+    setNotice("");
+    try {
+      const refreshed = await fetchJson<ScannerBoardResponse>("/api/scanner-board/refresh", { method: "POST" });
+      setPayload(refreshed);
+      setNotice("Scanner board manually refreshed to latest visible New York trading day.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to manually refresh scanner board.");
+    } finally {
+      setIsRefreshingBoard(false);
+    }
+  };
 
   return (
     <div className="page-grid scanner-board">
@@ -93,11 +111,22 @@ export function ScannerBoardPage() {
           <Link className="ghost-button" to="/ratings?mode=technical">
             Open Technical Top 100
           </Link>
+          {isAdmin ? (
+            <button className="ghost-button" type="button" onClick={() => void handleManualRefresh()} disabled={isRefreshingBoard}>
+              {isRefreshingBoard ? "Refreshing…" : "Manual Refresh"}
+            </button>
+          ) : null}
         </div>
         <p className="panel-copy earnings-console-note">
           Latest signal date on screen: {formatLocalDate(payload?.latest_signal_date)}.
           {payload?.reference_now_new_york ? ` Board generated ${formatLocalDateTime(payload.reference_now_new_york)} New York time.` : ""}
         </p>
+        {payload?.manual_override_active ? (
+          <p className="panel-copy earnings-console-note">
+            Admin override active for {formatLocalDate(payload.manual_override_target_date)}.
+            {payload.manual_override_requested_at ? ` Requested ${formatLocalDateTime(payload.manual_override_requested_at)}.` : ""}
+          </p>
+        ) : null}
         {notice ? <p className="panel-copy earnings-console-note">{notice}</p> : null}
       </section>
 

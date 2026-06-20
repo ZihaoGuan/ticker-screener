@@ -239,6 +239,36 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-12")
         self.assertEqual(cards["fearzone"]["preview_tickers"], ["TSLA", "HOOD"])
 
+    def test_force_scanner_board_refresh_bypasses_cutoff_for_admin_override(self) -> None:
+        self._write_watchlist(
+            "rs_new_high_before_price_2026-06-11",
+            tickers=["CRWD"],
+            modified_at=dt.datetime(2026, 6, 12, 0, 45, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "rs_new_high_before_price_2026-06-12",
+            tickers=["PLTR", "CRWV"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc),
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()):
+            default_payload = self.service.get_scanner_board(
+                now=dt.datetime(2026, 6, 12, 20, 30, tzinfo=dt.timezone.utc)
+            )
+            refreshed_payload = self.service.force_scanner_board_refresh(
+                now=dt.datetime(2026, 6, 12, 20, 30, tzinfo=dt.timezone.utc),
+                requested_by="admin@example.com",
+            )
+
+        default_cards = {item["id"]: item for item in default_payload["cards"]}
+        refreshed_cards = {item["id"]: item for item in refreshed_payload["cards"]}
+        self.assertEqual(default_payload["target_trading_date"], "2026-06-11")
+        self.assertEqual(default_cards["rs"]["stem"], "rs_new_high_before_price_2026-06-11")
+        self.assertEqual(refreshed_payload["target_trading_date"], "2026-06-12")
+        self.assertTrue(refreshed_payload["manual_override_active"])
+        self.assertEqual(refreshed_payload["manual_override_target_date"], "2026-06-12")
+        self.assertEqual(refreshed_cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
+
     def test_get_scanner_top_hits_payload_aggregates_overlap_and_sector_momentum(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         watchlists_dir = Path(self.temp_dir.name) / "watchlists"

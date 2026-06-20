@@ -138,6 +138,9 @@ export type ScannerBoardResponse = {
   cutoff_time_label: string;
   latest_update_at: string;
   latest_signal_date: string;
+  manual_override_active?: boolean;
+  manual_override_target_date?: string;
+  manual_override_requested_at?: string;
   cards: ScannerBoardCard[];
 };
 

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Requ
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
-from src.webapp.access_control import Principal
+from src.webapp.access_control import Principal, ROLE_ADMIN
 from src.webapp.services.admin_service import AdminService
 from src.webapp.services.audit_service import AuditService
 from src.webapp.services.auth_service import AuthService, UserAdminService
@@ -929,6 +929,16 @@ def scanner_board_data(
     _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     return JSONResponse(service.get_scanner_board())
+
+
+@router.post("/scanner-board/refresh", response_class=JSONResponse)
+def scanner_board_refresh_data(
+    service: WatchlistService = Depends(get_watchlist_service),
+    principal: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(status_code=403, detail="You do not have permission to perform this action.")
+    return JSONResponse(service.force_scanner_board_refresh(requested_by=str(principal.email or "")))
 
 
 @router.get("/scanner-board/top-hits", response_class=JSONResponse)

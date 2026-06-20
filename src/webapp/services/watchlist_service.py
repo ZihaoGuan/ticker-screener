@@ -302,13 +302,27 @@ class WatchlistService:
         self.market_data_source = resolve_market_data_source(market_data_source)
         self.benchmark_ticker = str(benchmark_ticker or "SPY").strip().upper() or "SPY"
         self._excluded_tickers: set[str] | None = None
+        self._scanner_board_override_path = self.repository.artifacts_dir / "status" / "scanner_board_override.json"
 
     def list_recent(self, *, include_deprecated: bool = True) -> list[dict[str, Any]]:
         return self.repository.list_recent_watchlists(limit=50, include_deprecated=include_deprecated)
 
     def get_scanner_board(self, *, now: dt.datetime | None = None) -> dict[str, Any]:
         reference_now = _normalize_scanner_now(now)
-        target_trading_date = _latest_completed_trading_day(reference_now)
+        default_target_trading_date = _latest_completed_trading_day(reference_now)
+        latest_visible_trading_day = _latest_visible_trading_day(reference_now)
+        override_payload = self._load_scanner_board_override()
+        override_target_date_text = _coerce_iso_date(override_payload.get("target_trading_date"))
+        override_target_date = dt.date.fromisoformat(override_target_date_text) if override_target_date_text else None
+        target_trading_date = default_target_trading_date
+        manual_override_active = False
+        if (
+            override_target_date is not None
+            and override_target_date > default_target_trading_date
+            and override_target_date <= latest_visible_trading_day
+        ):
+            target_trading_date = override_target_date
+            manual_override_active = True
         recent_watchlists = self.repository.list_recent_watchlists(limit=400)
         cards: list[dict[str, Any]] = []
 
@@ -359,8 +373,37 @@ class WatchlistService:
             "cutoff_time_label": "20:30 America/New_York",
             "latest_update_at": latest_update_at,
             "latest_signal_date": latest_signal_date,
+            "manual_override_active": manual_override_active,
+            "manual_override_target_date": override_target_date.isoformat() if override_target_date is not None else "",
+            "manual_override_requested_at": str(override_payload.get("requested_at") or ""),
             "cards": cards,
         }
+
+    def force_scanner_board_refresh(
+        self,
+        *,
+        now: dt.datetime | None = None,
+        requested_by: str = "",
+    ) -> dict[str, Any]:
+        reference_now = _normalize_scanner_now(now)
+        target_trading_date = _latest_visible_trading_day(reference_now)
+        payload = {
+            "target_trading_date": target_trading_date.isoformat(),
+            "requested_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "requested_by": str(requested_by or "").strip(),
+        }
+        self._scanner_board_override_path.parent.mkdir(parents=True, exist_ok=True)
+        self._scanner_board_override_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        return self.get_scanner_board(now=reference_now)
+
+    def _load_scanner_board_override(self) -> dict[str, Any]:
+        if not self._scanner_board_override_path.exists():
+            return {}
+        try:
+            payload = json.loads(self._scanner_board_override_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def get_scanner_top_hits_payload(self, *, rrg_service: Any | None = None, now: dt.datetime | None = None) -> dict[str, Any]:
         board_payload = self.get_scanner_board(now=now)
@@ -2019,6 +2062,14 @@ def _latest_completed_trading_day(now: dt.datetime) -> dt.date:
     if local_now.time() >= dt.time(hour=_SCANNER_BOARD_CUTOFF_HOUR, minute=_SCANNER_BOARD_CUTOFF_MINUTE):
         return local_date
     return _previous_weekday(local_date - dt.timedelta(days=1))
+
+
+def _latest_visible_trading_day(now: dt.datetime) -> dt.date:
+    local_now = now.astimezone(_NEW_YORK_TZ)
+    local_date = local_now.date()
+    if local_date.weekday() >= 5:
+        return _previous_weekday(local_date)
+    return local_date
 
 
 def _select_scanner_board_watchlist(
