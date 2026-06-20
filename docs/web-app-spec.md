@@ -119,7 +119,7 @@ User opens dashboard/admin pages to understand:
 
 1. Add browser-triggered runs for:
    - Weekly HTF Pullback
-   - HTF 8W Runup
+   - 8W 100% Runup
    - Gap Fill
    - PEG variants
    - Overlap summary
@@ -185,7 +185,7 @@ Implications:
    - VCP
    - Cup Handle
    - Weekly HTF Pullback
-   - HTF 8W Runup
+   - 8W 100% Runup
    - Gap Fill
 3. Show counts such as:
    - unique ticker count

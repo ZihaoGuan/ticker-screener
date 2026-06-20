@@ -140,7 +140,8 @@ class WatchlistRepository:
 def _group_for_stem(stem: str) -> tuple[str, str]:
     rules = (
         ("weekly_htf_pullback", "weekly_htf_pullback", "Weekly HTF Pullback"),
-        ("htf_8w_runup", "htf_8w_runup", "HTF 8W Runup"),
+        ("eight_week_100_runup", "eight_week_100_runup", "8W 100% Runup"),
+        ("htf_8w_runup", "eight_week_100_runup", "8W 100% Runup"),
         ("weekly_rs", "weekly_rs", "Weekly RS"),
         ("rs_new_high_before_price", "rs", "RS"),
         ("cup_handle", "cup_handle", "Cup Handle"),

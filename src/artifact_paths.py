@@ -249,11 +249,20 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("trend_template_{date_label}.json",),
         "legacy_summary_templates": ("trend_template_run_summary_{date_label}.json",),
     },
-    "htf_8w_runup": {
-        "stem_template": "htf_8w_runup_{date_label}",
-        "legacy_watchlist_templates": ("htf_8w_runup_{date_label}.json",),
-        "legacy_raw_templates": ("htf_8w_runup_{date_label}.json",),
-        "legacy_summary_templates": ("htf_8w_runup_run_summary_{date_label}.json",),
+    "eight_week_100_runup": {
+        "stem_template": "eight_week_100_runup_{date_label}",
+        "legacy_watchlist_templates": (
+            "eight_week_100_runup_{date_label}.json",
+            "htf_8w_runup_{date_label}.json",
+        ),
+        "legacy_raw_templates": (
+            "eight_week_100_runup_{date_label}.json",
+            "htf_8w_runup_{date_label}.json",
+        ),
+        "legacy_summary_templates": (
+            "eight_week_100_runup_run_summary_{date_label}.json",
+            "htf_8w_runup_run_summary_{date_label}.json",
+        ),
     },
     "pre_earnings_ma_stack": {
         "stem_template": "pre_earnings_ma_stack_{date_label}",
@@ -329,7 +338,8 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("wyckoff_buy_signal", "wyckoff_buy_signal"),
     ("wyckoff_sell_signal", "wyckoff_sell_signal"),
     ("inside_dryup", "inside_dryup"),
-    ("htf_8w_runup", "htf_8w_runup"),
+    ("eight_week_100_runup", "eight_week_100_runup"),
+    ("htf_8w_runup", "eight_week_100_runup"),
     ("hve", "hve"),
     ("bb_squeeze", "bb_squeeze"),
     ("ema21_pullback_buy", "ema21_pullback_buy"),

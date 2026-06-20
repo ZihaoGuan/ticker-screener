@@ -35,7 +35,7 @@ def build_htf_runup_watchlist(hits: list[HtfRunupHit]) -> list[dict[str, object]
             {
                 "ticker": hit.ticker,
                 "sector": getattr(hit, "sector", None),
-                "setup_label": "HTF 8W 100% Runup",
+                "setup_label": "8W 100% Runup",
                 "summary": summary,
                 "master_note": _format_note(hit),
                 "event_date": hit.runup_high_date,

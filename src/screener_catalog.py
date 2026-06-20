@@ -1058,6 +1058,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             warmup_trading_days=40,
             evaluator=_run_weekly_htf_pullback,
         ),
+        "eight_week_100_runup": ScreenerSpec(
+            id="eight_week_100_runup",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=max(int(config.htf_history_days), int(config.htf_runup_window_days), 90),
+            warmup_trading_days=20,
+            evaluator=_run_htf_runup,
+        ),
         "htf_8w_runup": ScreenerSpec(
             id="htf_8w_runup",
             required_inputs=("daily_bars", "benchmark_bars", "metadata"),

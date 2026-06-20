@@ -25,7 +25,7 @@ from src.universe_filters import add_universe_filter_args, build_filter_criteria
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the HTF 8-week 100% runup screen.")
+    parser = argparse.ArgumentParser(description="Run the 8-week 100% runup screen.")
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config" / "market_config.json"))
     parser.add_argument("--limit", type=int, help="Limit the universe for smoke runs.")
     parser.add_argument("--tickers", nargs="+", help="Optional explicit ticker list instead of full exchange universe.")
@@ -69,7 +69,11 @@ def main() -> int:
     result = run_htf_runup_screen(config, universe, as_of_date=as_of_date)
     watchlist = build_htf_runup_watchlist(result.hits)
 
-    artifact_paths = build_screener_artifact_paths(PROJECT_ROOT / "artifacts", strategy_id="htf_8w_runup", date_label=date_label)
+    artifact_paths = build_screener_artifact_paths(
+        PROJECT_ROOT / "artifacts",
+        strategy_id="eight_week_100_runup",
+        date_label=date_label,
+    )
     raw_path = artifact_paths.raw_results_path
     watchlist_path = artifact_paths.watchlist_path
     summary_path = artifact_paths.summary_path
@@ -79,10 +83,10 @@ def main() -> int:
     _write_json(
         summary_path,
         {
-            "strategy_id": "htf_8w_runup",
+            "strategy_id": "eight_week_100_runup",
             "date_label": date_label,
             "as_of_date": as_of_date.isoformat() if as_of_date else None,
-            "signal_profile": "htf_8w_runup",
+            "signal_profile": "eight_week_100_runup",
             "total_tickers": result.total_tickers,
             "passed_tickers": result.passed_tickers,
             "failed_tickers": result.failed_tickers,

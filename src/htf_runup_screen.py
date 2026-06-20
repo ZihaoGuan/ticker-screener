@@ -208,9 +208,6 @@ def run_htf_runup_screen(
 
     hits.sort(
         key=lambda hit: (
-            0 if hit.has_htf_setup else 1,
-            hit.htf_setup_distance_to_pivot_pct if hit.htf_setup_distance_to_pivot_pct is not None else 999.0,
-            -(hit.htf_setup_pole_gain_ratio if hit.htf_setup_pole_gain_ratio is not None else -1.0),
             -hit.runup_pct,
             hit.pullback_from_high_pct,
             hit.ticker,

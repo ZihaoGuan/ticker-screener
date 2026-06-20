@@ -1948,6 +1948,8 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     inside_dryup_v2: "Latest inside day plus extreme price-volume dry-up, without requiring breakout follow-through.",
     wyckoff_buy_signal: "Wyckoff accumulation-trigger scan for fresh BUY signals coming out of spring, LPS, or phase progression.",
     wyckoff_sell_signal: "Wyckoff distribution-trigger scan for fresh SELL signals coming out of UTAD, LPSY, or phase deterioration.",
+    ftd_sweep:
+      "Recent follow-through-day sweep reclaims where price undercut the FTD trigger, then quickly reclaimed and held back above it within the configured window.",
     high_tight_flag_setup: "Pre-breakout HTF setups with a completed pole, tight upper-range flag, volume dry-up, and constructive trend context.",
     leif_high_tight_flag: "Leif Soreide HTF breakout setup with scored pole, flag, volume, RS, and breakout rules.",
     weekly_tight_close: "Three weekly bars with ATR-scaled tight closes plus tight highs or lows, while first bar still passes wick and range filter.",
@@ -1959,6 +1961,8 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     td9_bullish: "Bullish TD Sequential exhaustion names where downside pressure may be spent.",
     sean_breakout: "Daily leaders already clearing key EMA, volume, and ADR thresholds.",
     rsi_ma_bb_bullish: "RSI and MA/Bollinger bullish trigger set for early continuation entries.",
+    double_bottom_detection:
+      "Active double-bottom bases still building below the middle-high breakout pivot, before a confirmed breakout invalidates the setup-stage scan.",
     rsi_ma_bb_bearish: "Bearish RSI and MA/Bollinger trigger set for breakdown continuation.",
     near_200ma: "Names testing the 200 day moving average with clear inflection context.",
     lost_21ema: "Recent loss of 21 EMA support while longer trend structure still matters.",

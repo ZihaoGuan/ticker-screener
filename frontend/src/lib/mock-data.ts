@@ -124,7 +124,7 @@ export const chartData: CandlePoint[] = priceSeed.map((item, index) => ({
 }));
 
 export const overlapEntries: OverlapEntry[] = [
-  { ticker: "NVDA", pipeline_count: 4, pipeline_labels: ["RS", "VCP", "HTF 8W Runup", "Overlap"], sector: "Semiconductors" },
+  { ticker: "NVDA", pipeline_count: 4, pipeline_labels: ["RS", "VCP", "8W 100% Runup", "Overlap"], sector: "Semiconductors" },
   { ticker: "CRWV", pipeline_count: 3, pipeline_labels: ["Sean PEG", "RS", "Gap Fill"], sector: "Software" },
   { ticker: "META", pipeline_count: 2, pipeline_labels: ["RS", "Weekly HTF Pullback"], sector: "Internet" },
 ];

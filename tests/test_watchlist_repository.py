@@ -118,6 +118,17 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "macd_golden_cross_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "macd")
 
+    def test_group_key_maps_legacy_htf_runup_stem_to_new_group(self) -> None:
+        watchlists_dir = self.artifacts_dir / "watchlists"
+        watchlists_dir.mkdir(parents=True, exist_ok=True)
+        legacy_path = watchlists_dir / "htf_8w_runup_2026-06-06.json"
+        legacy_path.write_text(json.dumps([{"ticker": "NVDA"}]), encoding="utf-8")
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "htf_8w_runup_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "eight_week_100_runup")
+
     def test_group_key_supports_rsi_ma_bb_bullish(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",

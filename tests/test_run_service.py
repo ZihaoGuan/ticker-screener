@@ -191,6 +191,13 @@ class RunServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_list_actions_prefers_new_8w_runup_name(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("eight_week_100_runup", actions)
+        self.assertNotIn("htf_8w_runup", actions)
+        self.assertEqual(actions["eight_week_100_runup"]["label"], "Run 8W 100% Runup")
+
     def test_cancel_marks_job_and_terminates_process(self) -> None:
         process = _DummyProcess()
         job = {

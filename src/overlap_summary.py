@@ -49,9 +49,9 @@ PIPELINES = (
         "filename": "weekly_htf_pullback_{date}.json",
     },
     {
-        "id": "htf_8w_runup",
+        "id": "eight_week_100_runup",
         "label": "8W 100% Runup",
-        "filename": "htf_8w_runup_{date}.json",
+        "filename": "eight_week_100_runup_{date}.json",
     },
     {
         "id": "gap_fill",
@@ -198,7 +198,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "cup_handle": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "weekly_htf_pullback": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
-    "htf_8w_runup": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "eight_week_100_runup": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "gap_fill": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "near_200ma": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "hve": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
