@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.scheduled_job_service import ScheduledJobService
 from src.webapp.config import load_webapp_config
@@ -100,6 +101,17 @@ def _update_scheduler_persistence_status(
     tmp_path.replace(status_path)
 
 
+def _load_scheduler_status(job_id: str) -> dict[str, object] | None:
+    status_path = STATUS_DIR / f"{job_id}.json"
+    if not status_path.exists():
+        return None
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _sync_scheduler_persistence_from_status(job_id: str) -> None:
     status_path = STATUS_DIR / f"{job_id}.json"
     if not status_path.exists():
@@ -173,6 +185,27 @@ def _sync_scheduler_persistence_from_status(job_id: str) -> None:
     )
 
 
+def _notify_scheduler_completion(
+    *,
+    discord_service: DiscordNotificationService,
+    job: dict[str, object],
+) -> None:
+    payload = _load_scheduler_status(str(job.get("job_id") or ""))
+    if not payload:
+        return
+    try:
+        discord_service.notify_job_completion(
+            action_id=str(job.get("action_id") or ""),
+            job_label=str(job.get("job_label") or job.get("job_id") or ""),
+            status=str(payload.get("status") or ""),
+            success_count=None,
+            trigger_source="scheduler",
+            watchlist_file=str(payload.get("artifact_file") or ""),
+        )
+    except Exception:
+        return
+
+
 def _matches_field(field: str, value: int, *, minimum: int, maximum: int) -> bool:
     if field == "*":
         return True
@@ -244,8 +277,10 @@ def _resolve_template_value(value: object, *, local_now: dt.datetime) -> object:
 
 
 def main() -> int:
-    run_service = RunService(project_root=PROJECT_ROOT, database_url=load_webapp_config().database_url)
+    web_config = load_webapp_config()
+    run_service = RunService(project_root=PROJECT_ROOT, database_url=web_config.database_url)
     schedule_service = ScheduledJobService(project_root=PROJECT_ROOT, run_service=run_service)
+    discord_service = DiscordNotificationService(project_root=PROJECT_ROOT, app_base_url=web_config.app_base_url)
     max_parallel_jobs = schedule_service.get_max_parallel_jobs()
     recovery = run_service.recover_remote_jobs(max_local_fallbacks=max_parallel_jobs)
     if recovery["requeued"] or recovery["local_fallback_started"]:
@@ -365,6 +400,7 @@ def main() -> int:
                     print(f"scheduled job {job['job_id']} exited with {return_code}")
                     exit_code = return_code if exit_code == 0 else exit_code
                 _sync_scheduler_persistence_from_status(str(job["job_id"]))
+                _notify_scheduler_completion(discord_service=discord_service, job=job)
             running_processes = next_running
             if running_processes:
                 time.sleep(1)

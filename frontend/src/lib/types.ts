@@ -84,6 +84,13 @@ export type AuditEventsResponse = {
   has_more: boolean;
 };
 
+export type DiscordNotificationSettingsResponse = {
+  webhook_url: string;
+  app_base_url: string;
+  effective_app_base_url: string;
+  enabled: boolean;
+};
+
 export type ScreenerJob = {
   jobId: string;
   label: string;

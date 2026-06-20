@@ -22,6 +22,7 @@ from src.webapp.services.admin_service import AdminService
 from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.audit_service import AuditService
 from src.webapp.services.dashboard_service import DashboardService
+from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
@@ -72,6 +73,10 @@ def get_chart_watchlist_service() -> WatchlistService:
 
 def get_run_service() -> RunService:
     return RunService(project_root=PROJECT_ROOT, database_url=config.database_url, artifacts_dir=config.artifacts_dir)
+
+
+def get_discord_notification_service() -> DiscordNotificationService:
+    return DiscordNotificationService(project_root=PROJECT_ROOT, app_base_url=config.app_base_url)
 
 
 def get_scheduled_job_service() -> ScheduledJobService:

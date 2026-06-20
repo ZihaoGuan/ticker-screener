@@ -15,6 +15,7 @@ from src.webapp.services.admin_service import AdminService
 from src.webapp.services.audit_service import AuditService
 from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.dashboard_service import DashboardService
+from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
@@ -35,6 +36,7 @@ from web.dependencies import (
     get_chart_watchlist_service,
     get_current_principal,
     get_dashboard_service,
+    get_discord_notification_service,
     get_earnings_calendar_service,
     get_overlap_backtest_service,
     get_overlap_service,
@@ -1283,6 +1285,45 @@ def update_schedule_settings(
         metadata={"max_parallel_jobs": max_parallel_jobs},
     )
     return JSONResponse({"ok": True, "max_parallel_jobs": max_parallel_jobs})
+
+
+@router.get("/admin/discord-notifications", response_class=JSONResponse)
+def discord_notification_settings(
+    service: DiscordNotificationService = Depends(get_discord_notification_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    return JSONResponse(service.get_settings())
+
+
+@router.post("/admin/discord-notifications", response_class=JSONResponse)
+def update_discord_notification_settings(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: DiscordNotificationService = Depends(get_discord_notification_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    settings = service.update_settings(
+        webhook_url=str(request_payload.get("webhook_url") or ""),
+        app_base_url=str(request_payload.get("app_base_url") or ""),
+    )
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.discord_notification.settings",
+        resource_type="discord_notification_settings",
+        resource_id="discord_notifications",
+        resource_label="discord_notifications",
+        message="Updated Discord notification settings.",
+        metadata={
+            "enabled": bool(settings.get("enabled")),
+            "has_webhook_url": bool(settings.get("webhook_url")),
+            "effective_app_base_url": str(settings.get("effective_app_base_url") or ""),
+        },
+    )
+    return JSONResponse({"ok": True, "settings": settings})
 
 
 @router.post("/admin/exclusions", response_class=JSONResponse)

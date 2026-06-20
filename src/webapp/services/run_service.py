@@ -21,7 +21,9 @@ from src.screener_catalog import build_screener_catalog
 from src.universe_filters import build_filter_option_catalog
 from src.universe import UniverseTicker, load_universe
 from src.universe_filters import UniverseFilterCriteria, filter_universe_by_criteria
+from src.webapp.config import load_webapp_config
 from src.webapp.services.screener_history_service import ScreenerHistoryService
+from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.repositories.history_repository import HistoryRepository
 
 
@@ -1433,7 +1435,14 @@ class RunService:
         stripped = str(value or "").strip()
         return stripped.startswith("{{") and stripped.endswith("}}")
 
-    def __init__(self, project_root: Path, *, database_url: str = "", artifacts_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        database_url: str = "",
+        artifacts_dir: Path | None = None,
+        discord_notification_service: DiscordNotificationService | None = None,
+    ) -> None:
         self.project_root = project_root
         self.database_url = database_url
         self.artifacts_dir = artifacts_dir or (project_root / "artifacts")
@@ -1442,6 +1451,10 @@ class RunService:
             database_url=database_url,
             artifacts_dir=self.artifacts_dir,
             repository=self.history_repository,
+        )
+        self.discord_notification_service = discord_notification_service or DiscordNotificationService(
+            project_root=project_root,
+            app_base_url=load_webapp_config().app_base_url,
         )
 
     def list_actions(self) -> list[dict[str, Any]]:
@@ -1669,6 +1682,7 @@ class RunService:
             command,
             normalized,
             job_run_id=job_run_id,
+            trigger_source=trigger_source,
         )
 
     def has_healthy_remote_workers(self) -> bool:
@@ -1710,6 +1724,7 @@ class RunService:
             normalized,
             job_id=self._remote_job_id(int(row["id"])),
             job_run_id=int(row["id"]),
+            trigger_source=str(row.get("trigger_source") or "manual"),
         )
 
     def _start_local_job(
@@ -1721,6 +1736,7 @@ class RunService:
         *,
         job_id: str | None = None,
         job_run_id: int | None = None,
+        trigger_source: str = "manual",
     ) -> str:
         local_job_id = str(job_id or uuid.uuid4().hex[:12])
         started_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
@@ -1752,6 +1768,7 @@ class RunService:
             "cancel_requested": False,
             "options": normalized,
             "execution_mode": "local",
+            "trigger_source": trigger_source,
             "log_file": str(log_file),
             "_started_monotonic": time.monotonic(),
         }
@@ -2504,29 +2521,37 @@ class RunService:
             finished_at=str(job.get("finished_at")) if job.get("finished_at") else None,
         )
         if str(job.get("status")) != "success":
+            self._notify_completed_job(job)
             return
         action_id = str(job.get("action_id") or "")
         if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "overlap_backtest_v1"}:
+            self._notify_completed_job(job)
             return
         summary_file = str(job.get("summary_file") or "").strip()
         if not summary_file:
+            self._notify_completed_job(job)
             return
         summary_path = Path(summary_file)
         if not summary_path.exists():
+            self._notify_completed_job(job)
             return
         try:
             summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
         except Exception:
+            self._notify_completed_job(job)
             return
         raw_results_file = str(summary_payload.get("raw_results_file") or job.get("raw_results_file") or "").strip()
         if not raw_results_file:
+            self._notify_completed_job(job)
             return
         raw_path = Path(raw_results_file)
         if not raw_path.exists():
+            self._notify_completed_job(job)
             return
         try:
             raw_payload = json.loads(raw_path.read_text(encoding="utf-8"))
         except Exception:
+            self._notify_completed_job(job)
             return
         screen_run_id = self.screener_history_service.persist_screen_run(
             strategy_id=action_id,
@@ -2540,6 +2565,25 @@ class RunService:
                 live = self._jobs_by_id.get(job_id)
                 if live is not None:
                     live["screen_run_id"] = screen_run_id
+            self.history_repository.patch_job_run_result(
+                job.get("job_run_id"),
+                result_payload_patch={"screen_run_id": screen_run_id},
+            )
+            job["screen_run_id"] = screen_run_id
+        self._notify_completed_job(job)
+
+    def _notify_completed_job(self, job: dict[str, Any]) -> None:
+        try:
+            self.discord_notification_service.notify_job_completion(
+                action_id=str(job.get("action_id") or ""),
+                job_label=str(job.get("label") or ""),
+                status=str(job.get("status") or ""),
+                success_count=int(job.get("success_count") or 0),
+                trigger_source=str(job.get("trigger_source") or "manual"),
+                watchlist_file=str(job.get("watchlist_file") or ""),
+            )
+        except Exception:
+            return
 
     def _attach_child_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         parent_job_run_ids = [

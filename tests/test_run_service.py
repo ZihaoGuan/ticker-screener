@@ -5,9 +5,10 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.webapp.services import run_service as run_service_module
+from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.run_service import RunService
 
 
@@ -166,6 +167,50 @@ class RunServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["watchlist_stem"], "weekly_rs_new_high_dell-2026-05-31")
         self.assertEqual(payload["watchlist_url"], "/watchlists?stem=weekly_rs_new_high_dell-2026-05-31")
+
+    def test_persist_completed_job_patches_screen_run_id_and_notifies(self) -> None:
+        summary_path = self.project_root / "artifacts" / "output" / "run_summary.json"
+        raw_path = self.project_root / "artifacts" / "output" / "raw.json"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "strategy_id": "weekly_rs",
+                    "raw_results_file": str(raw_path),
+                    "watchlist_file": "/tmp/weekly_rs_new_high_2026-06-20.json",
+                }
+            ),
+            encoding="utf-8",
+        )
+        raw_path.write_text(json.dumps({"rows": []}), encoding="utf-8")
+        notifier = MagicMock(spec=DiscordNotificationService)
+        service = RunService(project_root=self.project_root, discord_notification_service=notifier)
+        service.history_repository.update_job_run = MagicMock()  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = MagicMock()  # type: ignore[method-assign]
+        service.screener_history_service.persist_screen_run = MagicMock(return_value=321)  # type: ignore[method-assign]
+        job = {
+            "job_id": "job-3",
+            "job_run_id": 55,
+            "action_id": "weekly_rs",
+            "label": "Run Weekly RS",
+            "status": "success",
+            "finished_at": "2026-06-20T00:01:00+00:00",
+            "return_code": 0,
+            "summary_file": str(summary_path),
+            "watchlist_file": "/tmp/weekly_rs_new_high_2026-06-20.json",
+            "raw_results_file": str(raw_path),
+            "success_count": 8,
+            "options": {},
+            "trigger_source": "manual",
+        }
+        RunService._jobs = [job]
+        RunService._jobs_by_id = {"job-3": job}
+
+        service._persist_completed_job("job-3")
+
+        service.history_repository.patch_job_run_result.assert_called_with(55, result_payload_patch={"screen_run_id": 321})
+        notifier.notify_job_completion.assert_called_once()
+        self.assertEqual(job["screen_run_id"], 321)
 
     def test_build_command_supports_trendline_snapshot_backfill(self) -> None:
         command = self.service.build_command(

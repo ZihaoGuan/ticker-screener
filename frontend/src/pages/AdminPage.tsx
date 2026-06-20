@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { NavLink } from "react-router-dom";
 import { ExclusionDialog } from "../components/ExclusionDialog";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
@@ -17,6 +18,7 @@ import type {
   RatingsAdminStatusResponse,
   RoleName,
 } from "../lib/types";
+import "./RunsPage.css";
 
 const EMPTY_ADMIN_RESPONSE: AdminResponse = {
   excluded_tickers: [],
@@ -532,6 +534,21 @@ export function AdminPage() {
 
   return (
     <div className="page-grid">
+      <section className="panel screeners-subnav-panel">
+        <div className="screeners-subnav-copy">
+          <span className="eyebrow">Admin</span>
+          <h1>Operations Console</h1>
+          <p className="panel-copy">Manage exclusions, ratings maintenance, users, and notification plumbing from one admin area.</p>
+        </div>
+        <div className="screeners-subnav-links" role="tablist" aria-label="Admin sections">
+          <NavLink to="/admin" end className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}>
+            Admin Overview
+          </NavLink>
+          <NavLink to="/admin/discord-notifications" className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}>
+            Discord Alerts
+          </NavLink>
+        </div>
+      </section>
       <Panel title="Ticker Ratings Health" aside={<span className="eyebrow">{formatCount(ratingsStatus.diagnostics_count)} diagnostics</span>}>
         {isLoadingRatings ? <LoadingBlock label="Loading ratings status…" /> : null}
         <div className="run-toolbar">
