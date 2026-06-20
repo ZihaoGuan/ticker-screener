@@ -33,7 +33,7 @@ class EarningsCalendarServiceTests(unittest.TestCase):
         self.service._get_universe_index = lambda: {}  # type: ignore[method-assign]
         self.service.ratings_repository.load_latest_rating_snapshots_for_tickers = lambda tickers: {}  # type: ignore[method-assign]
         self.service.ratings_repository.load_latest_technical_rating_snapshots_for_tickers = lambda tickers: {}  # type: ignore[method-assign]
-        self.service._load_latest_criteria_meta = lambda: {  # type: ignore[method-assign]
+        self.service._load_criteria_meta_for_week = lambda week_start, week_end: {  # type: ignore[method-assign]
             "available": True,
             "strategy_id": "earnings_weekly_criteria",
             "run_id": 7,
@@ -148,7 +148,7 @@ class EarningsCalendarServiceTests(unittest.TestCase):
                 "summary": "Before market open",
             }
         ]
-        self.service._load_latest_criteria_meta = lambda: {  # type: ignore[method-assign]
+        self.service._load_criteria_meta_for_week = lambda week_start, week_end: {  # type: ignore[method-assign]
             "available": True,
             "strategy_id": "earnings_weekly_criteria",
             "run_id": 7,
@@ -185,6 +185,74 @@ class EarningsCalendarServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["days"][1]["before_market"], [])
         self.assertEqual(payload["criteria_filter"]["matched_count"], 0)
+
+    def test_week_specific_criteria_run_selected_instead_of_latest_only(self) -> None:
+        fake_events = [
+            {
+                "ticker": "AAA",
+                "event_date": dt.date(2026, 6, 8),
+                "summary": "Before market open",
+            }
+        ]
+        self.service._load_criteria_meta_for_week = EarningsCalendarService._load_criteria_meta_for_week.__get__(self.service, EarningsCalendarService)  # type: ignore[method-assign]
+        self.service.history_service.is_configured = lambda: True  # type: ignore[method-assign]
+        self.service.history_service.list_runs = lambda **kwargs: [  # type: ignore[method-assign]
+            {"id": 11, "run_date": dt.date(2026, 6, 9)},
+            {"id": 10, "run_date": dt.date(2026, 6, 2)},
+        ]
+
+        def fake_get_run(run_id: int, *, include_hits: bool = False, hit_limit: int = 200, hit_offset: int = 0):
+            _ = (include_hits, hit_limit, hit_offset)
+            if run_id == 11:
+                return {
+                    "id": 11,
+                    "hits": [
+                        {
+                            "ticker": "BBB",
+                            "passed": True,
+                            "hit_payload_json": {
+                                "ticker": "BBB",
+                                "criteria": {IMPLIED_MOVE_CRITERIA_KEY: True},
+                                "pass_mode": "loose",
+                            },
+                        },
+                        {
+                            "ticker": "CCC",
+                            "passed": False,
+                            "hit_payload_json": {
+                                "ticker": "CCC",
+                                "criteria": {IMPLIED_MOVE_CRITERIA_KEY: True},
+                                "pass_mode": "loose",
+                            },
+                        }
+                    ],
+                }
+            return {
+                "id": 10,
+                "hits": [
+                    {
+                        "ticker": "AAA",
+                        "passed": True,
+                        "hit_payload_json": {
+                            "ticker": "AAA",
+                            "earnings_date": "2026-06-08",
+                            "criteria": {IMPLIED_MOVE_CRITERIA_KEY: True},
+                            "pass_mode": "loose",
+                        },
+                    }
+                ],
+            }
+
+        self.service.history_service.get_run = fake_get_run  # type: ignore[method-assign]
+
+        with patch("src.webapp.services.earnings_calendar_service.load_configured_cookstock", return_value=_FakeCookstock(fake_events)):
+            payload = self.service.get_next_week_calendar(reference_date=dt.date(2026, 6, 2), week_offset=1)
+
+        entry = payload["days"][1]["before_market"][0]
+        self.assertEqual(entry["ticker"], "AAA")
+        self.assertTrue(entry["criteria"]["passed"])
+        self.assertEqual(payload["criteria_filter"]["run_id"], 10)
+        self.assertEqual(payload["criteria_filter"]["run_date"], "2026-06-02")
 
 
 if __name__ == "__main__":
