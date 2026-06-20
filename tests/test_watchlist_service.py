@@ -124,6 +124,21 @@ class WatchlistServiceTests(unittest.TestCase):
             modified_at=dt.datetime(2026, 6, 12, 1, 0, tzinfo=dt.timezone.utc),
         )
         self._write_watchlist(
+            "cup_detection_2026-06-11",
+            tickers=["U"],
+            modified_at=dt.datetime(2026, 6, 12, 0, 55, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "eight_week_100_runup_2026-06-11",
+            tickers=["PLTR", "APP"],
+            modified_at=dt.datetime(2026, 6, 12, 0, 57, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "three_weeks_tight_2026-06-11",
+            tickers=["NVDA"],
+            modified_at=dt.datetime(2026, 6, 12, 0, 58, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
             "td9_bullish_2026-06-11",
             tickers=["SHOP"],
             modified_at=dt.datetime(2026, 6, 12, 1, 5, tzinfo=dt.timezone.utc),
@@ -145,6 +160,12 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["rs"]["entry_count"], 2)
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-11")
         self.assertEqual(cards["sean_gap_up"]["entry_count"], 2)
+        self.assertEqual(cards["cup_detection"]["stem"], "cup_detection_2026-06-11")
+        self.assertEqual(cards["cup_detection"]["entry_count"], 1)
+        self.assertEqual(cards["eight_week_100_runup"]["stem"], "eight_week_100_runup_2026-06-11")
+        self.assertEqual(cards["eight_week_100_runup"]["entry_count"], 2)
+        self.assertEqual(cards["three_weeks_tight"]["stem"], "three_weeks_tight_2026-06-11")
+        self.assertEqual(cards["three_weeks_tight"]["entry_count"], 1)
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-11")
         self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-11")
         self.assertEqual(cards["weekly_rs"]["stem"], "weekly_rs_new_high_2026-06-06")
@@ -171,6 +192,21 @@ class WatchlistServiceTests(unittest.TestCase):
             modified_at=dt.datetime(2026, 6, 12, 23, 42, tzinfo=dt.timezone.utc),
         )
         self._write_watchlist(
+            "cup_detection_2026-06-12",
+            tickers=["AAPL", "MSFT"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 43, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "eight_week_100_runup_2026-06-12",
+            tickers=["CRWD", "NVDA"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 44, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "three_weeks_tight_2026-06-12",
+            tickers=["ANET", "PLTR"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 44, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
             "td9_bullish_2026-06-12",
             tickers=["SHOP"],
             modified_at=dt.datetime(2026, 6, 12, 23, 45, tzinfo=dt.timezone.utc),
@@ -194,6 +230,12 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-12")
         self.assertEqual(cards["vcs_critical_tightness"]["stem"], "vcs_critical_tightness_2026-06-12")
         self.assertEqual(cards["vcs_critical_tightness"]["preview_tickers"], ["APP", "NVDA"])
+        self.assertEqual(cards["cup_detection"]["stem"], "cup_detection_2026-06-12")
+        self.assertEqual(cards["cup_detection"]["preview_tickers"], ["AAPL", "MSFT"])
+        self.assertEqual(cards["eight_week_100_runup"]["stem"], "eight_week_100_runup_2026-06-12")
+        self.assertEqual(cards["eight_week_100_runup"]["preview_tickers"], ["CRWD", "NVDA"])
+        self.assertEqual(cards["three_weeks_tight"]["stem"], "three_weeks_tight_2026-06-12")
+        self.assertEqual(cards["three_weeks_tight"]["preview_tickers"], ["ANET", "PLTR"])
         self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-12")
         self.assertEqual(cards["fearzone"]["preview_tickers"], ["TSLA", "HOOD"])
 

@@ -15,6 +15,9 @@ const CARD_ART: Record<string, string> = {
   wyckoff_sell_signal: "M24 48 L76 44 L118 58 L162 54 L208 82 L246 104 L276 118",
   ftd_sweep: "M24 118 L74 124 L126 92 L168 104 L214 68 L248 72 L276 42",
   sepa_vcp: "M24 120 L82 118 L126 116 L168 114 L210 98 L246 84 L276 52",
+  cup_detection: "M24 112 L72 110 L118 84 L162 58 L206 64 L246 82 L276 70",
+  eight_week_100_runup: "M24 124 L74 122 L118 108 L156 84 L198 58 L238 44 L276 26",
+  three_weeks_tight: "M24 96 L86 94 L136 92 L186 90 L232 88 L276 84",
   double_bottom_detection: "M24 74 L76 108 L128 60 L176 106 L228 68 L276 46",
   ema21_pullback_buy: "M24 102 L74 72 L122 50 L164 74 L206 96 L248 70 L276 40",
   trend_template: "M24 112 L76 100 L120 82 L164 70 L212 52 L276 34",
@@ -73,7 +76,7 @@ export function ScannerBoardPage() {
         <div className="scanner-board-console-row">
           <div>
             <span className="eyebrow">Board logic</span>
-            <p className="panel-copy">Weekly RS New High, RS New High Before Price, Sean Gap Up, Gap Fill, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Fearzone, and TD9 Bullish.</p>
+            <p className="panel-copy">Weekly RS New High, RS New High Before Price, Sean Gap Up, Gap Fill, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Cup Detection, 8 Week Run Up (Doubler), Three Weeks Tight, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Fearzone, and TD9 Bullish.</p>
           </div>
           <div>
             <span className="eyebrow">Navigation</span>
