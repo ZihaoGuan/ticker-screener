@@ -647,12 +647,32 @@ class RatingsRepository:
             ORDER BY r.as_of_date DESC, r.updated_at DESC
             LIMIT 1
         """
+        rank_row = None
         with connection:
             with connection.cursor() as cursor:
                 cursor.execute(fundamentals_sql, (ticker.upper(),))
                 fundamentals_row = cursor.fetchone()
                 cursor.execute(rating_sql, (ticker.upper(),))
                 rating_row = cursor.fetchone()
+                if rating_row:
+                    rating_as_of_value = rating_row[0]
+                    if isinstance(rating_as_of_value, dt.date):
+                        rank_sql = """
+                            WITH ranked AS (
+                                SELECT
+                                  ticker,
+                                  ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
+                                FROM ticker_rating_snapshots
+                                WHERE as_of_date = %s
+                                  AND rating_status = 'ok'
+                            )
+                            SELECT current_rank
+                            FROM ranked
+                            WHERE ticker = %s
+                              AND current_rank <= 200
+                        """
+                        cursor.execute(rank_sql, (rating_as_of_value, ticker.upper()))
+                        rank_row = cursor.fetchone()
         if not fundamentals_row and not rating_row:
             return None
 
@@ -772,24 +792,6 @@ class RatingsRepository:
 
         fundamental_rank: int | None = None
         if rating_as_of_date is not None:
-            rank_sql = """
-                WITH ranked AS (
-                    SELECT
-                      ticker,
-                      ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
-                    FROM ticker_rating_snapshots
-                    WHERE as_of_date = %s
-                      AND rating_status = 'ok'
-                )
-                SELECT current_rank
-                FROM ranked
-                WHERE ticker = %s
-                  AND current_rank <= 200
-            """
-            with connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(rank_sql, (rating_as_of_date, ticker.upper()))
-                    rank_row = cursor.fetchone()
             if rank_row and rank_row[0] is not None:
                 fundamental_rank = int(rank_row[0])
         return {

@@ -27,7 +27,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   wyckoffHoldSignals: true,
   flexSr: false,
 };
-const CHART_CACHE_PREFIX = "chart-screen-cache-v4";
+const CHART_CACHE_PREFIX = "chart-screen-cache-v5";
 const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "overlays" | "fundamentals" | "insider", number> = {
   payload: 10 * 60 * 1000,
   overlays: 10 * 60 * 1000,
@@ -213,7 +213,7 @@ export function ChartsPage() {
     setFundamentalsNotice("");
     const cacheKey = buildChartCacheKey("fundamentals", requestedTicker, "latest");
     const cached = refreshNonce === 0 ? readChartCache<ChartFundamentalsResponse>(cacheKey) : null;
-    if (cached) {
+    if (cached && cached.rating_snapshot) {
       setFundamentalsPayload(cached);
       const earningsStatus = cached.diagnostics.earnings.status;
       const holdersStatus = cached.diagnostics.holders.status;
