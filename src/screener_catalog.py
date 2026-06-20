@@ -788,8 +788,22 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             warmup_trading_days=40,
             evaluator=_run_rs_daily,
         ),
+        "daily_rs_new_high": ScreenerSpec(
+            id="daily_rs_new_high",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=max_rs_days,
+            warmup_trading_days=40,
+            evaluator=_run_rs_daily,
+        ),
         "weekly_rs": ScreenerSpec(
             id="weekly_rs",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=max_rs_days,
+            warmup_trading_days=40,
+            evaluator=_run_rs_weekly,
+        ),
+        "weekly_rs_new_high": ScreenerSpec(
+            id="weekly_rs_new_high",
             required_inputs=("daily_bars", "benchmark_bars", "metadata"),
             lookback_trading_days=max_rs_days,
             warmup_trading_days=40,

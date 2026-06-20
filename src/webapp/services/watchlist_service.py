@@ -85,12 +85,28 @@ _chart_overlay_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dic
 _chart_overlay_cache_lock = threading.Lock()
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
+        "id": "weekly_rs_new_high",
+        "strategy_id": "weekly_rs_new_high",
+        "label": "Weekly RS New High",
+        "description": "Weekly relative-strength leaders printing fresh RS highs, even if price has already pushed to new highs too.",
+        "timeframe": "Weekly",
+        "accent": "violet",
+    },
+    {
         "id": "weekly_rs_before_price",
         "strategy_id": "weekly_rs",
         "label": "Weekly RS New High Before Price",
         "description": "Relative-strength leaders holding leadership while price still has room to catch up.",
         "timeframe": "Weekly",
         "accent": "violet",
+    },
+    {
+        "id": "daily_rs_new_high",
+        "strategy_id": "daily_rs_new_high",
+        "label": "Daily RS New High",
+        "description": "Daily RS line clears its lookback high, including names where price has already matched that leadership.",
+        "timeframe": "Daily",
+        "accent": "cyan",
     },
     {
         "id": "rs",
@@ -2111,8 +2127,12 @@ def _strategy_id_for_watchlist_meta(item: dict[str, Any]) -> str:
     stem = str(item.get("stem") or "").strip()
     if not stem:
         return ""
+    if stem.startswith("weekly_rs_new_high_all_"):
+        return "weekly_rs_new_high"
     if stem.startswith("weekly_rs_new_high_"):
         return "weekly_rs"
+    if stem.startswith("daily_rs_new_high_"):
+        return "daily_rs_new_high"
     if stem.startswith("fearzone_zeiierman_"):
         return "fearzone_zeiierman"
     return _stem_strategy_id(stem)

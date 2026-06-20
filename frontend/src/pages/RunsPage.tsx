@@ -1938,6 +1938,8 @@ function describeConsoleRunId(job: LiveJob): string {
 function describeScreenerAction(actionId: string, hasConfig: boolean): string {
   const catalog: Record<string, string> = {
     rs: "High relative-strength leaders still holding momentum before price fully extends.",
+    daily_rs_new_high: "Daily relative-strength leaders making fresh RS highs whether or not price is already at a matching high.",
+    weekly_rs_new_high: "Weekly relative-strength leaders making fresh RS highs whether or not price has already matched the move.",
     weekly_rs_before_price: "Weekly RS leaders with room before price catches up to relative strength.",
     vcp: "Volatility contraction setups tightening into potential breakout pivots.",
     sepa_vcp: "SEPA VCP squeeze names with Minervini trend, pressure, and risk context.",

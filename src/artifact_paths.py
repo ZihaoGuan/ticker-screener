@@ -15,11 +15,23 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("rs_new_high_before_price_{date_label}.json",),
         "legacy_summary_templates": ("run_summary_{date_label}.json",),
     },
+    "daily_rs_new_high": {
+        "stem_template": "daily_rs_new_high_{date_label}",
+        "legacy_watchlist_templates": ("daily_rs_new_high_{date_label}.json",),
+        "legacy_raw_templates": ("daily_rs_new_high_{date_label}.json",),
+        "legacy_summary_templates": ("daily_rs_new_high_run_summary_{date_label}.json",),
+    },
     "weekly_rs": {
         "stem_template": "weekly_rs_new_high_{date_label}",
         "legacy_watchlist_templates": ("weekly_rs_new_high_{date_label}.json",),
         "legacy_raw_templates": ("weekly_rs_new_high_{date_label}.json",),
         "legacy_summary_templates": ("weekly_rs_run_summary_{date_label}.json",),
+    },
+    "weekly_rs_new_high": {
+        "stem_template": "weekly_rs_new_high_all_{date_label}",
+        "legacy_watchlist_templates": ("weekly_rs_new_high_all_{date_label}.json",),
+        "legacy_raw_templates": ("weekly_rs_new_high_all_{date_label}.json",),
+        "legacy_summary_templates": ("weekly_rs_new_high_all_run_summary_{date_label}.json",),
     },
     "weekly_htf_pullback": {
         "stem_template": "weekly_htf_pullback_{date_label}",
@@ -304,7 +316,9 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
 
 _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("weekly_htf_pullback", "weekly_htf_pullback"),
+    ("weekly_rs_new_high_all", "weekly_rs_new_high"),
     ("weekly_rs_new_high", "weekly_rs"),
+    ("daily_rs_new_high", "daily_rs_new_high"),
     ("rs_new_high_before_price", "rs"),
     ("legacy_peg_earnings_gap", "legacy_peg"),
     ("sean_peg_earnings_gap", "sean_peg"),

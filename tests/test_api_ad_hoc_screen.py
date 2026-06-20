@@ -380,6 +380,22 @@ class _FakeWatchlistService:
                     "list_href": "/watchlists?stem=rs_new_high_before_price_2026-06-12",
                 },
                 {
+                    "id": "daily_rs_new_high",
+                    "strategy_id": "daily_rs_new_high",
+                    "label": "Daily RS New High",
+                    "description": "Daily RS leaders",
+                    "timeframe": "Daily",
+                    "accent": "cyan",
+                    "available": True,
+                    "stem": "daily_rs_new_high_2026-06-12",
+                    "group_label": "Daily RS New High",
+                    "captured_at": "2026-06-13T00:56:00+00:00",
+                    "sort_date": "2026-06-12",
+                    "entry_count": 5,
+                    "preview_tickers": ["AAPL", "PLTR"],
+                    "list_href": "/watchlists?stem=daily_rs_new_high_2026-06-12",
+                },
+                {
                     "id": "weekly_rs_before_price",
                     "strategy_id": "weekly_rs",
                     "label": "Weekly RS New High Before Price",
@@ -394,6 +410,22 @@ class _FakeWatchlistService:
                     "entry_count": 6,
                     "preview_tickers": ["NVDA", "MSFT"],
                     "list_href": "/watchlists?stem=weekly_rs_new_high_2026-06-12",
+                },
+                {
+                    "id": "weekly_rs_new_high",
+                    "strategy_id": "weekly_rs_new_high",
+                    "label": "Weekly RS New High",
+                    "description": "Weekly leaders",
+                    "timeframe": "Weekly",
+                    "accent": "violet",
+                    "available": True,
+                    "stem": "weekly_rs_new_high_all_2026-06-12",
+                    "group_label": "Weekly RS New High",
+                    "captured_at": "2026-06-13T01:01:00+00:00",
+                    "sort_date": "2026-06-12",
+                    "entry_count": 8,
+                    "preview_tickers": ["NVDA", "AAPL"],
+                    "list_href": "/watchlists?stem=weekly_rs_new_high_all_2026-06-12",
                 }
             ],
         }
@@ -806,6 +838,8 @@ class ApiAdHocScreenTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["target_trading_date"], "2026-06-12")
         cards = {item["id"]: item for item in payload["cards"]}
+        self.assertEqual(cards["daily_rs_new_high"]["entry_count"], 5)
+        self.assertEqual(cards["weekly_rs_new_high"]["entry_count"], 8)
         self.assertEqual(cards["weekly_rs_before_price"]["entry_count"], 6)
         self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
 

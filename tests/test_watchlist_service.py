@@ -109,6 +109,11 @@ class WatchlistServiceTests(unittest.TestCase):
             modified_at=dt.datetime(2026, 6, 12, 0, 45, tzinfo=dt.timezone.utc),
         )
         self._write_watchlist(
+            "daily_rs_new_high_2026-06-11",
+            tickers=["AAPL", "NVDA", "PLTR"],
+            modified_at=dt.datetime(2026, 6, 12, 0, 46, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
             "sean_peg_earnings_gap_2026-06-11",
             tickers=["APP", "NVDA"],
             modified_at=dt.datetime(2026, 6, 12, 0, 30, tzinfo=dt.timezone.utc),
@@ -148,6 +153,11 @@ class WatchlistServiceTests(unittest.TestCase):
             tickers=["MSFT", "META"],
             modified_at=dt.datetime(2026, 6, 8, 0, 0, tzinfo=dt.timezone.utc),
         )
+        self._write_watchlist(
+            "weekly_rs_new_high_all_2026-06-06",
+            tickers=["NVDA", "META", "MSFT"],
+            modified_at=dt.datetime(2026, 6, 8, 0, 5, tzinfo=dt.timezone.utc),
+        )
 
         with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()):
             payload = self.service.get_scanner_board(
@@ -158,6 +168,8 @@ class WatchlistServiceTests(unittest.TestCase):
         cards = {item["id"]: item for item in payload["cards"]}
         self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-11")
         self.assertEqual(cards["rs"]["entry_count"], 2)
+        self.assertEqual(cards["daily_rs_new_high"]["stem"], "daily_rs_new_high_2026-06-11")
+        self.assertEqual(cards["daily_rs_new_high"]["entry_count"], 3)
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-11")
         self.assertEqual(cards["sean_gap_up"]["entry_count"], 2)
         self.assertEqual(cards["cup_detection"]["stem"], "cup_detection_2026-06-11")
@@ -168,6 +180,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["three_weeks_tight"]["entry_count"], 1)
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-11")
         self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-11")
+        self.assertEqual(cards["weekly_rs_new_high"]["stem"], "weekly_rs_new_high_all_2026-06-06")
         self.assertEqual(cards["weekly_rs_before_price"]["stem"], "weekly_rs_new_high_2026-06-06")
 
     def test_get_scanner_board_uses_same_day_after_new_york_cutoff(self) -> None:
@@ -175,6 +188,11 @@ class WatchlistServiceTests(unittest.TestCase):
             "rs_new_high_before_price_2026-06-12",
             tickers=["PLTR", "CRWV"],
             modified_at=dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "daily_rs_new_high_2026-06-12",
+            tickers=["AAPL", "PLTR", "CRWV"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 36, tzinfo=dt.timezone.utc),
         )
         self._write_watchlist(
             "sean_peg_earnings_gap_2026-06-12",
@@ -216,6 +234,11 @@ class WatchlistServiceTests(unittest.TestCase):
             tickers=["MSFT"],
             modified_at=dt.datetime(2026, 6, 8, 0, 0, tzinfo=dt.timezone.utc),
         )
+        self._write_watchlist(
+            "weekly_rs_new_high_all_2026-06-06",
+            tickers=["MSFT", "NVDA"],
+            modified_at=dt.datetime(2026, 6, 8, 0, 5, tzinfo=dt.timezone.utc),
+        )
 
         with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()):
             payload = self.service.get_scanner_board(
@@ -226,6 +249,8 @@ class WatchlistServiceTests(unittest.TestCase):
         cards = {item["id"]: item for item in payload["cards"]}
         self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
         self.assertEqual(cards["rs"]["preview_tickers"], ["PLTR", "CRWV"])
+        self.assertEqual(cards["daily_rs_new_high"]["stem"], "daily_rs_new_high_2026-06-12")
+        self.assertEqual(cards["daily_rs_new_high"]["preview_tickers"], ["AAPL", "PLTR", "CRWV"])
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-12")
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-12")
         self.assertEqual(cards["vcs_critical_tightness"]["stem"], "vcs_critical_tightness_2026-06-12")
@@ -238,6 +263,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["three_weeks_tight"]["preview_tickers"], ["ANET", "PLTR"])
         self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-12")
         self.assertEqual(cards["fearzone"]["preview_tickers"], ["TSLA", "HOOD"])
+        self.assertEqual(cards["weekly_rs_new_high"]["stem"], "weekly_rs_new_high_all_2026-06-06")
+        self.assertEqual(cards["weekly_rs_new_high"]["preview_tickers"], ["MSFT", "NVDA"])
 
     def test_force_scanner_board_refresh_bypasses_cutoff_for_admin_override(self) -> None:
         self._write_watchlist(

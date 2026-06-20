@@ -34,7 +34,7 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
                 if hit.weekly_signal_weeks_ago is not None
                 else f"within {hit.weekly_recent_signal_weeks} weeks"
             )
-            setup_label = "Weekly RS new high"
+            setup_label = "Weekly RS new high before price" if hit.require_before_price else "Weekly RS new high"
             summary = (
                 f"Signal on {hit.signal_date}. "
                 f"Weekly RS NH: {hit.weekly_rs_new_high}. "
@@ -47,9 +47,10 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
                 f"Distance from year high: {hit.distance_from_year_high_pct:.1f}%."
             )
         else:
-            setup_label = "RS higher before price"
+            setup_label = "RS higher before price" if hit.require_before_price else "Daily RS new high"
             summary = (
                 f"Signal on {hit.signal_date}. "
+                f"Daily RS NH: {hit.daily_rs_new_high}. "
                 f"Daily RS NH before price: {hit.daily_rs_new_high_before_price}. "
                 f"Weekly RS NH before price: {weekly_status}. "
                 f"RS rating: {hit.rs_rating:.1f}. "

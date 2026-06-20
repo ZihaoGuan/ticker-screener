@@ -6,7 +6,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
-from .config import AppConfig
+from .config import AppConfig, override_config
 from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
 from .rs_rating_screen import approximate_rs_rating, compute_latest_weighted_rs_score
 from .universe import UniverseTicker
@@ -230,12 +230,13 @@ def _compute_rs_new_high_flags(
     return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
 
 
-def _compute_weekly_rs_before_price_context(
+def _compute_weekly_rs_context(
     stock_rows: list[dict[str, object]],
     benchmark_rows: list[dict[str, object]],
     *,
     weekly_lookback_weeks: int,
     recent_signal_weeks: int,
+    require_before_price: bool,
 ) -> dict[str, object] | None:
     stock_frame = _build_high_close_frame_from_rows(stock_rows)
     benchmark_frame = _build_close_frame_from_rows(benchmark_rows)
@@ -253,14 +254,15 @@ def _compute_weekly_rs_before_price_context(
         return None
 
     weekly_rs_line = weekly_aligned["Close"] / weekly_aligned["benchmark_close"]
-    _, weekly_before_price = _compute_rs_new_high_flags(
+    weekly_new_high, weekly_before_price = _compute_rs_new_high_flags(
         weekly_rs_line,
         weekly_aligned["High"],
         lookback=max(1, int(weekly_lookback_weeks)),
     )
 
-    latest_flag = bool(weekly_before_price.iloc[-1])
-    recent_flags = weekly_before_price.tail(max(1, int(recent_signal_weeks)))
+    target_flags = weekly_before_price if require_before_price else weekly_new_high
+    latest_flag = bool(target_flags.iloc[-1])
+    recent_flags = target_flags.tail(max(1, int(recent_signal_weeks)))
     recent_any = bool(recent_flags.any()) if not recent_flags.empty else False
     weeks_ago = None
     signal_date = None
@@ -273,10 +275,34 @@ def _compute_weekly_rs_before_price_context(
             signal_date = recent_flags.index[last_true_position].date().isoformat()
 
     return {
-        "latest_weekly_before_price": latest_flag,
-        "recent_weekly_before_price": recent_any,
-        "weekly_before_price_weeks_ago": weeks_ago,
-        "weekly_before_price_signal_date": signal_date,
+        "latest_weekly_signal": latest_flag,
+        "recent_weekly_signal": recent_any,
+        "weekly_signal_weeks_ago": weeks_ago,
+        "weekly_signal_date": signal_date,
+    }
+
+
+def _compute_weekly_rs_before_price_context(
+    stock_rows: list[dict[str, object]],
+    benchmark_rows: list[dict[str, object]],
+    *,
+    weekly_lookback_weeks: int,
+    recent_signal_weeks: int,
+) -> dict[str, object] | None:
+    context = _compute_weekly_rs_context(
+        stock_rows,
+        benchmark_rows,
+        weekly_lookback_weeks=weekly_lookback_weeks,
+        recent_signal_weeks=recent_signal_weeks,
+        require_before_price=True,
+    )
+    if context is None:
+        return None
+    return {
+        "latest_weekly_before_price": bool(context["latest_weekly_signal"]),
+        "recent_weekly_before_price": bool(context["recent_weekly_signal"]),
+        "weekly_before_price_weeks_ago": context["weekly_signal_weeks_ago"],
+        "weekly_before_price_signal_date": context["weekly_signal_date"],
     }
 
 
@@ -286,7 +312,15 @@ def run_rs_screen(
     *,
     signal_profile: str = "daily",
     as_of_date: dt.date | None = None,
+    require_before_price: bool | None = None,
 ) -> ScreenResult:
+    effective_require_before_price = (
+        bool(config.rs_new_high_require_before_price)
+        if require_before_price is None
+        else bool(require_before_price)
+    )
+    if effective_require_before_price != bool(config.rs_new_high_require_before_price):
+        config = override_config(config, rs_new_high_require_before_price=effective_require_before_price)
     cookstock = load_configured_cookstock(config)
     hits: list[ScreenHit] = []
     failures: list[dict[str, str]] = []
@@ -336,27 +370,33 @@ def run_rs_screen(
                     )
                     if summary:
                         if str(signal_profile).strip().lower() == "weekly":
-                            weekly_context = _compute_weekly_rs_before_price_context(
+                            weekly_context = _compute_weekly_rs_context(
                                 price_data,
                                 benchmark_rows,
                                 weekly_lookback_weeks=int(summary.get("weekly_lookback_weeks", config.rs_new_high_weekly_lookback_weeks)),
                                 recent_signal_weeks=int(summary.get("weekly_recent_signal_weeks", config.rs_weekly_recent_signal_weeks)),
+                                require_before_price=effective_require_before_price,
                             )
-                            if not weekly_context or not bool(weekly_context["recent_weekly_before_price"]):
+                            if not weekly_context or not bool(weekly_context["recent_weekly_signal"]):
                                 continue
-                            summary["weekly_rs_new_high_before_price"] = bool(weekly_context["latest_weekly_before_price"])
-                            summary["weekly_signal_weeks_ago"] = weekly_context["weekly_before_price_weeks_ago"]
-                            if weekly_context["weekly_before_price_signal_date"]:
-                                summary["signal_date"] = str(weekly_context["weekly_before_price_signal_date"])
+                            if effective_require_before_price:
+                                summary["weekly_rs_new_high_before_price"] = bool(weekly_context["latest_weekly_signal"])
+                            summary["weekly_signal_weeks_ago"] = weekly_context["weekly_signal_weeks_ago"]
+                            if weekly_context["weekly_signal_date"]:
+                                summary["signal_date"] = str(weekly_context["weekly_signal_date"])
                         if latest_rs_score is None or latest_rs_rating is None:
                             continue
                         reasons = list(summary.get("reasons", []))
                         if str(signal_profile).strip().lower() == "weekly":
                             weeks_ago = summary.get("weekly_signal_weeks_ago")
-                            if weeks_ago in (None, 0):
+                            if weeks_ago in (None, 0) and effective_require_before_price:
                                 reasons.append("weekly RS new high before price this week")
-                            else:
+                            elif weeks_ago in (None, 0):
+                                reasons.append("weekly RS new high this week")
+                            elif effective_require_before_price:
                                 reasons.append(f"weekly RS new high before price {int(weeks_ago)} week(s) ago")
+                            else:
+                                reasons.append(f"weekly RS new high {int(weeks_ago)} week(s) ago")
                         reasons.append(f"RS rating {latest_rs_rating:.1f}")
                         summary["reasons"] = reasons
                         summary["rs_score"] = latest_rs_score
