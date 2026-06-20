@@ -85,9 +85,9 @@ _chart_overlay_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dic
 _chart_overlay_cache_lock = threading.Lock()
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
-        "id": "weekly_rs",
+        "id": "weekly_rs_before_price",
         "strategy_id": "weekly_rs",
-        "label": "Weekly RS New High",
+        "label": "Weekly RS New High Before Price",
         "description": "Relative-strength leaders holding leadership while price still has room to catch up.",
         "timeframe": "Weekly",
         "accent": "violet",

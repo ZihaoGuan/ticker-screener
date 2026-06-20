@@ -168,7 +168,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["three_weeks_tight"]["entry_count"], 1)
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-11")
         self.assertEqual(cards["td9_bullish"]["stem"], "td9_bullish_2026-06-11")
-        self.assertEqual(cards["weekly_rs"]["stem"], "weekly_rs_new_high_2026-06-06")
+        self.assertEqual(cards["weekly_rs_before_price"]["stem"], "weekly_rs_new_high_2026-06-06")
 
     def test_get_scanner_board_uses_same_day_after_new_york_cutoff(self) -> None:
         self._write_watchlist(

@@ -380,9 +380,9 @@ class _FakeWatchlistService:
                     "list_href": "/watchlists?stem=rs_new_high_before_price_2026-06-12",
                 },
                 {
-                    "id": "weekly_rs",
+                    "id": "weekly_rs_before_price",
                     "strategy_id": "weekly_rs",
-                    "label": "Weekly RS New High",
+                    "label": "Weekly RS New High Before Price",
                     "description": "Leaders",
                     "timeframe": "Weekly",
                     "accent": "violet",
@@ -806,7 +806,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["target_trading_date"], "2026-06-12")
         cards = {item["id"]: item for item in payload["cards"]}
-        self.assertEqual(cards["weekly_rs"]["entry_count"], 6)
+        self.assertEqual(cards["weekly_rs_before_price"]["entry_count"], 6)
         self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
 
     def test_get_chart_fundamentals(self) -> None:

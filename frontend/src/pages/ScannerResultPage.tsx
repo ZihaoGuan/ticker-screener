@@ -70,7 +70,9 @@ export function ScannerResultPage() {
         setFundamentalPayload(fundamentalRows);
         setTechnicalPayload(technicalRows);
 
-        const selectedCard = boardPayload.cards.find((item) => item.id === scannerId) ?? null;
+        const selectedCard =
+          boardPayload.cards.find((item) => item.id === scannerId) ??
+          (scannerId === "weekly_rs" ? boardPayload.cards.find((item) => item.id === "weekly_rs_before_price") ?? null : null);
         setCard(selectedCard);
         if (!selectedCard) {
           setDetail(null);
