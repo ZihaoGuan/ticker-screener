@@ -1970,6 +1970,7 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     earnings_weekly_criteria: "Weekly earnings filter using repo criteria for cleaner candidate sets.",
     peg: "PEG-oriented value screen tuned around earnings gap context.",
     legacy_peg: "Legacy PEG variant kept for compatibility and comparison runs.",
+    sean_gap_up: "Sean earnings gap-up setup tuned around post-earnings power and continuation context.",
   };
   if (catalog[actionId]) {
     return catalog[actionId];
@@ -2214,7 +2215,7 @@ function buildScheduleOptionsTemplate(actionId: string): string {
   if (actionId === "earnings_weekly_criteria") {
     return JSON.stringify({ reference_date: "{{local_date}}" }, null, 2);
   }
-  if (actionId === "legacy_peg" || actionId === "sean_peg") {
+  if (actionId === "legacy_peg" || actionId === "sean_peg" || actionId === "sean_gap_up") {
     return JSON.stringify(
       {
         source: "earnings-watchlist",
