@@ -279,7 +279,7 @@ docker-compose up -d --no-deps web caddy
 
 That default deploy path intentionally avoids restarting Postgres, which reduces the chance of interrupting remote worker jobs that depend on the master server database.
 
-Before the frontend rebuild and compose step, the workflow now checks `job_runs` for queued or running remote jobs while the current `db` container is available. If any active remote jobs are found, the deploy stops by default and prints the first few matching jobs.
+Before the frontend rebuild and compose step, the workflow now checks `job_runs` for queued or running remote jobs while the current `db` container is available. That query runs inside the `db` container, so the workflow does not need to source `deploy/.env` on the host. If any active remote jobs are found, the deploy stops by default and prints the first few matching jobs.
 
 If you truly need to force a manual deploy anyway, set `allow_active_remote_jobs=true` in the workflow UI and rerun it.
 
