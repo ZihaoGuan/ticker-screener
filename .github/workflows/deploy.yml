@@ -81,7 +81,9 @@ jobs:
             cd deploy
             DB_CONTAINER_ID="$(docker-compose ps -q db || true)"
             if [ -n "${DB_CONTAINER_ID}" ] && [ "$(docker inspect -f '{{.State.Running}}' "${DB_CONTAINER_ID}" 2>/dev/null || echo false)" = "true" ]; then
-              ACTIVE_REMOTE_COUNT="$(docker-compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT COUNT(*) FROM job_runs WHERE status IN ('\''queued'\'', '\''running'\'') AND COALESCE(request_payload->>'\''execution_mode'\'', '\''local'\'') = '\''remote'\'';"')"
+              POSTGRES_USER_IN_CONTAINER="$(docker-compose exec -T db printenv POSTGRES_USER | tr -d '\r')"
+              POSTGRES_DB_IN_CONTAINER="$(docker-compose exec -T db printenv POSTGRES_DB | tr -d '\r')"
+              ACTIVE_REMOTE_COUNT="$(docker-compose exec -T db psql -U "${POSTGRES_USER_IN_CONTAINER}" -d "${POSTGRES_DB_IN_CONTAINER}" -Atqc "SELECT COUNT(*) FROM job_runs WHERE status IN ('queued', 'running') AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote';")"
               ACTIVE_REMOTE_COUNT="${ACTIVE_REMOTE_COUNT:-0}"
               if [ "${ACTIVE_REMOTE_COUNT}" != "0" ]; then
                 case "${ALLOW_ACTIVE_REMOTE_JOBS:-false}" in
@@ -91,7 +93,7 @@ jobs:
                   *)
                     echo "Blocked deploy: found ${ACTIVE_REMOTE_COUNT} active remote job(s)."
                     echo "Active remote jobs:"
-                    docker-compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT id || '\'' | '\'' || job_name || '\'' | status='\'' || status || '\'' | target_worker='\'' || COALESCE(request_payload->>'\''target_worker'\'', '\'''\'' ) FROM job_runs WHERE status IN ('\''queued'\'', '\''running'\'') AND COALESCE(request_payload->>'\''execution_mode'\'', '\''local'\'') = '\''remote'\'' ORDER BY created_at ASC LIMIT 20;"'
+                    docker-compose exec -T db psql -U "${POSTGRES_USER_IN_CONTAINER}" -d "${POSTGRES_DB_IN_CONTAINER}" -Atqc "SELECT id || ' | ' || job_name || ' | status=' || status || ' | target_worker=' || COALESCE(request_payload->>'target_worker', '') FROM job_runs WHERE status IN ('queued', 'running') AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote' ORDER BY created_at ASC LIMIT 20;"
                     echo "Wait for remote jobs to finish, or rerun manual deploy with allow_active_remote_jobs=true if you accept the risk."
                     exit 1
                     ;;
