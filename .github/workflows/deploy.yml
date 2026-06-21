@@ -91,19 +91,39 @@ jobs:
             cd deploy
             echo "Compose command: ${COMPOSE_COMMAND}"
             if docker compose version >/dev/null 2>&1; then
+              COMPOSE_IMPL="docker compose"
               echo "Using docker compose plugin"
               docker compose version
             elif command -v docker-compose >/dev/null 2>&1; then
+              COMPOSE_IMPL="docker-compose"
               echo "Using legacy docker-compose binary"
               docker-compose version
             else
               echo "No compose command available on server"
               exit 1
             fi
-            if ! compose ${COMPOSE_COMMAND}; then
+            if [ "${COMPOSE_IMPL}" = "docker-compose" ]; then
+              echo "Legacy docker-compose detected. Pre-cleaning stale web/caddy containers."
+              docker rm -f deploy_web_1 deploy_caddy_1 >/dev/null 2>&1 || true
+              docker ps -a --format '{{.Names}}' | grep -E '_deploy_(web|caddy)_1$' | xargs -r docker rm -f || true
+            fi
+            set +e
+            compose ${COMPOSE_COMMAND} > /tmp/codex-compose-attempt1.log 2>&1
+            COMPOSE_STATUS=$?
+            set -e
+            cat /tmp/codex-compose-attempt1.log
+            if [ "${COMPOSE_STATUS}" -ne 0 ]; then
               echo "First compose attempt failed. Removing stale web/caddy containers and retrying once."
               docker rm -f deploy_web_1 deploy_caddy_1 >/dev/null 2>&1 || true
               docker ps -a --format '{{.Names}}' | grep -E '_deploy_(web|caddy)_1$' | xargs -r docker rm -f || true
-              compose ${COMPOSE_COMMAND}
+              set +e
+              compose ${COMPOSE_COMMAND} > /tmp/codex-compose-attempt2.log 2>&1
+              COMPOSE_STATUS=$?
+              set -e
+              cat /tmp/codex-compose-attempt2.log
+              if [ "${COMPOSE_STATUS}" -ne 0 ]; then
+                echo "Second compose attempt failed."
+                exit "${COMPOSE_STATUS}"
+              fi
             fi
             compose ps
