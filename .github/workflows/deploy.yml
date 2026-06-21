@@ -55,6 +55,16 @@ jobs:
                 docker-compose "$@"
               fi
             }
+            cleanup_legacy_compose_containers() {
+              docker rm -f deploy_web_1 deploy_caddy_1 >/dev/null 2>&1 || true
+              for container_name in $(docker ps -a --format '{{.Names}}'); do
+                case "${container_name}" in
+                  *_deploy_web_1|*_deploy_caddy_1)
+                    docker rm -f "${container_name}" >/dev/null 2>&1 || true
+                    ;;
+                esac
+              done
+            }
             cd "${APP_DIR}"
             BACKUP_DIR="$(mktemp -d)"
             PRESERVE_PATHS="config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt"
@@ -97,26 +107,11 @@ jobs:
             fi
             if [ "${COMPOSE_IMPL}" = "docker-compose" ]; then
               echo "Legacy docker-compose detected. Pre-cleaning stale web/caddy containers."
-              docker rm -f deploy_web_1 deploy_caddy_1 >/dev/null 2>&1 || true
-              docker ps -a --format '{{.Names}}' | grep -E '_deploy_(web|caddy)_1$' | xargs -r docker rm -f || true
+              cleanup_legacy_compose_containers
             fi
-            set +e
-            compose ${COMPOSE_COMMAND} > /tmp/codex-compose-attempt1.log 2>&1
-            COMPOSE_STATUS=$?
-            set -e
-            cat /tmp/codex-compose-attempt1.log
-            if [ "${COMPOSE_STATUS}" -ne 0 ]; then
+            if ! compose ${COMPOSE_COMMAND}; then
               echo "First compose attempt failed. Removing stale web/caddy containers and retrying once."
-              docker rm -f deploy_web_1 deploy_caddy_1 >/dev/null 2>&1 || true
-              docker ps -a --format '{{.Names}}' | grep -E '_deploy_(web|caddy)_1$' | xargs -r docker rm -f || true
-              set +e
-              compose ${COMPOSE_COMMAND} > /tmp/codex-compose-attempt2.log 2>&1
-              COMPOSE_STATUS=$?
-              set -e
-              cat /tmp/codex-compose-attempt2.log
-              if [ "${COMPOSE_STATUS}" -ne 0 ]; then
-                echo "Second compose attempt failed."
-                exit "${COMPOSE_STATUS}"
-              fi
+              cleanup_legacy_compose_containers
+              compose ${COMPOSE_COMMAND}
             fi
             compose ps
