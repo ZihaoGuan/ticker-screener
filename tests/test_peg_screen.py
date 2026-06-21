@@ -10,6 +10,7 @@ import pandas as pd
 from src.config import AppConfig
 from src.peg_screen import EarningsEvent, assess_peg_event_quality, run_peg_screen
 from src.peg_strategy import assess_sean_post_earnings_gap_setup
+from scripts.run_peg_screen import _default_signal_date
 
 
 def _price_data(*, hv_signal: str | None = "HVE") -> tuple[list[dict[str, object]], str]:
@@ -166,6 +167,11 @@ def _freeze_stub(_cookstock: object, _as_of_date: dt.date | None):
 
 
 class PegScreenTests(unittest.TestCase):
+    def test_default_signal_date_rolls_weekend_back_to_previous_weekday(self) -> None:
+        self.assertEqual(_default_signal_date(dt.date(2026, 6, 21)), dt.date(2026, 6, 19))
+        self.assertEqual(_default_signal_date(dt.date(2026, 6, 20)), dt.date(2026, 6, 19))
+        self.assertEqual(_default_signal_date(dt.date(2026, 6, 19)), dt.date(2026, 6, 19))
+
     def test_assess_peg_event_quality_accepts_hve_gap_bar(self) -> None:
         price_data, peg_date = _price_data(hv_signal="HVE")
         financials = _FakeFinancials(price_data, _peg_setup(price_data, peg_date))

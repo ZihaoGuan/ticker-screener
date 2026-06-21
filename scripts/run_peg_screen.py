@@ -103,6 +103,13 @@ def _next_week_events(config_path: str, reference_date: dt.date | None, limit: i
     return events
 
 
+def _default_signal_date(today: dt.date | None = None) -> dt.date:
+    resolved = today or dt.date.today()
+    while resolved.weekday() >= 5:
+        resolved -= dt.timedelta(days=1)
+    return resolved
+
+
 def main() -> int:
     args = parse_args()
     os.environ.setdefault("MPLBACKEND", "Agg")
@@ -110,7 +117,7 @@ def main() -> int:
 
     config = load_app_config(args.config)
     excluded = load_excluded_tickers(config)
-    as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else None
+    as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else _default_signal_date()
     date_label = args.date_label or today_label(as_of_date)
     reference_date = dt.date.fromisoformat(args.reference_date) if args.reference_date else as_of_date
     filter_criteria = build_filter_criteria_from_args(args)
