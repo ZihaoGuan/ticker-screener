@@ -312,6 +312,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("sean_peg_earnings_gap_{date_label}.json", "peg_earnings_gap_{date_label}.json"),
         "legacy_summary_templates": ("sean_peg_run_summary_{date_label}.json", "peg_run_summary_{date_label}.json"),
     },
+    "sean_gap_up": {
+        "stem_template": "sean_peg_earnings_gap_{date_label}",
+        "legacy_watchlist_templates": ("sean_peg_earnings_gap_{date_label}.json", "peg_earnings_gap_{date_label}.json"),
+        "legacy_raw_templates": ("sean_peg_earnings_gap_{date_label}.json", "peg_earnings_gap_{date_label}.json"),
+        "legacy_summary_templates": ("sean_peg_run_summary_{date_label}.json", "peg_run_summary_{date_label}.json"),
+    },
 }
 
 _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
@@ -321,6 +327,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("daily_rs_new_high", "daily_rs_new_high"),
     ("rs_new_high_before_price", "rs"),
     ("legacy_peg_earnings_gap", "legacy_peg"),
+    ("sean_gap_up_earnings_gap", "sean_gap_up"),
     ("sean_peg_earnings_gap", "sean_peg"),
     ("peg_earnings_gap", "legacy_peg"),
     ("cup_handle", "cup_handle"),

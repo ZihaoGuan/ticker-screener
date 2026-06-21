@@ -11,8 +11,13 @@ on:
       compose_command:
         description: Compose command after git pull
         required: false
-        default: up -d
+        default: up -d --no-deps web caddy
         type: string
+      allow_active_remote_jobs:
+        description: Allow deploy even when queued or running remote jobs exist
+        required: false
+        default: false
+        type: boolean
   workflow_run:
     workflows: ["CI"]
     types:
@@ -37,14 +42,15 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           GIT_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.git_ref || github.event.workflow_run.head_branch }}
-          COMPOSE_COMMAND: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.compose_command || 'up -d' }}
+          COMPOSE_COMMAND: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.compose_command || 'up -d --no-deps web caddy' }}
+          ALLOW_ACTIVE_REMOTE_JOBS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.allow_active_remote_jobs || 'false' }}
           APP_DIR: ${{ secrets.ORACLE_APP_DIR }}
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           port: ${{ secrets.ORACLE_PORT }}
-          envs: GIT_REF,COMPOSE_COMMAND,APP_DIR
+          envs: GIT_REF,COMPOSE_COMMAND,ALLOW_ACTIVE_REMOTE_JOBS,APP_DIR
           script_stop: true
           script: |
             set -euo pipefail
@@ -72,9 +78,33 @@ jobs:
                 cp "${BACKUP_DIR}/${preserve_path}" "${preserve_path}"
               fi
             done
+            cd deploy
+            DB_CONTAINER_ID="$(docker-compose ps -q db || true)"
+            if [ -n "${DB_CONTAINER_ID}" ] && [ "$(docker inspect -f '{{.State.Running}}' "${DB_CONTAINER_ID}" 2>/dev/null || echo false)" = "true" ]; then
+              set -a
+              . ./.env
+              set +a
+              ACTIVE_REMOTE_COUNT="$(docker-compose exec -T db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Atqc "SELECT COUNT(*) FROM job_runs WHERE status IN ('queued', 'running') AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote';")"
+              ACTIVE_REMOTE_COUNT="${ACTIVE_REMOTE_COUNT:-0}"
+              if [ "${ACTIVE_REMOTE_COUNT}" != "0" ]; then
+                case "${ALLOW_ACTIVE_REMOTE_JOBS:-false}" in
+                  true|TRUE|1|yes|YES)
+                    echo "Proceeding despite ${ACTIVE_REMOTE_COUNT} active remote job(s) because allow_active_remote_jobs=${ALLOW_ACTIVE_REMOTE_JOBS}."
+                    ;;
+                  *)
+                    echo "Blocked deploy: found ${ACTIVE_REMOTE_COUNT} active remote job(s)."
+                    echo "Active remote jobs:"
+                    docker-compose exec -T db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Atqc "SELECT id || ' | ' || job_name || ' | status=' || status || ' | target_worker=' || COALESCE(request_payload->>'target_worker', '') FROM job_runs WHERE status IN ('queued', 'running') AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote' ORDER BY created_at ASC LIMIT 20;"
+                    echo "Wait for remote jobs to finish, or rerun manual deploy with allow_active_remote_jobs=true if you accept the risk."
+                    exit 1
+                    ;;
+                esac
+              fi
+            else
+              echo "Skipping active remote job check because db container is not currently running."
+            fi
+            cd "${APP_DIR}"
             docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
             cd deploy
-            docker-compose down || true
-            docker rm -f deploy_db_1 deploy_web_1 deploy_caddy_1 2>/dev/null || true
             docker-compose ${COMPOSE_COMMAND}
             docker-compose ps

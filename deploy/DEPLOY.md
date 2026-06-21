@@ -223,11 +223,17 @@ This repo now includes:
 
 - [.github/workflows/ci.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/ci.yml)
 - [.github/workflows/deploy.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/deploy.yml)
+- [.github/workflows/deploy-worker.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/deploy-worker.yml)
 
 The deploy workflow supports both:
 
 - automatic deploy after `CI` succeeds on `main` or `master`
 - manual deploy through `workflow_dispatch`
+
+The manual deploy form also supports:
+
+- `compose_command`: override the default service restart command
+- `allow_active_remote_jobs`: emergency override for the remote-job safety check
 
 Required GitHub repository secrets:
 
@@ -268,12 +274,55 @@ for preserve_path in ${PRESERVE_PATHS}; do
 done
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
 cd deploy
-docker-compose down || true
-docker rm -f deploy_db_1 deploy_web_1 deploy_caddy_1 2>/dev/null || true
-docker-compose up -d
+docker-compose up -d --no-deps web caddy
 ```
 
-You can override that compose command from the workflow UI when needed.
+That default deploy path intentionally avoids restarting Postgres, which reduces the chance of interrupting remote worker jobs that depend on the master server database.
+
+Before the frontend rebuild and compose step, the workflow now checks `job_runs` for queued or running remote jobs while the current `db` container is available. If any active remote jobs are found, the deploy stops by default and prints the first few matching jobs.
+
+If you truly need to force a manual deploy anyway, set `allow_active_remote_jobs=true` in the workflow UI and rerun it.
+
+You can still override the compose command from the workflow UI when needed. For example, if you intentionally need a broader restart, you can pass:
+
+```bash
+up -d db web caddy
+```
+
+or force a full service recreate:
+
+```bash
+up -d --force-recreate db web caddy
+```
+
+### Remote worker deploy
+
+Use the separate worker workflow when you want to update a slave server that only runs `scripts/run_remote_worker.py`.
+
+Required GitHub repository secrets:
+
+- `SLAVE_HOST`
+- `SLAVE_USER`
+- `SLAVE_SSH_KEY`
+- `SLAVE_PORT`
+- `SLAVE_APP_DIR`
+- `SLAVE_WORKER_SERVICE` (optional; defaults to `ticker-remote-worker`)
+
+Suggested values:
+
+- `SLAVE_PORT`: `22`
+- `SLAVE_APP_DIR`: `/opt/ticker-screener/app`
+- `SLAVE_WORKER_SERVICE`: `ticker-remote-worker`
+
+The worker workflow:
+
+- checks out the requested git ref on the slave server
+- preserves server-local config files plus `.worker.env`
+- rebuilds the Python virtualenv
+- runs `npm ci` under `frontend/` so Playwright probes stay in sync
+- restarts the worker service with `systemctl`
+
+Unlike the main web deploy workflow, the worker workflow does not run `docker-compose down` or restart the web stack.
 
 The deploy script now preserves the server-local exclusion files (`config/smallcap_exclude_tickers.txt`, `config/manual_exclude_tickers.txt`, and `config/manual_include_tickers.txt`) across `git pull`. It temporarily restores the tracked repo versions so fast-forward deploys do not fail, then copies the server-local files back before rebuild. The same script still restores `frontend/package-lock.json` from `HEAD` and runs the narrow `git clean` for frontend build artefacts, which avoids `git pull` being blocked by a mutated lockfile while still not wiping unrelated local files. The frontend container also uses `npm ci` so the checked-in lockfile is respected instead of being rewritten during deploy.
 

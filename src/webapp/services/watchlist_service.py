@@ -118,7 +118,7 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     },
     {
         "id": "sean_gap_up",
-        "strategy_id": "sean_peg",
+        "strategy_id": "sean_gap_up",
         "label": "Sean Gap Up",
         "description": "Post-earnings gap leaders with HVE or HV1 volume, tight structure, and continuation context.",
         "timeframe": "Daily",
@@ -562,7 +562,7 @@ class WatchlistService:
             raise ValueError(f"Deprecated watchlist is admin-only: {stem}")
         recent_watchlists = self.repository.list_recent_watchlists(limit=400, include_deprecated=allow_deprecated)
         current_meta = next((item for item in recent_watchlists if str(item.get("stem") or "") == stem), None)
-        current_strategy_id = _strategy_id_for_watchlist_meta(current_meta) if current_meta else _stem_strategy_id(stem)
+        current_strategy_id = _strategy_id_for_watchlist_meta(current_meta) if current_meta else _normalize_scanner_strategy_id(_stem_strategy_id(stem))
         previous_meta = _find_previous_watchlist_meta(
             recent_watchlists,
             stem=stem,
@@ -2208,6 +2208,9 @@ def _select_scanner_board_watchlist(
 
 
 def _strategy_id_for_watchlist_meta(item: dict[str, Any]) -> str:
+    explicit_strategy_id = _normalize_scanner_strategy_id(str(item.get("strategy_id") or "").strip())
+    if explicit_strategy_id:
+        return explicit_strategy_id
     stem = str(item.get("stem") or "").strip()
     if not stem:
         return ""
@@ -2219,7 +2222,7 @@ def _strategy_id_for_watchlist_meta(item: dict[str, Any]) -> str:
         return "daily_rs_new_high"
     if stem.startswith("fearzone_zeiierman_"):
         return "fearzone_zeiierman"
-    return _stem_strategy_id(stem)
+    return _normalize_scanner_strategy_id(_stem_strategy_id(stem))
 
 
 def _find_previous_watchlist_meta(
@@ -2252,6 +2255,13 @@ def _stem_strategy_id(stem: str) -> str:
     from ...artifact_paths import strategy_id_from_legacy_stem
 
     return strategy_id_from_legacy_stem(stem)
+
+
+def _normalize_scanner_strategy_id(strategy_id: str) -> str:
+    normalized = str(strategy_id or "").strip()
+    if normalized == "sean_peg":
+        return "sean_gap_up"
+    return normalized
 
 
 def _normalize_html_text(value: str) -> str:
