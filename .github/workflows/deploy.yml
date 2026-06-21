@@ -89,5 +89,21 @@ jobs:
             cd "${APP_DIR}"
             docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
             cd deploy
-            compose ${COMPOSE_COMMAND}
+            echo "Compose command: ${COMPOSE_COMMAND}"
+            if docker compose version >/dev/null 2>&1; then
+              echo "Using docker compose plugin"
+              docker compose version
+            elif command -v docker-compose >/dev/null 2>&1; then
+              echo "Using legacy docker-compose binary"
+              docker-compose version
+            else
+              echo "No compose command available on server"
+              exit 1
+            fi
+            if ! compose ${COMPOSE_COMMAND}; then
+              echo "First compose attempt failed. Removing stale web/caddy containers and retrying once."
+              docker rm -f deploy_web_1 deploy_caddy_1 >/dev/null 2>&1 || true
+              docker ps -a --format '{{.Names}}' | grep -E '_deploy_(web|caddy)_1$' | xargs -r docker rm -f || true
+              compose ${COMPOSE_COMMAND}
+            fi
             compose ps
