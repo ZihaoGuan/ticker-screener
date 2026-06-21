@@ -1112,10 +1112,10 @@ export function AdminPage() {
         </form>
       </Panel>
 
-      <Panel title="Fetch Today SPY GEX" aside={<span className="eyebrow">FlashAlpha close snapshot</span>}>
+      <Panel title="Fetch Today SPY GEX" aside={<span className="eyebrow">CBOE delayed close snapshot</span>}>
         <div className="run-toolbar">
           <p className="panel-copy">
-            Launches `flashalpha_gex_close` for today and persists snapshot for dashboard DB reads. Dashboard will not call FlashAlpha live.
+            Launches `flashalpha_gex_close` for today and persists a CBOE-delayed snapshot for dashboard DB reads. Default expiry is 0DTE when present, otherwise the nearest expiry.
           </p>
           <div className="run-action-footer">
             <button className="primary-button" type="button" disabled={isLaunchingGexSnapshot} onClick={() => void handleFetchTodayGexSnapshot()}>

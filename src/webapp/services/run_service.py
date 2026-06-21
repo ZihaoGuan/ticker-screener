@@ -370,7 +370,7 @@ class RunService:
         ),
         "flashalpha_gex_close": RunAction(
             "flashalpha_gex_close",
-            "Sync FlashAlpha GEX Close",
+            "Sync CBOE GEX Close",
             "scripts/run_flashalpha_gex_close_screen.py",
             supports_limit=False,
             fields=(

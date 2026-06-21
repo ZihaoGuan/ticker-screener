@@ -23,13 +23,13 @@ STRATEGY_ID = "flashalpha_gex_close"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fetch and persist FlashAlpha GEX close snapshot.")
+    parser = argparse.ArgumentParser(description="Fetch and persist a CBOE-delayed GEX close snapshot.")
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config" / "market_config.json"))
     parser.add_argument("--date-label", help="Override artifact date label (YYYY-MM-DD).")
     parser.add_argument("--as-of-date", help="Label the snapshot with a trading date (YYYY-MM-DD).")
     parser.add_argument("--symbol", help="Underlying symbol. Defaults to benchmark ticker from config.")
     parser.add_argument("--expiration", help="Optional expiry filter (YYYY-MM-DD).")
-    parser.add_argument("--min-oi", type=int, default=0, help="Optional minimum OI filter passed to FlashAlpha.")
+    parser.add_argument("--min-oi", type=int, default=0, help="Optional minimum effective OI filter applied to the CBOE chain.")
     return parser.parse_args()
 
 
@@ -55,7 +55,7 @@ def main() -> int:
         "as_of_date": as_of_date.isoformat(),
         "symbol": symbol,
         "summary": summary_snapshot,
-        "flashalpha_response": api_payload,
+        "cboe_response": api_payload,
         "hits": [],
         "failed_tickers": [],
     }
@@ -66,7 +66,7 @@ def main() -> int:
         "total_tickers": 1,
         "passed_tickers": 0,
         "failed_tickers": 0,
-        "source": "flashalpha",
+        "source": "cboe",
         "raw_results_file": str(artifact_paths.raw_results_path),
         "watchlist_file": str(artifact_paths.watchlist_path),
         "ticker": summary_snapshot.get("ticker") or symbol,
@@ -82,6 +82,8 @@ def main() -> int:
         "top_net_gex_strike": summary_snapshot.get("top_net_gex_strike"),
         "put_call_oi_ratio": summary_snapshot.get("put_call_oi_ratio"),
         "strike_count": summary_snapshot.get("strike_count"),
+        "front_expiry": summary_snapshot.get("front_expiry"),
+        "expiration_mode": summary_snapshot.get("expiration_mode"),
         "summary": summary_snapshot.get("summary"),
         "methodology": summary_snapshot.get("methodology"),
         "api_as_of": summary_snapshot.get("as_of"),
@@ -100,7 +102,7 @@ def main() -> int:
     if history_service.is_configured():
         persisted_run_id = history_service.persist_metric_snapshot_run(
             strategy_id=STRATEGY_ID,
-            options={"as_of_date": as_of_date.isoformat(), "source": "flashalpha"},
+            options={"as_of_date": as_of_date.isoformat(), "source": "cboe"},
             summary_payload=summary_payload,
             raw_artifact_path=str(artifact_paths.raw_results_path),
             watchlist_artifact_path=str(artifact_paths.watchlist_path),

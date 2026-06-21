@@ -319,7 +319,7 @@ def _build_options_positioning_payload(*, repository: DashboardRepository, ticke
             "put_call_oi_ratio": _to_number(summary.get("put_call_oi_ratio")),
             "strike_count": _to_number(summary.get("strike_count")),
             "implied_move_pct": None,
-            "front_expiry": "",
+            "front_expiry": str(summary.get("front_expiry") or ""),
             "summary": str(summary.get("summary") or ""),
             "methodology": str(summary.get("methodology") or ""),
         },
