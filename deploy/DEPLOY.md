@@ -233,7 +233,6 @@ The deploy workflow supports both:
 The manual deploy form also supports:
 
 - `compose_command`: override the default service restart command
-- `allow_active_remote_jobs`: emergency override for the remote-job safety check
 
 Required GitHub repository secrets:
 
@@ -277,11 +276,7 @@ cd deploy
 docker compose up -d --no-deps web caddy || { docker rm -f deploy_web_1 deploy_caddy_1 || true; docker ps -a --format '{{.Names}}' | grep -E '_deploy_(web|caddy)_1$' | xargs -r docker rm -f || true; docker compose up -d --no-deps web caddy; }
 ```
 
-That default deploy path intentionally avoids restarting Postgres, which reduces the chance of interrupting remote worker jobs that depend on the master server database.
-
-Before the frontend rebuild and compose step, the workflow now runs [`scripts/check_active_remote_jobs.sh`](/Users/Zihao.Guan/Personal/ticker-screener/scripts/check_active_remote_jobs.sh). That script prefers modern `docker compose` and falls back to legacy `docker-compose` only when needed. It checks `job_runs` for queued or running remote jobs while the current `db` container is available. It reads `POSTGRES_USER` and `POSTGRES_DB` from the running `db` container with `printenv`, then runs `psql` against that same container, so the deploy workflow does not need to source `deploy/.env` on the host. If any active remote jobs are found, the deploy stops by default and prints the first few matching jobs.
-
-If you truly need to force a manual deploy anyway, set `allow_active_remote_jobs=true` in the workflow UI and rerun it.
+That default deploy path intentionally avoids restarting Postgres.
 
 You can still override the compose command from the workflow UI when needed. For example, if you intentionally need a broader restart, you can pass:
 

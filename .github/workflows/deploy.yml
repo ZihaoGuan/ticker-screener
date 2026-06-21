@@ -13,11 +13,6 @@ on:
         required: false
         default: up -d --no-deps web caddy
         type: string
-      allow_active_remote_jobs:
-        description: Allow deploy even when queued or running remote jobs exist
-        required: false
-        default: false
-        type: boolean
   workflow_run:
     workflows: ["CI"]
     types:
@@ -43,14 +38,13 @@ jobs:
         env:
           GIT_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.git_ref || github.event.workflow_run.head_branch }}
           COMPOSE_COMMAND: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.compose_command || 'up -d --no-deps web caddy' }}
-          ALLOW_ACTIVE_REMOTE_JOBS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.allow_active_remote_jobs || 'false' }}
           APP_DIR: ${{ secrets.ORACLE_APP_DIR }}
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           port: ${{ secrets.ORACLE_PORT }}
-          envs: GIT_REF,COMPOSE_COMMAND,ALLOW_ACTIVE_REMOTE_JOBS,APP_DIR
+          envs: GIT_REF,COMPOSE_COMMAND,APP_DIR
           script_stop: true
           script: |
             set -euo pipefail
@@ -85,7 +79,6 @@ jobs:
                 cp "${BACKUP_DIR}/${preserve_path}" "${preserve_path}"
               fi
             done
-            sh scripts/check_active_remote_jobs.sh
             cd "${APP_DIR}"
             docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
             cd deploy
