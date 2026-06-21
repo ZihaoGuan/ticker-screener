@@ -160,9 +160,12 @@ export type ScannerTopHitRow = {
   industry: string;
   day_close: number | null;
   change_pct: number | null;
+  perf_year_pct: number | null;
+  perf_ytd_pct: number | null;
   rs_rating: number | null;
   ta_rating: number | null;
   fa_rating: number | null;
+  technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
   scanner_count: number;
   scanner_labels: string[];
   scanners: ScannerTopHitScanner[];

@@ -35,7 +35,8 @@ type ScannerRow = {
   perfYtdPct: number | null;
   arsScore: number | null;
   alsScore: number | null;
-  technicalIndicatorSummary: string;
+  technicalIndicator1d: string;
+  technicalIndicator1w: string;
   isNew: boolean;
 };
 
@@ -185,7 +186,7 @@ export function ScannerResultPage() {
       return;
     }
     const lines = [
-      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "1Y %", "YTD %", "TA", "Tech Ratings", "FA", "ARS", "ALS Score", "Setup", "Summary"].join(","),
+      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "1Y %", "YTD %", "TA", "1D", "1W", "FA", "ARS", "ALS Score", "Setup", "Summary"].join(","),
       ...filteredRows.map((row) =>
         [
           row.ticker,
@@ -197,7 +198,8 @@ export function ScannerResultPage() {
           row.perfYearPct == null ? "" : row.perfYearPct.toFixed(2),
           row.perfYtdPct == null ? "" : row.perfYtdPct.toFixed(2),
           row.taScore == null ? "" : row.taScore.toFixed(1),
-          csvValue(row.technicalIndicatorSummary),
+          csvValue(row.technicalIndicator1d),
+          csvValue(row.technicalIndicator1w),
           row.faScore == null ? "" : row.faScore.toFixed(1),
           row.arsScore == null ? "" : Math.round(row.arsScore).toString(),
           row.alsScore == null ? "" : Math.round(row.alsScore).toString(),
@@ -338,7 +340,8 @@ export function ScannerResultPage() {
                     <th>1Y %</th>
                     <th>YTD %</th>
                     <th>{renderSortHeader("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>Tech Ratings</th>
+                    <th>1D</th>
+                    <th>1W</th>
                     <th>{renderSortHeader("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
@@ -374,7 +377,8 @@ export function ScannerResultPage() {
                       <td data-label="TA">
                         <span className={`scanner-score-pill ${toneForScore(row.taScore, 10)}`}>{formatTenPointScore(row.taScore)}</span>
                       </td>
-                      <td data-label="Tech Ratings">{row.technicalIndicatorSummary || "--"}</td>
+                      <td data-label="1D">{row.technicalIndicator1d || "--"}</td>
+                      <td data-label="1W">{row.technicalIndicator1w || "--"}</td>
                       <td data-label="FA">
                         <span className={`scanner-score-pill ${toneForScore(row.faScore, 10)}`}>{formatTenPointScore(row.faScore)}</span>
                       </td>
@@ -422,11 +426,13 @@ function buildScannerRow(
   const ticker = String(entry.ticker ?? "").trim().toUpperCase();
   const fundamental = fundamentalMap.get(ticker);
   const technical = technicalMap.get(ticker);
-  const directTechnicalIndicatorSummary = formatDirectTechnicalIndicatorSummary(entry.technical_indicator_ratings);
   const technicalIndicator = technicalIndicatorMap.get(ticker);
   const technicalOverall = technical?.overall_rating ?? null;
   const fundamentalOverall = fundamental?.overall_rating ?? null;
   const leadershipOverall = technical?.leadership_score ?? null;
+  const directTechnicalIndicator = normalizeDirectTechnicalIndicatorRatings(entry.technical_indicator_ratings);
+  const dailyIndicator = directTechnicalIndicator["1d"] ?? technicalIndicator?.daily;
+  const weeklyIndicator = directTechnicalIndicator["1w"] ?? technicalIndicator?.weekly;
   return {
     ticker,
     company: String(entry.company_name ?? ""),
@@ -443,29 +449,17 @@ function buildScannerRow(
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,
     alsScore: averagePresent([technicalOverall, fundamentalOverall, leadershipOverall]),
-    technicalIndicatorSummary: directTechnicalIndicatorSummary || formatTechnicalIndicatorSummary(technicalIndicator),
+    technicalIndicator1d: dailyIndicator?.rating_label ?? "",
+    technicalIndicator1w: weeklyIndicator?.rating_label ?? "",
     isNew: Boolean(entry.is_new),
   };
 }
 
-function formatTechnicalIndicatorSummary(row: TopTechnicalIndicatorRatingEntry | undefined) {
-  if (!row) {
-    return "";
-  }
-  const cells: TechnicalIndicatorRatingCell[] = [row.daily, row.weekly, row.monthly];
-  return cells.map((cell) => `${cell.timeframe.toUpperCase()} ${cell.rating_label ?? "--"}`).join(" · ");
-}
-
-function formatDirectTechnicalIndicatorSummary(value: unknown) {
+function normalizeDirectTechnicalIndicatorRatings(value: unknown) {
   if (!value || typeof value !== "object") {
-    return "";
+    return {} as Record<string, TechnicalIndicatorRatingCell>;
   }
-  const ratings = value as Record<string, Partial<TechnicalIndicatorRatingCell>>;
-  return ["1d", "1w", "1m"]
-    .map((timeframe) => ratings[timeframe])
-    .filter((cell): cell is Partial<TechnicalIndicatorRatingCell> => Boolean(cell))
-    .map((cell) => `${String(cell.timeframe ?? "").toUpperCase() || "--"} ${String(cell.rating_label ?? "--")}`)
-    .join(" · ");
+  return value as Record<string, TechnicalIndicatorRatingCell>;
 }
 
 function buildChartHref(ticker: string, stem: string) {

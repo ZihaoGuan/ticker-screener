@@ -488,9 +488,12 @@ class WatchlistService:
                         "industry": "",
                         "day_close": None,
                         "change_pct": None,
+                        "perf_year_pct": None,
+                        "perf_ytd_pct": None,
                         "rs_rating": None,
                         "ta_rating": None,
                         "fa_rating": None,
+                        "technical_indicator_ratings": {},
                         "scanner_count": 0,
                         "scanners": [],
                     },
@@ -1300,17 +1303,22 @@ class WatchlistService:
         repository = RatingsRepository(self.database_url)
         fundamental_map = repository.load_latest_rating_snapshots_for_tickers(tickers)
         technical_map = repository.load_latest_technical_rating_snapshots_for_tickers(tickers)
+        technical_indicator_map = repository.load_latest_technical_indicator_ratings_for_tickers(tickers)
         for ticker in tickers:
             row = rows_by_ticker.get(ticker)
             if row is None:
                 continue
             fundamental = fundamental_map.get(ticker) or {}
             technical = technical_map.get(ticker) or {}
+            technical_indicator = technical_indicator_map.get(ticker) or {}
             if not row.get("sector"):
                 row["sector"] = _coalesce_text(row.get("sector"), fundamental.get("sector"), technical.get("sector"))
+            row["perf_year_pct"] = _coerce_optional_float(fundamental.get("perf_year_pct"))
+            row["perf_ytd_pct"] = _coerce_optional_float(fundamental.get("perf_ytd_pct"))
             row["fa_rating"] = _coerce_optional_float(fundamental.get("overall_rating"))
             row["ta_rating"] = _coerce_optional_float(technical.get("overall_rating"))
             row["rs_rating"] = _coerce_optional_float(technical.get("leadership_score"))
+            row["technical_indicator_ratings"] = technical_indicator
 
     def _attach_entry_technical_indicator_ratings(self, entries: list[dict[str, Any]]) -> None:
         if not self.database_url or not entries:

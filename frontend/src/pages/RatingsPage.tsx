@@ -124,14 +124,18 @@ export function RatingsPage() {
   useEffect(() => {
     setIsLoading(true);
     setNotice("");
-    const request =
+    const primaryRequest =
       mode === "technical"
         ? fetchJson<TopTechnicalRatingsResponse>(buildTechnicalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
         : mode === "technical-indicator"
           ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildTechnicalIndicatorRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
           : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector));
-    void request
-      .then((response) => {
+    const technicalIndicatorRequest = fetchJson<TopTechnicalIndicatorRatingsResponse>(
+      buildTechnicalIndicatorRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector),
+    );
+    void Promise.all([primaryRequest, technicalIndicatorRequest])
+      .then(([response, indicatorResponse]) => {
+        setTechnicalIndicatorPayload(indicatorResponse);
         if (mode === "technical") {
           setTechnicalPayload(response as TopTechnicalRatingsResponse);
         } else if (mode === "technical-indicator") {
@@ -152,6 +156,10 @@ export function RatingsPage() {
       })
       .finally(() => setIsLoading(false));
   }, [mode, requestedDate, requestedLimit, requestedSector, requestedStatus]);
+
+  const technicalIndicatorMap = useMemo(() => {
+    return new Map((technicalIndicatorPayload?.rows ?? []).map((row) => [row.ticker.toUpperCase(), row] satisfies [string, TopTechnicalIndicatorRatingEntry]));
+  }, [technicalIndicatorPayload?.rows]);
 
   const payload = mode === "technical" ? technicalPayload : mode === "technical-indicator" ? technicalIndicatorPayload : fundamentalPayload;
   const rows = mode === "technical" ? (technicalPayload?.rows ?? []) : mode === "technical-indicator" ? (technicalIndicatorPayload?.rows ?? []) : (fundamentalPayload?.rows ?? []);
@@ -306,6 +314,8 @@ export function RatingsPage() {
                   <th>1Y %</th>
                   <th>YTD %</th>
                   <th>Overall</th>
+                  <th>1D</th>
+                  <th>1W</th>
                   <th>Valuation</th>
                   <th>Profitability</th>
                   <th>Growth</th>
@@ -327,6 +337,8 @@ export function RatingsPage() {
                     <td data-label="1Y %">{formatPercent(row.perf_year_pct)}</td>
                     <td data-label="YTD %">{formatPercent(row.perf_ytd_pct)}</td>
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
+                    <td data-label="1D">{technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
+                    <td data-label="1W">{technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
                     <td data-label="Valuation">{row.valuation_grade ?? "-"} ({formatScore(row.valuation_score)})</td>
                     <td data-label="Profitability">{row.profitability_grade ?? "-"} ({formatScore(row.profitability_score)})</td>
                     <td data-label="Growth">{row.growth_grade ?? "-"} ({formatScore(row.growth_score)})</td>
@@ -348,6 +360,8 @@ export function RatingsPage() {
                   <th>Ticker</th>
                   <th>Sector / Industry</th>
                   <th>Overall</th>
+                  <th>1D</th>
+                  <th>1W</th>
                   <th>Band</th>
                   <th>Trend</th>
                   <th>DMA Speed</th>
@@ -370,6 +384,8 @@ export function RatingsPage() {
                       {[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}
                     </td>
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
+                    <td data-label="1D">{technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
+                    <td data-label="1W">{technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
                     <td data-label="Band">{row.rating_band ?? "-"}</td>
                     <td data-label="Trend">{formatScore(row.trend_regime_score)}</td>
                     <td data-label="DMA Speed">{formatScore(row.dma_speed_score)}</td>

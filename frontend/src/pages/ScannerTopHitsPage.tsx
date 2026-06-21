@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { ScannerTopHitRow, ScannerTopHitsResponse } from "../lib/types";
+import type { ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "close" | "change" | "rs" | "ta" | "fa";
 type SortDirection = "asc" | "desc";
@@ -173,8 +173,12 @@ export function ScannerTopHitsPage() {
                     <th>Sector Momentum</th>
                     <th>{renderSortButton("Close", "close", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("Change", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>1Y %</th>
+                    <th>YTD %</th>
                     <th>{renderSortButton("RS", "rs", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>1D</th>
+                    <th>1W</th>
                     <th>{renderSortButton("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                   </tr>
                 </thead>
@@ -212,8 +216,12 @@ export function ScannerTopHitsPage() {
                       </td>
                       <td data-label="Close">{formatPrice(row.day_close)}</td>
                       <td data-label="Change">{renderChange(row.change_pct)}</td>
+                      <td data-label="1Y %">{renderChange(row.perf_year_pct)}</td>
+                      <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
                       <td data-label="RS">{formatRating(row.rs_rating)}</td>
                       <td data-label="TA">{formatRating(row.ta_rating)}</td>
+                      <td data-label="1D">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1d"])}</td>
+                      <td data-label="1W">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1w"])}</td>
                       <td data-label="FA">{formatRating(row.fa_rating)}</td>
                     </tr>
                   ))}
@@ -325,6 +333,10 @@ function formatRating(value: number | null) {
 
 function formatCompactNumber(value: number | null | undefined) {
   return value == null ? "--" : value.toFixed(1);
+}
+
+function formatTechnicalIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {
+  return value?.rating_label ?? "--";
 }
 
 function renderChange(value: number | null) {
