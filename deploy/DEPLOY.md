@@ -274,12 +274,12 @@ for preserve_path in ${PRESERVE_PATHS}; do
 done
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
 cd deploy
-docker-compose up -d --no-deps web caddy
+docker compose up -d --no-deps web caddy
 ```
 
 That default deploy path intentionally avoids restarting Postgres, which reduces the chance of interrupting remote worker jobs that depend on the master server database.
 
-Before the frontend rebuild and compose step, the workflow now runs [`scripts/check_active_remote_jobs.sh`](/Users/Zihao.Guan/Personal/ticker-screener/scripts/check_active_remote_jobs.sh). That script checks `job_runs` for queued or running remote jobs while the current `db` container is available. It reads `POSTGRES_USER` and `POSTGRES_DB` from the running `db` container with `printenv`, then runs `psql` against that same container, so the deploy workflow does not need to source `deploy/.env` on the host. If any active remote jobs are found, the deploy stops by default and prints the first few matching jobs.
+Before the frontend rebuild and compose step, the workflow now runs [`scripts/check_active_remote_jobs.sh`](/Users/Zihao.Guan/Personal/ticker-screener/scripts/check_active_remote_jobs.sh). That script prefers modern `docker compose` and falls back to legacy `docker-compose` only when needed. It checks `job_runs` for queued or running remote jobs while the current `db` container is available. It reads `POSTGRES_USER` and `POSTGRES_DB` from the running `db` container with `printenv`, then runs `psql` against that same container, so the deploy workflow does not need to source `deploy/.env` on the host. If any active remote jobs are found, the deploy stops by default and prints the first few matching jobs.
 
 If you truly need to force a manual deploy anyway, set `allow_active_remote_jobs=true` in the workflow UI and rerun it.
 

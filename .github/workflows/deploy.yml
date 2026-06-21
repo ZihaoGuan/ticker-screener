@@ -54,6 +54,13 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
+            compose() {
+              if docker compose version >/dev/null 2>&1; then
+                docker compose "$@"
+              else
+                docker-compose "$@"
+              fi
+            }
             cd "${APP_DIR}"
             BACKUP_DIR="$(mktemp -d)"
             PRESERVE_PATHS="config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt"
@@ -82,5 +89,5 @@ jobs:
             cd "${APP_DIR}"
             docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
             cd deploy
-            docker-compose ${COMPOSE_COMMAND}
-            docker-compose ps
+            compose ${COMPOSE_COMMAND}
+            compose ps
