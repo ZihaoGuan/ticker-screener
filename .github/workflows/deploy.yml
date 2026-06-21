@@ -43,9 +43,9 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
-            GIT_REF='${{ github.event_name == 'workflow_dispatch' && github.event.inputs.git_ref || github.event.workflow_run.head_branch }}'
-            COMPOSE_COMMAND='${{ github.event_name == 'workflow_dispatch' && github.event.inputs.compose_command || 'up -d --no-deps web caddy' }}'
-            APP_DIR='${{ secrets.ORACLE_APP_DIR }}'
+            GIT_REF="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.git_ref || github.event.workflow_run.head_branch }}"
+            COMPOSE_COMMAND="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.compose_command || 'up -d --no-deps web caddy' }}"
+            APP_DIR="${{ secrets.ORACLE_APP_DIR }}"
             compose() {
               if docker compose version >/dev/null 2>&1; then
                 docker compose "$@"
