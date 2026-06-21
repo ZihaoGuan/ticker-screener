@@ -173,6 +173,17 @@ class AdminServiceTests(unittest.TestCase):
         mocked.assert_called_once_with(ticker="NVDA", sector="Technology")
         self.assertEqual(payload["sector"], "Technology")
 
+    def test_get_gamma_exposure_plot_context_includes_rendered_svgs(self) -> None:
+        service = AdminService(database_url="postgres://example")
+        with patch("src.webapp.services.admin_service.build_gamma_exposure_report", return_value={"symbol": "SPX", "net_gex": 1.0}), patch(
+            "src.webapp.services.admin_service.render_gamma_exposure_report_svgs",
+            return_value={"absolute": "<svg/>", "by_option_type": "<svg/>", "profile": "<svg/>"},
+        ):
+            payload = service.get_gamma_exposure_plot_context(symbol="SPX")
+
+        self.assertEqual(payload["symbol"], "SPX")
+        self.assertEqual(payload["plots"]["profile"], "<svg/>")
+
     def test_list_scheduled_jobs_exposes_db_persistence_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             artifacts_dir = Path(temp_dir)

@@ -12,6 +12,7 @@ import type {
   AuditEventSummary,
   AuditEventsResponse,
   ExclusionEntry,
+  GammaExposurePlotAdminResponse,
   JobsResponse,
   MissingSectorAdminResponse,
   PartialTickerDetailResponse,
@@ -127,6 +128,9 @@ export function AdminPage() {
   const [isLoadingRatingsRunJob, setIsLoadingRatingsRunJob] = useState(false);
   const [isLaunchingGexSnapshot, setIsLaunchingGexSnapshot] = useState(false);
   const [gexSnapshotNotice, setGexSnapshotNotice] = useState("");
+  const [gammaPlotPayload, setGammaPlotPayload] = useState<GammaExposurePlotAdminResponse | null>(null);
+  const [isLoadingGammaPlot, setIsLoadingGammaPlot] = useState(true);
+  const [gammaPlotNotice, setGammaPlotNotice] = useState("");
   const [missingSectorFilter, setMissingSectorFilter] = useState("");
   const [sectorSelections, setSectorSelections] = useState<Record<string, string>>({});
   const [isLoadingMissingSectors, setIsLoadingMissingSectors] = useState(true);
@@ -210,6 +214,18 @@ export function AdminPage() {
       .finally(() => setIsLoadingMissingSectors(false));
   };
 
+  const loadGammaExposurePlot = () => {
+    setIsLoadingGammaPlot(true);
+    setGammaPlotNotice("");
+    void fetchJson<GammaExposurePlotAdminResponse>("/api/admin/gamma-exposure-plot?symbol=SPX")
+      .then(setGammaPlotPayload)
+      .catch((error) => {
+        setGammaPlotPayload(null);
+        setGammaPlotNotice(error instanceof Error ? error.message : "Failed to load SPX gamma exposure plot.");
+      })
+      .finally(() => setIsLoadingGammaPlot(false));
+  };
+
   const loadRatingsRunJob = (jobId: string) => {
     if (!jobId) {
       return;
@@ -261,6 +277,10 @@ export function AdminPage() {
 
   useEffect(() => {
     loadAudit();
+  }, []);
+
+  useEffect(() => {
+    loadGammaExposurePlot();
   }, []);
 
   useEffect(() => {
@@ -1127,6 +1147,72 @@ export function AdminPage() {
         </div>
       </Panel>
 
+      <Panel title="SPX Gamma Exposure Plot" aside={<span className="eyebrow">All-expiry CBOE profile</span>}>
+        <div className="run-toolbar">
+          <div className="run-action-footer">
+            <button className="primary-button" type="button" disabled={isLoadingGammaPlot} onClick={() => loadGammaExposurePlot()}>
+              {isLoadingGammaPlot ? "Loading..." : "Refresh Plot"}
+            </button>
+            <span className="panel-copy">Loads live CBOE-delayed SPX chain using the `_SPX` symbol alias and renders the SpotGamma-style profile.</span>
+          </div>
+          {gammaPlotNotice ? <div className="panel-copy">{gammaPlotNotice}</div> : null}
+          {isLoadingGammaPlot ? <LoadingBlock label="Building SPX gamma profile..." /> : null}
+          {!isLoadingGammaPlot && gammaPlotPayload ? (
+            <>
+              <p className="panel-copy">{gammaPlotPayload.summary}</p>
+              <div className="gex-admin-metrics">
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">As Of</span>
+                  <strong className="gex-admin-value">{formatLocalDateTime(gammaPlotPayload.as_of)}</strong>
+                </div>
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">Spot</span>
+                  <strong className="gex-admin-value">{formatDecimal(gammaPlotPayload.underlying_price)}</strong>
+                </div>
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">Net GEX</span>
+                  <strong className="gex-admin-value">{formatBillions(gammaPlotPayload.net_gex)}</strong>
+                </div>
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">Call GEX</span>
+                  <strong className="gex-admin-value">{formatBillions(gammaPlotPayload.call_gex_total)}</strong>
+                </div>
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">Put GEX</span>
+                  <strong className="gex-admin-value">{formatBillions(gammaPlotPayload.put_gex_total)}</strong>
+                </div>
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">Gamma Flip</span>
+                  <strong className="gex-admin-value">{formatDecimal(gammaPlotPayload.gamma_flip)}</strong>
+                </div>
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">Call Wall</span>
+                  <strong className="gex-admin-value">{formatDecimal(gammaPlotPayload.call_wall)}</strong>
+                </div>
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">Put Wall</span>
+                  <strong className="gex-admin-value">{formatDecimal(gammaPlotPayload.put_wall)}</strong>
+                </div>
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">Next Expiry</span>
+                  <strong className="gex-admin-value">{gammaPlotPayload.next_expiry || "--"}</strong>
+                </div>
+                <div className="gex-admin-metric">
+                  <span className="gex-admin-label">Next Monthly</span>
+                  <strong className="gex-admin-value">{gammaPlotPayload.next_monthly_expiry || "--"}</strong>
+                </div>
+              </div>
+              <p className="panel-copy">{gammaPlotPayload.methodology}</p>
+              <div className="gex-admin-plot-grid">
+                <div className="gex-admin-plot" dangerouslySetInnerHTML={{ __html: gammaPlotPayload.plots.absolute }} />
+                <div className="gex-admin-plot" dangerouslySetInnerHTML={{ __html: gammaPlotPayload.plots.by_option_type }} />
+                <div className="gex-admin-plot gex-admin-plot-wide" dangerouslySetInnerHTML={{ __html: gammaPlotPayload.plots.profile }} />
+              </div>
+            </>
+          ) : null}
+        </div>
+      </Panel>
+
       <Panel title="Users and Roles" aside={<span className="eyebrow">{users.length} accounts</span>}>
         <form className="run-toolbar" onSubmit={(event) => void handleInviteUser(event)}>
           <div className="run-params-grid">
@@ -1368,4 +1454,18 @@ function formatJobDuration(totalSeconds: number | null | undefined): string {
     return `${minutes}m ${seconds}s`;
   }
   return `${seconds}s`;
+}
+
+function formatDecimal(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+}
+
+function formatBillions(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  return `${(value / 1_000_000_000).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}B`;
 }

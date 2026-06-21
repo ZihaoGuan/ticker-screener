@@ -1187,6 +1187,18 @@ def missing_sector_data(
     return JSONResponse(service.get_missing_sector_context())
 
 
+@router.get("/admin/gamma-exposure-plot", response_class=JSONResponse)
+def gamma_exposure_plot_data(
+    symbol: str = Query(default="SPX"),
+    service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    try:
+        return JSONResponse(service.get_gamma_exposure_plot_context(symbol=symbol))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/admin/ticker-lists/{ticker}", response_class=JSONResponse)
 def ticker_list_status(
     ticker: str,

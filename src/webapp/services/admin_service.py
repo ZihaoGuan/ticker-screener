@@ -15,6 +15,7 @@ from src.exclusion_registry import (
     remove_manual_inclusion,
     remove_user_exclusion,
 )
+from src.flashalpha_gex import build_gamma_exposure_report, render_gamma_exposure_report_svgs
 from src.market_data_access import resolve_database_url
 from src.ticker_filters import normalize_ticker_symbol
 from src.universe import load_universe
@@ -247,6 +248,13 @@ class AdminService:
             )
         jobs.sort(key=lambda item: (str(item.get("job_label") or item.get("job_id") or "")))
         return jobs
+
+    def get_gamma_exposure_plot_context(self, *, symbol: str = "SPX") -> dict[str, Any]:
+        report = build_gamma_exposure_report(symbol=symbol)
+        return {
+            **report,
+            "plots": render_gamma_exposure_report_svgs(report),
+        }
 
     def _load_exclusions(self) -> list[dict[str, Any]]:
         config = load_app_config()

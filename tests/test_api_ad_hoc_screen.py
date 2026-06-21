@@ -317,6 +317,33 @@ class _FakeAdminService:
             "notes": ["1 tickers still need sector assignment."],
         }
 
+    def get_gamma_exposure_plot_context(self, *, symbol: str = "SPX"):
+        return {
+            "symbol": symbol,
+            "source_symbol": "_SPX",
+            "source": "cboe_delayed_quotes",
+            "source_url": "https://cdn.cboe.com/api/global/delayed_quotes/options/_SPX.json",
+            "underlying_price": 7500.58,
+            "as_of": "2026-06-21T20:21:10+00:00",
+            "next_expiry": "2026-06-22",
+            "next_monthly_expiry": "2026-06-19",
+            "call_gex_total": 26852947865.13,
+            "put_gex_total": -24707786686.44,
+            "net_gex": 2145161178.65,
+            "gamma_flip": 7495.04,
+            "strike_count": 162,
+            "call_wall": 7550.0,
+            "put_wall": 7500.0,
+            "atm_pin_strike": 7500.0,
+            "top_net_gex_strike": 7550.0,
+            "put_call_oi_ratio": 1.33,
+            "summary": "SPX all-expiry profile.",
+            "methodology": "CBOE delayed chain with all listed expiries.",
+            "strikes": [],
+            "profile": {"levels": [7400.0, 7500.0], "all": [0.1, 0.2], "excluding_next_expiry": [0.0, 0.1], "excluding_next_monthly": [0.1, 0.2]},
+            "plots": {"absolute": "<svg/>", "by_option_type": "<svg/>", "profile": "<svg/>"},
+        }
+
     def update_ticker_sector(self, *, ticker: str, sector: str):
         return {"ticker": ticker.upper(), "sector": sector, "source": "finviz", "updated_at": "2026-06-14T00:00:00+00:00"}
 
@@ -1016,6 +1043,20 @@ class ApiAdHocScreenTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["missing_count"], 1)
         self.assertEqual(payload["tickers"][0]["ticker"], "NVDA")
+
+    def test_admin_can_access_gamma_exposure_plot(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/gamma-exposure-plot?symbol=SPX")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["symbol"], "SPX")
+        self.assertEqual(payload["source_symbol"], "_SPX")
+        self.assertEqual(payload["plots"]["profile"], "<svg/>")
 
     def test_admin_can_update_ticker_sector(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(

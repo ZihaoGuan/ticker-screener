@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.flashalpha_gex import fetch_gex_snapshot, summarize_gex_payload
+from src.flashalpha_gex import build_gamma_exposure_report, fetch_gex_snapshot, summarize_gex_payload
 
 
 class FlashalphaGexTests(unittest.TestCase):
@@ -80,6 +80,61 @@ class FlashalphaGexTests(unittest.TestCase):
         self.assertIsInstance(payload["net_gex"], float)
         called_request = mocked_urlopen.call_args.args[0]
         self.assertEqual(called_request.headers["Accept"], "application/json")
+
+    def test_build_gamma_exposure_report_normalizes_spx_and_builds_profiles(self) -> None:
+        response_payload = {
+            "timestamp": "2026-02-28T16:30:45Z",
+            "data": {
+                "current_price": 5975.05,
+                "options": [
+                    {
+                        "option": "_SPX260228C05950000",
+                        "iv": 0.2,
+                        "gamma": 0.01,
+                        "open_interest": 1000,
+                        "volume": 1500,
+                    },
+                    {
+                        "option": "_SPX260228P05950000",
+                        "iv": 0.21,
+                        "gamma": 0.012,
+                        "open_interest": 900,
+                        "volume": 1400,
+                    },
+                    {
+                        "option": "_SPX260303C06000000",
+                        "iv": 0.19,
+                        "gamma": 0.008,
+                        "open_interest": 800,
+                        "volume": 0,
+                    },
+                    {
+                        "option": "_SPX260320P05800000",
+                        "iv": 0.23,
+                        "gamma": 0.009,
+                        "open_interest": 700,
+                        "volume": 0,
+                    },
+                ],
+            },
+        }
+        response = MagicMock()
+        response.read.return_value = json.dumps(response_payload).encode("utf-8")
+        response.__enter__.return_value = response
+        response.__exit__.return_value = None
+
+        with patch("src.flashalpha_gex.request.urlopen", return_value=response) as mocked_urlopen:
+            payload = build_gamma_exposure_report(symbol="SPX")
+
+        self.assertEqual(payload["symbol"], "SPX")
+        self.assertEqual(payload["source_symbol"], "_SPX")
+        self.assertEqual(payload["next_expiry"], "2026-02-28")
+        self.assertEqual(payload["next_monthly_expiry"], "2026-03-20")
+        self.assertEqual(len(payload["profile"]["levels"]), 60)
+        self.assertEqual(len(payload["profile"]["all"]), 60)
+        self.assertEqual(len(payload["strikes"]), 3)
+        called_request = mocked_urlopen.call_args.args[0]
+        self.assertIn("_SPX.json", called_request.full_url)
 
 
 if __name__ == "__main__":

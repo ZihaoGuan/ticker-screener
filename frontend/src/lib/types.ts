@@ -1245,6 +1245,51 @@ export type MissingSectorAdminResponse = {
   notes: string[];
 };
 
+export type GammaExposurePlotAdminResponse = {
+  symbol: string;
+  source_symbol: string;
+  source: string;
+  source_url: string;
+  underlying_price: number;
+  as_of: string;
+  next_expiry: string;
+  next_monthly_expiry: string;
+  call_gex_total: number;
+  put_gex_total: number;
+  net_gex: number;
+  gamma_flip: number | null;
+  strike_count: number;
+  call_wall: number | null;
+  put_wall: number | null;
+  atm_pin_strike: number | null;
+  top_net_gex_strike: number | null;
+  put_call_oi_ratio: number | null;
+  summary: string;
+  methodology: string;
+  strikes: Array<{
+    strike: number;
+    call_gex: number;
+    put_gex: number;
+    net_gex: number;
+    call_gex_bn: number;
+    put_gex_bn: number;
+    net_gex_bn: number;
+    call_oi: number;
+    put_oi: number;
+  }>;
+  profile: {
+    levels: number[];
+    all: number[];
+    excluding_next_expiry: number[];
+    excluding_next_monthly: number[];
+  };
+  plots: {
+    absolute: string;
+    by_option_type: string;
+    profile: string;
+  };
+};
+
 export type RatingsAdminDiagnostic = {
   ticker: string;
   category: string;
