@@ -29,6 +29,14 @@ def _mock_options_positioning_summary() -> dict[str, object]:
     }
 
 
+def _mock_sparse_options_positioning_summary() -> dict[str, object]:
+    return {
+        "date_label": "2026-06-21",
+        "as_of_date": "2026-06-21",
+        "gex_regime": "positive",
+    }
+
+
 class DashboardServiceTests(unittest.TestCase):
     def test_get_dashboard_context_includes_spy_market_health(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -89,6 +97,43 @@ class DashboardServiceTests(unittest.TestCase):
         assert latest is not None
         self.assertIn(latest["state"], {"warning", "extreme"})
         self.assertGreater(latest["extension_pct"], 11.0)
+
+    def test_get_dashboard_context_prefers_most_complete_options_positioning_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
+            index = pd.date_range(start="2026-01-05", periods=90, freq="B")
+            close_values = [100.0 + (idx * 0.8) for idx in range(len(index) - 8)]
+            close_values.extend([176.0, 181.0, 187.0, 194.0, 201.0, 208.0, 214.0, 210.0])
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[
+                    {"result_summary_json": _mock_sparse_options_positioning_summary()},
+                    {"result_summary_json": _mock_options_positioning_summary()},
+                ],
+            ):
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        options_positioning = payload["market_health"]["options_positioning"]
+        latest = options_positioning["latest"]
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest["spot"], 600.0)
+        self.assertEqual(latest["gex_label"], "Positive Gamma")
+        self.assertEqual(latest["summary"], _mock_options_positioning_summary()["summary"])
 
     def test_get_dashboard_context_handles_missing_spy_market_health(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
