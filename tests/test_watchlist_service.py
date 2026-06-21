@@ -552,6 +552,65 @@ class WatchlistServiceTests(unittest.TestCase):
             ["Fearzone", "Weekly RS New High", "Weekly RS New High Before Price"],
         )
 
+    def test_get_scanner_top_hits_payload_uses_cache_for_same_target_date(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        watchlists_dir = Path(self.temp_dir.name) / "watchlists"
+        (watchlists_dir / "rs_new_high_before_price_2026-06-12.json").write_text(
+            json.dumps([{"ticker": "PLTR", "company_name": "Palantir", "sector": "Information Technology"}]),
+            encoding="utf-8",
+        )
+        (watchlists_dir / "fearzone_2026-06-12.json").write_text(
+            json.dumps([{"ticker": "PLTR", "company_name": "Palantir", "sector": "Information Technology"}]),
+            encoding="utf-8",
+        )
+        import os
+
+        os.utime(
+            watchlists_dir / "rs_new_high_before_price_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+        os.utime(
+            watchlists_dir / "fearzone_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+
+        class _FakeRrgService:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get_universe_report(self, *args: object, **kwargs: object) -> dict[str, object]:
+                self.calls += 1
+                return {"series": []}
+
+        fake_rrg = _FakeRrgService()
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()), patch(
+            "src.webapp.services.watchlist_service.load_universe",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch(
+            "src.ratings.repository.RatingsRepository.load_latest_rating_snapshots_for_tickers",
+            return_value={},
+        ), patch(
+            "src.ratings.repository.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
+            return_value={},
+        ):
+            first_payload = service.get_scanner_top_hits_payload(
+                rrg_service=fake_rrg,
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc),
+            )
+            second_payload = service.get_scanner_top_hits_payload(
+                rrg_service=fake_rrg,
+                now=dt.datetime(2026, 6, 13, 1, 1, tzinfo=dt.timezone.utc),
+            )
+
+        self.assertEqual(fake_rrg.calls, 1)
+        self.assertEqual(first_payload["rows"], second_payload["rows"])
+
     def test_get_chart_payload_snaps_to_latest_available_trading_day(self) -> None:
         frame = pd.DataFrame(
             {

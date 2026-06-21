@@ -4,6 +4,8 @@ import datetime as dt
 import json
 from pathlib import Path
 import re
+import threading
+import time
 from typing import Any
 
 from src.artifact_paths import strategy_id_from_legacy_stem, watchlist_stem_from_path
@@ -15,6 +17,8 @@ class WatchlistRepository:
         self.artifacts_dir = artifacts_dir
         self.watchlist_dir = artifacts_dir / "watchlists"
         self.history_repository = HistoryRepository(database_url=database_url, artifacts_dir=artifacts_dir)
+        self._watchlist_index_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
+        self._watchlist_index_cache_lock = threading.Lock()
 
     def list_recent_watchlists(self, limit: int = 200, *, include_deprecated: bool = True) -> list[dict[str, Any]]:
         rows = list(self._build_watchlist_index().values())
@@ -45,6 +49,13 @@ class WatchlistRepository:
         return dict(metadata) if isinstance(metadata, dict) else None
 
     def _build_watchlist_index(self) -> dict[str, dict[str, Any]]:
+        with self._watchlist_index_cache_lock:
+            cached_entry = self._watchlist_index_cache
+            if cached_entry is not None:
+                expires_at, cached_index = cached_entry
+                if expires_at > time.time():
+                    return dict(cached_index)
+
         index: dict[str, dict[str, Any]] = {}
 
         if self.history_repository.is_configured():
@@ -59,6 +70,8 @@ class WatchlistRepository:
             for path in sorted(screeners_dir.glob("*/*/watchlist.json"), key=lambda item: item.stat().st_mtime, reverse=True):
                 self._upsert_index_entry(index, path, layout="dated")
 
+        with self._watchlist_index_cache_lock:
+            self._watchlist_index_cache = (time.time() + 60.0, dict(index))
         return index
 
     def _upsert_index_entry(self, index: dict[str, dict[str, Any]], path: Path, *, layout: str) -> None:

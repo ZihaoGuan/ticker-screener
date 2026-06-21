@@ -76,6 +76,8 @@ _YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "pr
 _YAHOO_OPTIONS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_options_playwright.mjs"
 _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
+_SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
+_SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
 _SCANNER_BOARD_CUTOFF_HOUR = 20
 _SCANNER_BOARD_CUTOFF_MINUTE = 30
@@ -83,6 +85,10 @@ _chart_payload_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dic
 _chart_payload_cache_lock = threading.Lock()
 _chart_overlay_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
 _chart_overlay_cache_lock = threading.Lock()
+_scanner_top_hits_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_scanner_top_hits_cache_lock = threading.Lock()
+_sector_momentum_cache: dict[tuple[str, str, str, str], tuple[float, dict[str, dict[str, Any]]]] = {}
+_sector_momentum_cache_lock = threading.Lock()
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
         "id": "weekly_rs_new_high",
@@ -423,6 +429,13 @@ class WatchlistService:
 
     def get_scanner_top_hits_payload(self, *, rrg_service: Any | None = None, now: dt.datetime | None = None) -> dict[str, Any]:
         board_payload = self.get_scanner_board(now=now)
+        cache_key = (
+            str(board_payload.get("target_trading_date") or ""),
+            str(board_payload.get("manual_override_target_date") or ""),
+        )
+        cached_payload = _read_scanner_top_hits_cache(cache_key)
+        if cached_payload is not None:
+            return cached_payload
         cards = [dict(item) for item in board_payload.get("cards", []) if isinstance(item, dict)]
         card_config_by_id = {
             str(item.get("id") or ""): item
@@ -466,7 +479,9 @@ class WatchlistService:
             stem = str(card.get("stem") or "").strip()
             if not stem:
                 continue
-            entries = self._enrich_entries(self._filter_excluded_entries(self.repository.load_watchlist(stem)))
+            entries = self._prepare_scanner_top_hit_entries(
+                self._filter_excluded_entries(self.repository.load_watchlist(stem))
+            )
             scanner_meta = {
                 "id": str(card.get("id") or ""),
                 "strategy_id": str(card.get("strategy_id") or ""),
@@ -504,6 +519,7 @@ class WatchlistService:
                     scanners.append(dict(scanner_meta))
 
         tickers = sorted(aggregated.keys())
+        self._attach_latest_market_snapshots(aggregated, tickers)
         self._attach_latest_rating_snapshots(aggregated, tickers)
         rows = []
         for ticker in tickers:
@@ -520,13 +536,15 @@ class WatchlistService:
         rows.sort(key=lambda item: (-int(item.get("scanner_count") or 0), str(item.get("ticker") or "")))
         top_hit_rows = [item for item in rows if int(item.get("scanner_count") or 0) >= 2]
         overlapping_count = len(top_hit_rows)
-        return {
+        payload = {
             **board_payload,
             "total_live_scanners": len(live_cards),
             "total_unique_tickers": len(rows),
             "overlapping_ticker_count": overlapping_count,
             "rows": top_hit_rows,
         }
+        _write_scanner_top_hits_cache(cache_key, payload)
+        return payload
 
     def get_weekly_watchlist_board(self, stem: str | None = None) -> dict[str, Any]:
         weekly_files = [item for item in self.repository.list_recent_watchlists(limit=200, include_deprecated=False) if item.get("group_key") == "weekly_rs"]
@@ -1241,6 +1259,27 @@ class WatchlistService:
         self._attach_entry_latest_rating_snapshots(enriched)
         return enriched
 
+    def _prepare_scanner_top_hit_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        universe_index = self._get_universe_index()
+        normalized: list[dict[str, Any]] = []
+        for raw_entry in entries:
+            entry = dict(raw_entry)
+            ticker = normalize_ticker_symbol(str(entry.get("ticker", "")))
+            metadata = universe_index.get(ticker)
+            sector = _coalesce_text(entry.get("sector"), metadata.sector if metadata else None)
+            industry = _coalesce_text(entry.get("industry"), metadata.industry if metadata else None)
+            exchange = _coalesce_text(entry.get("exchange"), metadata.exchange if metadata else None)
+            if ticker:
+                entry["ticker"] = ticker
+            if sector:
+                entry["sector"] = sector
+            if industry:
+                entry["industry"] = industry
+            if exchange:
+                entry["exchange"] = exchange
+            normalized.append(entry)
+        return normalized
+
     def _load_latest_market_snapshot_map(self, entries: list[dict[str, Any]]) -> dict[str, dict[str, float | int | str | None]]:
         if not self.database_url:
             return {}
@@ -1328,6 +1367,33 @@ class WatchlistService:
         bucket["ta_rating"] = ta_rating
         bucket["fa_rating"] = fa_rating
         bucket["technical_indicator_ratings"] = technical_indicator_ratings
+
+    def _attach_latest_market_snapshots(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
+        if not self.database_url or not tickers:
+            return
+        try:
+            frames = load_many_ticker_windows(
+                tickers,
+                dt.date.today(),
+                2,
+                database_url=self.database_url,
+            )
+        except Exception as exc:
+            logger.warning("Scanner top hits latest market enrichment unavailable; continuing without DB day-volume/change data: %s", exc)
+            return
+        for ticker in tickers:
+            row = rows_by_ticker.get(ticker)
+            frame = frames.get(ticker)
+            if row is None or frame is None or frame.empty:
+                continue
+            latest = frame.iloc[-1]
+            latest_close = _coerce_optional_float(latest.get("Close"))
+            previous_close = _coerce_optional_float(frame.iloc[-2].get("Close")) if len(frame.index) >= 2 else None
+            change_pct = row.get("change_pct")
+            if latest_close is not None and row.get("day_close") is None:
+                row["day_close"] = latest_close
+            if change_pct is None and latest_close is not None and previous_close is not None and previous_close > 0:
+                row["change_pct"] = ((latest_close / previous_close) - 1.0) * 100.0
 
     def _attach_latest_rating_snapshots(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
         if not self.database_url or not tickers:
@@ -1428,6 +1494,15 @@ class WatchlistService:
     def _load_sector_momentum_map(self, rrg_service: Any | None) -> dict[str, dict[str, Any]]:
         if rrg_service is None:
             return {}
+        cache_key = (
+            self.benchmark_ticker,
+            "sector",
+            "3y",
+            "weekly",
+        )
+        cached_payload = _read_sector_momentum_cache(cache_key)
+        if cached_payload is not None:
+            return cached_payload
         try:
             payload = rrg_service.get_universe_report(
                 "sector",
@@ -1455,6 +1530,7 @@ class WatchlistService:
                 "momentum": _coerce_optional_float(latest.get("y")),
                 "as_of_date": str(latest.get("date") or "").strip() or None,
             }
+        _write_sector_momentum_cache(cache_key, result)
         return result
 
     def _get_universe_index(self) -> dict[str, UniverseTicker]:
@@ -1671,11 +1747,51 @@ def _write_chart_payload_cache(key: tuple[str, str, str, str, str, str], payload
         _chart_payload_cache[key] = (time.time() + _CHART_PAYLOAD_CACHE_TTL_SECONDS, copy.deepcopy(payload))
 
 
+def _read_scanner_top_hits_cache(key: tuple[str, str]) -> dict[str, Any] | None:
+    now = time.time()
+    with _scanner_top_hits_cache_lock:
+        cached_entry = _scanner_top_hits_cache.get(key)
+        if cached_entry is None:
+            return None
+        expires_at, payload = cached_entry
+        if expires_at <= now:
+            _scanner_top_hits_cache.pop(key, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _write_scanner_top_hits_cache(key: tuple[str, str], payload: dict[str, Any]) -> None:
+    with _scanner_top_hits_cache_lock:
+        _scanner_top_hits_cache[key] = (time.time() + _SCANNER_TOP_HITS_CACHE_TTL_SECONDS, copy.deepcopy(payload))
+
+
+def _read_sector_momentum_cache(key: tuple[str, str, str, str]) -> dict[str, dict[str, Any]] | None:
+    now = time.time()
+    with _sector_momentum_cache_lock:
+        cached_entry = _sector_momentum_cache.get(key)
+        if cached_entry is None:
+            return None
+        expires_at, payload = cached_entry
+        if expires_at <= now:
+            _sector_momentum_cache.pop(key, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _write_sector_momentum_cache(key: tuple[str, str, str, str], payload: dict[str, dict[str, Any]]) -> None:
+    with _sector_momentum_cache_lock:
+        _sector_momentum_cache[key] = (time.time() + _SECTOR_MOMENTUM_CACHE_TTL_SECONDS, copy.deepcopy(payload))
+
+
 def _clear_chart_payload_cache() -> None:
     with _chart_payload_cache_lock:
         _chart_payload_cache.clear()
     with _chart_overlay_cache_lock:
         _chart_overlay_cache.clear()
+    with _scanner_top_hits_cache_lock:
+        _scanner_top_hits_cache.clear()
+    with _sector_momentum_cache_lock:
+        _sector_momentum_cache.clear()
 
 
 def _build_chart_overlay_cache_key(
