@@ -52,12 +52,12 @@ class DashboardService:
         except Exception:
             db_frame = None
 
-        db_payload = _build_payload_if_possible(frame=db_frame, ticker=benchmark, data_source="database")
+        db_payload = _build_payload_if_possible(frame=db_frame, ticker=benchmark, data_source="database", repository=self.dashboard_repository)
         if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
             return db_payload
 
         internet_frame = _download_history_frame(benchmark, start_date, end_date)
-        internet_payload = _build_payload_if_possible(frame=internet_frame, ticker=benchmark, data_source="internet")
+        internet_payload = _build_payload_if_possible(frame=internet_frame, ticker=benchmark, data_source="internet", repository=self.dashboard_repository)
         if internet_payload is not None and not _market_health_payload_has_no_latest(internet_payload):
             return internet_payload
 
@@ -67,11 +67,12 @@ class DashboardService:
         return _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
 
 
-def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_source: str) -> dict[str, Any]:
+def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_source: str, repository: DashboardRepository) -> dict[str, Any]:
     weekly = resample_to_weekly(frame[["Open", "High", "Low", "Close", "Volume"]])
     regime = _build_regime_payload(frame=frame, weekly=weekly, ticker=ticker, data_source=data_source)
     rsi_divergence = _build_rsi_divergence_payload(frame=frame, ticker=ticker, data_source=data_source)
     bearish_td9 = _build_bearish_td9_payload(frame=frame, ticker=ticker, data_source=data_source)
+    options_positioning = _build_options_positioning_payload(repository=repository, ticker=ticker)
     enriched = compute_extension_frame(weekly, length=10, ma_type="sma", warning_pct=11.0, extreme_pct=15.0)
     latest_valid = enriched.dropna(subset=["moving_average", "extension_pct"]).tail(1)
     latest = None
@@ -90,6 +91,7 @@ def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_sourc
         "regime": regime,
         "rsi_divergence": rsi_divergence,
         "bearish_td9": bearish_td9,
+        "options_positioning": options_positioning,
         "spy_extension": {
             "ticker": ticker,
             "label": "10W SMA",
@@ -104,11 +106,11 @@ def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_sourc
     }
 
 
-def _build_payload_if_possible(*, frame: pd.DataFrame | None, ticker: str, data_source: str) -> dict[str, Any] | None:
+def _build_payload_if_possible(*, frame: pd.DataFrame | None, ticker: str, data_source: str, repository: DashboardRepository) -> dict[str, Any] | None:
     if frame is None or frame.empty:
         return None
     try:
-        return _build_market_health_payload(frame=frame, ticker=ticker, data_source=data_source)
+        return _build_market_health_payload(frame=frame, ticker=ticker, data_source=data_source, repository=repository)
     except Exception:
         return None
 
@@ -118,8 +120,9 @@ def _market_health_payload_has_no_latest(payload: dict[str, Any]) -> bool:
     regime_latest = ((market_health.get("regime") or {}).get("latest")) if isinstance(market_health.get("regime"), dict) else None
     rsi_latest = ((market_health.get("rsi_divergence") or {}).get("latest")) if isinstance(market_health.get("rsi_divergence"), dict) else None
     td9_latest = ((market_health.get("bearish_td9") or {}).get("latest")) if isinstance(market_health.get("bearish_td9"), dict) else None
+    options_latest = ((market_health.get("options_positioning") or {}).get("latest")) if isinstance(market_health.get("options_positioning"), dict) else None
     extension_latest = ((market_health.get("spy_extension") or {}).get("latest")) if isinstance(market_health.get("spy_extension"), dict) else None
-    return regime_latest is None and rsi_latest is None and td9_latest is None and extension_latest is None
+    return regime_latest is None and rsi_latest is None and td9_latest is None and options_latest is None and extension_latest is None
 
 
 def _build_unavailable_market_health(*, benchmark: str, data_source: str) -> dict[str, Any]:
@@ -135,6 +138,11 @@ def _build_unavailable_market_health(*, benchmark: str, data_source: str) -> dic
             "latest": None,
         },
         "bearish_td9": {
+            "ticker": benchmark,
+            "data_source": data_source,
+            "latest": None,
+        },
+        "options_positioning": {
             "ticker": benchmark,
             "data_source": data_source,
             "latest": None,
@@ -284,3 +292,44 @@ def _build_bearish_td9_payload(*, frame: pd.DataFrame, ticker: str, data_source:
             "distance_from_compare_pct": distance_pct,
         },
     }
+
+
+def _build_options_positioning_payload(*, repository: DashboardRepository, ticker: str) -> dict[str, Any]:
+    summary = repository.get_latest_screen_run_summary(strategy_id="flashalpha_gex_close")
+    if not isinstance(summary, dict):
+        return {
+            "ticker": ticker,
+            "data_source": "unavailable",
+            "latest": None,
+        }
+    return {
+        "ticker": str(summary.get("ticker") or ticker).strip().upper(),
+        "data_source": "database",
+        "latest": {
+            "as_of": str(summary.get("api_as_of") or summary.get("as_of_date") or ""),
+            "spot": _to_number(summary.get("spot")),
+            "net_gex": _to_number(summary.get("net_gex")),
+            "gex_regime": "negative" if str(summary.get("gex_regime") or "").strip().lower() == "negative" else "positive",
+            "gex_label": str(summary.get("gex_label") or "Unavailable"),
+            "gamma_flip": _to_number(summary.get("gamma_flip")),
+            "distance_to_flip_pct": _to_number(summary.get("distance_to_flip_pct")),
+            "call_wall": _to_number(summary.get("call_wall")),
+            "put_wall": _to_number(summary.get("put_wall")),
+            "atm_pin_strike": _to_number(summary.get("atm_pin_strike")),
+            "put_call_oi_ratio": _to_number(summary.get("put_call_oi_ratio")),
+            "strike_count": _to_number(summary.get("strike_count")),
+            "implied_move_pct": None,
+            "front_expiry": "",
+            "summary": str(summary.get("summary") or ""),
+            "methodology": str(summary.get("methodology") or ""),
+        },
+    }
+
+
+def _to_number(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

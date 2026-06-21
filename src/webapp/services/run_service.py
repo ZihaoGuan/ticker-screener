@@ -368,6 +368,15 @@ class RunService:
                 _end_date_field,
             ),
         ),
+        "flashalpha_gex_close": RunAction(
+            "flashalpha_gex_close",
+            "Sync FlashAlpha GEX Close",
+            "scripts/run_flashalpha_gex_close_screen.py",
+            supports_limit=False,
+            fields=(
+                _as_of_date_field,
+            ),
+        ),
         "sync_finviz_fundamentals": RunAction(
             "sync_finviz_fundamentals",
             "Sync Finviz Fundamentals",

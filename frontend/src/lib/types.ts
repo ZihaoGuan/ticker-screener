@@ -303,6 +303,28 @@ export type DashboardResponse = {
         distance_from_compare_pct: number | null;
       } | null;
     };
+    options_positioning: {
+      ticker: string;
+      data_source: string;
+      latest: {
+        as_of: string;
+        spot: number;
+        net_gex: number;
+        gex_regime: "positive" | "negative";
+        gex_label: string;
+        gamma_flip: number | null;
+        distance_to_flip_pct: number | null;
+        call_wall: number | null;
+        put_wall: number | null;
+        atm_pin_strike: number | null;
+        put_call_oi_ratio: number | null;
+        strike_count?: number | null;
+        implied_move_pct: number | null;
+        front_expiry: string;
+        summary: string;
+        methodology: string;
+      } | null;
+    };
     spy_extension: {
       ticker: string;
       label: string;

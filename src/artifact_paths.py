@@ -300,6 +300,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("earnings_weekly_criteria_{date_label}.json",),
         "legacy_summary_templates": ("earnings_weekly_criteria_run_summary_{date_label}.json",),
     },
+    "flashalpha_gex_close": {
+        "stem_template": "flashalpha_gex_close_{date_label}",
+        "legacy_watchlist_templates": ("flashalpha_gex_close_{date_label}.json",),
+        "legacy_raw_templates": ("flashalpha_gex_close_{date_label}.json",),
+        "legacy_summary_templates": ("flashalpha_gex_close_run_summary_{date_label}.json",),
+    },
     "legacy_peg": {
         "stem_template": "legacy_peg_earnings_gap_{date_label}",
         "legacy_watchlist_templates": ("legacy_peg_earnings_gap_{date_label}.json", "peg_earnings_gap_{date_label}.json"),
@@ -354,6 +360,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("pre_earnings_ma_stack", "pre_earnings_ma_stack"),
     ("pre_earnings_focus", "pre_earnings_focus"),
     ("earnings_weekly_criteria", "earnings_weekly_criteria"),
+    ("flashalpha_gex_close", "flashalpha_gex_close"),
     ("earnings_growth", "earnings_growth"),
     ("inside_dryup_v2", "inside_dryup_v2"),
     ("wyckoff_buy_signal", "wyckoff_buy_signal"),

@@ -24,6 +24,8 @@ export function DashboardPage() {
   const rsiLatest = rsiDivergence?.latest ?? null;
   const bearishTd9 = dashboard?.market_health?.bearish_td9 ?? null;
   const td9Latest = bearishTd9?.latest ?? null;
+  const optionsPositioning = dashboard?.market_health?.options_positioning ?? null;
+  const optionsLatest = optionsPositioning?.latest ?? null;
   const spyExtension = dashboard?.market_health?.spy_extension ?? null;
   const spyLatest = spyExtension?.latest ?? null;
 
@@ -127,6 +129,38 @@ export function DashboardPage() {
 
           <article className="metric-card">
             <div className="metric-card-head">
+              <h3>{optionsPositioning?.ticker ?? "SPY"} Options Positioning</h3>
+              <span className={`accent-mark accent-${optionsLatest?.gex_regime === "negative" ? "down" : "up"}`} />
+            </div>
+            <p className="card-meta">FlashAlpha close snapshot loaded from persisted DB summary, not live-fetched on dashboard load.</p>
+            <div className="metric-value">
+              {optionsLatest?.gex_label ?? "Unavailable"} <span>{optionsLatest ? `Flip ${formatPrice(optionsLatest.gamma_flip)}` : "No options snapshot"}</span>
+            </div>
+            <p className="card-meta">
+              {optionsLatest
+                ? `Net GEX ${formatCompactNumber(optionsLatest.net_gex)} · Spot ${formatPrice(optionsLatest.spot)} · ${formatFlipDistance(optionsLatest.distance_to_flip_pct)}`
+                : "No GEX data available."}
+            </p>
+            <p className="card-meta">
+              {optionsLatest
+                ? `Call wall ${formatPrice(optionsLatest.call_wall)} · Put wall ${formatPrice(optionsLatest.put_wall)} · ATM pin ${formatPrice(optionsLatest.atm_pin_strike)}`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {optionsLatest
+                ? `Tracked strikes ${optionsLatest.strike_count ?? "--"} · Put/Call OI ${formatRatio(optionsLatest.put_call_oi_ratio)}`
+                : ""}
+            </p>
+            <p className="card-meta">{optionsLatest?.summary ?? ""}</p>
+            <p className="card-meta">{optionsLatest?.methodology ?? ""}</p>
+            <p className="card-meta">
+              {optionsLatest ? `As of ${optionsLatest.as_of}` : "Waiting for market data."}
+              {optionsPositioning?.data_source ? ` · Source ${optionsPositioning.data_source}` : ""}
+            </p>
+          </article>
+
+          <article className="metric-card">
+            <div className="metric-card-head">
               <h3>{spyExtension?.ticker ?? "SPY"} Extension</h3>
               <span className={`accent-mark accent-${spyLatest?.state === "extreme" ? "down" : spyLatest?.state === "warning" ? "neutral" : "up"}`} />
             </div>
@@ -198,6 +232,38 @@ function formatPercentSigned(value: number | null | undefined) {
   }
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(2)}%`;
+}
+
+function formatCompactNumber(value: number | null | undefined) {
+  if (value == null) {
+    return "--";
+  }
+  const absValue = Math.abs(value);
+  if (absValue >= 1_000_000_000) {
+    return `${value < 0 ? "-" : ""}$${(absValue / 1_000_000_000).toFixed(2)}B`;
+  }
+  if (absValue >= 1_000_000) {
+    return `${value < 0 ? "-" : ""}$${(absValue / 1_000_000).toFixed(2)}M`;
+  }
+  if (absValue >= 1_000) {
+    return `${value < 0 ? "-" : ""}$${(absValue / 1_000).toFixed(2)}K`;
+  }
+  return `${value < 0 ? "-" : ""}$${absValue.toFixed(2)}`;
+}
+
+function formatFlipDistance(value: number | null | undefined) {
+  if (value == null) {
+    return "Flip dist --";
+  }
+  const side = value >= 0 ? "Above flip" : "Below flip";
+  return `${side} ${formatPercentSigned(value)}`;
+}
+
+function formatRatio(value: number | null | undefined) {
+  if (value == null) {
+    return "--";
+  }
+  return `${value.toFixed(2)}x`;
 }
 
 function regimeAccent(regime: MarketRegime | null | undefined) {

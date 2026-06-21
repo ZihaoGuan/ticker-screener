@@ -194,6 +194,48 @@ class ScreenerHistoryService:
         self.repository.replace_screen_run_hits(screen_run_id, rows)
         return screen_run_id
 
+    def persist_metric_snapshot_run(
+        self,
+        *,
+        strategy_id: str,
+        options: dict[str, Any],
+        summary_payload: dict[str, Any],
+        raw_artifact_path: str,
+        watchlist_artifact_path: str,
+        job_run_id: int | None = None,
+    ) -> int | None:
+        config_json = load_app_config().to_dict()
+        scope_json = {
+            "source": options.get("source"),
+            "as_of_date": options.get("as_of_date"),
+            "tickers": [],
+        }
+        config_hash = stable_json_hash(config_json)
+        scope_hash = stable_json_hash(scope_json)
+        signal_date = self._resolve_run_date(summary_payload, options)
+        result_summary = dict(summary_payload)
+        result_summary.setdefault("date_label", signal_date.isoformat())
+        result_summary.setdefault("as_of_date", signal_date.isoformat())
+        screen_run_id = self.repository.upsert_screen_run(
+            strategy_id=strategy_id,
+            run_date=signal_date,
+            job_run_id=job_run_id,
+            config_json=config_json,
+            config_hash=config_hash,
+            scope_json=scope_json,
+            scope_hash=scope_hash,
+            market_data_mode="api",
+            source_kind=str(summary_payload.get("source") or "market-snapshot"),
+            hit_count=0,
+            failure_count=int(summary_payload.get("failed_tickers") or 0),
+            result_summary_json=result_summary,
+            raw_artifact_path=raw_artifact_path,
+            watchlist_artifact_path=watchlist_artifact_path,
+            notes="Market metric snapshot",
+        )
+        self.repository.replace_screen_run_hits(screen_run_id, [])
+        return screen_run_id
+
     def _coerce_failure_count(self, raw_value: Any) -> int:
         if isinstance(raw_value, list):
             return len(raw_value)

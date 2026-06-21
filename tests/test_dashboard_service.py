@@ -10,6 +10,25 @@ import pandas as pd
 from src.webapp.services.dashboard_service import DashboardService
 
 
+def _mock_options_positioning_summary() -> dict[str, object]:
+    return {
+        "ticker": "SPY",
+        "api_as_of": "2026-06-22T20:00:00Z",
+        "spot": 600.0,
+        "net_gex": 123456789.0,
+        "gex_regime": "positive",
+        "gex_label": "Positive Gamma",
+        "gamma_flip": 592.0,
+        "distance_to_flip_pct": 1.35,
+        "call_wall": 605.0,
+        "put_wall": 590.0,
+        "atm_pin_strike": 600.0,
+        "put_call_oi_ratio": 0.82,
+        "summary": "Dealers likely dampen moves; spot above gamma flip 592.00; put wall 590.00, call wall 605.00.",
+        "methodology": "FlashAlpha GEX API snapshot persisted at close; dashboard reads stored DB summary only.",
+    }
+
+
 class DashboardServiceTests(unittest.TestCase):
     def test_get_dashboard_context_includes_spy_market_health(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -30,7 +49,10 @@ class DashboardServiceTests(unittest.TestCase):
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
                 "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 
@@ -55,10 +77,14 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(bearish_td9["data_source"], "database")
 
         spy_extension = payload["market_health"]["spy_extension"]
+        options_positioning = payload["market_health"]["options_positioning"]
         self.assertEqual(spy_extension["ticker"], "SPY")
         self.assertEqual(spy_extension["label"], "10W SMA")
         self.assertEqual(spy_extension["data_source"], "database")
         self.assertIsNotNone(spy_extension["latest"])
+        self.assertEqual(options_positioning["ticker"], "SPY")
+        self.assertEqual(options_positioning["data_source"], "database")
+        self.assertIsNotNone(options_positioning["latest"])
         latest = spy_extension["latest"]
         assert latest is not None
         self.assertIn(latest["state"], {"warning", "extreme"})
@@ -78,12 +104,15 @@ class DashboardServiceTests(unittest.TestCase):
         regime = payload["market_health"]["regime"]
         rsi_divergence = payload["market_health"]["rsi_divergence"]
         bearish_td9 = payload["market_health"]["bearish_td9"]
+        options_positioning = payload["market_health"]["options_positioning"]
         self.assertEqual(regime["data_source"], "unavailable")
         self.assertIsNone(regime["latest"])
         self.assertEqual(rsi_divergence["data_source"], "unavailable")
         self.assertIsNone(rsi_divergence["latest"])
         self.assertEqual(bearish_td9["data_source"], "unavailable")
         self.assertIsNone(bearish_td9["latest"])
+        self.assertEqual(options_positioning["data_source"], "unavailable")
+        self.assertIsNone(options_positioning["latest"])
         self.assertEqual(spy_extension["data_source"], "unavailable")
         self.assertIsNone(spy_extension["latest"])
 
@@ -117,6 +146,9 @@ class DashboardServiceTests(unittest.TestCase):
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=db_frame.copy()), patch(
                 "src.webapp.services.dashboard_service._download_history_frame",
                 return_value=fresh_frame.copy(),
+            ), patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
             ):
                 with patch("src.webapp.services.dashboard_service.load_app_config") as mock_config:
                     mock_config.return_value.benchmark_ticker = "SPY"
@@ -147,8 +179,12 @@ class DashboardServiceTests(unittest.TestCase):
                 "src.webapp.services.dashboard_service._download_history_frame",
                 return_value=None,
             ), patch("src.webapp.services.dashboard_service.load_app_config") as mock_config:
-                mock_config.return_value.benchmark_ticker = "SPY"
-                payload = service.get_dashboard_context()
+                with patch(
+                    "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                    return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+                ):
+                    mock_config.return_value.benchmark_ticker = "SPY"
+                    payload = service.get_dashboard_context()
 
         self.assertEqual(payload["market_health"]["regime"]["data_source"], "database")
         self.assertIsNotNone(payload["market_health"]["regime"]["latest"])
@@ -173,7 +209,10 @@ class DashboardServiceTests(unittest.TestCase):
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
                 "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 
@@ -203,7 +242,10 @@ class DashboardServiceTests(unittest.TestCase):
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
                 "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 
@@ -253,7 +295,10 @@ class DashboardServiceTests(unittest.TestCase):
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
                 "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 
@@ -290,7 +335,10 @@ class DashboardServiceTests(unittest.TestCase):
 
             with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
                 "src.webapp.services.dashboard_service.load_app_config"
-            ) as mock_config:
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
                 mock_config.return_value.benchmark_ticker = "SPY"
                 payload = service.get_dashboard_context()
 

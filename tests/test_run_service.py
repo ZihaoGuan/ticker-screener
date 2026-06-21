@@ -420,6 +420,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("build_technical_ratings", action_ids)
         self.assertIn("run_finviz_ratings_pipeline", action_ids)
         self.assertIn("sync_chart_fundamentals_cache", action_ids)
+        self.assertIn("flashalpha_gex_close", action_ids)
         self.assertIn("backfill_trendline_snapshots", action_ids)
         self.assertIn("reload_postgres_market_data_date", action_ids)
 

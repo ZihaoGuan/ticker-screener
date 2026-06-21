@@ -125,6 +125,8 @@ export function AdminPage() {
   const [ratingsRunNotice, setRatingsRunNotice] = useState("");
   const [ratingsRunJob, setRatingsRunJob] = useState<RatingsRunJob | null>(null);
   const [isLoadingRatingsRunJob, setIsLoadingRatingsRunJob] = useState(false);
+  const [isLaunchingGexSnapshot, setIsLaunchingGexSnapshot] = useState(false);
+  const [gexSnapshotNotice, setGexSnapshotNotice] = useState("");
   const [missingSectorFilter, setMissingSectorFilter] = useState("");
   const [sectorSelections, setSectorSelections] = useState<Record<string, string>>({});
   const [isLoadingMissingSectors, setIsLoadingMissingSectors] = useState(true);
@@ -324,6 +326,24 @@ export function AdminPage() {
       setGapError(error instanceof Error ? error.message : "Failed to load missing-date detail.");
     } finally {
       setIsGapLoading(false);
+    }
+  };
+
+  const handleFetchTodayGexSnapshot = async () => {
+    setIsLaunchingGexSnapshot(true);
+    setGexSnapshotNotice("");
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await fetchJson<{ ok: boolean; job_id: string }>("/api/runs/flashalpha_gex_close", {
+        method: "POST",
+        body: JSON.stringify({ as_of_date: today }),
+      });
+      setGexSnapshotNotice(`FlashAlpha GEX snapshot launched for ${today}: ${response.job_id}`);
+      loadAudit();
+    } catch (error) {
+      setGexSnapshotNotice(error instanceof Error ? error.message : "Failed to launch FlashAlpha GEX snapshot.");
+    } finally {
+      setIsLaunchingGexSnapshot(false);
     }
   };
 
@@ -1090,6 +1110,21 @@ export function AdminPage() {
           </div>
           {launchMessage ? <div className="panel-copy">{launchMessage}</div> : null}
         </form>
+      </Panel>
+
+      <Panel title="Fetch Today SPY GEX" aside={<span className="eyebrow">FlashAlpha close snapshot</span>}>
+        <div className="run-toolbar">
+          <p className="panel-copy">
+            Launches `flashalpha_gex_close` for today and persists snapshot for dashboard DB reads. Dashboard will not call FlashAlpha live.
+          </p>
+          <div className="run-action-footer">
+            <button className="primary-button" type="button" disabled={isLaunchingGexSnapshot} onClick={() => void handleFetchTodayGexSnapshot()}>
+              {isLaunchingGexSnapshot ? "Launching..." : "Fetch Now"}
+            </button>
+            <span className="panel-copy">Uses benchmark ticker default `SPY` and today date label.</span>
+          </div>
+          {gexSnapshotNotice ? <div className="panel-copy">{gexSnapshotNotice}</div> : null}
+        </div>
       </Panel>
 
       <Panel title="Users and Roles" aside={<span className="eyebrow">{users.length} accounts</span>}>
