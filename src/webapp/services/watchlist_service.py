@@ -994,6 +994,9 @@ class WatchlistService:
             rating_status=rating_status,
             sector=sector,
         )
+        resolved_as_of_raw = str(payload.get("as_of_date") or "").strip()
+        resolved_as_of_date = dt.date.fromisoformat(resolved_as_of_raw) if resolved_as_of_raw else None
+        self._attach_top_rows_technical_indicator_ratings(payload.get("rows", []), as_of_date=resolved_as_of_date)
         payload["limit"] = max(1, min(int(limit), 500))
         payload["rating_status"] = str(rating_status or "").strip().lower() or "ok"
         payload["sector"] = str(sector or "").strip()
@@ -1024,6 +1027,9 @@ class WatchlistService:
             technical_status=technical_status,
             sector=sector,
         )
+        resolved_as_of_raw = str(payload.get("as_of_date") or "").strip()
+        resolved_as_of_date = dt.date.fromisoformat(resolved_as_of_raw) if resolved_as_of_raw else None
+        self._attach_top_rows_technical_indicator_ratings(payload.get("rows", []), as_of_date=resolved_as_of_date)
         payload["limit"] = max(1, min(int(limit), 500))
         payload["technical_status"] = str(technical_status or "").strip().lower() or "ok"
         payload["sector"] = str(sector or "").strip()
@@ -1232,6 +1238,7 @@ class WatchlistService:
                 entry["current_close"] = latest_market["close"]
                 entry["daily_change_pct"] = latest_market["change_pct"]
             enriched.append(entry)
+        self._attach_entry_latest_rating_snapshots(enriched)
         return enriched
 
     def _load_latest_market_snapshot_map(self, entries: list[dict[str, Any]]) -> dict[str, dict[str, float | int | str | None]]:
@@ -1288,6 +1295,25 @@ class WatchlistService:
         change_pct = bucket.get("change_pct")
         if change_pct is None:
             change_pct = _resolve_entry_change_pct(entry)
+        perf_year_pct = bucket.get("perf_year_pct")
+        if perf_year_pct is None:
+            perf_year_pct = _coerce_optional_float(entry.get("perf_year_pct"))
+        perf_ytd_pct = bucket.get("perf_ytd_pct")
+        if perf_ytd_pct is None:
+            perf_ytd_pct = _coerce_optional_float(entry.get("perf_ytd_pct"))
+        rs_rating = bucket.get("rs_rating")
+        if rs_rating is None:
+            rs_rating = _coerce_optional_float(entry.get("rs_rating"))
+        ta_rating = bucket.get("ta_rating")
+        if ta_rating is None:
+            ta_rating = _coerce_optional_float(entry.get("ta_rating"))
+        fa_rating = bucket.get("fa_rating")
+        if fa_rating is None:
+            fa_rating = _coerce_optional_float(entry.get("fa_rating"))
+        technical_indicator_ratings = bucket.get("technical_indicator_ratings")
+        if not isinstance(technical_indicator_ratings, dict) or not technical_indicator_ratings:
+            raw_indicator_ratings = entry.get("technical_indicator_ratings")
+            technical_indicator_ratings = raw_indicator_ratings if isinstance(raw_indicator_ratings, dict) else {}
         if company:
             bucket["company"] = company
         if sector:
@@ -1296,6 +1322,12 @@ class WatchlistService:
             bucket["industry"] = industry
         bucket["day_close"] = day_close
         bucket["change_pct"] = change_pct
+        bucket["perf_year_pct"] = perf_year_pct
+        bucket["perf_ytd_pct"] = perf_ytd_pct
+        bucket["rs_rating"] = rs_rating
+        bucket["ta_rating"] = ta_rating
+        bucket["fa_rating"] = fa_rating
+        bucket["technical_indicator_ratings"] = technical_indicator_ratings
 
     def _attach_latest_rating_snapshots(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
         if not self.database_url or not tickers:
@@ -1338,6 +1370,60 @@ class WatchlistService:
             if not ticker:
                 continue
             entry["technical_indicator_ratings"] = technical_indicator_map.get(ticker, {})
+
+    def _attach_entry_latest_rating_snapshots(self, entries: list[dict[str, Any]]) -> None:
+        if not self.database_url or not entries:
+            return
+        tickers = sorted(
+            {
+                normalize_ticker_symbol(str(entry.get("ticker") or ""))
+                for entry in entries
+                if normalize_ticker_symbol(str(entry.get("ticker") or ""))
+            }
+        )
+        if not tickers:
+            return
+        repository = RatingsRepository(self.database_url)
+        fundamental_map = repository.load_latest_rating_snapshots_for_tickers(tickers)
+        technical_map = repository.load_latest_technical_rating_snapshots_for_tickers(tickers)
+        for entry in entries:
+            ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
+            if not ticker:
+                continue
+            fundamental = fundamental_map.get(ticker) or {}
+            technical = technical_map.get(ticker) or {}
+            entry["perf_year_pct"] = _coerce_optional_float(fundamental.get("perf_year_pct"))
+            entry["perf_ytd_pct"] = _coerce_optional_float(fundamental.get("perf_ytd_pct"))
+            entry["fa_rating"] = _coerce_optional_float(fundamental.get("overall_rating"))
+            entry["ta_rating"] = _coerce_optional_float(technical.get("overall_rating"))
+            entry["rs_rating"] = _coerce_optional_float(technical.get("leadership_score"))
+
+    def _attach_top_rows_technical_indicator_ratings(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        as_of_date: dt.date | None,
+    ) -> None:
+        if not self.database_url or not rows:
+            return
+        tickers = sorted(
+            {
+                normalize_ticker_symbol(str(row.get("ticker") or ""))
+                for row in rows
+                if normalize_ticker_symbol(str(row.get("ticker") or ""))
+            }
+        )
+        if not tickers:
+            return
+        technical_indicator_map = RatingsRepository(self.database_url).load_latest_technical_indicator_ratings_for_tickers(
+            tickers,
+            as_of_date=as_of_date,
+        )
+        for row in rows:
+            ticker = normalize_ticker_symbol(str(row.get("ticker") or ""))
+            if not ticker:
+                continue
+            row["technical_indicator_ratings"] = technical_indicator_map.get(ticker, {})
 
     def _load_sector_momentum_map(self, rrg_service: Any | None) -> dict[str, dict[str, Any]]:
         if rrg_service is None:

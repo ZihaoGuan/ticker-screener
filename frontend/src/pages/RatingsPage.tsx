@@ -337,8 +337,8 @@ export function RatingsPage() {
                     <td data-label="1Y %">{formatPercent(row.perf_year_pct)}</td>
                     <td data-label="YTD %">{formatPercent(row.perf_ytd_pct)}</td>
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
-                    <td data-label="1D">{technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
-                    <td data-label="1W">{technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
+                    <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
+                    <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
                     <td data-label="Valuation">{row.valuation_grade ?? "-"} ({formatScore(row.valuation_score)})</td>
                     <td data-label="Profitability">{row.profitability_grade ?? "-"} ({formatScore(row.profitability_score)})</td>
                     <td data-label="Growth">{row.growth_grade ?? "-"} ({formatScore(row.growth_score)})</td>
@@ -384,8 +384,8 @@ export function RatingsPage() {
                       {[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}
                     </td>
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
-                    <td data-label="1D">{technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
-                    <td data-label="1W">{technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
+                    <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
+                    <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
                     <td data-label="Band">{row.rating_band ?? "-"}</td>
                     <td data-label="Trend">{formatScore(row.trend_regime_score)}</td>
                     <td data-label="DMA Speed">{formatScore(row.dma_speed_score)}</td>

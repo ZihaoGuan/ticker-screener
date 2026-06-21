@@ -427,9 +427,14 @@ function buildScannerRow(
   const fundamental = fundamentalMap.get(ticker);
   const technical = technicalMap.get(ticker);
   const technicalIndicator = technicalIndicatorMap.get(ticker);
-  const technicalOverall = technical?.overall_rating ?? null;
-  const fundamentalOverall = fundamental?.overall_rating ?? null;
-  const leadershipOverall = technical?.leadership_score ?? null;
+  const directPerfYear = typeof entry.perf_year_pct === "number" ? entry.perf_year_pct : null;
+  const directPerfYtd = typeof entry.perf_ytd_pct === "number" ? entry.perf_ytd_pct : null;
+  const directTechnicalOverall = typeof entry.ta_rating === "number" ? entry.ta_rating : null;
+  const directFundamentalOverall = typeof entry.fa_rating === "number" ? entry.fa_rating : null;
+  const directLeadershipOverall = typeof entry.rs_rating === "number" ? entry.rs_rating : null;
+  const technicalOverall = directTechnicalOverall ?? technical?.overall_rating ?? null;
+  const fundamentalOverall = directFundamentalOverall ?? fundamental?.overall_rating ?? null;
+  const leadershipOverall = directLeadershipOverall ?? technical?.leadership_score ?? null;
   const directTechnicalIndicator = normalizeDirectTechnicalIndicatorRatings(entry.technical_indicator_ratings);
   const dailyIndicator = directTechnicalIndicator["1d"] ?? technicalIndicator?.daily;
   const weeklyIndicator = directTechnicalIndicator["1w"] ?? technicalIndicator?.weekly;
@@ -443,8 +448,8 @@ function buildScannerRow(
     chartHref: buildChartHref(ticker, stem),
     dayVolume: resolveDisplayVolume(entry),
     changePct: resolveDisplayChangePct(entry),
-    perfYearPct: fundamental?.perf_year_pct ?? null,
-    perfYtdPct: fundamental?.perf_ytd_pct ?? null,
+    perfYearPct: directPerfYear ?? fundamental?.perf_year_pct ?? null,
+    perfYtdPct: directPerfYtd ?? fundamental?.perf_ytd_pct ?? null,
     taScore: technicalOverall != null ? technicalOverall / 10 : null,
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,

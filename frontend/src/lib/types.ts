@@ -781,6 +781,7 @@ export type TopRatingEntry = {
   performance_grade: string | null;
   rating_status: string | null;
   rating_status_reason: string | null;
+  technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
 };
 
 export type TopRatingsResponse = {
@@ -813,6 +814,7 @@ export type TopTechnicalRatingEntry = {
   technical_status: string | null;
   technical_status_reason: string | null;
   flags: string[];
+  technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
 };
 
 export type TopTechnicalRatingsResponse = {

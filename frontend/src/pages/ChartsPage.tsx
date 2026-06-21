@@ -74,6 +74,7 @@ export function ChartsPage() {
   const [isSectorOptionsLoading, setIsSectorOptionsLoading] = useState(false);
   const [isSavingSector, setIsSavingSector] = useState(false);
   const [sectorNotice, setSectorNotice] = useState("");
+  const [syncedHoverTime, setSyncedHoverTime] = useState<string | null>(null);
 
   useEffect(() => {
     setTickerInput(requestedTicker);
@@ -81,11 +82,16 @@ export function ChartsPage() {
   }, [requestedDate, requestedTicker]);
 
   useEffect(() => {
+    setSyncedHoverTime(null);
+  }, [payload?.resolved_as_of_date, requestedTicker]);
+
+  useEffect(() => {
     if (!requestedTicker) {
       setPayload(null);
       setOverlayPayload(null);
       setFundamentalsPayload(null);
       setInsiderPayload(null);
+      setSyncedHoverTime(null);
       setNotice("");
       setFundamentalsNotice("");
       setInsiderNotice("");
@@ -288,7 +294,7 @@ export function ChartsPage() {
   const latestFundamentalRank = fundamentalsPayload?.fundamental_rank ?? null;
   const latestRatingDiagnostics = fundamentalsPayload?.rating_diagnostics ?? null;
   const technicalIndicatorRatings = fundamentalsPayload?.technical_indicator_ratings ?? {};
-  const orderedTechnicalIndicatorRatings = ["1d", "1w", "1m"]
+  const orderedTechnicalIndicatorRatings = ["1d", "1w"]
     .map((timeframe) => technicalIndicatorRatings[timeframe] ?? null)
     .filter((item): item is NonNullable<typeof item> => item != null);
   const sectorLabel = latestFundamentalsSnapshot?.sector?.trim() || null;
@@ -858,7 +864,7 @@ export function ChartsPage() {
         ) : null}
       </Panel>
 
-      <Panel title="Technical Ratings" aside={<span className="eyebrow">Latest DB-backed daily / weekly / monthly composite labels</span>}>
+      <Panel title="Technical Ratings" aside={<span className="eyebrow">Latest DB-backed daily / weekly composite labels</span>}>
         {!requestedTicker ? <p className="panel-copy">Load ticker to inspect multi-timeframe technical ratings.</p> : null}
         {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading technical ratings…" compact /> : null}
         {requestedTicker && !isFundamentalsLoading && orderedTechnicalIndicatorRatings.length === 0 ? (
@@ -1076,6 +1082,8 @@ export function ChartsPage() {
               ]}
               visibility={chartVisibility}
               forceFearzonePanel
+              hoveredTime={syncedHoverTime}
+              onHoverTimeChange={setSyncedHoverTime}
             />
             <div className="chart-annotation-strip">
               {chartPayload?.resolved_as_of_date ? <span className="chart-pill chart-pill-event">As Of {chartPayload.resolved_as_of_date}</span> : null}
@@ -1111,6 +1119,8 @@ export function ChartsPage() {
                 title="RS Rating Daily"
                 series={dailyRsRatingSeries}
                 emptyLabel="Daily RS rating needs more history."
+                hoveredTime={syncedHoverTime}
+                onHoverTimeChange={setSyncedHoverTime}
               />
             </div>
           </>
@@ -1218,14 +1228,18 @@ function RsRatingMiniChart({
   title,
   series,
   emptyLabel,
+  hoveredTime,
+  onHoverTimeChange,
 }: {
   title: string;
   series: Array<{ time: string; value: number }>;
   emptyLabel: string;
+  hoveredTime: string | null;
+  onHoverTimeChange: (time: string | null) => void;
 }) {
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const path = useMemo(() => buildMiniChartPath(series), [series]);
-  const activeIndex = hoveredIndex != null && hoveredIndex >= 0 && hoveredIndex < series.length ? hoveredIndex : series.length - 1;
+  const hoveredIndex = hoveredTime ? series.findIndex((point) => point.time === hoveredTime) : -1;
+  const activeIndex = hoveredIndex >= 0 && hoveredIndex < series.length ? hoveredIndex : series.length - 1;
   const activePoint = activeIndex >= 0 ? series[activeIndex] ?? null : null;
   const activePathPoint = path?.points[activeIndex] ?? null;
   const activeValue = activePoint?.value ?? null;
@@ -1237,7 +1251,7 @@ function RsRatingMiniChart({
       <div className="rs-rating-card-head">
         <div>
           <div className="chart-rs-header">{title}</div>
-          <div className="rs-rating-meta">{activeTime ? `${hoveredIndex != null ? "Hover" : "Latest"} ${activeTime}` : emptyLabel}</div>
+          <div className="rs-rating-meta">{activeTime ? `${hoveredIndex >= 0 ? "Hover" : "Latest"} ${activeTime}` : emptyLabel}</div>
         </div>
         <div className="rs-rating-value">{activeValue == null ? "--" : activeValue.toFixed(1)}</div>
       </div>
@@ -1247,7 +1261,7 @@ function RsRatingMiniChart({
         <svg
           className="rs-rating-svg"
           viewBox="0 0 560 180"
-          preserveAspectRatio="none"
+          preserveAspectRatio="xMidYMid meet"
           aria-label={title}
           onMouseMove={(event) => {
             const bounds = event.currentTarget.getBoundingClientRect();
@@ -1256,9 +1270,10 @@ function RsRatingMiniChart({
             }
             const rawX = ((event.clientX - bounds.left) / bounds.width) * 560;
             const nextIndex = clampMiniChartIndex(series.length, rawX);
-            setHoveredIndex((current) => (current === nextIndex ? current : nextIndex));
+            const nextTime = series[nextIndex]?.time ?? null;
+            onHoverTimeChange(nextTime);
           }}
-          onMouseLeave={() => setHoveredIndex((current) => (current == null ? current : null))}
+          onMouseLeave={() => onHoverTimeChange(null)}
         >
           <rect x="0" y="0" width="560" height="180" rx="10" fill="#111114" />
           {[30, 70, 90].map((level) => {

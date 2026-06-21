@@ -1032,7 +1032,12 @@ class RatingsRepository:
             }
         return result
 
-    def load_latest_technical_indicator_ratings_for_tickers(self, tickers: Iterable[str]) -> dict[str, dict[str, dict[str, Any]]]:
+    def load_latest_technical_indicator_ratings_for_tickers(
+        self,
+        tickers: Iterable[str],
+        *,
+        as_of_date: dt.date | None = None,
+    ) -> dict[str, dict[str, dict[str, Any]]]:
         normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
         if not normalized:
             return {}
@@ -1057,11 +1062,12 @@ class RatingsRepository:
             LEFT JOIN ticker_metadata tm
               ON tm.ticker = r.ticker
             WHERE r.ticker = ANY(%s)
+              AND (%s::date IS NULL OR r.as_of_date = %s)
             ORDER BY r.ticker, r.timeframe, r.as_of_date DESC, r.updated_at DESC
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (normalized,))
+                cursor.execute(sql, (normalized, as_of_date, as_of_date))
                 rows = cursor.fetchall()
         result: dict[str, dict[str, dict[str, Any]]] = {}
         for (

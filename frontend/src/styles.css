@@ -434,8 +434,9 @@ a {
 }
 
 .rs-rating-svg {
+  aspect-ratio: 560 / 180;
   display: block;
-  height: 180px;
+  height: auto;
   width: 100%;
 }
 

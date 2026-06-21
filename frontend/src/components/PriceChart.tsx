@@ -1,4 +1,4 @@
-import { ColorType, LineStyle, createChart, type IChartApi } from "lightweight-charts";
+import { ColorType, LineStyle, createChart, type IChartApi, type ISeriesApi } from "lightweight-charts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createGapZonePrimitive } from "./GapZonePrimitive";
 import { createHighTightFlagPrimitive } from "./HighTightFlagPrimitive";
@@ -38,6 +38,8 @@ type PriceChartProps = {
   extraMarkers?: Array<{ time: string; label?: string; color: string; shape: "circle" | "square"; position: "aboveBar" | "belowBar" }>;
   visibility?: ChartVisibility;
   forceFearzonePanel?: boolean;
+  hoveredTime?: string | null;
+  onHoverTimeChange?: (time: string | null) => void;
 };
 
 type GapZone = {
@@ -109,13 +111,27 @@ type StructuralFibOverlay = {
   markers: Array<{ time: string; label?: string; color: string; shape: "circle" | "square"; position: "aboveBar" | "belowBar" }>;
 };
 
-export function PriceChart({ ticker, candles, overlays, annotations, extraAnnotations, extraMarkers, visibility, forceFearzonePanel = false }: PriceChartProps) {
+export function PriceChart({
+  ticker,
+  candles,
+  overlays,
+  annotations,
+  extraAnnotations,
+  extraMarkers,
+  visibility,
+  forceFearzonePanel = false,
+  hoveredTime = null,
+  onHoverTimeChange,
+}: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
   const rsRootRef = useRef<HTMLDivElement | null>(null);
   const fibRootRef = useRef<HTMLDivElement | null>(null);
   const priceChartApiRef = useRef<IChartApi | null>(null);
   const rsChartApiRef = useRef<IChartApi | null>(null);
   const fibChartApiRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const rsSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const fibCandleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const [visibleIndexRange, setVisibleIndexRange] = useState<{ from: number; to: number } | null>(null);
   const [hoverGuide, setHoverGuide] = useState<{ time: string; xRatio: number } | null>(null);
   const resolvedExtraAnnotations = extraAnnotations ?? EMPTY_ANNOTATIONS;
@@ -156,6 +172,8 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     [overlays?.market_extension],
   );
   const rsLine = useMemo(() => overlays?.rs_line ?? [], [overlays?.rs_line]);
+  const candleCloseByTime = useMemo(() => new Map(candles.map((item) => [item.time, item.close])), [candles]);
+  const rsValueByTime = useMemo(() => new Map(rsLine.map((item) => [item.time, item.value])), [rsLine]);
   const rsMarkers = useMemo(() => overlays?.rs_markers ?? [], [overlays?.rs_markers]);
   const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
@@ -182,9 +200,11 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
       point.y < 0
     ) {
       setHoverGuide(null);
+      onHoverTimeChange?.(null);
       return;
     }
     const xRatio = Math.max(0, Math.min(1, point.x / width));
+    onHoverTimeChange?.(normalizedTime);
     setHoverGuide((current) => {
       if (current && current.time === normalizedTime && Math.abs(current.xRatio - xRatio) < 0.0005) {
         return current;
@@ -308,6 +328,9 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
       crosshairMarkerVisible: false,
     });
     const rsSeries = rsChart.addLineSeries({ color: "#60a5fa", lineWidth: 2, priceLineVisible: false });
+    candleSeriesRef.current = candleSeries;
+    fibCandleSeriesRef.current = fibCandleSeries;
+    rsSeriesRef.current = rsSeries;
     const annotationSeries = annotationLines.map((line) =>
       priceChart.addLineSeries({
         color: line.color,
@@ -652,6 +675,9 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
 
     return () => {
       resizeObserver.disconnect();
+      candleSeriesRef.current = null;
+      rsSeriesRef.current = null;
+      fibCandleSeriesRef.current = null;
       priceChartApiRef.current = null;
       rsChartApiRef.current = null;
       fibChartApiRef.current = null;
@@ -695,6 +721,63 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
     flexibleSrOverlay,
     showFibPane,
   ]);
+
+  useEffect(() => {
+    const priceChart = priceChartApiRef.current;
+    const rsChart = rsChartApiRef.current;
+    const fibChart = fibChartApiRef.current;
+    const candleSeries = candleSeriesRef.current;
+    const rsSeries = rsSeriesRef.current;
+    const fibCandleSeries = fibCandleSeriesRef.current;
+    if (!priceChart || !candleSeries) {
+      return;
+    }
+    if (!hoveredTime) {
+      priceChart.clearCrosshairPosition();
+      rsChart?.clearCrosshairPosition();
+      fibChart?.clearCrosshairPosition();
+      setHoverGuide(null);
+      return;
+    }
+
+    const priceValue = candleCloseByTime.get(hoveredTime);
+    if (priceValue == null) {
+      priceChart.clearCrosshairPosition();
+      rsChart?.clearCrosshairPosition();
+      fibChart?.clearCrosshairPosition();
+      setHoverGuide(null);
+      return;
+    }
+
+    priceChart.setCrosshairPosition(priceValue, hoveredTime, candleSeries);
+    if (showRsPane && rsChart && rsSeries) {
+      const rsValue = rsValueByTime.get(hoveredTime);
+      if (rsValue != null) {
+        rsChart.setCrosshairPosition(rsValue, hoveredTime, rsSeries);
+      } else {
+        rsChart.clearCrosshairPosition();
+      }
+    } else {
+      rsChart?.clearCrosshairPosition();
+    }
+    if (showFibPane && fibChart && fibCandleSeries) {
+      fibChart.setCrosshairPosition(priceValue, hoveredTime, fibCandleSeries);
+    } else {
+      fibChart?.clearCrosshairPosition();
+    }
+
+    const width = priceRootRef.current?.clientWidth ?? 0;
+    const x = priceChart.timeScale().timeToCoordinate(hoveredTime);
+    if (width > 0 && x != null) {
+      const xRatio = Math.max(0, Math.min(1, x / width));
+      setHoverGuide((current) => {
+        if (current && current.time === hoveredTime && Math.abs(current.xRatio - xRatio) < 0.0005) {
+          return current;
+        }
+        return { time: hoveredTime, xRatio };
+      });
+    }
+  }, [candleCloseByTime, hoveredTime, rsValueByTime, showFibPane, showRsPane]);
 
   const handleZoom = (direction: "in" | "out" | "reset") => {
     const priceChart = priceChartApiRef.current;
@@ -759,9 +842,11 @@ export function PriceChart({ ticker, candles, overlays, annotations, extraAnnota
           hoveredTime={hoverGuide?.time ?? null}
           onHoverTime={(time, xRatio) => {
             if (!time || xRatio == null) {
+              onHoverTimeChange?.(null);
               setHoverGuide((current) => (current == null ? current : null));
               return;
             }
+            onHoverTimeChange?.(time);
             setHoverGuide((current) => {
               if (current && current.time === time && Math.abs(current.xRatio - xRatio) < 0.0005) {
                 return current;
