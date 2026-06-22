@@ -47,6 +47,9 @@ class FundamentalsSnapshot:
     roa_pct: float | None = None
     roe_pct: float | None = None
     institutional_ownership_pct: float | None = None
+    institutional_transactions_pct: float | None = None
+    insider_ownership_pct: float | None = None
+    insider_transactions_pct: float | None = None
     shares_float: float | None = None
     shares_outstanding: float | None = None
     eps_this_y_pct: float | None = None

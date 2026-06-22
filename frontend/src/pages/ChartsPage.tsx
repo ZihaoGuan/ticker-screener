@@ -955,6 +955,18 @@ export function ChartsPage() {
                     <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.institutional_ownership_pct))}</td>
                   </tr>
                   <tr>
+                    <td>Inst Trans</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.institutional_transactions_pct))}</td>
+                  </tr>
+                  <tr>
+                    <td>Insider Ownership</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.insider_ownership_pct))}</td>
+                  </tr>
+                  <tr>
+                    <td>Insider Trans</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.insider_transactions_pct))}</td>
+                  </tr>
+                  <tr>
                     <td>Leadership</td>
                     <td>{formatMetric(toNullableNumber(canslimSnapshot.metrics.leadership_score))}</td>
                   </tr>

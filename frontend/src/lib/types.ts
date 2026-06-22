@@ -707,6 +707,10 @@ export type ChartFundamentalsResponse = {
     gross_margin_pct: number | null;
     roa_pct: number | null;
     roe_pct: number | null;
+    institutional_ownership_pct: number | null;
+    institutional_transactions_pct: number | null;
+    insider_ownership_pct: number | null;
+    insider_transactions_pct: number | null;
     eps_this_y_pct: number | null;
     eps_next_y_pct: number | null;
     eps_next_5y_pct: number | null;

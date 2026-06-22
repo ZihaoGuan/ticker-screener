@@ -165,8 +165,38 @@ def _score_l(leadership_score: float | None) -> tuple[int, list[str], list[str]]
 
 def _score_i(current: dict[str, Any]) -> tuple[int, list[str]]:
     inst_own = _coerce_float(current.get("institutional_ownership_pct"))
-    score = 2 if inst_own is not None and inst_own >= 20.0 else 1 if inst_own is not None and inst_own >= 10.0 else 0
-    reasons = [f"Inst ownership {inst_own:.1f}%"] if inst_own is not None else []
+    inst_trans = _coerce_float(current.get("institutional_transactions_pct"))
+    insider_own = _coerce_float(current.get("insider_ownership_pct"))
+    insider_trans = _coerce_float(current.get("insider_transactions_pct"))
+
+    sponsorship_points = 0.0
+    if inst_own is not None and inst_own >= 20.0:
+        sponsorship_points += 1.0
+    elif inst_own is not None and inst_own >= 10.0:
+        sponsorship_points += 0.5
+    if inst_trans is not None and inst_trans > 0.0:
+        sponsorship_points += 1.0
+    if inst_trans is not None and inst_trans >= 5.0:
+        sponsorship_points += 0.5
+    if insider_own is not None and insider_own >= 1.0:
+        sponsorship_points += 0.5
+    if insider_trans is not None and insider_trans > 0.0:
+        sponsorship_points += 0.5
+    if inst_trans is not None and inst_trans <= -5.0:
+        sponsorship_points -= 0.5
+    if insider_trans is not None and insider_trans < 0.0:
+        sponsorship_points -= 0.25
+
+    score = 2 if sponsorship_points >= 2.0 else 1 if sponsorship_points >= 1.0 else 0
+    reasons = []
+    if inst_own is not None:
+        reasons.append(f"Inst ownership {inst_own:.1f}%")
+    if inst_trans is not None:
+        reasons.append(f"Inst trans {inst_trans:.1f}%")
+    if insider_own is not None:
+        reasons.append(f"Insider ownership {insider_own:.1f}%")
+    if insider_trans is not None:
+        reasons.append(f"Insider trans {insider_trans:.1f}%")
     return score, reasons
 
 
@@ -276,6 +306,9 @@ def evaluate_canslim_ticker(
         "eps_next_5y_pct": current.get("eps_next_5y_pct"),
         "roe_pct": current.get("roe_pct"),
         "institutional_ownership_pct": current.get("institutional_ownership_pct"),
+        "institutional_transactions_pct": current.get("institutional_transactions_pct"),
+        "insider_ownership_pct": current.get("insider_ownership_pct"),
+        "insider_transactions_pct": current.get("insider_transactions_pct"),
         "shares_float": current.get("shares_float"),
         "shares_outstanding": current.get("shares_outstanding"),
         "leadership_score": leadership_score,

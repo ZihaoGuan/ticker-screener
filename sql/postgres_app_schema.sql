@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS ticker_fundamentals_snapshots (
   roa_pct NUMERIC(18,6),
   roe_pct NUMERIC(18,6),
   institutional_ownership_pct NUMERIC(18,6),
+  institutional_transactions_pct NUMERIC(18,6),
+  insider_ownership_pct NUMERIC(18,6),
+  insider_transactions_pct NUMERIC(18,6),
   shares_float NUMERIC(24,6),
   shares_outstanding NUMERIC(24,6),
   eps_this_y_pct NUMERIC(18,6),
@@ -108,6 +111,15 @@ CREATE INDEX IF NOT EXISTS idx_ticker_fundamentals_snapshots_date_sector
 
 ALTER TABLE ticker_fundamentals_snapshots
   ADD COLUMN IF NOT EXISTS institutional_ownership_pct NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS institutional_transactions_pct NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS insider_ownership_pct NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS insider_transactions_pct NUMERIC(18,6);
 
 ALTER TABLE ticker_fundamentals_snapshots
   ADD COLUMN IF NOT EXISTS shares_float NUMERIC(24,6);

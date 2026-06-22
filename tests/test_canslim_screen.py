@@ -40,6 +40,9 @@ class CanslimScreenTests(unittest.TestCase):
                 "eps_next_5y_pct": 24.0,
                 "roe_pct": 22.0,
                 "institutional_ownership_pct": 41.0,
+                "institutional_transactions_pct": 6.0,
+                "insider_ownership_pct": 2.5,
+                "insider_transactions_pct": 0.8,
                 "shares_float": 420_000_000.0,
                 "shares_outstanding": 430_000_000.0,
             },
@@ -54,6 +57,9 @@ class CanslimScreenTests(unittest.TestCase):
                 "eps_next_5y_pct": 18.0,
                 "roe_pct": 16.0,
                 "institutional_ownership_pct": 12.0,
+                "institutional_transactions_pct": -3.0,
+                "insider_ownership_pct": 0.3,
+                "insider_transactions_pct": -0.8,
                 "shares_float": 1_500_000_000.0,
                 "shares_outstanding": 1_600_000_000.0,
             },
@@ -82,6 +88,8 @@ class CanslimScreenTests(unittest.TestCase):
         self.assertGreater(result.hits[0].score, result.hits[1].score)
         self.assertEqual(result.hits[0].rank, 1)
         self.assertTrue(result.hits[0].letter_passes["M"])
+        self.assertEqual(result.hits[0].letter_scores["I"], 2)
+        self.assertEqual(result.hits[1].letter_scores["I"], 0)
         self.assertTrue(any(item["ticker"] == "MSFT" for item in result.failed_tickers))
 
 
