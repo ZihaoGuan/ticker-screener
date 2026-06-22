@@ -1271,9 +1271,15 @@ function RsRatingMiniChart({
             const rawX = ((event.clientX - bounds.left) / bounds.width) * 560;
             const nextIndex = clampMiniChartIndex(series.length, rawX);
             const nextTime = series[nextIndex]?.time ?? null;
-            onHoverTimeChange(nextTime);
+            if (nextTime !== hoveredTime) {
+              onHoverTimeChange(nextTime);
+            }
           }}
-          onMouseLeave={() => onHoverTimeChange(null)}
+          onMouseLeave={() => {
+            if (hoveredTime != null) {
+              onHoverTimeChange(null);
+            }
+          }}
         >
           <rect x="0" y="0" width="560" height="180" rx="10" fill="#111114" />
           {[30, 70, 90].map((level) => {

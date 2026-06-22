@@ -132,6 +132,8 @@ export function PriceChart({
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const rsSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const fibCandleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const suppressCrosshairEventRef = useRef(false);
+  const lastHoverTimeRef = useRef<string | null>(null);
   const [visibleIndexRange, setVisibleIndexRange] = useState<{ from: number; to: number } | null>(null);
   const [hoverGuide, setHoverGuide] = useState<{ time: string; xRatio: number } | null>(null);
   const resolvedExtraAnnotations = extraAnnotations ?? EMPTY_ANNOTATIONS;
@@ -189,6 +191,9 @@ export function PriceChart({
   const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, resolvedExtraAnnotations), [annotations, resolvedExtraAnnotations]);
   const flexibleSrOverlay = useMemo(() => (options.flexSr ? buildFlexibleSrOverlay(candles) : null), [candles, options.flexSr]);
   const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
+    if (suppressCrosshairEventRef.current) {
+      return;
+    }
     const point = param.point;
     const normalizedTime = normalizeCrosshairTime(param.time);
     if (
@@ -204,7 +209,10 @@ export function PriceChart({
       return;
     }
     const xRatio = Math.max(0, Math.min(1, point.x / width));
-    onHoverTimeChange?.(normalizedTime);
+    if (lastHoverTimeRef.current !== normalizedTime) {
+      lastHoverTimeRef.current = normalizedTime;
+      onHoverTimeChange?.(normalizedTime);
+    }
     setHoverGuide((current) => {
       if (current && current.time === normalizedTime && Math.abs(current.xRatio - xRatio) < 0.0005) {
         return current;
@@ -733,22 +741,29 @@ export function PriceChart({
       return;
     }
     if (!hoveredTime) {
+      suppressCrosshairEventRef.current = true;
       priceChart.clearCrosshairPosition();
       rsChart?.clearCrosshairPosition();
       fibChart?.clearCrosshairPosition();
+      suppressCrosshairEventRef.current = false;
+      lastHoverTimeRef.current = null;
       setHoverGuide(null);
       return;
     }
 
     const priceValue = candleCloseByTime.get(hoveredTime);
     if (priceValue == null) {
+      suppressCrosshairEventRef.current = true;
       priceChart.clearCrosshairPosition();
       rsChart?.clearCrosshairPosition();
       fibChart?.clearCrosshairPosition();
+      suppressCrosshairEventRef.current = false;
+      lastHoverTimeRef.current = null;
       setHoverGuide(null);
       return;
     }
 
+    suppressCrosshairEventRef.current = true;
     priceChart.setCrosshairPosition(priceValue, hoveredTime, candleSeries);
     if (showRsPane && rsChart && rsSeries) {
       const rsValue = rsValueByTime.get(hoveredTime);
@@ -765,6 +780,8 @@ export function PriceChart({
     } else {
       fibChart?.clearCrosshairPosition();
     }
+    suppressCrosshairEventRef.current = false;
+    lastHoverTimeRef.current = hoveredTime;
 
     const width = priceRootRef.current?.clientWidth ?? 0;
     const x = priceChart.timeScale().timeToCoordinate(hoveredTime);
@@ -842,11 +859,17 @@ export function PriceChart({
           hoveredTime={hoverGuide?.time ?? null}
           onHoverTime={(time, xRatio) => {
             if (!time || xRatio == null) {
-              onHoverTimeChange?.(null);
+              if (lastHoverTimeRef.current !== null) {
+                lastHoverTimeRef.current = null;
+                onHoverTimeChange?.(null);
+              }
               setHoverGuide((current) => (current == null ? current : null));
               return;
             }
-            onHoverTimeChange?.(time);
+            if (lastHoverTimeRef.current !== time) {
+              lastHoverTimeRef.current = time;
+              onHoverTimeChange?.(time);
+            }
             setHoverGuide((current) => {
               if (current && current.time === time && Math.abs(current.xRatio - xRatio) < 0.0005) {
                 return current;
