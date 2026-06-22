@@ -135,7 +135,6 @@ export function PriceChart({
   const suppressCrosshairEventRef = useRef(false);
   const lastHoverTimeRef = useRef<string | null>(null);
   const [visibleIndexRange, setVisibleIndexRange] = useState<{ from: number; to: number } | null>(null);
-  const [hoverGuide, setHoverGuide] = useState<{ time: string; xRatio: number } | null>(null);
   const resolvedExtraAnnotations = extraAnnotations ?? EMPTY_ANNOTATIONS;
   const resolvedExtraMarkers = extraMarkers ?? EMPTY_MARKERS;
   const options = visibility ?? {
@@ -204,21 +203,16 @@ export function PriceChart({
       point.x > width ||
       point.y < 0
     ) {
-      setHoverGuide(null);
-      onHoverTimeChange?.(null);
+      if (lastHoverTimeRef.current !== null) {
+        lastHoverTimeRef.current = null;
+        onHoverTimeChange?.(null);
+      }
       return;
     }
-    const xRatio = Math.max(0, Math.min(1, point.x / width));
     if (lastHoverTimeRef.current !== normalizedTime) {
       lastHoverTimeRef.current = normalizedTime;
       onHoverTimeChange?.(normalizedTime);
     }
-    setHoverGuide((current) => {
-      if (current && current.time === normalizedTime && Math.abs(current.xRatio - xRatio) < 0.0005) {
-        return current;
-      }
-      return { time: normalizedTime, xRatio };
-    });
   };
 
   useEffect(() => {
@@ -747,7 +741,6 @@ export function PriceChart({
       fibChart?.clearCrosshairPosition();
       suppressCrosshairEventRef.current = false;
       lastHoverTimeRef.current = null;
-      setHoverGuide(null);
       return;
     }
 
@@ -759,7 +752,6 @@ export function PriceChart({
       fibChart?.clearCrosshairPosition();
       suppressCrosshairEventRef.current = false;
       lastHoverTimeRef.current = null;
-      setHoverGuide(null);
       return;
     }
 
@@ -782,18 +774,6 @@ export function PriceChart({
     }
     suppressCrosshairEventRef.current = false;
     lastHoverTimeRef.current = hoveredTime;
-
-    const width = priceRootRef.current?.clientWidth ?? 0;
-    const x = priceChart.timeScale().timeToCoordinate(hoveredTime);
-    if (width > 0 && x != null) {
-      const xRatio = Math.max(0, Math.min(1, x / width));
-      setHoverGuide((current) => {
-        if (current && current.time === hoveredTime && Math.abs(current.xRatio - xRatio) < 0.0005) {
-          return current;
-        }
-        return { time: hoveredTime, xRatio };
-      });
-    }
   }, [candleCloseByTime, hoveredTime, rsValueByTime, showFibPane, showRsPane]);
 
   const handleZoom = (direction: "in" | "out" | "reset") => {
@@ -840,42 +820,32 @@ export function PriceChart({
       </div>
       <div className="chart-pane">
         <div ref={priceRootRef} className="chart-card chart-card-price" />
-        {hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showFibPane ? <div className="chart-rs-header">Fib structure pane</div> : null}
       <div className="chart-pane">
         <div ref={fibRootRef} className="chart-card chart-card-rs" />
-        {showFibPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
       <div className="chart-pane">
         <div ref={rsRootRef} className="chart-card chart-card-rs" />
-        {showRsPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showFearzonePanel ? (
         <FearzonePanel
           panel={fearzonePanel}
           visibleIndexRange={visibleIndexRange}
-          hoveredTime={hoverGuide?.time ?? null}
-          onHoverTime={(time, xRatio) => {
-            if (!time || xRatio == null) {
+          hoveredTime={hoveredTime}
+          onHoverTime={(time) => {
+            if (!time) {
               if (lastHoverTimeRef.current !== null) {
                 lastHoverTimeRef.current = null;
                 onHoverTimeChange?.(null);
               }
-              setHoverGuide((current) => (current == null ? current : null));
               return;
             }
             if (lastHoverTimeRef.current !== time) {
               lastHoverTimeRef.current = time;
               onHoverTimeChange?.(time);
             }
-            setHoverGuide((current) => {
-              if (current && current.time === time && Math.abs(current.xRatio - xRatio) < 0.0005) {
-                return current;
-              }
-              return { time, xRatio };
-            });
           }}
         />
       ) : null}
@@ -892,7 +862,7 @@ function FearzonePanel({
   panel: WatchlistChartResponse["fearzone_panel"];
   visibleIndexRange: { from: number; to: number } | null;
   hoveredTime: string | null;
-  onHoverTime: (time: string | null, xRatio: number | null) => void;
+  onHoverTime: (time: string | null) => void;
 }) {
   const width = 1080;
   const labelWidth = 96;
@@ -933,30 +903,29 @@ function FearzonePanel({
         preserveAspectRatio="none"
         onMouseMove={(event) => {
           if (pointCount === 0) {
-            onHoverTime(null, null);
+            onHoverTime(null);
             return;
           }
           const bounds = event.currentTarget.getBoundingClientRect();
           if (bounds.width <= 0) {
-            onHoverTime(null, null);
+            onHoverTime(null);
             return;
           }
           const rawX = ((event.clientX - bounds.left) / bounds.width) * width;
           const translatedX = rawX - labelWidth;
           if (translatedX < 0) {
-            onHoverTime(null, null);
+            onHoverTime(null);
             return;
           }
           const pointIndex = Math.max(0, Math.min(pointCount - 1, Math.floor(translatedX / Math.max(step, 1e-6))));
           const point = rows[0]?.points[pointIndex];
           if (!point) {
-            onHoverTime(null, null);
+            onHoverTime(null);
             return;
           }
-          const xRatio = Math.max(0, Math.min(1, (labelWidth + pointIndex * step + Math.max(0.5, step / 2)) / width));
-          onHoverTime(point.time, xRatio);
+          onHoverTime(point.time);
         }}
-        onMouseLeave={() => onHoverTime(null, null)}
+        onMouseLeave={() => onHoverTime(null)}
       >
         <rect x="0" y="0" width={width} height={height} fill="#111114" rx="10" />
         {rows.map((row, rowIndex) => {
