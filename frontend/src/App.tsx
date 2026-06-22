@@ -73,9 +73,7 @@ export default function App() {
         <Route
           path="/ratings"
           element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
-              <RatingsPage />
-            </RoleRoute>
+            <RatingsPage />
           }
         />
         <Route
@@ -205,9 +203,6 @@ function HomeRoute() {
 
   if (auth.isLoading) {
     return <LoadingBlock label="Checking access…" />;
-  }
-  if (auth.role === "visitor") {
-    return <Navigate to="/charts" replace />;
   }
   return <DashboardPage />;
 }

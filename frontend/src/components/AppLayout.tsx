@@ -4,9 +4,9 @@ import { useAuth } from "../auth/AuthContext";
 import type { CapabilityName, RoleName } from "../lib/types";
 
 const navItems = [
-  { to: "/", label: "Dashboard", icon: "▦", roles: ["premium", "admin"] as RoleName[] },
+  { to: "/", label: "Dashboard", icon: "▦" },
   { to: "/scanner", label: "Scanner", icon: "◭", roles: ["premium", "admin"] as RoleName[] },
-  { to: "/ratings", label: "Ratings", icon: "◬", roles: ["premium", "admin"] as RoleName[] },
+  { to: "/ratings", label: "Ratings", icon: "◬" },
   { to: "/guide", label: "Guide", icon: "◫", roles: ["premium", "admin"] as RoleName[] },
   { to: "/charts", label: "Charts", icon: "◍" },
   { to: "/earnings", label: "Earnings", icon: "◒" },

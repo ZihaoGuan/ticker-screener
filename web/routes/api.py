@@ -302,7 +302,7 @@ def _record_audit(
 @router.get("/dashboard", response_class=JSONResponse)
 def dashboard_data(
     service: DashboardService = Depends(get_dashboard_service),
-    principal: Principal = Depends(require_member_access),
+    principal: Principal = Depends(get_current_principal),
 ) -> JSONResponse:
     return JSONResponse(service.get_dashboard_context(include_deprecated_watchlists=principal.role == "admin"))
 
@@ -1046,7 +1046,6 @@ def top_ratings_data(
     rating_status: str = Query(default="ok", alias="ratingStatus"),
     sector: str = Query(default=""),
     service: WatchlistService = Depends(get_watchlist_service),
-    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     return JSONResponse(
         service.get_top_ratings_payload(
@@ -1065,7 +1064,6 @@ def top_technical_ratings_data(
     technical_status: str = Query(default="ok", alias="technicalStatus"),
     sector: str = Query(default=""),
     service: WatchlistService = Depends(get_watchlist_service),
-    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     return JSONResponse(
         service.get_top_technical_ratings_payload(
@@ -1084,7 +1082,6 @@ def top_technical_indicator_ratings_data(
     technical_status: str = Query(default="ok", alias="technicalStatus"),
     sector: str = Query(default=""),
     service: WatchlistService = Depends(get_watchlist_service),
-    _: Principal = Depends(require_member_access),
 ) -> JSONResponse:
     return JSONResponse(
         service.get_top_technical_indicator_ratings_payload(

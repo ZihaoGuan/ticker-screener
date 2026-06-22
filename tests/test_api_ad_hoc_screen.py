@@ -18,6 +18,7 @@ if TestClient is not None:
         get_auth_service,
         get_audit_service,
         get_current_principal,
+        get_dashboard_service,
         get_earnings_calendar_service,
         get_portfolio_service,
         get_run_service,
@@ -570,6 +571,79 @@ class _FakeWatchlistService:
             },
         }
 
+    def get_top_ratings_payload(
+        self,
+        *,
+        as_of_date: dt.date | None = None,
+        limit: int = 100,
+        rating_status: str = "ok",
+        sector: str = "",
+    ):
+        return {
+            "as_of_date": as_of_date.isoformat() if as_of_date else "2026-06-12",
+            "limit": limit,
+            "rating_status": rating_status,
+            "sector": sector,
+            "rows": [
+                {
+                    "ticker": "NVDA",
+                    "as_of_date": "2026-06-12",
+                    "overall_rating": 95.0,
+                    "latest_scanner_hit_count": 4,
+                }
+            ],
+        }
+
+    def get_top_technical_ratings_payload(
+        self,
+        *,
+        as_of_date: dt.date | None = None,
+        limit: int = 100,
+        technical_status: str = "ok",
+        sector: str = "",
+    ):
+        return {
+            "as_of_date": as_of_date.isoformat() if as_of_date else "2026-06-12",
+            "limit": limit,
+            "technical_status": technical_status,
+            "sector": sector,
+            "rows": [{"ticker": "NVDA", "technical_rating": 91.0}],
+        }
+
+    def get_top_technical_indicator_ratings_payload(
+        self,
+        *,
+        as_of_date: dt.date | None = None,
+        limit: int = 100,
+        technical_status: str = "ok",
+        sector: str = "",
+    ):
+        return {
+            "as_of_date": as_of_date.isoformat() if as_of_date else "2026-06-12",
+            "limit": limit,
+            "technical_status": technical_status,
+            "sector": sector,
+            "rows": [{"ticker": "NVDA", "daily": {"rating_label": "Strong"}}],
+        }
+
+
+class _FakeDashboardService:
+    def get_dashboard_context(self, *, include_deprecated_watchlists: bool = False):
+        return {
+            "market_health": {
+                "options_positioning": {
+                    "ticker": "SPX",
+                    "data_source": "database",
+                    "latest": {
+                        "as_of": "2026-06-21T20:21:10",
+                        "spot": 746.74,
+                        "net_gex": 3289313970.77,
+                    },
+                }
+            },
+            "include_deprecated_watchlists": include_deprecated_watchlists,
+        }
+
 
 class _FakeEarningsCalendarService:
     def get_next_week_calendar(
@@ -826,6 +900,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_auth_service] = lambda: _FakeAuthService()
         app.dependency_overrides[get_audit_service] = lambda: _FakeAuditService()
         app.dependency_overrides[get_user_admin_service] = lambda: _FakeUserAdminService()
+        app.dependency_overrides[get_dashboard_service] = lambda: _FakeDashboardService()
         app.dependency_overrides[get_watchlist_service] = lambda: _FakeWatchlistService()
         app.dependency_overrides[get_earnings_calendar_service] = lambda: _FakeEarningsCalendarService()
         app.dependency_overrides[get_portfolio_service] = lambda: _FakePortfolioService()
@@ -877,6 +952,23 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(cards["weekly_rs_new_high"]["entry_count"], 8)
         self.assertEqual(cards["weekly_rs_before_price"]["entry_count"], 6)
         self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
+
+    def test_dashboard_and_ratings_are_public_for_visitors(self) -> None:
+        dashboard_response = self.client.get("/api/dashboard")
+        self.assertEqual(dashboard_response.status_code, 200)
+        self.assertEqual(dashboard_response.json()["market_health"]["options_positioning"]["ticker"], "SPX")
+
+        ratings_response = self.client.get("/api/ratings/top?limit=5")
+        self.assertEqual(ratings_response.status_code, 200)
+        self.assertEqual(ratings_response.json()["rows"][0]["latest_scanner_hit_count"], 4)
+
+        technical_response = self.client.get("/api/ratings/technical/top?limit=5")
+        self.assertEqual(technical_response.status_code, 200)
+        self.assertEqual(technical_response.json()["rows"][0]["ticker"], "NVDA")
+
+        indicator_response = self.client.get("/api/ratings/technical-indicator/top?limit=5")
+        self.assertEqual(indicator_response.status_code, 200)
+        self.assertEqual(indicator_response.json()["rows"][0]["daily"]["rating_label"], "Strong")
 
     def test_get_chart_fundamentals(self) -> None:
         response = self.client.get("/api/chart-fundamentals/nvda?earningsLimit=1")
