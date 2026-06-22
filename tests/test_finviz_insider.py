@@ -9,6 +9,7 @@ from pathlib import Path
 import requests
 
 from src.ratings.finviz_insider import _normalize_parsed_rows, fetch_finviz_insider_trades, load_finviz_insider_signal_map
+from src.ratings.finviz_missing_tickers import load_missing_finviz_tickers, record_missing_finviz_ticker
 
 
 _SAMPLE_HTML = """
@@ -160,6 +161,30 @@ class FinvizInsiderTests(unittest.TestCase):
 
             self.assertEqual(signal_map, {})
             self.assertFalse((artifacts_dir / "raw" / "insider" / "finviz_insider_trades_latest.json").exists())
+            missing_registry = load_missing_finviz_tickers(artifacts_dir)
+            self.assertIn("AEFC", missing_registry)
+            self.assertEqual(missing_registry["AEFC"]["source"], "insider")
+
+    def test_load_signal_map_skips_known_missing_ticker_without_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            record_missing_finviz_ticker(
+                "SOJD",
+                artifacts_dir=artifacts_dir,
+                reason="404 Client Error: Not Found",
+                source="insider",
+            )
+            with patch("src.ratings.finviz_insider.fetch_finviz_insider_trades") as fetch_mock:
+                signal_map = load_finviz_insider_signal_map(
+                    ["SOJD"],
+                    as_of_date=dt.date(2026, 6, 22),
+                    lookback_days=30,
+                    artifacts_dir=artifacts_dir,
+                    ttl_hours=12,
+                )
+
+            self.assertEqual(signal_map, {})
+            fetch_mock.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -18,6 +18,12 @@ from src.config import load_app_config, today_label
 from src.ratings.finviz_api import FinvizApiError, fetch_finviz_api_snapshot, snapshot_needs_fallback
 from src.ratings.constants import RATING_STATUS_SCRAPE_FAILED
 from src.ratings.finviz_parser import parse_finviz_probe
+from src.ratings.finviz_missing_tickers import (
+    finviz_error_is_missing,
+    finviz_probe_is_missing,
+    is_known_missing_finviz_ticker,
+    record_missing_finviz_ticker,
+)
 from src.ratings.finviz_probe import FinvizProbeError, looks_blocked, looks_retryable_failure, probe_finviz_ticker
 from src.ratings.models import FundamentalsSnapshot
 from src.ratings.repository import RatingsRepository
@@ -180,6 +186,7 @@ def main() -> int:
         raise RuntimeError("No Postgres connection string configured. Pass --database-url or set TICKER_SCREENER_DATABASE_URL.")
     as_of_date = dt.date.fromisoformat(str(args.as_of_date))
     manifest_path = _manifest_path(args)
+    artifacts_dir = PROJECT_ROOT / "artifacts"
     if args.retry_failed_from_manifest:
         retry_tickers = _load_retry_manifest_tickers(manifest_path)
         if not retry_tickers:
@@ -220,6 +227,20 @@ def main() -> int:
 
     for index, ticker_meta in enumerate(universe, start=1):
         ticker = ticker_meta.symbol.strip().upper()
+        if is_known_missing_finviz_ticker(ticker, artifacts_dir=artifacts_dir):
+            completed.append(ticker)
+            print(f"[{index}/{len(universe)}] {ticker} skipped_known_missing reason=finviz_404_registry", flush=True)
+            next_resume = universe[index].symbol if index < len(universe) else None
+            if _should_write_manifest(index, len(universe)):
+                _write_manifest(
+                    manifest_path,
+                    args=args,
+                    completed=completed,
+                    failed=failed,
+                    blocked=blocked,
+                    next_resume_ticker=next_resume,
+                )
+            continue
         latest_state = latest_states.get(ticker) or {}
         existing_date = latest_state.get("as_of_date")
         existing_status = str(latest_state.get("parse_status") or "").strip().lower()
@@ -285,8 +306,30 @@ def main() -> int:
                 break
             except FinvizApiError as exc:
                 failure_message = str(exc)
+                if finviz_error_is_missing(exc):
+                    record_missing_finviz_ticker(
+                        ticker,
+                        artifacts_dir=artifacts_dir,
+                        reason=failure_message,
+                        source="fundamentals",
+                    )
+                    snapshot = _build_failed_snapshot(ticker, as_of_date, failure_message)
+                    break
             try:
                 probe = probe_finviz_ticker(ticker)
+                if finviz_probe_is_missing(probe):
+                    failure_message = (
+                        f"Finviz ticker page returned 404 for {ticker}: "
+                        f"{probe.final_url or probe.source_url or 'unknown_url'}"
+                    )
+                    record_missing_finviz_ticker(
+                        ticker,
+                        artifacts_dir=artifacts_dir,
+                        reason=failure_message,
+                        source="fundamentals",
+                    )
+                    snapshot = _build_failed_snapshot(ticker, as_of_date, failure_message)
+                    break
                 if looks_blocked(probe):
                     blocked_this_ticker = True
                     blocked.append(ticker)

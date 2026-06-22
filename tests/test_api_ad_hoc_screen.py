@@ -318,6 +318,22 @@ class _FakeAdminService:
             "notes": ["1 tickers still need sector assignment."],
         }
 
+    def get_missing_finviz_tickers_context(self):
+        return {
+            "missing_count": 1,
+            "tickers": [
+                {
+                    "ticker": "SOJD",
+                    "source": "insider",
+                    "reason": "404 Client Error: Not Found",
+                    "first_seen_at": "2026-06-22T00:00:00+00:00",
+                    "last_seen_at": "2026-06-22T01:00:00+00:00",
+                    "hit_count": 2,
+                }
+            ],
+            "notes": ["1 tickers currently skipped for Finviz 404 responses."],
+        }
+
     def get_gamma_exposure_plot_context(self, *, symbol: str = "SPX"):
         return {
             "symbol": symbol,
@@ -355,6 +371,9 @@ class _FakeAdminService:
 
     def update_ticker_sector(self, *, ticker: str, sector: str):
         return {"ticker": ticker.upper(), "sector": sector, "source": "finviz", "updated_at": "2026-06-14T00:00:00+00:00"}
+
+    def remove_missing_finviz_ticker(self, *, ticker: str):
+        return {"ticker": ticker.upper(), "removed_entry": {"ticker": ticker.upper()}}
 
 
 class _FakeUserAdminService:
@@ -1144,6 +1163,19 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["missing_count"], 1)
         self.assertEqual(payload["tickers"][0]["ticker"], "NVDA")
 
+    def test_admin_can_access_missing_finviz_ticker_list(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/finviz-missing-tickers")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["missing_count"], 1)
+        self.assertEqual(payload["tickers"][0]["ticker"], "SOJD")
+
     def test_admin_can_access_gamma_exposure_plot(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
             user_id=1,
@@ -1183,6 +1215,19 @@ class ApiAdHocScreenTests(unittest.TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["entry"]["ticker"], "NVDA")
+
+    def test_admin_can_remove_missing_finviz_ticker(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.post("/api/admin/finviz-missing-tickers/SOJD/remove")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["entry"]["ticker"], "SOJD")
         self.assertEqual(payload["entry"]["sector"], "Technology")
 
     def test_premium_cannot_access_portfolio(self) -> None:

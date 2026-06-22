@@ -14,6 +14,7 @@ import type {
   ExclusionEntry,
   GammaExposurePlotAdminResponse,
   JobsResponse,
+  MissingFinvizTickersAdminResponse,
   MissingSectorAdminResponse,
   PartialTickerDetailResponse,
   RatingsAdminStatusResponse,
@@ -76,6 +77,12 @@ const EMPTY_MISSING_SECTOR_RESPONSE: MissingSectorAdminResponse = {
   notes: [],
 };
 
+const EMPTY_MISSING_FINVIZ_RESPONSE: MissingFinvizTickersAdminResponse = {
+  missing_count: 0,
+  tickers: [],
+  notes: [],
+};
+
 const RATINGS_ACTION_IDS = new Set([
   "run_finviz_ratings_pipeline",
   "sync_finviz_fundamentals",
@@ -89,6 +96,7 @@ export function AdminPage() {
   const [payload, setPayload] = useState<AdminResponse>(EMPTY_ADMIN_RESPONSE);
   const [ratingsStatus, setRatingsStatus] = useState<RatingsAdminStatusResponse>(EMPTY_RATINGS_RESPONSE);
   const [missingSectorPayload, setMissingSectorPayload] = useState<MissingSectorAdminResponse>(EMPTY_MISSING_SECTOR_RESPONSE);
+  const [missingFinvizPayload, setMissingFinvizPayload] = useState<MissingFinvizTickersAdminResponse>(EMPTY_MISSING_FINVIZ_RESPONSE);
   const [coverageStart, setCoverageStart] = useState("2020-01-01");
   const [syncStartDate, setSyncStartDate] = useState("2020-01-01");
   const [syncEndDate, setSyncEndDate] = useState("");
@@ -138,6 +146,10 @@ export function AdminPage() {
   const [isLoadingMissingSectors, setIsLoadingMissingSectors] = useState(true);
   const [isSavingSector, setIsSavingSector] = useState(false);
   const [sectorNotice, setSectorNotice] = useState("");
+  const [missingFinvizFilter, setMissingFinvizFilter] = useState("");
+  const [isLoadingMissingFinviz, setIsLoadingMissingFinviz] = useState(true);
+  const [isRemovingMissingFinviz, setIsRemovingMissingFinviz] = useState(false);
+  const [missingFinvizNotice, setMissingFinvizNotice] = useState("");
 
   const loadAdmin = (start: string) => {
     setIsLoading(true);
@@ -216,6 +228,19 @@ export function AdminPage() {
       .finally(() => setIsLoadingMissingSectors(false));
   };
 
+  const loadMissingFinvizTickers = () => {
+    setIsLoadingMissingFinviz(true);
+    void fetchJson<MissingFinvizTickersAdminResponse>("/api/admin/finviz-missing-tickers")
+      .then(setMissingFinvizPayload)
+      .catch(() => {
+        setMissingFinvizPayload({
+          ...EMPTY_MISSING_FINVIZ_RESPONSE,
+          notes: ["Failed to load Finviz missing-ticker registry."],
+        });
+      })
+      .finally(() => setIsLoadingMissingFinviz(false));
+  };
+
   const loadGammaExposurePlot = () => {
     setIsLoadingGammaPlot(true);
     setGammaPlotNotice("");
@@ -265,6 +290,7 @@ export function AdminPage() {
     loadAdmin(coverageStart);
     loadRatings();
     loadMissingSectors();
+    loadMissingFinvizTickers();
     loadLatestRatingsRunJob();
     void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
       .then((result) => {
@@ -430,6 +456,16 @@ export function AdminPage() {
     );
   }, [missingSectorFilter, missingSectorPayload.tickers]);
 
+  const filteredMissingFinvizTickers = useMemo(() => {
+    const query = missingFinvizFilter.trim().toLowerCase();
+    if (!query) {
+      return missingFinvizPayload.tickers;
+    }
+    return missingFinvizPayload.tickers.filter((entry) =>
+      [entry.ticker, entry.source, entry.reason, entry.first_seen_at, entry.last_seen_at].join(" ").toLowerCase().includes(query),
+    );
+  }, [missingFinvizFilter, missingFinvizPayload.tickers]);
+
   const db = payload.database_status;
   const ratingDiagnostics = ratingsStatus.diagnostics;
 
@@ -588,6 +624,23 @@ export function AdminPage() {
       setSectorNotice(error instanceof Error ? error.message : "Failed to update sector.");
     } finally {
       setIsSavingSector(false);
+    }
+  };
+
+  const handleRemoveMissingFinvizTicker = async (ticker: string) => {
+    setIsRemovingMissingFinviz(true);
+    setMissingFinvizNotice("");
+    try {
+      await fetchJson<{ ok: boolean; entry: { ticker: string } }>(`/api/admin/finviz-missing-tickers/${ticker}/remove`, {
+        method: "POST",
+      });
+      setMissingFinvizNotice(`${ticker} removed from Finviz 404 skip list.`);
+      loadMissingFinvizTickers();
+      loadAudit();
+    } catch (error) {
+      setMissingFinvizNotice(error instanceof Error ? error.message : "Failed to remove Finviz missing ticker.");
+    } finally {
+      setIsRemovingMissingFinviz(false);
     }
   };
 
@@ -947,6 +1000,77 @@ export function AdminPage() {
                             {isSavingSector ? "Saving..." : "Save"}
                           </button>
                         </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title="Finviz Missing Tickers" aside={<span className="eyebrow">{formatCount(missingFinvizPayload.missing_count)} skipped</span>}>
+        {isLoadingMissingFinviz ? <LoadingBlock label="Loading Finviz missing-ticker registry…" /> : null}
+        <div className="run-toolbar">
+          <div className="run-action-footer">
+            <label className="field" style={{ flex: "1 1 20rem" }}>
+              <span>Filter tickers</span>
+              <input
+                type="text"
+                value={missingFinvizFilter}
+                onChange={(event) => setMissingFinvizFilter(event.target.value)}
+                placeholder="Ticker, source, reason"
+              />
+            </label>
+            <button className="ghost-button" type="button" onClick={loadMissingFinvizTickers} disabled={isLoadingMissingFinviz || isRemovingMissingFinviz}>
+              {isLoadingMissingFinviz ? "Refreshing..." : "Refresh Registry"}
+            </button>
+          </div>
+
+          {missingFinvizPayload.notes.length > 0 ? <div className="panel-copy">{missingFinvizPayload.notes.join(" ")}</div> : null}
+          {missingFinvizNotice ? <div className="panel-copy">{missingFinvizNotice}</div> : null}
+
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Source</th>
+                  <th>Hit Count</th>
+                  <th>First Seen</th>
+                  <th>Last Seen</th>
+                  <th>Reason</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMissingFinvizTickers.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>
+                      {isLoadingMissingFinviz ? "Loading Finviz missing tickers..." : "No Finviz missing tickers recorded."}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredMissingFinvizTickers.map((item) => (
+                    <tr key={item.ticker}>
+                      <td data-label="Ticker">
+                        <strong>{item.ticker}</strong>
+                      </td>
+                      <td data-label="Source">{item.source || "-"}</td>
+                      <td data-label="Hit Count">{formatCount(item.hit_count)}</td>
+                      <td data-label="First Seen">{formatLocalDateTime(item.first_seen_at)}</td>
+                      <td data-label="Last Seen">{formatLocalDateTime(item.last_seen_at)}</td>
+                      <td data-label="Reason" className="file-meta">{item.reason || "-"}</td>
+                      <td data-label="Action">
+                        <button
+                          className="table-action-button"
+                          type="button"
+                          disabled={isRemovingMissingFinviz}
+                          onClick={() => void handleRemoveMissingFinvizTicker(item.ticker)}
+                        >
+                          {isRemovingMissingFinviz ? "Removing..." : "Allow Retry"}
+                        </button>
                       </td>
                     </tr>
                   ))

@@ -1184,6 +1184,14 @@ def missing_sector_data(
     return JSONResponse(service.get_missing_sector_context())
 
 
+@router.get("/admin/finviz-missing-tickers", response_class=JSONResponse)
+def missing_finviz_tickers_data(
+    service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    return JSONResponse(service.get_missing_finviz_tickers_context())
+
+
 @router.get("/admin/gamma-exposure-plot", response_class=JSONResponse)
 def gamma_exposure_plot_data(
     symbol: str = Query(default="SPX"),
@@ -1452,6 +1460,32 @@ def update_ticker_sector(
         resource_label=str(entry.get("ticker") or ""),
         message=f"Updated sector for {entry.get('ticker')} to {entry.get('sector')}.",
         metadata={"ticker": entry.get("ticker"), "sector": entry.get("sector")},
+    )
+    return JSONResponse({"ok": True, "entry": entry})
+
+
+@router.post("/admin/finviz-missing-tickers/{ticker}/remove", response_class=JSONResponse)
+def remove_missing_finviz_ticker_entry(
+    request: Request,
+    ticker: str,
+    service: AdminService = Depends(get_admin_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    try:
+        entry = service.remove_missing_finviz_ticker(ticker=ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.finviz_missing_ticker.remove",
+        resource_type="finviz_missing_ticker",
+        resource_id=str(entry.get("ticker") or ticker),
+        resource_label=str(entry.get("ticker") or ticker),
+        message=f"Removed Finviz missing-ticker skip entry for {entry.get('ticker') or ticker}.",
+        metadata={"ticker": entry.get("ticker") or ticker},
     )
     return JSONResponse({"ok": True, "entry": entry})
 

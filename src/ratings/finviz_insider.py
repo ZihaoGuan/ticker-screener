@@ -11,6 +11,11 @@ from urllib.parse import urljoin
 
 import requests
 
+from .finviz_missing_tickers import (
+    finviz_error_is_missing,
+    is_known_missing_finviz_ticker,
+    record_missing_finviz_ticker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +84,26 @@ def load_finviz_insider_signal_map(
         if _is_cache_window_fresh(window, ttl_hours=ttl_hours):
             _emit_info(f"finviz insider cache hit ticker={ticker} as_of={as_of_date.isoformat()} lookback_days={lookback_days}")
             continue
+        if is_known_missing_finviz_ticker(ticker, artifacts_dir=artifacts_dir):
+            _emit_info(f"finviz insider skip_known_missing ticker={ticker} reason=missing_registry")
+            if isinstance(window, dict) and isinstance(window.get("entries"), list):
+                _emit_info(f"finviz insider using stale cache ticker={ticker}")
+            else:
+                _emit_info(f"finviz insider skipping overlay ticker={ticker} reason=known_missing")
+            continue
         try:
             entries = fetch_finviz_insider_trades(ticker, session=active_session)
         except (FinvizInsiderError, requests.RequestException) as exc:
             entries = None
             _emit_warning(f"finviz insider refresh failed ticker={ticker} error={exc}")
+            if finviz_error_is_missing(exc):
+                record_missing_finviz_ticker(
+                    ticker,
+                    artifacts_dir=artifacts_dir,
+                    reason=str(exc),
+                    source="insider",
+                )
+                _emit_info(f"finviz insider marked_known_missing ticker={ticker}")
             if isinstance(window, dict) and isinstance(window.get("entries"), list):
                 _emit_info(f"finviz insider using stale cache ticker={ticker}")
             else:

@@ -1266,6 +1266,21 @@ export type MissingSectorAdminResponse = {
   notes: string[];
 };
 
+export type MissingFinvizTickerSummary = {
+  ticker: string;
+  source: string | null;
+  reason: string | null;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  hit_count: number;
+};
+
+export type MissingFinvizTickersAdminResponse = {
+  missing_count: number;
+  tickers: MissingFinvizTickerSummary[];
+  notes: string[];
+};
+
 export type GammaExposurePlotAdminResponse = {
   symbol: string;
   source_symbol: string;

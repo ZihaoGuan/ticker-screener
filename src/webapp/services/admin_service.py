@@ -20,6 +20,7 @@ from src.exclusion_registry import (
 )
 from src.flashalpha_gex import build_gamma_exposure_report, render_gamma_exposure_report_svgs
 from src.market_data_access import resolve_database_url
+from src.ratings.finviz_missing_tickers import load_missing_finviz_tickers, remove_missing_finviz_ticker
 from src.ticker_filters import normalize_ticker_symbol
 from src.universe import load_universe
 from src.webapp.repositories.history_repository import HistoryRepository
@@ -204,6 +205,46 @@ class AdminService:
         payload["available_sectors"] = available_sectors
         payload["notes"] = ["All tracked tickers already have sectors."] if not tickers else [f"{len(tickers)} tickers still need sector assignment."]
         return payload
+
+    def get_missing_finviz_tickers_context(self) -> dict[str, Any]:
+        entries = load_missing_finviz_tickers(self.artifacts_dir)
+        rows = sorted(
+            (
+                {
+                    "ticker": ticker,
+                    "source": str(entry.get("source") or "") or None,
+                    "reason": str(entry.get("reason") or "") or None,
+                    "first_seen_at": self._to_iso(entry.get("first_seen_at")),
+                    "last_seen_at": self._to_iso(entry.get("last_seen_at")),
+                    "hit_count": int(entry.get("hit_count") or 0),
+                }
+                for ticker, entry in entries.items()
+                if isinstance(entry, dict)
+            ),
+            key=lambda item: (
+                str(item.get("last_seen_at") or ""),
+                str(item.get("ticker") or ""),
+            ),
+            reverse=True,
+        )
+        return {
+            "missing_count": len(rows),
+            "tickers": rows,
+            "notes": ["No Finviz 404 tickers recorded."] if not rows else [f"{len(rows)} tickers currently skipped for Finviz 404 responses."],
+        }
+
+    def remove_missing_finviz_ticker(self, *, ticker: str) -> dict[str, Any]:
+        normalized_ticker = normalize_ticker_symbol(ticker)
+        if not normalized_ticker:
+            raise ValueError("Ticker is required.")
+        try:
+            removed = remove_missing_finviz_ticker(normalized_ticker, artifacts_dir=self.artifacts_dir)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return {
+            "ticker": normalized_ticker,
+            "removed_entry": removed,
+        }
 
     def update_ticker_sector(self, *, ticker: str, sector: str) -> dict[str, Any]:
         normalized_ticker = normalize_ticker_symbol(ticker)

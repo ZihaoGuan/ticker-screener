@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from src.ratings.finviz_missing_tickers import record_missing_finviz_ticker
 from src.webapp.services.admin_service import AdminService, _build_missing_ranges
 
 
@@ -153,6 +154,46 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(payload["missing_count"], 1)
         self.assertEqual(payload["tickers"][0]["ticker"], "NVDA")
         self.assertEqual(payload["available_sectors"], ["Finance", "Health Care", "Technology"])
+
+    def test_get_missing_finviz_tickers_context_returns_sorted_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            record_missing_finviz_ticker(
+                "SOJD",
+                artifacts_dir=artifacts_dir,
+                reason="404 Client Error: Not Found",
+                source="insider",
+            )
+            record_missing_finviz_ticker(
+                "SOMN",
+                artifacts_dir=artifacts_dir,
+                reason="404 Client Error: Not Found",
+                source="fundamentals",
+            )
+            service = AdminService(database_url="postgres://example", artifacts_dir=artifacts_dir)
+
+            payload = service.get_missing_finviz_tickers_context()
+
+        self.assertEqual(payload["missing_count"], 2)
+        self.assertEqual({item["ticker"] for item in payload["tickers"]}, {"SOJD", "SOMN"})
+        self.assertIn("skipped", payload["notes"][0])
+
+    def test_remove_missing_finviz_ticker_deletes_registry_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            record_missing_finviz_ticker(
+                "SOJE",
+                artifacts_dir=artifacts_dir,
+                reason="404 Client Error: Not Found",
+                source="fundamentals",
+            )
+            service = AdminService(database_url="postgres://example", artifacts_dir=artifacts_dir)
+
+            removed = service.remove_missing_finviz_ticker(ticker="soje")
+            payload = service.get_missing_finviz_tickers_context()
+
+        self.assertEqual(removed["ticker"], "SOJE")
+        self.assertEqual(payload["missing_count"], 0)
 
     def test_update_ticker_sector_requires_database_and_sector(self) -> None:
         service = AdminService(database_url="")

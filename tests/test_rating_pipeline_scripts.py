@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
+from src.ratings.finviz_missing_tickers import load_missing_finviz_tickers, record_missing_finviz_ticker
 from src.ratings.models import FundamentalsSnapshot
 
 
@@ -409,6 +410,107 @@ class RatingPipelineScriptTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(repository.upsert_fundamentals_snapshots.call_count, 2)
         self.assertTrue(write_manifest.called)
+
+    def test_sync_finviz_fundamentals_records_404_ticker_in_missing_registry(self) -> None:
+        import scripts.sync_finviz_fundamentals as script
+        from src.ratings.finviz_api import FinvizApiError
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            repository = MagicMock()
+            repository.load_latest_fundamentals_statuses.return_value = {}
+            with patch.object(
+                script,
+                "PROJECT_ROOT",
+                project_root,
+            ), patch.object(
+                script,
+                "parse_args",
+                return_value=Namespace(
+                    config="",
+                    as_of_date="2026-06-13",
+                    limit=None,
+                    tickers=["SOJD"],
+                    resume_from="",
+                    delay_min_seconds=0.0,
+                    delay_max_seconds=0.0,
+                    batch_size_before_rest=500,
+                    rest_seconds=0.0,
+                    overwrite_policy="replace-date",
+                    include_sectors=None,
+                    database_url="postgres://example",
+                    manifest_path="",
+                    retry_failed_from_manifest=False,
+                    circuit_breaker_consecutive_503=25,
+                ),
+            ), patch.object(script, "load_webapp_config", return_value=Namespace(database_url="postgres://example")), patch.object(
+                script, "RatingsRepository", return_value=repository
+            ), patch.object(
+                script,
+                "_load_target_universe",
+                return_value=[script.UniverseTicker(symbol="SOJD")],
+            ), patch.object(
+                script,
+                "fetch_finviz_api_snapshot",
+                side_effect=FinvizApiError("404 Client Error: Not Found for url: https://finviz.com/stock?t=SOJD&p=d"),
+            ), patch.object(script, "_write_manifest"), patch.object(script, "_sleep_with_jitter"):
+                result = script.main()
+
+            self.assertEqual(result, 0)
+            missing_registry = load_missing_finviz_tickers(project_root / "artifacts")
+            self.assertIn("SOJD", missing_registry)
+            self.assertEqual(missing_registry["SOJD"]["source"], "fundamentals")
+
+    def test_sync_finviz_fundamentals_skips_known_missing_ticker_before_fetch(self) -> None:
+        import scripts.sync_finviz_fundamentals as script
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            record_missing_finviz_ticker(
+                "SOJE",
+                artifacts_dir=project_root / "artifacts",
+                reason="404 Client Error: Not Found",
+                source="fundamentals",
+            )
+            repository = MagicMock()
+            repository.load_latest_fundamentals_statuses.return_value = {}
+            with patch.object(
+                script,
+                "PROJECT_ROOT",
+                project_root,
+            ), patch.object(
+                script,
+                "parse_args",
+                return_value=Namespace(
+                    config="",
+                    as_of_date="2026-06-13",
+                    limit=None,
+                    tickers=["SOJE"],
+                    resume_from="",
+                    delay_min_seconds=0.0,
+                    delay_max_seconds=0.0,
+                    batch_size_before_rest=500,
+                    rest_seconds=0.0,
+                    overwrite_policy="replace-date",
+                    include_sectors=None,
+                    database_url="postgres://example",
+                    manifest_path="",
+                    retry_failed_from_manifest=False,
+                    circuit_breaker_consecutive_503=25,
+                ),
+            ), patch.object(script, "load_webapp_config", return_value=Namespace(database_url="postgres://example")), patch.object(
+                script, "RatingsRepository", return_value=repository
+            ), patch.object(
+                script,
+                "_load_target_universe",
+                return_value=[script.UniverseTicker(symbol="SOJE")],
+            ), patch.object(script, "fetch_finviz_api_snapshot") as fetch_mock, patch.object(
+                script, "_write_manifest"
+            ), patch.object(script, "_sleep_with_jitter"):
+                result = script.main()
+
+            self.assertEqual(result, 0)
+            fetch_mock.assert_not_called()
 
 
 if __name__ == "__main__":
