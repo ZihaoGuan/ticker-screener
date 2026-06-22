@@ -747,6 +747,21 @@ export type ChartFundamentalsResponse = {
     insufficient_baseline_metrics: string[];
   } | null;
   technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
+  canslim_snapshot?: {
+    ticker: string;
+    sector: string | null;
+    industry: string | null;
+    exchange: string | null;
+    as_of_date: string;
+    score: number;
+    max_score: number;
+    rank: number;
+    letter_scores: Record<string, number>;
+    letter_passes: Record<string, boolean>;
+    metrics: Record<string, string | number | boolean | null>;
+    reasons: string[];
+    leader_flags: string[];
+  } | null;
   diagnostics: {
     earnings: {
       status: string;

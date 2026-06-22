@@ -20,6 +20,7 @@ import requests
 import yfinance as yf
 
 from ...config import AppConfig
+from ...canslim_screen import CANSLIM_HISTORY_DAYS, compute_canslim_frame_metrics, evaluate_canslim_ticker
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
 from ...market_extension import compute_extension_frame, resample_to_weekly
@@ -891,7 +892,41 @@ class WatchlistService:
         ratings_repository = RatingsRepository(self.database_url) if self.database_url else None
         ratings_bundle = ratings_repository.load_latest_ticker_rating_bundle(normalized_ticker) if ratings_repository else None
         technical_indicator_ratings = ratings_repository.load_latest_technical_indicator_ratings_for_tickers([normalized_ticker]).get(normalized_ticker, {}) if ratings_repository else {}
+        technical_rating_snapshot = ratings_repository.load_latest_technical_rating_snapshots_for_tickers([normalized_ticker]).get(normalized_ticker) if ratings_repository else None
         cached_entry = ratings_repository.load_latest_chart_fundamentals_cache_entry(normalized_ticker) if ratings_repository else None
+
+        canslim_snapshot = None
+        if ratings_repository and ratings_bundle:
+            fundamentals_snapshot = ratings_bundle.get("fundamentals_snapshot")
+            canslim_as_of_date = dt.date.today()
+            if isinstance(fundamentals_snapshot, dict):
+                as_of_text = str(fundamentals_snapshot.get("as_of_date") or "").strip()
+                if as_of_text:
+                    try:
+                        canslim_as_of_date = dt.date.fromisoformat(as_of_text)
+                    except ValueError:
+                        canslim_as_of_date = dt.date.today()
+            frame_map = load_many_ticker_windows(
+                [normalized_ticker, self.benchmark_ticker],
+                canslim_as_of_date,
+                CANSLIM_HISTORY_DAYS,
+                database_url=self.database_url,
+            )
+            benchmark_frame = frame_map.get(self.benchmark_ticker.upper())
+            if benchmark_frame is None:
+                benchmark_frame = frame_map.get(self.benchmark_ticker)
+            ticker_frame = frame_map.get(normalized_ticker)
+            if benchmark_frame is not None and not benchmark_frame.empty:
+                hit, _failure_reason = evaluate_canslim_ticker(
+                    UniverseTicker(symbol=normalized_ticker),
+                    current=fundamentals_snapshot if isinstance(fundamentals_snapshot, dict) else None,
+                    technical=technical_rating_snapshot if isinstance(technical_rating_snapshot, dict) else None,
+                    frame=ticker_frame,
+                    benchmark_metrics=compute_canslim_frame_metrics(benchmark_frame),
+                    as_of_date=canslim_as_of_date,
+                )
+                canslim_snapshot = hit.to_dict() if hit is not None else None
+
         if _chart_fundamentals_cache_is_complete(cached_entry):
             return {
                 "ticker": normalized_ticker,
@@ -905,6 +940,7 @@ class WatchlistService:
                 "fundamental_rank": ratings_bundle.get("fundamental_rank") if ratings_bundle else None,
                 "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
                 "technical_indicator_ratings": technical_indicator_ratings,
+                "canslim_snapshot": canslim_snapshot,
                 "diagnostics": _chart_cache_diagnostics(cached_entry),
             }
 
@@ -954,6 +990,7 @@ class WatchlistService:
             "fundamental_rank": ratings_bundle.get("fundamental_rank") if ratings_bundle else None,
             "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
             "technical_indicator_ratings": technical_indicator_ratings,
+            "canslim_snapshot": canslim_snapshot,
             "diagnostics": {
                 "earnings": browser_diagnostics["earnings"],
                 "holders": browser_diagnostics["holders"],

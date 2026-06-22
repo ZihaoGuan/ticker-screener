@@ -224,6 +224,100 @@ def _frame_metrics(frame: pd.DataFrame) -> dict[str, float | bool | None]:
     }
 
 
+def compute_canslim_frame_metrics(frame: pd.DataFrame) -> dict[str, float | bool | None]:
+    return _frame_metrics(frame)
+
+
+def evaluate_canslim_ticker(
+    ticker: UniverseTicker,
+    *,
+    current: dict[str, Any] | None,
+    technical: dict[str, Any] | None,
+    frame: pd.DataFrame | None,
+    benchmark_metrics: dict[str, float | bool | None],
+    as_of_date: dt.date,
+) -> tuple[CanslimHit | None, str | None]:
+    if not current or str(current.get("parse_status") or "").lower() != "ok":
+        return None, "missing finviz fundamentals snapshot"
+    if not technical or str(technical.get("technical_status") or "").lower() != "ok":
+        return None, "missing technical rating snapshot"
+    if frame is None or frame.empty or not db_frame_has_recent_coverage(frame, as_of_date):
+        return None, "missing cached price history"
+
+    metrics = _frame_metrics(frame)
+    avg_volume = _coerce_float(metrics.get("avg_volume_20d"))
+    if avg_volume is None or avg_volume < CANSLIM_MIN_AVG_VOLUME_20D:
+        return None, "below minimum liquidity floor"
+
+    market_score, market_reasons, market_pass = _score_m(benchmark_metrics)
+    leadership_score = _coerce_float(technical.get("leadership_score"))
+    c_score, c_reasons = _score_c(current)
+    a_score, a_reasons = _score_a(current)
+    n_score, n_reasons, n_flags = _score_n(metrics, leadership_score)
+    s_score, s_reasons = _score_s(current, metrics)
+    l_score, l_reasons, l_flags = _score_l(leadership_score)
+    i_score, i_reasons = _score_i(current)
+    letter_scores = {
+        "C": c_score,
+        "A": a_score,
+        "N": n_score,
+        "S": s_score,
+        "L": l_score,
+        "I": i_score,
+        "M": market_score,
+    }
+    letter_passes = {key: value >= 1 for key, value in letter_scores.items()}
+    total_score = sum(letter_scores.values())
+    hit_metrics: dict[str, object] = {
+        "as_of_date": current.get("as_of_date"),
+        "eps_qq_pct": current.get("eps_qq_pct"),
+        "sales_qq_pct": current.get("sales_qq_pct"),
+        "eps_this_y_pct": current.get("eps_this_y_pct"),
+        "eps_next_5y_pct": current.get("eps_next_5y_pct"),
+        "roe_pct": current.get("roe_pct"),
+        "institutional_ownership_pct": current.get("institutional_ownership_pct"),
+        "shares_float": current.get("shares_float"),
+        "shares_outstanding": current.get("shares_outstanding"),
+        "leadership_score": leadership_score,
+        "distance_from_52w_high_pct": metrics.get("distance_from_52w_high_pct"),
+        "avg_volume_20d": metrics.get("avg_volume_20d"),
+        "up_down_volume_ratio_20d": metrics.get("up_down_volume_ratio_20d"),
+        "market_pass": market_pass,
+    }
+    reasons = [
+        *(c_reasons[:2]),
+        *(a_reasons[:2]),
+        *(n_reasons[:2]),
+        *(l_reasons[:1]),
+        *(i_reasons[:1]),
+    ]
+    return (
+        CanslimHit(
+            ticker=ticker.symbol.upper(),
+            sector=ticker.sector or current.get("sector"),
+            industry=ticker.industry or current.get("industry"),
+            exchange=ticker.exchange,
+            as_of_date=as_of_date.isoformat(),
+            score=total_score,
+            max_score=14,
+            rank=0,
+            letter_scores=letter_scores,
+            letter_passes=letter_passes,
+            metrics=hit_metrics,
+            reasons=reasons + market_reasons,
+            leader_flags=[*n_flags, *l_flags],
+        ),
+        None,
+    )
+
+
+def canslim_sort_key(item: CanslimHit) -> tuple[int, int, float, float, str]:
+    distance = _coerce_float(item.metrics.get("distance_from_52w_high_pct"))
+    leadership = _coerce_float(item.metrics.get("leadership_score")) or 0.0
+    market = 1 if item.letter_passes.get("M") else 0
+    return (-market, -item.score, -(leadership or 0.0), distance if distance is not None else 999.0, item.ticker)
+
+
 def run_canslim_screen(
     config: AppConfig,
     tickers: list[UniverseTicker],
@@ -252,95 +346,23 @@ def run_canslim_screen(
             hits=[],
         )
     benchmark_metrics = _frame_metrics(benchmark_frame)
-    market_score, market_reasons, market_pass = _score_m(benchmark_metrics)
-
     scored_hits: list[CanslimHit] = []
     for ticker in tickers:
         symbol = ticker.symbol.upper()
-        current = fundamentals_map.get(symbol)
-        technical = technical_map.get(symbol)
-        frame = frame_map.get(symbol)
-        if not current or str(current.get("parse_status") or "").lower() != "ok":
-            failures.append({"ticker": symbol, "error": "missing finviz fundamentals snapshot"})
-            continue
-        if not technical or str(technical.get("technical_status") or "").lower() != "ok":
-            failures.append({"ticker": symbol, "error": "missing technical rating snapshot"})
-            continue
-        if frame is None or frame.empty or not db_frame_has_recent_coverage(frame, run_date):
-            failures.append({"ticker": symbol, "error": "missing cached price history"})
-            continue
-        metrics = _frame_metrics(frame)
-        avg_volume = _coerce_float(metrics.get("avg_volume_20d"))
-        if avg_volume is None or avg_volume < CANSLIM_MIN_AVG_VOLUME_20D:
-            failures.append({"ticker": symbol, "error": "below minimum liquidity floor"})
-            continue
-
-        leadership_score = _coerce_float(technical.get("leadership_score"))
-        c_score, c_reasons = _score_c(current)
-        a_score, a_reasons = _score_a(current)
-        n_score, n_reasons, n_flags = _score_n(metrics, leadership_score)
-        s_score, s_reasons = _score_s(current, metrics)
-        l_score, l_reasons, l_flags = _score_l(leadership_score)
-        i_score, i_reasons = _score_i(current)
-        letter_scores = {
-            "C": c_score,
-            "A": a_score,
-            "N": n_score,
-            "S": s_score,
-            "L": l_score,
-            "I": i_score,
-            "M": market_score,
-        }
-        letter_passes = {key: value >= 1 for key, value in letter_scores.items()}
-        total_score = sum(letter_scores.values())
-        hit_metrics: dict[str, object] = {
-            "as_of_date": current.get("as_of_date"),
-            "eps_qq_pct": current.get("eps_qq_pct"),
-            "sales_qq_pct": current.get("sales_qq_pct"),
-            "eps_this_y_pct": current.get("eps_this_y_pct"),
-            "eps_next_5y_pct": current.get("eps_next_5y_pct"),
-            "roe_pct": current.get("roe_pct"),
-            "institutional_ownership_pct": current.get("institutional_ownership_pct"),
-            "shares_float": current.get("shares_float"),
-            "shares_outstanding": current.get("shares_outstanding"),
-            "leadership_score": leadership_score,
-            "distance_from_52w_high_pct": metrics.get("distance_from_52w_high_pct"),
-            "avg_volume_20d": metrics.get("avg_volume_20d"),
-            "up_down_volume_ratio_20d": metrics.get("up_down_volume_ratio_20d"),
-            "market_pass": market_pass,
-        }
-        reasons = [
-            *(c_reasons[:2]),
-            *(a_reasons[:2]),
-            *(n_reasons[:2]),
-            *(l_reasons[:1]),
-            *(i_reasons[:1]),
-        ]
-        scored_hits.append(
-            CanslimHit(
-                ticker=symbol,
-                sector=ticker.sector or current.get("sector"),
-                industry=ticker.industry or current.get("industry"),
-                exchange=ticker.exchange,
-                as_of_date=run_date.isoformat(),
-                score=total_score,
-                max_score=14,
-                rank=0,
-                letter_scores=letter_scores,
-                letter_passes=letter_passes,
-                metrics=hit_metrics,
-                reasons=reasons + market_reasons,
-                leader_flags=[*n_flags, *l_flags],
-            )
+        hit, failure_reason = evaluate_canslim_ticker(
+            ticker,
+            current=fundamentals_map.get(symbol),
+            technical=technical_map.get(symbol),
+            frame=frame_map.get(symbol),
+            benchmark_metrics=benchmark_metrics,
+            as_of_date=run_date,
         )
+        if hit is None:
+            failures.append({"ticker": symbol, "error": failure_reason or "unknown canslim error"})
+            continue
+        scored_hits.append(hit)
 
-    def _sort_key(item: CanslimHit) -> tuple[int, int, float, float, str]:
-        distance = _coerce_float(item.metrics.get("distance_from_52w_high_pct"))
-        leadership = _coerce_float(item.metrics.get("leadership_score")) or 0.0
-        market = 1 if item.letter_passes.get("M") else 0
-        return (-market, -item.score, -(leadership or 0.0), distance if distance is not None else 999.0, item.ticker)
-
-    ordered = sorted(scored_hits, key=_sort_key)
+    ordered = sorted(scored_hits, key=canslim_sort_key)
     ranked_hits = [
         CanslimHit(
             ticker=item.ticker,

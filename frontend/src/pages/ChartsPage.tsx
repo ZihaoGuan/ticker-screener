@@ -27,7 +27,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   wyckoffHoldSignals: true,
   flexSr: false,
 };
-const CHART_CACHE_PREFIX = "chart-screen-cache-v5";
+const CHART_CACHE_PREFIX = "chart-screen-cache-v6";
 const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "overlays" | "fundamentals" | "insider", number> = {
   payload: 10 * 60 * 1000,
   overlays: 10 * 60 * 1000,
@@ -294,6 +294,16 @@ export function ChartsPage() {
   const latestFundamentalRank = fundamentalsPayload?.fundamental_rank ?? null;
   const latestRatingDiagnostics = fundamentalsPayload?.rating_diagnostics ?? null;
   const technicalIndicatorRatings = fundamentalsPayload?.technical_indicator_ratings ?? {};
+  const canslimSnapshot = fundamentalsPayload?.canslim_snapshot ?? null;
+  const canslimLetters = useMemo(
+    () =>
+      ["C", "A", "N", "S", "L", "I", "M"].map((letter) => ({
+        letter,
+        score: canslimSnapshot?.letter_scores?.[letter] ?? null,
+        passed: canslimSnapshot?.letter_passes?.[letter] ?? false,
+      })),
+    [canslimSnapshot],
+  );
   const orderedTechnicalIndicatorRatings = ["1d", "1w"]
     .map((timeframe) => technicalIndicatorRatings[timeframe] ?? null)
     .filter((item): item is NonNullable<typeof item> => item != null);
@@ -878,6 +888,93 @@ export function ChartsPage() {
                   {JSON.stringify(latestRatingDiagnostics, null, 2)}
                 </pre>
               </details>
+            ) : null}
+          </>
+        ) : null}
+      </Panel>
+
+      <Panel title="CANSLIM Score" aside={<span className="eyebrow">Finviz + local technical scored proxy</span>}>
+        {!requestedTicker ? <p className="panel-copy">Load ticker to inspect latest CANSLIM letter scores.</p> : null}
+        {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading CANSLIM score…" compact /> : null}
+        {requestedTicker && !isFundamentalsLoading && !canslimSnapshot ? (
+          <p className="panel-copy">No CANSLIM snapshot available yet for this ticker.</p>
+        ) : null}
+        {canslimSnapshot ? (
+          <>
+            <p className="panel-copy">
+              Total: {canslimSnapshot.score}/{canslimSnapshot.max_score}
+              {" · "}
+              As Of: {formatLocalDate(canslimSnapshot.as_of_date)}
+              {" · "}
+              Market: {canslimSnapshot.letter_passes.M ? "constructive" : "weak"}
+            </p>
+            <div className="button-row" style={{ alignItems: "center", flexWrap: "wrap" }}>
+              <span className={`scanner-score-pill ${toneForCanslimScore(canslimSnapshot.score, canslimSnapshot.max_score)}`}>
+                CANSLIM {canslimSnapshot.score}/{canslimSnapshot.max_score}
+              </span>
+              {canslimLetters.map((item) => (
+                <span key={item.letter} className={`scanner-score-pill ${toneForCanslimLetter(item.score)}`}>
+                  {item.letter}:{item.score ?? "--"} {item.passed ? "pass" : "miss"}
+                </span>
+              ))}
+            </div>
+            <p className="panel-copy">
+              Leader flags: {canslimSnapshot.leader_flags.length > 0 ? canslimSnapshot.leader_flags.join(", ") : "none"}
+            </p>
+            <div className="data-table-responsive">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>EPS Q/Q</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.eps_qq_pct))}</td>
+                  </tr>
+                  <tr>
+                    <td>Sales Q/Q</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.sales_qq_pct))}</td>
+                  </tr>
+                  <tr>
+                    <td>EPS This Y</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.eps_this_y_pct))}</td>
+                  </tr>
+                  <tr>
+                    <td>EPS Next 5Y</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.eps_next_5y_pct))}</td>
+                  </tr>
+                  <tr>
+                    <td>ROE</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.roe_pct))}</td>
+                  </tr>
+                  <tr>
+                    <td>Inst Ownership</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.institutional_ownership_pct))}</td>
+                  </tr>
+                  <tr>
+                    <td>Leadership</td>
+                    <td>{formatMetric(toNullableNumber(canslimSnapshot.metrics.leadership_score))}</td>
+                  </tr>
+                  <tr>
+                    <td>Distance To 52W High</td>
+                    <td>{formatPercent(toNullableNumber(canslimSnapshot.metrics.distance_from_52w_high_pct))}</td>
+                  </tr>
+                  <tr>
+                    <td>20D Avg Volume</td>
+                    <td>{formatInteger(toNullableNumber(canslimSnapshot.metrics.avg_volume_20d))}</td>
+                  </tr>
+                  <tr>
+                    <td>Up / Down Volume</td>
+                    <td>{formatMetric(toNullableNumber(canslimSnapshot.metrics.up_down_volume_ratio_20d))}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {canslimSnapshot.reasons.length > 0 ? (
+              <p className="panel-copy">Reasons: {canslimSnapshot.reasons.slice(0, 6).join(" | ")}</p>
             ) : null}
           </>
         ) : null}
@@ -1519,6 +1616,36 @@ function formatAtrMultiple(value: number | null | undefined) {
   }
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(2)}x`;
+}
+
+function toNullableNumber(value: string | number | boolean | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function toneForCanslimScore(value: number | null | undefined, maxScore: number | null | undefined) {
+  if (value == null || maxScore == null || maxScore <= 0) {
+    return "is-neutral";
+  }
+  if (value / maxScore >= 0.7) {
+    return "is-strong";
+  }
+  if (value / maxScore >= 0.45) {
+    return "is-warm";
+  }
+  return "is-neutral";
+}
+
+function toneForCanslimLetter(value: number | null | undefined) {
+  if (value == null) {
+    return "is-neutral";
+  }
+  if (value >= 2) {
+    return "is-strong";
+  }
+  if (value >= 1) {
+    return "is-warm";
+  }
+  return "is-neutral";
 }
 
 function computeAdrPercent(candles: CandlePoint[], lookbackDays: number): number | null {

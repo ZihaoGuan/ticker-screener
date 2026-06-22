@@ -1458,6 +1458,7 @@ class WatchlistServiceTests(unittest.TestCase):
 
     def test_get_chart_fundamentals_payload_includes_rating_bundle(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        frame = self._long_price_frame()
         with patch(
             "src.webapp.services.watchlist_service._load_yahoo_earnings_and_holders_playwright",
             return_value=([], None, None, None, {"earnings": {}, "holders": {}, "statistics": {}}),
@@ -1467,11 +1468,31 @@ class WatchlistServiceTests(unittest.TestCase):
         ), patch(
             "src.webapp.services.watchlist_service.RatingsRepository.load_latest_ticker_rating_bundle",
             return_value={
-                "fundamentals_snapshot": {"as_of_date": "2026-06-13", "sector": "Technology"},
+                "fundamentals_snapshot": {
+                    "as_of_date": "2025-03-24",
+                    "ticker": "NVDA",
+                    "sector": "Technology",
+                    "industry": "Semiconductors",
+                    "parse_status": "ok",
+                    "eps_qq_pct": 42.0,
+                    "sales_qq_pct": 31.0,
+                    "eps_this_y_pct": 33.0,
+                    "eps_next_5y_pct": 24.0,
+                    "roe_pct": 21.0,
+                    "institutional_ownership_pct": 68.0,
+                    "shares_float": 2.4e9,
+                    "shares_outstanding": 2.5e9,
+                },
                 "rating_snapshot": {"overall_rating": 88.5, "rating_status": "ok"},
-                "fundamental_rank": {"as_of_date": "2026-06-13", "current_rank": 42, "list_limit": 200},
+                "fundamental_rank": {"as_of_date": "2025-03-24", "current_rank": 42, "list_limit": 200},
                 "rating_diagnostics": {"missing_metric_names": [], "insufficient_baseline_metrics": []},
             },
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
+            return_value={"NVDA": {"technical_status": "ok", "leadership_score": 91.0}},
+        ), patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows",
+            return_value={"NVDA": frame.copy(), "SPY": frame.copy()},
         ):
             payload = service.get_chart_fundamentals_payload("NVDA")
 
@@ -1480,6 +1501,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rating_snapshot"]["overall_rating"], 88.5)
         self.assertEqual(payload["fundamental_rank"]["current_rank"], 42)
         self.assertEqual(payload["rating_diagnostics"]["missing_metric_names"], [])
+        self.assertEqual(payload["canslim_snapshot"]["ticker"], "NVDA")
+        self.assertGreaterEqual(payload["canslim_snapshot"]["score"], 1)
 
     def test_get_top_ratings_payload_includes_latest_scanner_hit_count(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
