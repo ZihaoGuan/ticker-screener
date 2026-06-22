@@ -1493,6 +1493,19 @@ class WatchlistServiceTests(unittest.TestCase):
         ), patch(
             "src.webapp.services.watchlist_service.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
             return_value={"NVDA": {"technical_status": "ok", "leadership_score": 91.0}},
+        ) as technical_mock, patch(
+            "src.webapp.services.watchlist_service.load_finviz_insider_signal_map",
+            return_value={
+                "NVDA": {
+                    "buy_count": 2,
+                    "sell_count": 0,
+                    "buy_amount": 1_250_000.0,
+                    "sell_amount": 0.0,
+                    "discretionary_sell_count": 0,
+                    "discretionary_sell_amount": 0.0,
+                    "net_amount_excl_10b5_1": 1_250_000.0,
+                }
+            },
         ), patch(
             "src.webapp.services.watchlist_service.load_many_ticker_windows",
             return_value={"NVDA": frame.copy(), "SPY": frame.copy()},
@@ -1506,6 +1519,14 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rating_diagnostics"]["missing_metric_names"], [])
         self.assertEqual(payload["canslim_snapshot"]["ticker"], "NVDA")
         self.assertGreaterEqual(payload["canslim_snapshot"]["score"], 1)
+        self.assertIn("S", payload["canslim_snapshot"]["letter_scores"])
+        self.assertEqual(payload["canslim_snapshot"]["letter_scores"]["I"], 2)
+        self.assertEqual(payload["canslim_snapshot"]["metrics"]["insider_buy_amount"], 1_250_000.0)
+        technical_mock.assert_called_once_with(
+            ["NVDA"],
+            as_of_date=dt.date(2025, 3, 24),
+            allow_older_as_of_date=True,
+        )
 
     def test_get_top_ratings_payload_includes_latest_scanner_hit_count(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")

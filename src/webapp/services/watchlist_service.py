@@ -20,7 +20,7 @@ import requests
 import yfinance as yf
 
 from ...config import AppConfig
-from ...canslim_screen import CANSLIM_HISTORY_DAYS, compute_canslim_frame_metrics, evaluate_canslim_ticker
+from ...canslim_screen import CANSLIM_HISTORY_DAYS, CANSLIM_INSIDER_LOOKBACK_DAYS, compute_canslim_frame_metrics, evaluate_canslim_ticker
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
 from ...market_extension import compute_extension_frame, resample_to_weekly
@@ -31,6 +31,7 @@ from ...market_data_access import (
     resolve_database_url,
     resolve_market_data_source,
 )
+from ...ratings.finviz_insider import load_finviz_insider_signal_map
 from ...ratings.repository import RatingsRepository
 from ...rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
 from ...sepa_vcp_screen import build_sepa_dashboard_snapshot
@@ -892,7 +893,6 @@ class WatchlistService:
         ratings_repository = RatingsRepository(self.database_url) if self.database_url else None
         ratings_bundle = ratings_repository.load_latest_ticker_rating_bundle(normalized_ticker) if ratings_repository else None
         technical_indicator_ratings = ratings_repository.load_latest_technical_indicator_ratings_for_tickers([normalized_ticker]).get(normalized_ticker, {}) if ratings_repository else {}
-        technical_rating_snapshot = ratings_repository.load_latest_technical_rating_snapshots_for_tickers([normalized_ticker]).get(normalized_ticker) if ratings_repository else None
         cached_entry = ratings_repository.load_latest_chart_fundamentals_cache_entry(normalized_ticker) if ratings_repository else None
 
         canslim_snapshot = None
@@ -906,11 +906,22 @@ class WatchlistService:
                         canslim_as_of_date = dt.date.fromisoformat(as_of_text)
                     except ValueError:
                         canslim_as_of_date = dt.date.today()
+            technical_rating_snapshot = ratings_repository.load_latest_technical_rating_snapshots_for_tickers(
+                [normalized_ticker],
+                as_of_date=canslim_as_of_date,
+                allow_older_as_of_date=True,
+            ).get(normalized_ticker)
             frame_map = load_many_ticker_windows(
                 [normalized_ticker, self.benchmark_ticker],
                 canslim_as_of_date,
                 CANSLIM_HISTORY_DAYS,
                 database_url=self.database_url,
+            )
+            insider_signal_map = load_finviz_insider_signal_map(
+                [normalized_ticker],
+                as_of_date=canslim_as_of_date,
+                lookback_days=CANSLIM_INSIDER_LOOKBACK_DAYS,
+                artifacts_dir=self.repository.artifacts_dir,
             )
             benchmark_frame = frame_map.get(self.benchmark_ticker.upper())
             if benchmark_frame is None:
@@ -924,6 +935,7 @@ class WatchlistService:
                     frame=ticker_frame,
                     benchmark_metrics=compute_canslim_frame_metrics(benchmark_frame),
                     as_of_date=canslim_as_of_date,
+                    insider_signal=insider_signal_map.get(normalized_ticker),
                 )
                 canslim_snapshot = hit.to_dict() if hit is not None else None
 
