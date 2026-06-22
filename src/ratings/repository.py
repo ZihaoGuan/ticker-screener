@@ -106,7 +106,7 @@ class RatingsRepository:
               volatility_month_pct, source, source_url, parse_status, parse_error, scraped_at, updated_at
             ) VALUES (
               %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), NOW()
+              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), NOW()
             )
             ON CONFLICT (ticker, as_of_date) DO UPDATE SET
               sector = EXCLUDED.sector,

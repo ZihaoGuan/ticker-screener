@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import unittest
 
+from src.ratings.models import FundamentalsSnapshot
 from src.ratings.repository import RatingsRepository
 
 
@@ -35,10 +36,19 @@ class _FakeCursor:
             raise AssertionError("fetchall called before execute.")
         return self.current_result.get("fetchall", [])
 
+    def executemany(self, sql: str, params_seq: object) -> None:
+        self.executed_sql.append(sql)
+        rows = list(params_seq)
+        placeholder_count = sql.count("%s")
+        for row in rows:
+            if len(row) != placeholder_count:
+                raise AssertionError(f"Expected {placeholder_count} params, got {len(row)}.")
+
 
 class _FakeConnection:
     def __init__(self, cursor: _FakeCursor) -> None:
         self._cursor = cursor
+        self.commit_called = False
 
     def __enter__(self) -> _FakeConnection:
         return self
@@ -49,8 +59,40 @@ class _FakeConnection:
     def cursor(self) -> _FakeCursor:
         return self._cursor
 
+    def commit(self) -> None:
+        self.commit_called = True
+
 
 class RatingsRepositoryRankChangeTests(unittest.TestCase):
+    def test_upsert_fundamentals_snapshots_matches_placeholder_count(self) -> None:
+        cursor = _FakeCursor([])
+        connection = _FakeConnection(cursor)
+        repository = RatingsRepository()
+        repository._connect = lambda: connection
+
+        written = repository.upsert_fundamentals_snapshots(
+            [
+                FundamentalsSnapshot(
+                    ticker="NVDA",
+                    as_of_date=dt.date(2026, 6, 22),
+                    sector="Technology",
+                    industry="Semiconductors",
+                    source="finviz-api",
+                    source_url="https://finviz.com/quote.ashx?t=NVDA&p=d",
+                    parse_status="ok",
+                    institutional_ownership_pct=70.28,
+                    institutional_transactions_pct=0.0,
+                    insider_ownership_pct=4.09,
+                    insider_transactions_pct=-0.28,
+                    shares_float=23_200_000_000.0,
+                    shares_outstanding=24_220_000_000.0,
+                )
+            ]
+        )
+
+        self.assertEqual(written, 1)
+        self.assertTrue(connection.commit_called)
+
     def test_load_latest_rating_snapshots_for_tickers_includes_current_rank(self) -> None:
         cursor = _FakeCursor(
             [
