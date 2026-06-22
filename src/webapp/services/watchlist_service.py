@@ -436,42 +436,7 @@ class WatchlistService:
         cached_payload = _read_scanner_top_hits_cache(cache_key)
         if cached_payload is not None:
             return cached_payload
-        cards = [dict(item) for item in board_payload.get("cards", []) if isinstance(item, dict)]
-        card_config_by_id = {
-            str(item.get("id") or ""): item
-            for item in _SCANNER_BOARD_CONFIG
-            if str(item.get("id") or "").strip()
-        }
-        candidate_cards = [
-            item
-            for item in cards
-            if item.get("available")
-            and str(item.get("stem") or "").strip()
-            and str(card_config_by_id.get(str(item.get("id") or ""), {}).get("bias_group") or "bullish") != "bearish"
-        ]
-        candidate_cards_by_id = {
-            str(item.get("id") or ""): item
-            for item in candidate_cards
-            if str(item.get("id") or "").strip()
-        }
-        live_cards = [
-            item
-            for item in candidate_cards
-            if str(item.get("timeframe") or "").strip().lower() != "weekly"
-        ]
-        fallback_pairs = (
-            ("daily_rs_new_high", "weekly_rs_new_high"),
-            ("rs", "weekly_rs_before_price"),
-        )
-        live_card_ids = {str(item.get("id") or "") for item in live_cards}
-        for primary_id, fallback_id in fallback_pairs:
-            if primary_id in live_card_ids:
-                continue
-            fallback_card = candidate_cards_by_id.get(fallback_id)
-            if fallback_card is None:
-                continue
-            live_cards.append(fallback_card)
-            live_card_ids.add(fallback_id)
+        live_cards = self._select_scanner_top_hit_live_cards(board_payload)
         sector_momentum_map = self._load_sector_momentum_map(rrg_service)
         aggregated: dict[str, dict[str, Any]] = {}
 
@@ -508,6 +473,7 @@ class WatchlistService:
                         "rs_rating": None,
                         "ta_rating": None,
                         "fa_rating": None,
+                        "fa_current_rank": None,
                         "technical_indicator_ratings": {},
                         "scanner_count": 0,
                         "scanners": [],
@@ -1015,6 +981,7 @@ class WatchlistService:
         resolved_as_of_raw = str(payload.get("as_of_date") or "").strip()
         resolved_as_of_date = dt.date.fromisoformat(resolved_as_of_raw) if resolved_as_of_raw else None
         self._attach_top_rows_technical_indicator_ratings(payload.get("rows", []), as_of_date=resolved_as_of_date)
+        self._attach_top_rows_latest_scanner_hit_counts(payload.get("rows", []))
         payload["limit"] = max(1, min(int(limit), 500))
         payload["rating_status"] = str(rating_status or "").strip().lower() or "ok"
         payload["sector"] = str(sector or "").strip()
@@ -1368,6 +1335,65 @@ class WatchlistService:
         bucket["fa_rating"] = fa_rating
         bucket["technical_indicator_ratings"] = technical_indicator_ratings
 
+    def _select_scanner_top_hit_live_cards(self, board_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        cards = [dict(item) for item in board_payload.get("cards", []) if isinstance(item, dict)]
+        card_config_by_id = {
+            str(item.get("id") or ""): item
+            for item in _SCANNER_BOARD_CONFIG
+            if str(item.get("id") or "").strip()
+        }
+        candidate_cards = [
+            item
+            for item in cards
+            if item.get("available")
+            and str(item.get("stem") or "").strip()
+            and str(card_config_by_id.get(str(item.get("id") or ""), {}).get("bias_group") or "bullish") != "bearish"
+        ]
+        candidate_cards_by_id = {
+            str(item.get("id") or ""): item
+            for item in candidate_cards
+            if str(item.get("id") or "").strip()
+        }
+        live_cards = [
+            item
+            for item in candidate_cards
+            if str(item.get("timeframe") or "").strip().lower() != "weekly"
+        ]
+        fallback_pairs = (
+            ("daily_rs_new_high", "weekly_rs_new_high"),
+            ("rs", "weekly_rs_before_price"),
+        )
+        live_card_ids = {str(item.get("id") or "") for item in live_cards}
+        for primary_id, fallback_id in fallback_pairs:
+            if primary_id in live_card_ids:
+                continue
+            fallback_card = candidate_cards_by_id.get(fallback_id)
+            if fallback_card is None:
+                continue
+            live_cards.append(fallback_card)
+            live_card_ids.add(fallback_id)
+        return live_cards
+
+    def _build_latest_scanner_hit_count_map(self, *, now: dt.datetime | None = None) -> dict[str, int]:
+        board_payload = self.get_scanner_board(now=now)
+        live_cards = self._select_scanner_top_hit_live_cards(board_payload)
+        counts: dict[str, int] = {}
+        for card in live_cards:
+            stem = str(card.get("stem") or "").strip()
+            if not stem:
+                continue
+            entries = self._prepare_scanner_top_hit_entries(
+                self._filter_excluded_entries(self.repository.load_watchlist(stem))
+            )
+            seen_tickers: set[str] = set()
+            for entry in entries:
+                ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
+                if not ticker or ticker in seen_tickers:
+                    continue
+                seen_tickers.add(ticker)
+                counts[ticker] = counts.get(ticker, 0) + 1
+        return counts
+
     def _attach_latest_market_snapshots(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
         if not self.database_url or not tickers:
             return
@@ -1414,9 +1440,23 @@ class WatchlistService:
             row["perf_year_pct"] = _coerce_optional_float(fundamental.get("perf_year_pct"))
             row["perf_ytd_pct"] = _coerce_optional_float(fundamental.get("perf_ytd_pct"))
             row["fa_rating"] = _coerce_optional_float(fundamental.get("overall_rating"))
+            row["fa_current_rank"] = _coerce_optional_int(fundamental.get("current_rank"))
             row["ta_rating"] = _coerce_optional_float(technical.get("overall_rating"))
             row["rs_rating"] = _coerce_optional_float(technical.get("leadership_score"))
             row["technical_indicator_ratings"] = technical_indicator
+
+    def _attach_top_rows_latest_scanner_hit_counts(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        now: dt.datetime | None = None,
+    ) -> None:
+        if not rows:
+            return
+        hit_count_map = self._build_latest_scanner_hit_count_map(now=now)
+        for row in rows:
+            ticker = normalize_ticker_symbol(str(row.get("ticker") or ""))
+            row["latest_scanner_hit_count"] = int(hit_count_map.get(ticker, 0)) if ticker else 0
 
     def _attach_entry_technical_indicator_ratings(self, entries: list[dict[str, Any]]) -> None:
         if not self.database_url or not entries:
@@ -2947,6 +2987,15 @@ def _coerce_optional_float(value: object) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_optional_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 

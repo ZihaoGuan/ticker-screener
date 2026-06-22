@@ -405,9 +405,9 @@ class WatchlistServiceTests(unittest.TestCase):
         ), patch(
             "src.ratings.repository.RatingsRepository.load_latest_rating_snapshots_for_tickers",
             return_value={
-                "PLTR": {"overall_rating": 91.0, "sector": "Information Technology", "industry": "Software"},
-                "CRWD": {"overall_rating": 88.0, "sector": "Information Technology", "industry": "Software"},
-                "TSLA": {"overall_rating": 74.0, "sector": "Consumer Discretionary", "industry": "Auto Manufacturers"},
+                "PLTR": {"overall_rating": 91.0, "current_rank": 7, "sector": "Information Technology", "industry": "Software"},
+                "CRWD": {"overall_rating": 88.0, "current_rank": 19, "sector": "Information Technology", "industry": "Software"},
+                "TSLA": {"overall_rating": 74.0, "current_rank": 58, "sector": "Consumer Discretionary", "industry": "Auto Manufacturers"},
             },
         ), patch(
             "src.ratings.repository.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
@@ -434,6 +434,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["rs_rating"], 97.0)
         self.assertEqual(pltr["ta_rating"], 95.0)
         self.assertEqual(pltr["fa_rating"], 91.0)
+        self.assertEqual(pltr["fa_current_rank"], 7)
         self.assertEqual(pltr["sector_momentum"]["quadrant"], "Leading")
         self.assertEqual(pltr["sector_momentum"]["etf_ticker"], "XLK")
 
@@ -1465,6 +1466,33 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rating_snapshot"]["overall_rating"], 88.5)
         self.assertEqual(payload["fundamental_rank"]["current_rank"], 42)
         self.assertEqual(payload["rating_diagnostics"]["missing_metric_names"], [])
+
+    def test_get_top_ratings_payload_includes_latest_scanner_hit_count(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        with patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.list_top_rating_snapshots",
+            return_value={
+                "as_of_date": "2026-06-13",
+                "previous_as_of_date": "2026-06-06",
+                "rows": [
+                    {"ticker": "PLTR", "as_of_date": "2026-06-13", "current_rank": 1, "previous_rank": 2, "rank_change": "up", "rank_delta": 1},
+                    {"ticker": "NVDA", "as_of_date": "2026-06-13", "current_rank": 2, "previous_rank": 1, "rank_change": "down", "rank_delta": -1},
+                ],
+                "status_counts": {"ok": 2},
+                "sector_options": ["Technology"],
+            },
+        ), patch.object(
+            service,
+            "_attach_top_rows_technical_indicator_ratings",
+        ), patch.object(
+            service,
+            "_build_latest_scanner_hit_count_map",
+            return_value={"PLTR": 3, "NVDA": 1},
+        ):
+            payload = service.get_top_ratings_payload()
+
+        self.assertEqual(payload["rows"][0]["latest_scanner_hit_count"], 3)
+        self.assertEqual(payload["rows"][1]["latest_scanner_hit_count"], 1)
 
     def test_get_chart_fundamentals_payload_uses_db_cache_when_complete(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")

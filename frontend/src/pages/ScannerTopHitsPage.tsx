@@ -180,6 +180,7 @@ export function ScannerTopHitsPage() {
                     <th>1D</th>
                     <th>1W</th>
                     <th>{renderSortButton("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>FA Rank</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -223,6 +224,7 @@ export function ScannerTopHitsPage() {
                       <td data-label="1D">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1d"])}</td>
                       <td data-label="1W">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1w"])}</td>
                       <td data-label="FA">{formatRating(row.fa_rating)}</td>
+                      <td data-label="FA Rank">{row.fa_current_rank != null ? `#${formatCount(row.fa_current_rank)}` : "--"}</td>
                     </tr>
                   ))}
                 </tbody>

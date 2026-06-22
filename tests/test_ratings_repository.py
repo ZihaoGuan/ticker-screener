@@ -51,6 +51,25 @@ class _FakeConnection:
 
 
 class RatingsRepositoryRankChangeTests(unittest.TestCase):
+    def test_load_latest_rating_snapshots_for_tickers_includes_current_rank(self) -> None:
+        cursor = _FakeCursor(
+            [
+                {
+                    "fetchall": [
+                        ("NVDA", dt.date(2026, 6, 13), "Technology", "Semiconductors", 55.0, 33.0, 98.2, "A", "A", "A", "A", "ok", None, 1),
+                        ("MSFT", dt.date(2026, 6, 13), "Technology", "Software", 41.0, 20.0, 96.4, "A", "A", "A", "B", "ok", None, 2),
+                    ]
+                }
+            ]
+        )
+        repository = RatingsRepository()
+        repository._connect = lambda: _FakeConnection(cursor)
+
+        payload = repository.load_latest_rating_snapshots_for_tickers(["NVDA", "MSFT"])
+
+        self.assertEqual(payload["NVDA"]["current_rank"], 1)
+        self.assertEqual(payload["MSFT"]["current_rank"], 2)
+
     def test_list_top_rating_snapshots_adds_rank_change_fields(self) -> None:
         cursor = _FakeCursor(
             [

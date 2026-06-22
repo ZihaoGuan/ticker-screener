@@ -919,27 +919,58 @@ class RatingsRepository:
         if connection is None:
             return {}
         sql = """
-            SELECT DISTINCT ON (r.ticker)
-              r.ticker,
-              r.as_of_date,
-              COALESCE(r.sector, f.sector, tm.sector) AS sector,
-              COALESCE(f.industry, tm.industry) AS industry,
-              f.perf_year_pct,
-              f.perf_ytd_pct,
-              r.overall_rating,
-              r.valuation_grade,
-              r.profitability_grade,
-              r.growth_grade,
-              r.performance_grade,
-              r.rating_status,
-              r.rating_status_reason
-            FROM ticker_rating_snapshots r
-            LEFT JOIN ticker_fundamentals_snapshots f
-              ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
-            LEFT JOIN ticker_metadata tm
-              ON tm.ticker = r.ticker
-            WHERE r.ticker = ANY(%s)
-            ORDER BY r.ticker, r.as_of_date DESC, r.updated_at DESC
+            WITH latest AS (
+              SELECT DISTINCT ON (r.ticker)
+                r.ticker,
+                r.as_of_date,
+                COALESCE(r.sector, f.sector, tm.sector) AS sector,
+                COALESCE(f.industry, tm.industry) AS industry,
+                f.perf_year_pct,
+                f.perf_ytd_pct,
+                r.overall_rating,
+                r.valuation_grade,
+                r.profitability_grade,
+                r.growth_grade,
+                r.performance_grade,
+                r.rating_status,
+                r.rating_status_reason
+              FROM ticker_rating_snapshots r
+              LEFT JOIN ticker_fundamentals_snapshots f
+                ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
+              LEFT JOIN ticker_metadata tm
+                ON tm.ticker = r.ticker
+              WHERE r.ticker = ANY(%s)
+              ORDER BY r.ticker, r.as_of_date DESC, r.updated_at DESC
+            ),
+            ranked AS (
+              SELECT
+                r.ticker,
+                r.as_of_date,
+                ROW_NUMBER() OVER (PARTITION BY r.as_of_date ORDER BY r.overall_rating DESC NULLS LAST, r.ticker ASC) AS current_rank
+              FROM ticker_rating_snapshots r
+              WHERE r.as_of_date IN (SELECT DISTINCT as_of_date FROM latest)
+                AND COALESCE(r.rating_status, '') = 'ok'
+            )
+            SELECT
+              latest.ticker,
+              latest.as_of_date,
+              latest.sector,
+              latest.industry,
+              latest.perf_year_pct,
+              latest.perf_ytd_pct,
+              latest.overall_rating,
+              latest.valuation_grade,
+              latest.profitability_grade,
+              latest.growth_grade,
+              latest.performance_grade,
+              latest.rating_status,
+              latest.rating_status_reason,
+              ranked.current_rank
+            FROM latest
+            LEFT JOIN ranked
+              ON ranked.ticker = latest.ticker
+             AND ranked.as_of_date = latest.as_of_date
+            ORDER BY latest.ticker ASC
         """
         with connection:
             with connection.cursor() as cursor:
@@ -960,6 +991,7 @@ class RatingsRepository:
             performance_grade,
             rating_status,
             rating_status_reason,
+            current_rank,
         ) in rows:
             result[str(ticker).upper()] = {
                 "as_of_date": as_of_date.isoformat() if isinstance(as_of_date, dt.date) else str(as_of_date or ""),
@@ -974,6 +1006,7 @@ class RatingsRepository:
                 "performance_grade": performance_grade,
                 "rating_status": rating_status,
                 "rating_status_reason": rating_status_reason,
+                "current_rank": int(current_rank) if current_rank is not None else None,
             }
         return result
 

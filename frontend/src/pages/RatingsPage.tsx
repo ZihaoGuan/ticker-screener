@@ -313,6 +313,7 @@ export function RatingsPage() {
                   <th>Sector / Industry</th>
                   <th>1Y %</th>
                   <th>YTD %</th>
+                  <th>Hits</th>
                   <th>Overall</th>
                   <th>1D</th>
                   <th>1W</th>
@@ -336,6 +337,7 @@ export function RatingsPage() {
                     </td>
                     <td data-label="1Y %">{formatPercent(row.perf_year_pct)}</td>
                     <td data-label="YTD %">{formatPercent(row.perf_ytd_pct)}</td>
+                    <td data-label="Hits">{formatCount(row.latest_scanner_hit_count ?? 0)}</td>
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
                     <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
                     <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
