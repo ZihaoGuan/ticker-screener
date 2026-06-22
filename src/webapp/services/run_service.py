@@ -1463,6 +1463,18 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="leaders",
         ),
+        "venu_scanner": RunAction(
+            "venu_scanner",
+            "Run Venu Scanner",
+            "scripts/run_venu_scanner.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+            ),
+            bias_group="bullish",
+            bullish_subgroup="leaders",
+        ),
         "legacy_peg": RunAction(
             "legacy_peg",
             "Run Legacy PEG",

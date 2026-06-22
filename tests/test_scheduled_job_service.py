@@ -39,6 +39,7 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         self.assertIn("sync_postgres_market_data", actions)
         self.assertIn("reload_postgres_market_data_date", actions)
+        self.assertIn("venu_scanner", actions)
 
     def test_available_actions_include_grouping_metadata(self) -> None:
         actions = {item["id"]: item for item in self.service.get_context()["available_actions"]}

@@ -149,6 +149,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "lime",
     },
     {
+        "id": "venu_scanner",
+        "strategy_id": "venu_scanner",
+        "label": "Venu Scanner",
+        "description": "Live Finviz mid-cap stock scan for liquid names above the 20, 50, and 200 day moving averages with strong current participation.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+    },
+    {
         "id": "macd_golden_cross",
         "strategy_id": "macd_golden_cross",
         "label": "MACD Golden Cross",
