@@ -152,7 +152,14 @@ def _score_s(
         and up_down_volume_ratio > 1.2
     ):
         score = 2
-    elif supply_proxy is not None and supply_proxy <= 2_000_000_000.0 and avg_volume is not None and avg_volume >= CANSLIM_MIN_AVG_VOLUME_20D:
+    elif (
+        avg_volume is not None
+        and avg_volume >= CANSLIM_MIN_AVG_VOLUME_20D
+        and (
+            (supply_proxy is not None and supply_proxy <= 2_000_000_000.0)
+            or (up_down_volume_ratio is not None and up_down_volume_ratio > 1.2)
+        )
+    ):
         score = 1
 
     buy_amount = _coerce_float(insider_signal.get("buy_amount")) if insider_signal else None
@@ -161,9 +168,7 @@ def _score_s(
     discretionary_sell_count = int(insider_signal.get("discretionary_sell_count") or 0) if insider_signal else 0
     net_amount_excl_10b5_1 = _coerce_float(insider_signal.get("net_amount_excl_10b5_1")) if insider_signal else None
     positive_insider = (
-        supply_proxy is not None
-        and supply_proxy <= 2_000_000_000.0
-        and avg_volume is not None
+        avg_volume is not None
         and avg_volume >= CANSLIM_MIN_AVG_VOLUME_20D
         and buy_amount is not None
         and buy_amount >= CANSLIM_INSIDER_BUY_BONUS_AMOUNT

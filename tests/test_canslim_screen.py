@@ -26,6 +26,25 @@ def _frame(*, close_start: float, close_end: float, volume: float = 1_500_000.0)
     )
 
 
+def _accumulation_frame(*, close_start: float, close_end: float, volume: float) -> pd.DataFrame:
+    frame = _frame(close_start=close_start, close_end=close_end, volume=volume)
+    closes = frame["Close"].tolist()
+    start = len(closes) - 20
+    current = closes[start - 1]
+    for offset in range(20):
+        current += 2.0 if offset % 4 != 3 else -0.5
+        closes[start + offset] = current
+    frame["Close"] = closes
+    frame["Open"] = frame["Close"] - 1.0
+    frame["High"] = frame["Close"] + 1.5
+    frame["Low"] = frame["Close"] - 1.5
+    volumes = frame["Volume"].tolist()
+    for offset in range(20):
+        volumes[start + offset] = volume * (1.4 if offset % 4 != 3 else 0.4)
+    frame["Volume"] = volumes
+    return frame
+
+
 class CanslimScreenTests(unittest.TestCase):
     def test_run_canslim_screen_ranks_high_score_names_and_skips_missing_data(self) -> None:
         fundamentals = {
@@ -163,6 +182,48 @@ class CanslimScreenTests(unittest.TestCase):
         )
         self.assertEqual(result.passed_tickers, 1)
         self.assertEqual(result.failed_tickers, [])
+
+    def test_run_canslim_screen_allows_mega_caps_to_earn_partial_s_score(self) -> None:
+        fundamentals = {
+            "NVDA": {
+                "as_of_date": "2026-06-22",
+                "parse_status": "ok",
+                "sector": "Technology",
+                "industry": "Semiconductors",
+                "eps_qq_pct": 62.0,
+                "sales_qq_pct": 31.0,
+                "eps_this_y_pct": 55.0,
+                "eps_next_5y_pct": 24.0,
+                "roe_pct": 22.0,
+                "institutional_ownership_pct": 70.28,
+                "institutional_transactions_pct": 0.0,
+                "insider_ownership_pct": 4.09,
+                "insider_transactions_pct": -0.28,
+                "shares_float": 23_200_000_000.0,
+                "shares_outstanding": 24_220_000_000.0,
+            },
+        }
+        technical = {
+            "NVDA": {"technical_status": "ok", "leadership_score": 89.2},
+        }
+        frames = {
+            "SPY": _frame(close_start=450.0, close_end=520.0, volume=8_000_000.0),
+            "NVDA": _accumulation_frame(close_start=90.0, close_end=198.0, volume=54_018_362.0),
+        }
+        universe = [UniverseTicker(symbol="NVDA")]
+
+        with patch("src.canslim_screen.RatingsRepository.load_latest_fundamentals_snapshots_for_tickers", return_value=fundamentals), patch(
+            "src.canslim_screen.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
+            return_value=technical,
+        ), patch("src.canslim_screen.load_many_ticker_windows", return_value=frames), patch(
+            "src.canslim_screen.load_finviz_insider_signal_map",
+            return_value={},
+        ):
+            result = run_canslim_screen(AppConfig(), universe, as_of_date=dt.date(2026, 6, 22), database_url="postgres://example")
+
+        self.assertEqual(result.passed_tickers, 1)
+        self.assertEqual(result.hits[0].letter_scores["S"], 1)
+        self.assertEqual(result.hits[0].letter_scores["I"], 1)
 
 
 if __name__ == "__main__":
