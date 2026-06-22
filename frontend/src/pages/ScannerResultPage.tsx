@@ -66,7 +66,7 @@ export function ScannerResultPage() {
   const [sectorFilter, setSectorFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("als");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [viewMode, setViewMode] = useState<ScannerViewMode>("charts");
+  const [viewMode, setViewMode] = useState<ScannerViewMode>("list");
   const [chartColumns, setChartColumns] = useState<ChartColumnCount>(2);
   const [currentPage, setCurrentPage] = useState(1);
   const [chartPayloads, setChartPayloads] = useState<Record<string, WatchlistChartResponse | null | undefined>>({});
@@ -372,9 +372,6 @@ export function ScannerResultPage() {
             >
               List
             </button>
-            <Link className="ghost-button" to={card?.stem ? `/watchlists?stem=${encodeURIComponent(card.stem)}` : "/watchlists"}>
-              Watchlist
-            </Link>
           </div>
         </div>
         <div className="scanner-result-filter panel scanner-result-filter-actions">
