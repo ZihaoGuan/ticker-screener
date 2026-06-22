@@ -94,6 +94,14 @@ class RatingsRepository:
         connection = self._connect()
         if connection is None:
             return 0
+        metadata_sql = """
+            INSERT INTO ticker_metadata (ticker, sector, industry, source)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (ticker) DO UPDATE SET
+              sector = COALESCE(ticker_metadata.sector, EXCLUDED.sector),
+              industry = COALESCE(ticker_metadata.industry, EXCLUDED.industry),
+              updated_at = NOW()
+        """
         sql = """
             INSERT INTO ticker_fundamentals_snapshots (
               ticker, as_of_date, sector, industry, market_cap, enterprise_value, forward_pe,
@@ -148,6 +156,15 @@ class RatingsRepository:
               scraped_at = COALESCE(EXCLUDED.scraped_at, ticker_fundamentals_snapshots.scraped_at),
               updated_at = NOW()
         """
+        metadata_payload = [
+            (
+                item.ticker.upper(),
+                item.sector,
+                item.industry,
+                item.source or "finviz-fundamentals",
+            )
+            for item in rows
+        ]
         payload = [
             (
                 item.ticker.upper(),
@@ -194,6 +211,7 @@ class RatingsRepository:
         ]
         with connection:
             with connection.cursor() as cursor:
+                cursor.executemany(metadata_sql, metadata_payload)
                 cursor.executemany(sql, payload)
             connection.commit()
         return len(rows)
