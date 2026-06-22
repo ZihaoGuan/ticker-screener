@@ -74,6 +74,47 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["entry_count"], 1)
         self.assertEqual(payload["entries"][0]["ticker"], "NVDA")
 
+    def test_get_watchlist_detail_includes_latest_canslim_score(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        dated_dir = Path(self.temp_dir.name) / "screeners" / "2026-06-22" / "canslim"
+        dated_dir.mkdir(parents=True, exist_ok=True)
+        (dated_dir / "watchlist.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "NVDA",
+                        "score": 11,
+                        "max_score": 14,
+                        "rank": 1,
+                        "letter_scores": {"C": 2, "A": 2, "N": 2, "S": 1, "L": 2, "I": 1, "M": 1},
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_universe", return_value=[]), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.load_excluded_tickers",
+            return_value=set(),
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_rating_snapshots_for_tickers",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
+            return_value={},
+        ):
+            payload = service.get_watchlist_detail("weekly_htf_pullback_2026-05-31")
+
+        self.assertEqual(payload["entries"][0]["canslim_score"], 11)
+        self.assertEqual(payload["entries"][0]["canslim_max_score"], 14)
+        self.assertEqual(payload["entries"][0]["canslim_rank"], 1)
+
     def test_list_recent_can_hide_deprecated_legacy_watchlists(self) -> None:
         self._write_watchlist(
             "fearzone_2026-06-18",
@@ -1604,6 +1645,17 @@ class WatchlistServiceTests(unittest.TestCase):
 
     def test_get_top_ratings_payload_includes_latest_scanner_hit_count(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        dated_dir = Path(self.temp_dir.name) / "screeners" / "2026-06-22" / "canslim"
+        dated_dir.mkdir(parents=True, exist_ok=True)
+        (dated_dir / "watchlist.json").write_text(
+            json.dumps(
+                [
+                    {"ticker": "PLTR", "score": 10, "max_score": 14, "rank": 2},
+                    {"ticker": "NVDA", "score": 11, "max_score": 14, "rank": 1},
+                ]
+            ),
+            encoding="utf-8",
+        )
         with patch(
             "src.webapp.services.watchlist_service.RatingsRepository.list_top_rating_snapshots",
             return_value={
@@ -1628,6 +1680,8 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["rows"][0]["latest_scanner_hit_count"], 3)
         self.assertEqual(payload["rows"][1]["latest_scanner_hit_count"], 1)
+        self.assertEqual(payload["rows"][0]["canslim_score"], 10)
+        self.assertEqual(payload["rows"][1]["canslim_score"], 11)
 
     def test_get_chart_fundamentals_payload_uses_db_cache_when_complete(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")

@@ -1066,6 +1066,41 @@ class WatchlistService:
     def _is_complete_canslim_snapshot(self, payload: dict[str, Any]) -> bool:
         return isinstance(payload.get("letter_scores"), dict) and isinstance(payload.get("metrics"), dict) and isinstance(payload.get("reasons"), list)
 
+    def _load_latest_stored_canslim_score_map(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
+        normalized_tickers = {
+            str(ticker or "").strip().upper()
+            for ticker in tickers
+            if str(ticker or "").strip()
+        }
+        if not normalized_tickers:
+            return {}
+        resolved: dict[str, dict[str, Any]] = {}
+        for metadata in self.repository.list_recent_watchlists(limit=400, include_deprecated=False):
+            if str(metadata.get("group_key") or "").strip() != "canslim":
+                continue
+            stem = str(metadata.get("stem") or "").strip()
+            if not stem:
+                continue
+            for item in self.repository.load_watchlist(stem):
+                if not isinstance(item, dict):
+                    continue
+                ticker = normalize_ticker_symbol(str(item.get("ticker") or ""))
+                if not ticker or ticker not in normalized_tickers or ticker in resolved:
+                    continue
+                score = _coerce_optional_int(item.get("score"))
+                max_score = _coerce_optional_int(item.get("max_score"))
+                rank = _coerce_optional_int(item.get("rank"))
+                if score is None or max_score is None:
+                    continue
+                resolved[ticker] = {
+                    "canslim_score": score,
+                    "canslim_max_score": max_score,
+                    "canslim_rank": rank,
+                }
+            if len(resolved) == len(normalized_tickers):
+                break
+        return resolved
+
     def get_top_ratings_payload(
         self,
         *,
@@ -1092,6 +1127,7 @@ class WatchlistService:
         )
         resolved_as_of_raw = str(payload.get("as_of_date") or "").strip()
         resolved_as_of_date = dt.date.fromisoformat(resolved_as_of_raw) if resolved_as_of_raw else None
+        self._attach_top_rows_canslim_scores(payload.get("rows", []))
         self._attach_top_rows_technical_indicator_ratings(payload.get("rows", []), as_of_date=resolved_as_of_date)
         self._attach_top_rows_latest_scanner_hit_counts(payload.get("rows", []))
         payload["limit"] = max(1, min(int(limit), 500))
@@ -1126,6 +1162,7 @@ class WatchlistService:
         )
         resolved_as_of_raw = str(payload.get("as_of_date") or "").strip()
         resolved_as_of_date = dt.date.fromisoformat(resolved_as_of_raw) if resolved_as_of_raw else None
+        self._attach_top_rows_canslim_scores(payload.get("rows", []))
         self._attach_top_rows_technical_indicator_ratings(payload.get("rows", []), as_of_date=resolved_as_of_date)
         payload["limit"] = max(1, min(int(limit), 500))
         payload["technical_status"] = str(technical_status or "").strip().lower() or "ok"
@@ -1157,6 +1194,7 @@ class WatchlistService:
             technical_status=technical_status,
             sector=sector,
         )
+        self._attach_top_rows_canslim_scores(payload.get("rows", []))
         payload["limit"] = max(1, min(int(limit), 500))
         payload["technical_status"] = str(technical_status or "").strip().lower() or "ok"
         payload["sector"] = str(sector or "").strip()
@@ -1604,17 +1642,44 @@ class WatchlistService:
         repository = RatingsRepository(self.database_url)
         fundamental_map = repository.load_latest_rating_snapshots_for_tickers(tickers)
         technical_map = repository.load_latest_technical_rating_snapshots_for_tickers(tickers)
+        canslim_map = self._load_latest_stored_canslim_score_map(tickers)
         for entry in entries:
             ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
             if not ticker:
                 continue
             fundamental = fundamental_map.get(ticker) or {}
             technical = technical_map.get(ticker) or {}
+            canslim = canslim_map.get(ticker) or {}
             entry["perf_year_pct"] = _coerce_optional_float(fundamental.get("perf_year_pct"))
             entry["perf_ytd_pct"] = _coerce_optional_float(fundamental.get("perf_ytd_pct"))
             entry["fa_rating"] = _coerce_optional_float(fundamental.get("overall_rating"))
             entry["ta_rating"] = _coerce_optional_float(technical.get("overall_rating"))
             entry["rs_rating"] = _coerce_optional_float(technical.get("leadership_score"))
+            entry["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))
+            entry["canslim_max_score"] = _coerce_optional_int(canslim.get("canslim_max_score"))
+            entry["canslim_rank"] = _coerce_optional_int(canslim.get("canslim_rank"))
+
+    def _attach_top_rows_canslim_scores(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        tickers = sorted(
+            {
+                normalize_ticker_symbol(str(row.get("ticker") or ""))
+                for row in rows
+                if normalize_ticker_symbol(str(row.get("ticker") or ""))
+            }
+        )
+        if not tickers:
+            return
+        canslim_map = self._load_latest_stored_canslim_score_map(tickers)
+        for row in rows:
+            ticker = normalize_ticker_symbol(str(row.get("ticker") or ""))
+            if not ticker:
+                continue
+            canslim = canslim_map.get(ticker) or {}
+            row["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))
+            row["canslim_max_score"] = _coerce_optional_int(canslim.get("canslim_max_score"))
+            row["canslim_rank"] = _coerce_optional_int(canslim.get("canslim_rank"))
 
     def _attach_top_rows_technical_indicator_ratings(
         self,

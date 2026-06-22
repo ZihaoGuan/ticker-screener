@@ -38,6 +38,8 @@ type ScannerRow = {
   faScore: number | null;
   perfYearPct: number | null;
   perfYtdPct: number | null;
+  canslimScore: number | null;
+  canslimMaxScore: number | null;
   arsScore: number | null;
   alsScore: number | null;
   technicalIndicator1d: string;
@@ -264,7 +266,7 @@ export function ScannerResultPage() {
       return;
     }
     const lines = [
-      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "1Y %", "YTD %", "TA", "1D", "1W", "FA", "ARS", "ALS Score", "Setup", "Summary"].join(","),
+      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "1Y %", "YTD %", "TA", "1D", "1W", "FA", "CANSLIM", "ARS", "ALS Score", "Setup", "Summary"].join(","),
       ...filteredRows.map((row) =>
         [
           row.ticker,
@@ -279,6 +281,7 @@ export function ScannerResultPage() {
           csvValue(row.technicalIndicator1d),
           csvValue(row.technicalIndicator1w),
           row.faScore == null ? "" : row.faScore.toFixed(1),
+          formatCanslimScore(row.canslimScore, row.canslimMaxScore),
           row.arsScore == null ? "" : Math.round(row.arsScore).toString(),
           row.alsScore == null ? "" : Math.round(row.alsScore).toString(),
           csvValue(row.setupLabel),
@@ -498,6 +501,7 @@ export function ScannerResultPage() {
                       <th>1D</th>
                       <th>1W</th>
                       <th>{renderSortHeader("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>CANSLIM</th>
                       <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                       <th>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     </tr>
@@ -537,6 +541,7 @@ export function ScannerResultPage() {
                         <td data-label="FA">
                           <span className={`scanner-score-pill ${toneForScore(row.faScore, 10)}`}>{formatTenPointScore(row.faScore)}</span>
                         </td>
+                        <td data-label="CANSLIM">{formatCanslimScore(row.canslimScore, row.canslimMaxScore)}</td>
                         <td data-label="ARS">{formatPercentScore(row.arsScore)}</td>
                         <td data-label="ALS Score" className="scanner-result-als-cell">
                           {formatIntegerScore(row.alsScore)}
@@ -585,6 +590,8 @@ function buildScannerRow(
   const technicalIndicator = technicalIndicatorMap.get(ticker);
   const directPerfYear = typeof entry.perf_year_pct === "number" ? entry.perf_year_pct : null;
   const directPerfYtd = typeof entry.perf_ytd_pct === "number" ? entry.perf_ytd_pct : null;
+  const directCanslimScore = typeof entry.canslim_score === "number" ? entry.canslim_score : null;
+  const directCanslimMaxScore = typeof entry.canslim_max_score === "number" ? entry.canslim_max_score : null;
   const directTechnicalOverall = typeof entry.ta_rating === "number" ? entry.ta_rating : null;
   const directFundamentalOverall = typeof entry.fa_rating === "number" ? entry.fa_rating : null;
   const directLeadershipOverall = typeof entry.rs_rating === "number" ? entry.rs_rating : null;
@@ -606,6 +613,8 @@ function buildScannerRow(
     changePct: resolveDisplayChangePct(entry),
     perfYearPct: directPerfYear ?? fundamental?.perf_year_pct ?? null,
     perfYtdPct: directPerfYtd ?? fundamental?.perf_ytd_pct ?? null,
+    canslimScore: directCanslimScore,
+    canslimMaxScore: directCanslimMaxScore,
     taScore: technicalOverall != null ? technicalOverall / 10 : null,
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,
@@ -749,6 +758,13 @@ function formatPercentScore(value: number | null) {
 
 function formatIntegerScore(value: number | null) {
   return value == null ? "--" : `${Math.round(value)}`;
+}
+
+function formatCanslimScore(score: number | null, maxScore: number | null) {
+  if (score == null) {
+    return "--";
+  }
+  return `${score}/${maxScore ?? 14}`;
 }
 
 function toneForScore(value: number | null, max: number) {

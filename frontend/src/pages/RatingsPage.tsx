@@ -28,6 +28,13 @@ function formatPercent(value: number | null | undefined): string {
   return `${value.toFixed(2)}%`;
 }
 
+function formatCanslimScore(score: number | null | undefined, maxScore: number | null | undefined): string {
+  if (score == null) {
+    return "--";
+  }
+  return `${score}/${maxScore ?? 14}`;
+}
+
 function buildFundamentalRequestPath(asOfDate: string, limit: number, ratingStatus: string, sector: string) {
   const query = new URLSearchParams();
   if (asOfDate.trim()) {
@@ -317,6 +324,7 @@ export function RatingsPage() {
                   <th>Overall</th>
                   <th>1D</th>
                   <th>1W</th>
+                  <th>CANSLIM</th>
                   <th>Valuation</th>
                   <th>Profitability</th>
                   <th>Growth</th>
@@ -341,6 +349,7 @@ export function RatingsPage() {
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
                     <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
                     <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
+                    <td data-label="CANSLIM">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
                     <td data-label="Valuation">{row.valuation_grade ?? "-"} ({formatScore(row.valuation_score)})</td>
                     <td data-label="Profitability">{row.profitability_grade ?? "-"} ({formatScore(row.profitability_score)})</td>
                     <td data-label="Growth">{row.growth_grade ?? "-"} ({formatScore(row.growth_score)})</td>
@@ -364,6 +373,7 @@ export function RatingsPage() {
                   <th>Overall</th>
                   <th>1D</th>
                   <th>1W</th>
+                  <th>CANSLIM</th>
                   <th>Band</th>
                   <th>Trend</th>
                   <th>DMA Speed</th>
@@ -388,6 +398,7 @@ export function RatingsPage() {
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
                     <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
                     <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
+                    <td data-label="CANSLIM">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
                     <td data-label="Band">{row.rating_band ?? "-"}</td>
                     <td data-label="Trend">{formatScore(row.trend_regime_score)}</td>
                     <td data-label="DMA Speed">{formatScore(row.dma_speed_score)}</td>
@@ -417,6 +428,7 @@ export function RatingsPage() {
                   <th>1W Score</th>
                   <th>1M</th>
                   <th>1M Score</th>
+                  <th>CANSLIM</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -437,6 +449,7 @@ export function RatingsPage() {
                     <td data-label="1W Score">{formatScore(row.weekly.overall_score)}</td>
                     <td data-label="1M">{row.monthly.rating_label ?? "-"}</td>
                     <td data-label="1M Score">{formatScore(row.monthly.overall_score)}</td>
+                    <td data-label="CANSLIM">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
                     <td data-label="Status">{row.combined_status}</td>
                   </tr>
                 ))}

@@ -165,6 +165,9 @@ export type ScannerTopHitRow = {
   rs_rating: number | null;
   ta_rating: number | null;
   fa_rating: number | null;
+  canslim_score?: number | null;
+  canslim_max_score?: number | null;
+  canslim_rank?: number | null;
   fa_current_rank?: number | null;
   technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
   scanner_count: number;
@@ -823,6 +826,9 @@ export type TopRatingEntry = {
   performance_grade: string | null;
   rating_status: string | null;
   rating_status_reason: string | null;
+  canslim_score?: number | null;
+  canslim_max_score?: number | null;
+  canslim_rank?: number | null;
   latest_scanner_hit_count?: number;
   technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
 };
@@ -857,6 +863,9 @@ export type TopTechnicalRatingEntry = {
   technical_status: string | null;
   technical_status_reason: string | null;
   flags: string[];
+  canslim_score?: number | null;
+  canslim_max_score?: number | null;
+  canslim_rank?: number | null;
   technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
 };
 
@@ -884,6 +893,9 @@ export type TopTechnicalIndicatorRatingEntry = {
   daily: TechnicalIndicatorRatingCell;
   weekly: TechnicalIndicatorRatingCell;
   monthly: TechnicalIndicatorRatingCell;
+  canslim_score?: number | null;
+  canslim_max_score?: number | null;
+  canslim_rank?: number | null;
 };
 
 export type TopTechnicalIndicatorRatingsResponse = {
