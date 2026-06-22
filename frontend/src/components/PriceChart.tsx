@@ -130,11 +130,9 @@ export function PriceChart({
   const rsChartApiRef = useRef<IChartApi | null>(null);
   const fibChartApiRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const rsSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const fibCandleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const suppressCrosshairEventRef = useRef(false);
   const lastHoverTimeRef = useRef<string | null>(null);
   const [visibleIndexRange, setVisibleIndexRange] = useState<{ from: number; to: number } | null>(null);
+  const [hoverGuide, setHoverGuide] = useState<{ time: string; xRatio: number } | null>(null);
   const resolvedExtraAnnotations = extraAnnotations ?? EMPTY_ANNOTATIONS;
   const resolvedExtraMarkers = extraMarkers ?? EMPTY_MARKERS;
   const options = visibility ?? {
@@ -173,8 +171,6 @@ export function PriceChart({
     [overlays?.market_extension],
   );
   const rsLine = useMemo(() => overlays?.rs_line ?? [], [overlays?.rs_line]);
-  const candleCloseByTime = useMemo(() => new Map(candles.map((item) => [item.time, item.close])), [candles]);
-  const rsValueByTime = useMemo(() => new Map(rsLine.map((item) => [item.time, item.value])), [rsLine]);
   const rsMarkers = useMemo(() => overlays?.rs_markers ?? [], [overlays?.rs_markers]);
   const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
@@ -190,9 +186,6 @@ export function PriceChart({
   const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, resolvedExtraAnnotations), [annotations, resolvedExtraAnnotations]);
   const flexibleSrOverlay = useMemo(() => (options.flexSr ? buildFlexibleSrOverlay(candles) : null), [candles, options.flexSr]);
   const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
-    if (suppressCrosshairEventRef.current) {
-      return;
-    }
     const point = param.point;
     const normalizedTime = normalizeCrosshairTime(param.time);
     if (
@@ -207,6 +200,7 @@ export function PriceChart({
         lastHoverTimeRef.current = null;
         onHoverTimeChange?.(null);
       }
+      setHoverGuide((current) => (current == null ? current : null));
       return;
     }
     if (lastHoverTimeRef.current !== normalizedTime) {
@@ -238,6 +232,14 @@ export function PriceChart({
       },
       crosshair: {
         mode: 0,
+        vertLine: {
+          visible: false,
+          labelVisible: false,
+        },
+        horzLine: {
+          visible: false,
+          labelVisible: false,
+        },
       },
     });
 
@@ -260,6 +262,14 @@ export function PriceChart({
       },
       crosshair: {
         mode: 0,
+        vertLine: {
+          visible: false,
+          labelVisible: false,
+        },
+        horzLine: {
+          visible: false,
+          labelVisible: false,
+        },
       },
     });
     const fibChart = createChart(fibRootRef.current, {
@@ -281,6 +291,14 @@ export function PriceChart({
       },
       crosshair: {
         mode: 0,
+        vertLine: {
+          visible: false,
+          labelVisible: false,
+        },
+        horzLine: {
+          visible: false,
+          labelVisible: false,
+        },
       },
     });
     priceChartApiRef.current = priceChart;
@@ -331,8 +349,6 @@ export function PriceChart({
     });
     const rsSeries = rsChart.addLineSeries({ color: "#60a5fa", lineWidth: 2, priceLineVisible: false });
     candleSeriesRef.current = candleSeries;
-    fibCandleSeriesRef.current = fibCandleSeries;
-    rsSeriesRef.current = rsSeries;
     const annotationSeries = annotationLines.map((line) =>
       priceChart.addLineSeries({
         color: line.color,
@@ -678,8 +694,6 @@ export function PriceChart({
     return () => {
       resizeObserver.disconnect();
       candleSeriesRef.current = null;
-      rsSeriesRef.current = null;
-      fibCandleSeriesRef.current = null;
       priceChartApiRef.current = null;
       rsChartApiRef.current = null;
       fibChartApiRef.current = null;
@@ -726,55 +740,28 @@ export function PriceChart({
 
   useEffect(() => {
     const priceChart = priceChartApiRef.current;
-    const rsChart = rsChartApiRef.current;
-    const fibChart = fibChartApiRef.current;
-    const candleSeries = candleSeriesRef.current;
-    const rsSeries = rsSeriesRef.current;
-    const fibCandleSeries = fibCandleSeriesRef.current;
-    if (!priceChart || !candleSeries) {
+    if (!priceChart) {
       return;
     }
     if (!hoveredTime) {
-      suppressCrosshairEventRef.current = true;
-      priceChart.clearCrosshairPosition();
-      rsChart?.clearCrosshairPosition();
-      fibChart?.clearCrosshairPosition();
-      suppressCrosshairEventRef.current = false;
       lastHoverTimeRef.current = null;
+      setHoverGuide((current) => (current == null ? current : null));
       return;
     }
-
-    const priceValue = candleCloseByTime.get(hoveredTime);
-    if (priceValue == null) {
-      suppressCrosshairEventRef.current = true;
-      priceChart.clearCrosshairPosition();
-      rsChart?.clearCrosshairPosition();
-      fibChart?.clearCrosshairPosition();
-      suppressCrosshairEventRef.current = false;
-      lastHoverTimeRef.current = null;
+    const width = priceRootRef.current?.clientWidth ?? 0;
+    const x = priceChart.timeScale().timeToCoordinate(hoveredTime);
+    if (width <= 0 || x == null) {
       return;
     }
-
-    suppressCrosshairEventRef.current = true;
-    priceChart.setCrosshairPosition(priceValue, hoveredTime, candleSeries);
-    if (showRsPane && rsChart && rsSeries) {
-      const rsValue = rsValueByTime.get(hoveredTime);
-      if (rsValue != null) {
-        rsChart.setCrosshairPosition(rsValue, hoveredTime, rsSeries);
-      } else {
-        rsChart.clearCrosshairPosition();
-      }
-    } else {
-      rsChart?.clearCrosshairPosition();
-    }
-    if (showFibPane && fibChart && fibCandleSeries) {
-      fibChart.setCrosshairPosition(priceValue, hoveredTime, fibCandleSeries);
-    } else {
-      fibChart?.clearCrosshairPosition();
-    }
-    suppressCrosshairEventRef.current = false;
+    const xRatio = Math.max(0, Math.min(1, x / width));
     lastHoverTimeRef.current = hoveredTime;
-  }, [candleCloseByTime, hoveredTime, rsValueByTime, showFibPane, showRsPane]);
+    setHoverGuide((current) => {
+      if (current && current.time === hoveredTime && Math.abs(current.xRatio - xRatio) < 0.0005) {
+        return current;
+      }
+      return { time: hoveredTime, xRatio };
+    });
+  }, [hoveredTime]);
 
   const handleZoom = (direction: "in" | "out" | "reset") => {
     const priceChart = priceChartApiRef.current;
@@ -820,14 +807,17 @@ export function PriceChart({
       </div>
       <div className="chart-pane">
         <div ref={priceRootRef} className="chart-card chart-card-price" />
+        {hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showFibPane ? <div className="chart-rs-header">Fib structure pane</div> : null}
       <div className="chart-pane">
         <div ref={fibRootRef} className="chart-card chart-card-rs" />
+        {showFibPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
       <div className="chart-pane">
         <div ref={rsRootRef} className="chart-card chart-card-rs" />
+        {showRsPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showFearzonePanel ? (
         <FearzonePanel
@@ -840,6 +830,7 @@ export function PriceChart({
                 lastHoverTimeRef.current = null;
                 onHoverTimeChange?.(null);
               }
+              setHoverGuide((current) => (current == null ? current : null));
               return;
             }
             if (lastHoverTimeRef.current !== time) {
@@ -1012,6 +1003,7 @@ function buildFearzoneDateMarkers(points: Array<{ time: string; active: boolean 
   }
   return markers.filter((marker, index, source) => source.findIndex((item) => item.time === marker.time) === index);
 }
+
 
 function formatFearzoneDate(value: string) {
   const [year, month, day] = value.split("-");

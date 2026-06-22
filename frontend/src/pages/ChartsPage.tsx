@@ -83,7 +83,7 @@ export function ChartsPage() {
 
   useEffect(() => {
     setSyncedHoverTime(null);
-  }, [payload?.resolved_as_of_date, requestedTicker]);
+  }, [payload?.resolved_as_of_date, requestedDate, requestedTicker]);
 
   useEffect(() => {
     if (!requestedTicker) {
