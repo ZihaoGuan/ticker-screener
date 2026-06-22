@@ -184,6 +184,15 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(payload["symbol"], "SPX")
         self.assertEqual(payload["plots"]["profile"], "<svg/>")
 
+    def test_request_web_restart_schedules_self_exit(self) -> None:
+        service = AdminService(database_url="postgres://example")
+        with patch.object(service, "_schedule_process_exit") as mocked:
+            payload = service.request_web_restart(delay_seconds=0.5)
+
+        mocked.assert_called_once_with(delay_seconds=0.5)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["restart_mode"], "self_exit")
+
     def test_list_scheduled_jobs_exposes_db_persistence_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             artifacts_dir = Path(temp_dir)

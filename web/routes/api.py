@@ -1552,6 +1552,36 @@ def launch_history_sync(
     return JSONResponse({"ok": True, "job_id": job_id})
 
 
+@router.post("/admin/web-restart", response_class=JSONResponse)
+def admin_restart_web_app(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: AdminService = Depends(get_admin_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        response_payload = service.request_web_restart(delay_seconds=float(request_payload.get("delay_seconds") or 1.0))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.web_restart.request",
+        resource_type="application",
+        resource_id="web",
+        resource_label="web",
+        message="Requested web app restart.",
+        metadata={
+            "restart_mode": response_payload.get("restart_mode"),
+            "delay_seconds": response_payload.get("delay_seconds"),
+        },
+    )
+    return JSONResponse(response_payload)
+
+
 @router.get("/admin/portfolio", response_class=JSONResponse)
 def admin_portfolio_context(
     service: PortfolioService = Depends(get_portfolio_service),

@@ -3,7 +3,10 @@ from __future__ import annotations
 import datetime as dt
 from collections import Counter
 import json
+import os
 from pathlib import Path
+import threading
+import time
 from typing import Any
 
 from src.config import load_app_config, today_label
@@ -254,6 +257,16 @@ class AdminService:
         return {
             **report,
             "plots": render_gamma_exposure_report_svgs(report),
+        }
+
+    def request_web_restart(self, *, delay_seconds: float = 1.0) -> dict[str, Any]:
+        normalized_delay = max(0.2, float(delay_seconds))
+        self._schedule_process_exit(delay_seconds=normalized_delay)
+        return {
+            "ok": True,
+            "message": f"Web restart requested. This process will exit in about {normalized_delay:.1f}s and Docker should bring it back.",
+            "delay_seconds": normalized_delay,
+            "restart_mode": "self_exit",
         }
 
     def _load_exclusions(self) -> list[dict[str, Any]]:
@@ -784,6 +797,14 @@ class AdminService:
             return value.isoformat()
         text = str(value).strip()
         return text or None
+
+    def _schedule_process_exit(self, *, delay_seconds: float) -> None:
+        def _restart_later() -> None:
+            time.sleep(delay_seconds)
+            os._exit(0)
+
+        thread = threading.Thread(target=_restart_later, name="admin-web-restart", daemon=True)
+        thread.start()
 
 
 def _build_missing_ranges(

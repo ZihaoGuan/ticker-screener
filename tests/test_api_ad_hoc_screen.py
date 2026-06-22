@@ -344,6 +344,14 @@ class _FakeAdminService:
             "plots": {"absolute": "<svg/>", "by_option_type": "<svg/>", "profile": "<svg/>"},
         }
 
+    def request_web_restart(self, *, delay_seconds: float = 1.0):
+        return {
+            "ok": True,
+            "message": f"Web restart requested. This process will exit in about {delay_seconds:.1f}s and Docker should bring it back.",
+            "delay_seconds": delay_seconds,
+            "restart_mode": "self_exit",
+        }
+
     def update_ticker_sector(self, *, ticker: str, sector: str):
         return {"ticker": ticker.upper(), "sector": sector, "source": "finviz", "updated_at": "2026-06-14T00:00:00+00:00"}
 
@@ -1057,6 +1065,19 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["symbol"], "SPX")
         self.assertEqual(payload["source_symbol"], "_SPX")
         self.assertEqual(payload["plots"]["profile"], "<svg/>")
+
+    def test_admin_can_request_web_restart(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.post("/api/admin/web-restart", json={"delay_seconds": 1.0})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["restart_mode"], "self_exit")
 
     def test_admin_can_update_ticker_sector(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(

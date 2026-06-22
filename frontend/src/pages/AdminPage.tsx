@@ -128,6 +128,8 @@ export function AdminPage() {
   const [isLoadingRatingsRunJob, setIsLoadingRatingsRunJob] = useState(false);
   const [isLaunchingGexSnapshot, setIsLaunchingGexSnapshot] = useState(false);
   const [gexSnapshotNotice, setGexSnapshotNotice] = useState("");
+  const [isRestartingWebApp, setIsRestartingWebApp] = useState(false);
+  const [webRestartNotice, setWebRestartNotice] = useState("");
   const [gammaPlotPayload, setGammaPlotPayload] = useState<GammaExposurePlotAdminResponse | null>(null);
   const [isLoadingGammaPlot, setIsLoadingGammaPlot] = useState(true);
   const [gammaPlotNotice, setGammaPlotNotice] = useState("");
@@ -364,6 +366,23 @@ export function AdminPage() {
       setGexSnapshotNotice(error instanceof Error ? error.message : "Failed to launch FlashAlpha GEX snapshot.");
     } finally {
       setIsLaunchingGexSnapshot(false);
+    }
+  };
+
+  const handleRestartWebApp = async () => {
+    setIsRestartingWebApp(true);
+    setWebRestartNotice("");
+    try {
+      const response = await fetchJson<{ ok: boolean; message: string; delay_seconds: number; restart_mode: string }>("/api/admin/web-restart", {
+        method: "POST",
+        body: JSON.stringify({ delay_seconds: 1.0 }),
+      });
+      setWebRestartNotice(response.message);
+      loadAudit();
+    } catch (error) {
+      setWebRestartNotice(error instanceof Error ? error.message : "Failed to request web app restart.");
+    } finally {
+      setIsRestartingWebApp(false);
     }
   };
 
@@ -1144,6 +1163,21 @@ export function AdminPage() {
             <span className="panel-copy">Uses benchmark ticker default `SPY` and today date label.</span>
           </div>
           {gexSnapshotNotice ? <div className="panel-copy">{gexSnapshotNotice}</div> : null}
+        </div>
+      </Panel>
+
+      <Panel title="Restart Web App" aside={<span className="eyebrow">Admin-only repair action</span>}>
+        <div className="run-toolbar">
+          <p className="panel-copy">
+            Requests the current web process to exit so Docker can restart the `web` container. Use this after config or dependency changes that need a fresh app process.
+          </p>
+          <div className="run-action-footer">
+            <button className="primary-button" type="button" disabled={isRestartingWebApp} onClick={() => void handleRestartWebApp()}>
+              {isRestartingWebApp ? "Requesting..." : "Restart Web App"}
+            </button>
+            <span className="panel-copy">Expected behavior on deploy host: brief downtime while Docker restarts the `web` service.</span>
+          </div>
+          {webRestartNotice ? <div className="panel-copy">{webRestartNotice}</div> : null}
         </div>
       </Panel>
 
