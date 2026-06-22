@@ -1195,6 +1195,7 @@ class RatingsRepository:
         tickers: Iterable[str],
         *,
         as_of_date: dt.date | None = None,
+        allow_older_as_of_date: bool = False,
     ) -> dict[str, dict[str, Any]]:
         normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
         if not normalized:
@@ -1218,9 +1219,11 @@ class RatingsRepository:
             LEFT JOIN ticker_metadata tm
               ON tm.ticker = r.ticker
             WHERE r.ticker = ANY(%s)
-              AND (%s::date IS NULL OR r.as_of_date = %s)
+              AND (%s::date IS NULL OR r.as_of_date {date_operator} %s)
             ORDER BY r.ticker, r.as_of_date DESC, r.updated_at DESC
         """
+        date_operator = "<=" if allow_older_as_of_date else "="
+        sql = sql.format(date_operator=date_operator)
         with connection:
             with connection.cursor() as cursor:
                 cursor.execute(sql, (normalized, as_of_date, as_of_date))

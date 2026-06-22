@@ -413,7 +413,11 @@ def run_canslim_screen(
     repository = RatingsRepository(resolved_database_url)
     symbols = [item.symbol.upper() for item in tickers]
     fundamentals_map = repository.load_latest_fundamentals_snapshots_for_tickers(symbols, as_of_date=run_date)
-    technical_map = repository.load_latest_technical_rating_snapshots_for_tickers(symbols, as_of_date=run_date)
+    technical_map = repository.load_latest_technical_rating_snapshots_for_tickers(
+        symbols,
+        as_of_date=run_date,
+        allow_older_as_of_date=True,
+    )
     frame_map = load_many_ticker_windows([*symbols, config.benchmark_ticker], run_date, CANSLIM_HISTORY_DAYS, database_url=resolved_database_url)
     benchmark_frame = frame_map.get(config.benchmark_ticker.upper())
     if benchmark_frame is None:

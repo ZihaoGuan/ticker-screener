@@ -118,6 +118,52 @@ class CanslimScreenTests(unittest.TestCase):
         self.assertEqual(result.hits[0].metrics["insider_net_amount_excl_10b5_1"], 1_250_000.0)
         self.assertTrue(any(item["ticker"] == "MSFT" for item in result.failed_tickers))
 
+    def test_run_canslim_screen_allows_older_technical_snapshot_lookup(self) -> None:
+        fundamentals = {
+            "NVDA": {
+                "as_of_date": "2026-06-22",
+                "parse_status": "ok",
+                "sector": "Technology",
+                "industry": "Semiconductors",
+                "eps_qq_pct": 62.0,
+                "sales_qq_pct": 31.0,
+                "eps_this_y_pct": 55.0,
+                "eps_next_5y_pct": 24.0,
+                "roe_pct": 22.0,
+                "institutional_ownership_pct": 41.0,
+                "institutional_transactions_pct": 6.0,
+                "insider_ownership_pct": 2.5,
+                "insider_transactions_pct": 0.8,
+                "shares_float": 420_000_000.0,
+                "shares_outstanding": 430_000_000.0,
+            },
+        }
+        technical = {
+            "NVDA": {"technical_status": "ok", "leadership_score": 91.0, "as_of_date": "2026-06-20"},
+        }
+        frames = {
+            "SPY": _frame(close_start=450.0, close_end=520.0, volume=8_000_000.0),
+            "NVDA": _frame(close_start=90.0, close_end=198.0),
+        }
+        universe = [UniverseTicker(symbol="NVDA")]
+
+        with patch("src.canslim_screen.RatingsRepository.load_latest_fundamentals_snapshots_for_tickers", return_value=fundamentals), patch(
+            "src.canslim_screen.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
+            return_value=technical,
+        ) as technical_loader, patch("src.canslim_screen.load_many_ticker_windows", return_value=frames), patch(
+            "src.canslim_screen.load_finviz_insider_signal_map",
+            return_value={},
+        ):
+            result = run_canslim_screen(AppConfig(), universe, as_of_date=dt.date(2026, 6, 22), database_url="postgres://example")
+
+        technical_loader.assert_called_once_with(
+            ["NVDA"],
+            as_of_date=dt.date(2026, 6, 22),
+            allow_older_as_of_date=True,
+        )
+        self.assertEqual(result.passed_tickers, 1)
+        self.assertEqual(result.failed_tickers, [])
+
 
 if __name__ == "__main__":
     unittest.main()
