@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import datetime as dt
+import json
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from .config import AppConfig
+from .config import AppConfig, project_root
 from .market_data_access import db_frame_has_recent_coverage, load_many_ticker_windows, resolve_database_url
 from .ratings.repository import RatingsRepository
 from .universe import UniverseTicker
@@ -17,6 +19,9 @@ CANSLIM_MIN_SCORE = 9
 CANSLIM_MIN_WATCHLIST_COUNT = 5
 CANSLIM_WATCHLIST_FALLBACK_COUNT = 10
 CANSLIM_MIN_AVG_VOLUME_20D = 500_000.0
+CANSLIM_INSIDER_LOOKBACK_DAYS = 90
+CANSLIM_INSIDER_BUY_BONUS_AMOUNT = 500_000.0
+CANSLIM_INSIDER_SELL_PENALTY_AMOUNT = 2_000_000.0
 
 
 @dataclass(frozen=True)
@@ -66,6 +71,96 @@ def _coerce_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_date(value: object) -> dt.date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return dt.date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _load_cached_insider_signal_map(
+    tickers: list[str],
+    *,
+    as_of_date: dt.date,
+    lookback_days: int = CANSLIM_INSIDER_LOOKBACK_DAYS,
+    artifacts_dir: Path | None = None,
+) -> dict[str, dict[str, float | int]]:
+    normalized_tickers = {str(item or "").strip().upper() for item in tickers if str(item or "").strip()}
+    if not normalized_tickers:
+        return {}
+
+    repo_dir = artifacts_dir or (project_root() / "artifacts")
+    latest_path = repo_dir / "raw" / "insider" / "insider_trades_latest.json"
+    if not latest_path.exists():
+        return {}
+
+    try:
+        payload = json.loads(latest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    raw_entries: list[dict[str, Any]] = []
+    caches = payload.get("caches")
+    if isinstance(caches, dict):
+        for window in caches.values():
+            if not isinstance(window, dict):
+                continue
+            entries = window.get("entries")
+            if isinstance(entries, list):
+                raw_entries.extend(entry for entry in entries if isinstance(entry, dict))
+    entries = payload.get("entries")
+    if isinstance(entries, list):
+        raw_entries.extend(entry for entry in entries if isinstance(entry, dict))
+
+    if not raw_entries:
+        return {}
+
+    window_start = as_of_date - dt.timedelta(days=max(1, int(lookback_days)))
+    summary_map: dict[str, dict[str, float | int]] = {}
+    for raw_entry in raw_entries:
+        ticker = str(raw_entry.get("ticker") or "").strip().upper()
+        if ticker not in normalized_tickers:
+            continue
+        event_date = _coerce_date(raw_entry.get("transaction_date")) or _coerce_date(raw_entry.get("filing_date"))
+        if event_date is None or event_date < window_start or event_date > as_of_date:
+            continue
+        entry_type = str(raw_entry.get("type") or "").strip().upper()
+        if entry_type not in {"BUY", "SELL"}:
+            continue
+        gross_amount = _coerce_float(raw_entry.get("gross_amount")) or 0.0
+        if gross_amount <= 0:
+            continue
+        summary = summary_map.setdefault(
+            ticker,
+            {
+                "buy_count": 0,
+                "sell_count": 0,
+                "buy_amount": 0.0,
+                "sell_amount": 0.0,
+                "discretionary_sell_count": 0,
+                "discretionary_sell_amount": 0.0,
+                "net_amount_excl_10b5_1": 0.0,
+            },
+        )
+        if entry_type == "BUY":
+            summary["buy_count"] = int(summary["buy_count"]) + 1
+            summary["buy_amount"] = float(summary["buy_amount"]) + gross_amount
+            summary["net_amount_excl_10b5_1"] = float(summary["net_amount_excl_10b5_1"]) + gross_amount
+            continue
+        summary["sell_count"] = int(summary["sell_count"]) + 1
+        summary["sell_amount"] = float(summary["sell_amount"]) + gross_amount
+        if not bool(raw_entry.get("is_10b5_1")):
+            summary["discretionary_sell_count"] = int(summary["discretionary_sell_count"]) + 1
+            summary["discretionary_sell_amount"] = float(summary["discretionary_sell_amount"]) + gross_amount
+            summary["net_amount_excl_10b5_1"] = float(summary["net_amount_excl_10b5_1"]) - gross_amount
+    return summary_map
 
 
 def _score_c(current: dict[str, Any]) -> tuple[int, list[str]]:
@@ -128,7 +223,11 @@ def _score_n(metrics: dict[str, float | None], leadership_score: float | None) -
     return score, reasons, flags
 
 
-def _score_s(current: dict[str, Any], metrics: dict[str, float | None]) -> tuple[int, list[str]]:
+def _score_s(
+    current: dict[str, Any],
+    metrics: dict[str, float | None],
+    insider_signal: dict[str, float | int] | None = None,
+) -> tuple[int, list[str]]:
     shares_float = _coerce_float(current.get("shares_float"))
     shares_outstanding = _coerce_float(current.get("shares_outstanding"))
     supply_proxy = shares_float if shares_float is not None else shares_outstanding
@@ -146,6 +245,35 @@ def _score_s(current: dict[str, Any], metrics: dict[str, float | None]) -> tuple
         score = 2
     elif supply_proxy is not None and supply_proxy <= 2_000_000_000.0 and avg_volume is not None and avg_volume >= CANSLIM_MIN_AVG_VOLUME_20D:
         score = 1
+
+    buy_amount = _coerce_float(insider_signal.get("buy_amount")) if insider_signal else None
+    buy_count = int(insider_signal.get("buy_count") or 0) if insider_signal else 0
+    discretionary_sell_amount = _coerce_float(insider_signal.get("discretionary_sell_amount")) if insider_signal else None
+    discretionary_sell_count = int(insider_signal.get("discretionary_sell_count") or 0) if insider_signal else 0
+    net_amount_excl_10b5_1 = _coerce_float(insider_signal.get("net_amount_excl_10b5_1")) if insider_signal else None
+    positive_insider = (
+        supply_proxy is not None
+        and supply_proxy <= 2_000_000_000.0
+        and avg_volume is not None
+        and avg_volume >= CANSLIM_MIN_AVG_VOLUME_20D
+        and buy_amount is not None
+        and buy_amount >= CANSLIM_INSIDER_BUY_BONUS_AMOUNT
+        and buy_count >= 1
+        and net_amount_excl_10b5_1 is not None
+        and net_amount_excl_10b5_1 > 0.0
+    )
+    negative_insider = (
+        discretionary_sell_amount is not None
+        and discretionary_sell_amount >= CANSLIM_INSIDER_SELL_PENALTY_AMOUNT
+        and discretionary_sell_count >= 2
+        and net_amount_excl_10b5_1 is not None
+        and net_amount_excl_10b5_1 <= -CANSLIM_INSIDER_SELL_PENALTY_AMOUNT
+    )
+    if positive_insider and score < 2:
+        score += 1
+    if negative_insider and score > 0:
+        score -= 1
+
     reasons = []
     if supply_proxy is not None:
         reasons.append(f"Float/outstanding {supply_proxy:,.0f}")
@@ -153,6 +281,12 @@ def _score_s(current: dict[str, Any], metrics: dict[str, float | None]) -> tuple
         reasons.append(f"Avg volume 20D {avg_volume:,.0f}")
     if up_down_volume_ratio is not None:
         reasons.append(f"Up/down volume {up_down_volume_ratio:.2f}")
+    if buy_amount is not None and buy_amount > 0.0:
+        reasons.append(f"Insider buys {buy_amount:,.0f}")
+    if discretionary_sell_amount is not None and discretionary_sell_amount > 0.0:
+        reasons.append(f"Insider sells ex-10b5-1 {discretionary_sell_amount:,.0f}")
+    if net_amount_excl_10b5_1 is not None:
+        reasons.append(f"Insider net ex-10b5-1 {net_amount_excl_10b5_1:,.0f}")
     return score, reasons
 
 
@@ -266,6 +400,7 @@ def evaluate_canslim_ticker(
     frame: pd.DataFrame | None,
     benchmark_metrics: dict[str, float | bool | None],
     as_of_date: dt.date,
+    insider_signal: dict[str, float | int] | None = None,
 ) -> tuple[CanslimHit | None, str | None]:
     if not current or str(current.get("parse_status") or "").lower() != "ok":
         return None, "missing finviz fundamentals snapshot"
@@ -284,7 +419,7 @@ def evaluate_canslim_ticker(
     c_score, c_reasons = _score_c(current)
     a_score, a_reasons = _score_a(current)
     n_score, n_reasons, n_flags = _score_n(metrics, leadership_score)
-    s_score, s_reasons = _score_s(current, metrics)
+    s_score, s_reasons = _score_s(current, metrics, insider_signal)
     l_score, l_reasons, l_flags = _score_l(leadership_score)
     i_score, i_reasons = _score_i(current)
     letter_scores = {
@@ -311,6 +446,11 @@ def evaluate_canslim_ticker(
         "insider_transactions_pct": current.get("insider_transactions_pct"),
         "shares_float": current.get("shares_float"),
         "shares_outstanding": current.get("shares_outstanding"),
+        "insider_buy_amount": insider_signal.get("buy_amount") if insider_signal else None,
+        "insider_buy_count": insider_signal.get("buy_count") if insider_signal else None,
+        "insider_discretionary_sell_amount": insider_signal.get("discretionary_sell_amount") if insider_signal else None,
+        "insider_discretionary_sell_count": insider_signal.get("discretionary_sell_count") if insider_signal else None,
+        "insider_net_amount_excl_10b5_1": insider_signal.get("net_amount_excl_10b5_1") if insider_signal else None,
         "leadership_score": leadership_score,
         "distance_from_52w_high_pct": metrics.get("distance_from_52w_high_pct"),
         "avg_volume_20d": metrics.get("avg_volume_20d"),
@@ -321,6 +461,7 @@ def evaluate_canslim_ticker(
         *(c_reasons[:2]),
         *(a_reasons[:2]),
         *(n_reasons[:2]),
+        *(s_reasons[:2]),
         *(l_reasons[:1]),
         *(i_reasons[:1]),
     ]
@@ -379,6 +520,7 @@ def run_canslim_screen(
             hits=[],
         )
     benchmark_metrics = _frame_metrics(benchmark_frame)
+    insider_signal_map = _load_cached_insider_signal_map(symbols, as_of_date=run_date)
     scored_hits: list[CanslimHit] = []
     for ticker in tickers:
         symbol = ticker.symbol.upper()
@@ -389,6 +531,7 @@ def run_canslim_screen(
             frame=frame_map.get(symbol),
             benchmark_metrics=benchmark_metrics,
             as_of_date=run_date,
+            insider_signal=insider_signal_map.get(symbol),
         )
         if hit is None:
             failures.append({"ticker": symbol, "error": failure_reason or "unknown canslim error"})

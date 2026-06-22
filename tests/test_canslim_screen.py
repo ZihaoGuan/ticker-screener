@@ -74,11 +74,34 @@ class CanslimScreenTests(unittest.TestCase):
             "PLTR": _frame(close_start=20.0, close_end=34.0),
         }
         universe = [UniverseTicker(symbol="NVDA"), UniverseTicker(symbol="PLTR"), UniverseTicker(symbol="MSFT")]
+        insider_signal_map = {
+            "NVDA": {
+                "buy_count": 2,
+                "sell_count": 0,
+                "buy_amount": 1_250_000.0,
+                "sell_amount": 0.0,
+                "discretionary_sell_count": 0,
+                "discretionary_sell_amount": 0.0,
+                "net_amount_excl_10b5_1": 1_250_000.0,
+            },
+            "PLTR": {
+                "buy_count": 0,
+                "sell_count": 3,
+                "buy_amount": 0.0,
+                "sell_amount": 4_100_000.0,
+                "discretionary_sell_count": 3,
+                "discretionary_sell_amount": 4_100_000.0,
+                "net_amount_excl_10b5_1": -4_100_000.0,
+            },
+        }
 
         with patch("src.canslim_screen.RatingsRepository.load_latest_fundamentals_snapshots_for_tickers", return_value=fundamentals), patch(
             "src.canslim_screen.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
             return_value=technical,
-        ), patch("src.canslim_screen.load_many_ticker_windows", return_value=frames):
+        ), patch("src.canslim_screen.load_many_ticker_windows", return_value=frames), patch(
+            "src.canslim_screen._load_cached_insider_signal_map",
+            return_value=insider_signal_map,
+        ):
             result = run_canslim_screen(AppConfig(), universe, as_of_date=dt.date(2026, 6, 22), database_url="postgres://example")
 
         self.assertEqual(result.total_tickers, 3)
@@ -88,8 +111,11 @@ class CanslimScreenTests(unittest.TestCase):
         self.assertGreater(result.hits[0].score, result.hits[1].score)
         self.assertEqual(result.hits[0].rank, 1)
         self.assertTrue(result.hits[0].letter_passes["M"])
+        self.assertEqual(result.hits[0].letter_scores["S"], 2)
         self.assertEqual(result.hits[0].letter_scores["I"], 2)
+        self.assertEqual(result.hits[1].letter_scores["S"], 0)
         self.assertEqual(result.hits[1].letter_scores["I"], 0)
+        self.assertEqual(result.hits[0].metrics["insider_net_amount_excl_10b5_1"], 1_250_000.0)
         self.assertTrue(any(item["ticker"] == "MSFT" for item in result.failed_tickers))
 
 
