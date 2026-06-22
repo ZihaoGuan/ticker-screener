@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import datetime as dt
-import json
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from .config import AppConfig, project_root
 from .market_data_access import db_frame_has_recent_coverage, load_many_ticker_windows, resolve_database_url
+from .ratings.finviz_insider import load_finviz_insider_signal_map
 from .ratings.repository import RatingsRepository
 from .universe import UniverseTicker
 
@@ -71,96 +70,6 @@ def _coerce_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _coerce_date(value: object) -> dt.date | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        return dt.date.fromisoformat(text[:10])
-    except ValueError:
-        return None
-
-
-def _load_cached_insider_signal_map(
-    tickers: list[str],
-    *,
-    as_of_date: dt.date,
-    lookback_days: int = CANSLIM_INSIDER_LOOKBACK_DAYS,
-    artifacts_dir: Path | None = None,
-) -> dict[str, dict[str, float | int]]:
-    normalized_tickers = {str(item or "").strip().upper() for item in tickers if str(item or "").strip()}
-    if not normalized_tickers:
-        return {}
-
-    repo_dir = artifacts_dir or (project_root() / "artifacts")
-    latest_path = repo_dir / "raw" / "insider" / "insider_trades_latest.json"
-    if not latest_path.exists():
-        return {}
-
-    try:
-        payload = json.loads(latest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-
-    raw_entries: list[dict[str, Any]] = []
-    caches = payload.get("caches")
-    if isinstance(caches, dict):
-        for window in caches.values():
-            if not isinstance(window, dict):
-                continue
-            entries = window.get("entries")
-            if isinstance(entries, list):
-                raw_entries.extend(entry for entry in entries if isinstance(entry, dict))
-    entries = payload.get("entries")
-    if isinstance(entries, list):
-        raw_entries.extend(entry for entry in entries if isinstance(entry, dict))
-
-    if not raw_entries:
-        return {}
-
-    window_start = as_of_date - dt.timedelta(days=max(1, int(lookback_days)))
-    summary_map: dict[str, dict[str, float | int]] = {}
-    for raw_entry in raw_entries:
-        ticker = str(raw_entry.get("ticker") or "").strip().upper()
-        if ticker not in normalized_tickers:
-            continue
-        event_date = _coerce_date(raw_entry.get("transaction_date")) or _coerce_date(raw_entry.get("filing_date"))
-        if event_date is None or event_date < window_start or event_date > as_of_date:
-            continue
-        entry_type = str(raw_entry.get("type") or "").strip().upper()
-        if entry_type not in {"BUY", "SELL"}:
-            continue
-        gross_amount = _coerce_float(raw_entry.get("gross_amount")) or 0.0
-        if gross_amount <= 0:
-            continue
-        summary = summary_map.setdefault(
-            ticker,
-            {
-                "buy_count": 0,
-                "sell_count": 0,
-                "buy_amount": 0.0,
-                "sell_amount": 0.0,
-                "discretionary_sell_count": 0,
-                "discretionary_sell_amount": 0.0,
-                "net_amount_excl_10b5_1": 0.0,
-            },
-        )
-        if entry_type == "BUY":
-            summary["buy_count"] = int(summary["buy_count"]) + 1
-            summary["buy_amount"] = float(summary["buy_amount"]) + gross_amount
-            summary["net_amount_excl_10b5_1"] = float(summary["net_amount_excl_10b5_1"]) + gross_amount
-            continue
-        summary["sell_count"] = int(summary["sell_count"]) + 1
-        summary["sell_amount"] = float(summary["sell_amount"]) + gross_amount
-        if not bool(raw_entry.get("is_10b5_1")):
-            summary["discretionary_sell_count"] = int(summary["discretionary_sell_count"]) + 1
-            summary["discretionary_sell_amount"] = float(summary["discretionary_sell_amount"]) + gross_amount
-            summary["net_amount_excl_10b5_1"] = float(summary["net_amount_excl_10b5_1"]) - gross_amount
-    return summary_map
 
 
 def _score_c(current: dict[str, Any]) -> tuple[int, list[str]]:
@@ -520,7 +429,12 @@ def run_canslim_screen(
             hits=[],
         )
     benchmark_metrics = _frame_metrics(benchmark_frame)
-    insider_signal_map = _load_cached_insider_signal_map(symbols, as_of_date=run_date)
+    insider_signal_map = load_finviz_insider_signal_map(
+        symbols,
+        as_of_date=run_date,
+        lookback_days=CANSLIM_INSIDER_LOOKBACK_DAYS,
+        artifacts_dir=project_root() / "artifacts",
+    )
     scored_hits: list[CanslimHit] = []
     for ticker in tickers:
         symbol = ticker.symbol.upper()

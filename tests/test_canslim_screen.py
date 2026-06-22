@@ -99,7 +99,7 @@ class CanslimScreenTests(unittest.TestCase):
             "src.canslim_screen.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
             return_value=technical,
         ), patch("src.canslim_screen.load_many_ticker_windows", return_value=frames), patch(
-            "src.canslim_screen._load_cached_insider_signal_map",
+            "src.canslim_screen.load_finviz_insider_signal_map",
             return_value=insider_signal_map,
         ):
             result = run_canslim_screen(AppConfig(), universe, as_of_date=dt.date(2026, 6, 22), database_url="postgres://example")
