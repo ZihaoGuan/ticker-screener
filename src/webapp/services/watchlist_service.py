@@ -895,8 +895,8 @@ class WatchlistService:
         technical_indicator_ratings = ratings_repository.load_latest_technical_indicator_ratings_for_tickers([normalized_ticker]).get(normalized_ticker, {}) if ratings_repository else {}
         cached_entry = ratings_repository.load_latest_chart_fundamentals_cache_entry(normalized_ticker) if ratings_repository else None
 
-        canslim_snapshot = None
-        if ratings_repository and ratings_bundle:
+        canslim_snapshot = self._load_latest_stored_canslim_snapshot(normalized_ticker)
+        if canslim_snapshot is None and ratings_repository and ratings_bundle:
             fundamentals_snapshot = ratings_bundle.get("fundamentals_snapshot")
             canslim_as_of_date = dt.date.today()
             if isinstance(fundamentals_snapshot, dict):
@@ -1010,6 +1010,61 @@ class WatchlistService:
                 "options": options_diagnostics,
             },
         }
+
+    def _load_latest_stored_canslim_snapshot(self, ticker: str) -> dict[str, Any] | None:
+        normalized_ticker = str(ticker or "").strip().upper()
+        if not normalized_ticker:
+            return None
+        for metadata in self.repository.list_recent_watchlists(limit=400, include_deprecated=False):
+            if str(metadata.get("group_key") or "") != "canslim":
+                continue
+            payload = self._load_canslim_snapshot_from_watchlist_metadata(metadata, normalized_ticker)
+            if payload is not None:
+                return payload
+        return None
+
+    def _load_canslim_snapshot_from_watchlist_metadata(self, metadata: dict[str, Any], ticker: str) -> dict[str, Any] | None:
+        stem = str(metadata.get("stem") or "").strip()
+        if not stem:
+            return None
+        entries = self.repository.load_watchlist(stem)
+        payload = self._extract_stored_canslim_hit(entries, ticker)
+        if payload is not None and self._is_complete_canslim_snapshot(payload):
+            return payload
+
+        path_text = str(metadata.get("path") or "").strip()
+        if not path_text:
+            return payload if self._is_complete_canslim_snapshot(payload or {}) else None
+        path = Path(path_text)
+        if path.name != "watchlist.json":
+            return payload if self._is_complete_canslim_snapshot(payload or {}) else None
+        raw_path = path.with_name("raw_results.json")
+        if not raw_path.exists():
+            return payload if self._is_complete_canslim_snapshot(payload or {}) else None
+        try:
+            raw_payload = json.loads(raw_path.read_text(encoding="utf-8"))
+        except Exception:
+            return payload if self._is_complete_canslim_snapshot(payload or {}) else None
+        hits = raw_payload.get("hits") if isinstance(raw_payload, dict) else None
+        if not isinstance(hits, list):
+            return payload if self._is_complete_canslim_snapshot(payload or {}) else None
+        raw_hit = self._extract_stored_canslim_hit(hits, ticker)
+        if raw_hit is not None:
+            return raw_hit
+        return payload if self._is_complete_canslim_snapshot(payload or {}) else None
+
+    def _extract_stored_canslim_hit(self, rows: list[dict[str, Any]], ticker: str) -> dict[str, Any] | None:
+        normalized_ticker = str(ticker or "").strip().upper()
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("ticker") or "").strip().upper() != normalized_ticker:
+                continue
+            return dict(item)
+        return None
+
+    def _is_complete_canslim_snapshot(self, payload: dict[str, Any]) -> bool:
+        return isinstance(payload.get("letter_scores"), dict) and isinstance(payload.get("metrics"), dict) and isinstance(payload.get("reasons"), list)
 
     def get_top_ratings_payload(
         self,

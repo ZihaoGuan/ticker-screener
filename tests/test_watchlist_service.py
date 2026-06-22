@@ -1528,6 +1528,80 @@ class WatchlistServiceTests(unittest.TestCase):
             allow_older_as_of_date=True,
         )
 
+    def test_get_chart_fundamentals_payload_prefers_stored_canslim_artifact(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        dated_dir = Path(self.temp_dir.name) / "screeners" / "2025-03-24" / "canslim"
+        dated_dir.mkdir(parents=True, exist_ok=True)
+        (dated_dir / "watchlist.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "NVDA",
+                        "letter_scores": {"C": 2, "A": 2, "N": 2, "S": 1, "L": 2, "I": 2, "M": 2},
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (dated_dir / "raw_results.json").write_text(
+            json.dumps(
+                {
+                    "hits": [
+                        {
+                            "ticker": "NVDA",
+                            "as_of_date": "2025-03-24",
+                            "score": 13,
+                            "max_score": 14,
+                            "rank": 1,
+                            "letter_scores": {"C": 2, "A": 2, "N": 2, "S": 1, "L": 2, "I": 2, "M": 2},
+                            "letter_passes": {"C": True, "A": True, "N": True, "S": True, "L": True, "I": True, "M": True},
+                            "metrics": {"insider_buy_amount": 900000.0, "avg_volume_20d": 1500000.0},
+                            "reasons": ["stored artifact reason"],
+                            "leader_flags": ["leader"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        frame = self._long_price_frame()
+        with patch(
+            "src.webapp.services.watchlist_service._load_yahoo_earnings_and_holders_playwright",
+            return_value=([], None, None, None, {"earnings": {}, "holders": {}, "statistics": {}}),
+        ), patch(
+            "src.webapp.services.watchlist_service._load_yahoo_implied_move_playwright",
+            return_value=(None, {}),
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_ticker_rating_bundle",
+            return_value={
+                "fundamentals_snapshot": {
+                    "as_of_date": "2025-03-24",
+                    "ticker": "NVDA",
+                    "sector": "Technology",
+                    "industry": "Semiconductors",
+                    "parse_status": "ok",
+                },
+                "rating_snapshot": {"overall_rating": 88.5, "rating_status": "ok"},
+                "fundamental_rank": {"as_of_date": "2025-03-24", "current_rank": 42, "list_limit": 200},
+                "rating_diagnostics": {"missing_metric_names": [], "insufficient_baseline_metrics": []},
+            },
+        ), patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows",
+            return_value={"NVDA": frame.copy(), "SPY": frame.copy()},
+        ), patch(
+            "src.webapp.services.watchlist_service.evaluate_canslim_ticker",
+            side_effect=AssertionError("should not recompute canslim when stored artifact exists"),
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
+            side_effect=AssertionError("should not load technical snapshot when stored artifact exists"),
+        ):
+            payload = service.get_chart_fundamentals_payload("NVDA")
+
+        self.assertEqual(payload["canslim_snapshot"]["ticker"], "NVDA")
+        self.assertEqual(payload["canslim_snapshot"]["letter_scores"]["S"], 1)
+        self.assertEqual(payload["canslim_snapshot"]["metrics"]["insider_buy_amount"], 900000.0)
+        self.assertEqual(payload["canslim_snapshot"]["reasons"], ["stored artifact reason"])
+
     def test_get_top_ratings_payload_includes_latest_scanner_hit_count(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         with patch(
