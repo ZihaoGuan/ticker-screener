@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
+import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type {
+  CandlePoint,
   ScannerBoardCard,
   ScannerBoardResponse,
   TechnicalIndicatorRatingCell,
@@ -13,11 +15,14 @@ import type {
   TopRatingsResponse,
   TopTechnicalRatingEntry,
   TopTechnicalRatingsResponse,
+  WatchlistChartResponse,
   WatchlistDetailResponse,
 } from "../lib/types";
 
 type SortKey = "als" | "ta" | "fa" | "ars" | "ticker" | "company" | "sector" | "volume" | "change";
 type SortDirection = "asc" | "desc";
+type ScannerViewMode = "charts" | "list";
+type ChartColumnCount = 2 | 3;
 
 type ScannerRow = {
   ticker: string;
@@ -41,7 +46,11 @@ type ScannerRow = {
 };
 
 const MAX_RATINGS_ROWS = 500;
-const PAGE_SIZE = 50;
+const LIST_PAGE_SIZE = 50;
+const CHART_PAGE_SIZE_BY_COLUMN: Record<ChartColumnCount, number> = {
+  2: 10,
+  3: 12,
+};
 
 export function ScannerResultPage() {
   const { scannerId = "" } = useParams();
@@ -57,7 +66,12 @@ export function ScannerResultPage() {
   const [sectorFilter, setSectorFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("als");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [viewMode, setViewMode] = useState<ScannerViewMode>("charts");
+  const [chartColumns, setChartColumns] = useState<ChartColumnCount>(2);
   const [currentPage, setCurrentPage] = useState(1);
+  const [chartPayloads, setChartPayloads] = useState<Record<string, WatchlistChartResponse | null | undefined>>({});
+  const [chartErrors, setChartErrors] = useState<Record<string, string>>({});
+  const [chartLoadingTickers, setChartLoadingTickers] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let ignore = false;
@@ -161,20 +175,83 @@ export function ScannerResultPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [scannerId, search, sectorFilter, sortBy, sortDirection]);
+  }, [scannerId, search, sectorFilter, sortBy, sortDirection, viewMode, chartColumns]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE_BY_COLUMN[chartColumns] : LIST_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const normalizedPage = Math.min(currentPage, totalPages);
   const pagedRows = useMemo(() => {
-    const startIndex = (normalizedPage - 1) * PAGE_SIZE;
-    return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [filteredRows, normalizedPage]);
+    const startIndex = (normalizedPage - 1) * pageSize;
+    return filteredRows.slice(startIndex, startIndex + pageSize);
+  }, [filteredRows, normalizedPage, pageSize]);
 
   useEffect(() => {
     if (currentPage !== normalizedPage) {
       setCurrentPage(normalizedPage);
     }
   }, [currentPage, normalizedPage]);
+
+  useEffect(() => {
+    if (viewMode !== "charts" || pagedRows.length === 0) {
+      return;
+    }
+    const missingTickers = pagedRows
+      .map((row) => row.ticker)
+      .filter((ticker) => chartPayloads[ticker] === undefined && !chartLoadingTickers[ticker]);
+    if (missingTickers.length === 0) {
+      return;
+    }
+    let ignore = false;
+    setChartLoadingTickers((current) => {
+      const next = { ...current };
+      for (const ticker of missingTickers) {
+        next[ticker] = true;
+      }
+      return next;
+    });
+    void Promise.allSettled(
+      missingTickers.map(async (ticker) => {
+        const query = new URLSearchParams({ period: "18mo" });
+        const payload = await fetchJson<WatchlistChartResponse>(`/api/charts/${ticker}?${query.toString()}`);
+        return { ticker, payload };
+      }),
+    ).then((results) => {
+      if (ignore) {
+        return;
+      }
+      setChartPayloads((current) => {
+        const next = { ...current };
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            next[result.value.ticker] = result.value.payload;
+          }
+        }
+        return next;
+      });
+      setChartErrors((current) => {
+        const next = { ...current };
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            delete next[result.value.ticker];
+            return;
+          }
+          const failedTicker = missingTickers[index];
+          next[failedTicker] = result.reason instanceof Error ? result.reason.message : "Failed to load chart.";
+        });
+        return next;
+      });
+      setChartLoadingTickers((current) => {
+        const next = { ...current };
+        for (const ticker of missingTickers) {
+          delete next[ticker];
+        }
+        return next;
+      });
+    });
+    return () => {
+      ignore = true;
+    };
+  }, [chartLoadingTickers, chartPayloads, pagedRows, viewMode]);
 
   const topNote = useMemo(() => {
     const first = detail?.entries.find((entry) => typeof entry.master_note === "string" && entry.master_note.trim());
@@ -280,10 +357,42 @@ export function ScannerResultPage() {
         <div className="scanner-result-filter panel scanner-result-filter-actions">
           <span className="eyebrow">Views</span>
           <div className="scanner-result-view-actions">
-            <Link className="ghost-button" to={card?.stem ? `/watchlists?stem=${encodeURIComponent(card.stem)}` : "/watchlists"}>
+            <button
+              type="button"
+              className={`scanner-result-view-chip${viewMode === "charts" ? " is-active" : ""}`}
+              onClick={() => setViewMode("charts")}
+            >
               Charts
+            </button>
+            <button
+              type="button"
+              className={`scanner-result-view-chip${viewMode === "list" ? " is-active" : ""}`}
+              onClick={() => setViewMode("list")}
+            >
+              List
+            </button>
+            <Link className="ghost-button" to={card?.stem ? `/watchlists?stem=${encodeURIComponent(card.stem)}` : "/watchlists"}>
+              Watchlist
             </Link>
-            <span className="scanner-result-view-chip is-active">List</span>
+          </div>
+        </div>
+        <div className="scanner-result-filter panel scanner-result-filter-actions">
+          <span className="eyebrow">Chart Density</span>
+          <div className="scanner-result-view-actions">
+            <button
+              type="button"
+              className={`scanner-result-view-chip${chartColumns === 2 ? " is-active" : ""}`}
+              onClick={() => setChartColumns(2)}
+            >
+              2 per line
+            </button>
+            <button
+              type="button"
+              className={`scanner-result-view-chip${chartColumns === 3 ? " is-active" : ""}`}
+              onClick={() => setChartColumns(3)}
+            >
+              3 per line
+            </button>
           </div>
         </div>
       </section>
@@ -291,7 +400,7 @@ export function ScannerResultPage() {
       <section className="scanner-result-toolbar">
         <div className="scanner-result-toolbar-left">
           <strong>Showing {formatCount(filteredRows.length)} results</strong>
-          <span>View: List</span>
+          <span>View: {viewMode === "charts" ? "Charts" : "List"}</span>
           <span>Sorted by: {labelForSort(sortBy)} ({sortDirection})</span>
           <span>Page {normalizedPage} / {formatCount(totalPages)}</span>
         </div>
@@ -310,7 +419,7 @@ export function ScannerResultPage() {
           <>
             <div className="scanner-result-pagination">
               <span className="scanner-result-pagination-status">
-                Showing {formatCount((normalizedPage - 1) * PAGE_SIZE + 1)}-{formatCount(Math.min(normalizedPage * PAGE_SIZE, filteredRows.length))} of {formatCount(filteredRows.length)}
+                Showing {formatCount((normalizedPage - 1) * pageSize + 1)}-{formatCount(Math.min(normalizedPage * pageSize, filteredRows.length))} of {formatCount(filteredRows.length)}
               </span>
               <div className="scanner-result-pagination-actions">
                 <button className="ghost-button" type="button" onClick={() => setCurrentPage(1)} disabled={normalizedPage <= 1}>
@@ -327,70 +436,119 @@ export function ScannerResultPage() {
                 </button>
               </div>
             </div>
-            <div className="data-table-responsive scanner-result-table-wrap">
-              <table className="data-table scanner-result-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>{renderSortHeader("Symbol", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>{renderSortHeader("Company", "company", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>{renderSortHeader("Sector", "sector", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>{renderSortHeader("Day Vol", "volume", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>{renderSortHeader("Change %", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>1Y %</th>
-                    <th>YTD %</th>
-                    <th>{renderSortHeader("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>1D</th>
-                    <th>1W</th>
-                    <th>{renderSortHeader("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pagedRows.map((row, index) => (
-                    <tr key={`${row.ticker}-${index}`}>
-                      <td data-label="#">{(normalizedPage - 1) * PAGE_SIZE + index + 1}</td>
-                      <td data-label="Symbol">
-                        <Link className="scanner-result-symbol" to={row.chartHref}>
-                          <span>{row.ticker}</span>
-                          {row.isNew ? <span className="scanner-inline-badge is-new">New</span> : null}
-                          {row.setupLabel ? <span className="scanner-inline-badge">{row.setupLabel}</span> : null}
-                        </Link>
-                      </td>
-                      <td data-label="Company">
-                        <div className="scanner-result-company">
+            {viewMode === "charts" ? (
+              <div className={`scanner-result-chart-grid is-${chartColumns}-col`}>
+                {pagedRows.map((row, index) => {
+                  const chartPayload = chartPayloads[row.ticker];
+                  const chartCandles = buildMiniChartCandles(chartPayload);
+                  const isChartLoading = Boolean(chartLoadingTickers[row.ticker]);
+                  const chartError = chartErrors[row.ticker];
+                  const latestCandle = chartCandles[chartCandles.length - 1] ?? null;
+                  const resolvedChange = row.changePct ?? computeDayChangePct(chartCandles);
+                  return (
+                    <article key={`${row.ticker}-${index}`} className="scanner-chart-card">
+                      <div className="scanner-chart-card-header">
+                        <div className="scanner-chart-card-heading">
+                          <div className="scanner-chart-card-symbol-row">
+                            <Link className="scanner-result-symbol" to={row.chartHref}>
+                              <span>{row.ticker}</span>
+                            </Link>
+                            {row.isNew ? <span className="scanner-inline-badge is-new">New</span> : null}
+                            {row.setupLabel ? <span className="scanner-inline-badge">{row.setupLabel}</span> : null}
+                          </div>
                           <strong>{row.company || row.ticker}</strong>
-                          {row.summary ? <span>{row.summary}</span> : null}
+                          <span>{row.sector}</span>
                         </div>
-                      </td>
-                      <td data-label="Sector">
-                        <div className="scanner-result-sector">
-                          <strong>{row.sector}</strong>
-                          {row.industry && row.industry !== row.sector ? <span>{row.industry}</span> : null}
+                        <div className="scanner-chart-card-price">
+                          <strong>{latestCandle ? latestCandle.close.toFixed(2) : "--"}</strong>
+                          {renderChange(resolvedChange)}
                         </div>
-                      </td>
-                      <td data-label="Day Vol">{formatVolume(row.dayVolume)}</td>
-                      <td data-label="Change %">{renderChange(row.changePct)}</td>
-                      <td data-label="1Y %">{renderChange(row.perfYearPct)}</td>
-                      <td data-label="YTD %">{renderChange(row.perfYtdPct)}</td>
-                      <td data-label="TA">
-                        <span className={`scanner-score-pill ${toneForScore(row.taScore, 10)}`}>{formatTenPointScore(row.taScore)}</span>
-                      </td>
-                      <td data-label="1D">{row.technicalIndicator1d || "--"}</td>
-                      <td data-label="1W">{row.technicalIndicator1w || "--"}</td>
-                      <td data-label="FA">
-                        <span className={`scanner-score-pill ${toneForScore(row.faScore, 10)}`}>{formatTenPointScore(row.faScore)}</span>
-                      </td>
-                      <td data-label="ARS">{formatPercentScore(row.arsScore)}</td>
-                      <td data-label="ALS Score" className="scanner-result-als-cell">
-                        {formatIntegerScore(row.alsScore)}
-                      </td>
+                      </div>
+                      <div className="scanner-chart-card-score-row">
+                        <span className={`scanner-score-pill ${toneForScore(row.alsScore, 100)}`}>ALS {formatIntegerScore(row.alsScore)}</span>
+                        <span className={`scanner-score-pill ${toneForScore(row.taScore, 10)}`}>TA {formatTenPointScore(row.taScore)}</span>
+                        <span className="scanner-chart-card-volume">Vol {formatVolume(row.dayVolume)}</span>
+                      </div>
+                      <div className="scanner-chart-card-body">
+                        {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart…`} /> : null}
+                        {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
+                        {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
+                        {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={row.ticker} candles={chartCandles} /> : null}
+                      </div>
+                      <div className="scanner-chart-card-footer">
+                        <span>{chartPayload?.resolved_as_of_date ? `As of ${chartPayload.resolved_as_of_date}` : "Latest"}</span>
+                        <Link to={row.chartHref}>Analyze Full Chart</Link>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="data-table-responsive scanner-result-table-wrap">
+                <table className="data-table scanner-result-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>{renderSortHeader("Symbol", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>{renderSortHeader("Company", "company", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>{renderSortHeader("Sector", "sector", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>{renderSortHeader("Day Vol", "volume", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>{renderSortHeader("Change %", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>1Y %</th>
+                      <th>YTD %</th>
+                      <th>{renderSortHeader("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>1D</th>
+                      <th>1W</th>
+                      <th>{renderSortHeader("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {pagedRows.map((row, index) => (
+                      <tr key={`${row.ticker}-${index}`}>
+                        <td data-label="#">{(normalizedPage - 1) * pageSize + index + 1}</td>
+                        <td data-label="Symbol">
+                          <Link className="scanner-result-symbol" to={row.chartHref}>
+                            <span>{row.ticker}</span>
+                            {row.isNew ? <span className="scanner-inline-badge is-new">New</span> : null}
+                            {row.setupLabel ? <span className="scanner-inline-badge">{row.setupLabel}</span> : null}
+                          </Link>
+                        </td>
+                        <td data-label="Company">
+                          <div className="scanner-result-company">
+                            <strong>{row.company || row.ticker}</strong>
+                            {row.summary ? <span>{row.summary}</span> : null}
+                          </div>
+                        </td>
+                        <td data-label="Sector">
+                          <div className="scanner-result-sector">
+                            <strong>{row.sector}</strong>
+                            {row.industry && row.industry !== row.sector ? <span>{row.industry}</span> : null}
+                          </div>
+                        </td>
+                        <td data-label="Day Vol">{formatVolume(row.dayVolume)}</td>
+                        <td data-label="Change %">{renderChange(row.changePct)}</td>
+                        <td data-label="1Y %">{renderChange(row.perfYearPct)}</td>
+                        <td data-label="YTD %">{renderChange(row.perfYtdPct)}</td>
+                        <td data-label="TA">
+                          <span className={`scanner-score-pill ${toneForScore(row.taScore, 10)}`}>{formatTenPointScore(row.taScore)}</span>
+                        </td>
+                        <td data-label="1D">{row.technicalIndicator1d || "--"}</td>
+                        <td data-label="1W">{row.technicalIndicator1w || "--"}</td>
+                        <td data-label="FA">
+                          <span className={`scanner-score-pill ${toneForScore(row.faScore, 10)}`}>{formatTenPointScore(row.faScore)}</span>
+                        </td>
+                        <td data-label="ARS">{formatPercentScore(row.arsScore)}</td>
+                        <td data-label="ALS Score" className="scanner-result-als-cell">
+                          {formatIntegerScore(row.alsScore)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className="scanner-result-footer">
               <span>Page {normalizedPage} shows {formatCount(pagedRows.length)} stocks</span>
               <div className="scanner-result-preview-pills">
@@ -666,4 +824,23 @@ function csvValue(value: string) {
     return normalized;
   }
   return `"${normalized.split('"').join('""')}"`;
+}
+
+function buildMiniChartCandles(payload: WatchlistChartResponse | null | undefined): CandlePoint[] {
+  if (!payload) {
+    return [];
+  }
+  return payload.candles.map((item, index) => ({
+    ...item,
+    volume: payload.volume[index]?.value ?? 0,
+  }));
+}
+
+function computeDayChangePct(candles: CandlePoint[]) {
+  const latest = candles[candles.length - 1];
+  const previous = candles[candles.length - 2];
+  if (!latest || !previous || previous.close <= 0) {
+    return null;
+  }
+  return ((latest.close - previous.close) / previous.close) * 100;
 }
