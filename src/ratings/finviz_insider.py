@@ -36,6 +36,16 @@ class FinvizInsiderError(RuntimeError):
     pass
 
 
+def _emit_info(message: str) -> None:
+    logger.info(message)
+    print(message, flush=True)
+
+
+def _emit_warning(message: str) -> None:
+    logger.warning(message)
+    print(message, flush=True)
+
+
 def load_finviz_insider_signal_map(
     tickers: list[str],
     *,
@@ -67,17 +77,17 @@ def load_finviz_insider_signal_map(
         cache_key = _cache_key(ticker=ticker, as_of_date=as_of_date.isoformat(), lookback_days=lookback_days)
         window = normalized_caches.get(cache_key)
         if _is_cache_window_fresh(window, ttl_hours=ttl_hours):
-            logger.info("Finviz insider cache hit for %s as_of=%s lookback=%s", ticker, as_of_date.isoformat(), lookback_days)
+            _emit_info(f"finviz insider cache hit ticker={ticker} as_of={as_of_date.isoformat()} lookback_days={lookback_days}")
             continue
         try:
             entries = fetch_finviz_insider_trades(ticker, session=active_session)
         except (FinvizInsiderError, requests.RequestException) as exc:
             entries = None
-            logger.warning("Finviz insider refresh failed for %s: %s", ticker, exc)
+            _emit_warning(f"finviz insider refresh failed ticker={ticker} error={exc}")
             if isinstance(window, dict) and isinstance(window.get("entries"), list):
-                logger.info("Finviz insider using stale cache for %s", ticker)
+                _emit_info(f"finviz insider using stale cache ticker={ticker}")
             else:
-                logger.info("Finviz insider skipping overlay for %s because no cache available", ticker)
+                _emit_info(f"finviz insider skipping overlay ticker={ticker} reason=no_cache")
         if entries is not None:
             normalized_caches[cache_key] = {
                 "ticker": ticker,
@@ -88,7 +98,7 @@ def load_finviz_insider_signal_map(
                 "entries": entries,
             }
             refreshed_any = True
-            logger.info("Finviz insider refreshed %s rows=%s", ticker, len(entries))
+            _emit_info(f"finviz insider refreshed ticker={ticker} rows={len(entries)}")
         if index < len(normalized_tickers) - 1:
             time.sleep(0.2)
 
@@ -100,7 +110,7 @@ def load_finviz_insider_signal_map(
             "caches": normalized_caches,
         }
         cache_path.write_text(json.dumps(wrapped, indent=2), encoding="utf-8")
-        logger.info("Finviz insider cache wrote %s", cache_path)
+        _emit_info(f"finviz insider cache wrote path={cache_path}")
     return _build_signal_map(
         caches=normalized_caches,
         tickers=normalized_tickers,
