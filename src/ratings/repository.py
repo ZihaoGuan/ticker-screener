@@ -98,13 +98,14 @@ class RatingsRepository:
             INSERT INTO ticker_fundamentals_snapshots (
               ticker, as_of_date, sector, industry, market_cap, enterprise_value, forward_pe,
               peg_ratio_5y, price_to_sales, price_to_book, price_to_fcf, profit_margin_pct,
-              operating_margin_pct, gross_margin_pct, roa_pct, roe_pct, eps_this_y_pct,
+              operating_margin_pct, gross_margin_pct, roa_pct, roe_pct, institutional_ownership_pct,
+              shares_float, shares_outstanding, eps_this_y_pct,
               eps_next_y_pct, eps_next_5y_pct, sales_qq_pct, eps_qq_pct, perf_month_pct,
               perf_quarter_pct, perf_half_pct, perf_year_pct, perf_ytd_pct, volatility_week_pct,
               volatility_month_pct, source, source_url, parse_status, parse_error, scraped_at, updated_at
             ) VALUES (
               %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), NOW()
+              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), NOW()
             )
             ON CONFLICT (ticker, as_of_date) DO UPDATE SET
               sector = EXCLUDED.sector,
@@ -121,6 +122,9 @@ class RatingsRepository:
               gross_margin_pct = EXCLUDED.gross_margin_pct,
               roa_pct = EXCLUDED.roa_pct,
               roe_pct = EXCLUDED.roe_pct,
+              institutional_ownership_pct = EXCLUDED.institutional_ownership_pct,
+              shares_float = EXCLUDED.shares_float,
+              shares_outstanding = EXCLUDED.shares_outstanding,
               eps_this_y_pct = EXCLUDED.eps_this_y_pct,
               eps_next_y_pct = EXCLUDED.eps_next_y_pct,
               eps_next_5y_pct = EXCLUDED.eps_next_5y_pct,
@@ -158,6 +162,9 @@ class RatingsRepository:
                 item.gross_margin_pct,
                 item.roa_pct,
                 item.roe_pct,
+                item.institutional_ownership_pct,
+                item.shares_float,
+                item.shares_outstanding,
                 item.eps_this_y_pct,
                 item.eps_next_y_pct,
                 item.eps_next_5y_pct,
@@ -574,7 +581,8 @@ class RatingsRepository:
                    COALESCE(fs.industry, tm.industry) AS industry, fs.source, fs.source_url, fs.parse_status, fs.parse_error,
                    fs.scraped_at, fs.updated_at, fs.market_cap, fs.enterprise_value, fs.forward_pe, fs.peg_ratio_5y,
                    fs.price_to_sales, fs.price_to_book, fs.price_to_fcf, fs.profit_margin_pct, fs.operating_margin_pct,
-                   fs.gross_margin_pct, fs.roa_pct, fs.roe_pct, fs.eps_this_y_pct, fs.eps_next_y_pct, fs.eps_next_5y_pct,
+                   fs.gross_margin_pct, fs.roa_pct, fs.roe_pct, fs.institutional_ownership_pct, fs.shares_float,
+                   fs.shares_outstanding, fs.eps_this_y_pct, fs.eps_next_y_pct, fs.eps_next_5y_pct,
                    fs.sales_qq_pct, fs.eps_qq_pct, fs.perf_month_pct, fs.perf_quarter_pct, fs.perf_half_pct, fs.perf_year_pct,
                    fs.perf_ytd_pct, fs.volatility_week_pct, fs.volatility_month_pct
             FROM ticker_fundamentals_snapshots fs
@@ -653,6 +661,9 @@ class RatingsRepository:
               f.gross_margin_pct,
               f.roa_pct,
               f.roe_pct,
+              f.institutional_ownership_pct,
+              f.shares_float,
+              f.shares_outstanding,
               f.eps_this_y_pct,
               f.eps_next_y_pct,
               f.eps_next_5y_pct,
@@ -749,6 +760,9 @@ class RatingsRepository:
                 gross_margin_pct,
                 roa_pct,
                 roe_pct,
+                institutional_ownership_pct,
+                shares_float,
+                shares_outstanding,
                 eps_this_y_pct,
                 eps_next_y_pct,
                 eps_next_5y_pct,
@@ -782,6 +796,9 @@ class RatingsRepository:
                 "gross_margin_pct": float(gross_margin_pct) if gross_margin_pct is not None else None,
                 "roa_pct": float(roa_pct) if roa_pct is not None else None,
                 "roe_pct": float(roe_pct) if roe_pct is not None else None,
+                "institutional_ownership_pct": float(institutional_ownership_pct) if institutional_ownership_pct is not None else None,
+                "shares_float": float(shares_float) if shares_float is not None else None,
+                "shares_outstanding": float(shares_outstanding) if shares_outstanding is not None else None,
                 "eps_this_y_pct": float(eps_this_y_pct) if eps_this_y_pct is not None else None,
                 "eps_next_y_pct": float(eps_next_y_pct) if eps_next_y_pct is not None else None,
                 "eps_next_5y_pct": float(eps_next_5y_pct) if eps_next_5y_pct is not None else None,
@@ -911,6 +928,143 @@ class RatingsRepository:
             }
         return result
 
+    def load_latest_fundamentals_snapshots_for_tickers(
+        self,
+        tickers: Iterable[str],
+        *,
+        as_of_date: dt.date | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
+        if not normalized:
+            return {}
+        connection = self._connect()
+        if connection is None:
+            return {}
+        sql = """
+            SELECT DISTINCT ON (f.ticker)
+              f.ticker,
+              f.as_of_date,
+              COALESCE(f.sector, tm.sector) AS sector,
+              COALESCE(f.industry, tm.industry) AS industry,
+              f.market_cap,
+              f.enterprise_value,
+              f.forward_pe,
+              f.peg_ratio_5y,
+              f.price_to_sales,
+              f.price_to_book,
+              f.price_to_fcf,
+              f.profit_margin_pct,
+              f.operating_margin_pct,
+              f.gross_margin_pct,
+              f.roa_pct,
+              f.roe_pct,
+              f.institutional_ownership_pct,
+              f.shares_float,
+              f.shares_outstanding,
+              f.eps_this_y_pct,
+              f.eps_next_y_pct,
+              f.eps_next_5y_pct,
+              f.sales_qq_pct,
+              f.eps_qq_pct,
+              f.perf_month_pct,
+              f.perf_quarter_pct,
+              f.perf_half_pct,
+              f.perf_year_pct,
+              f.perf_ytd_pct,
+              f.volatility_week_pct,
+              f.volatility_month_pct,
+              f.source,
+              f.source_url,
+              f.parse_status,
+              f.parse_error
+            FROM ticker_fundamentals_snapshots f
+            LEFT JOIN ticker_metadata tm
+              ON tm.ticker = f.ticker
+            WHERE f.ticker = ANY(%s)
+              AND (%s::date IS NULL OR f.as_of_date <= %s)
+            ORDER BY f.ticker, f.as_of_date DESC, f.updated_at DESC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized, as_of_date, as_of_date))
+                rows = cursor.fetchall()
+        result: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            (
+                ticker,
+                snapshot_date,
+                sector,
+                industry,
+                market_cap,
+                enterprise_value,
+                forward_pe,
+                peg_ratio_5y,
+                price_to_sales,
+                price_to_book,
+                price_to_fcf,
+                profit_margin_pct,
+                operating_margin_pct,
+                gross_margin_pct,
+                roa_pct,
+                roe_pct,
+                institutional_ownership_pct,
+                shares_float,
+                shares_outstanding,
+                eps_this_y_pct,
+                eps_next_y_pct,
+                eps_next_5y_pct,
+                sales_qq_pct,
+                eps_qq_pct,
+                perf_month_pct,
+                perf_quarter_pct,
+                perf_half_pct,
+                perf_year_pct,
+                perf_ytd_pct,
+                volatility_week_pct,
+                volatility_month_pct,
+                source,
+                source_url,
+                parse_status,
+                parse_error,
+            ) = row
+            result[str(ticker).upper()] = {
+                "as_of_date": snapshot_date.isoformat() if isinstance(snapshot_date, dt.date) else str(snapshot_date or ""),
+                "sector": sector,
+                "industry": industry,
+                "market_cap": float(market_cap) if market_cap is not None else None,
+                "enterprise_value": float(enterprise_value) if enterprise_value is not None else None,
+                "forward_pe": float(forward_pe) if forward_pe is not None else None,
+                "peg_ratio_5y": float(peg_ratio_5y) if peg_ratio_5y is not None else None,
+                "price_to_sales": float(price_to_sales) if price_to_sales is not None else None,
+                "price_to_book": float(price_to_book) if price_to_book is not None else None,
+                "price_to_fcf": float(price_to_fcf) if price_to_fcf is not None else None,
+                "profit_margin_pct": float(profit_margin_pct) if profit_margin_pct is not None else None,
+                "operating_margin_pct": float(operating_margin_pct) if operating_margin_pct is not None else None,
+                "gross_margin_pct": float(gross_margin_pct) if gross_margin_pct is not None else None,
+                "roa_pct": float(roa_pct) if roa_pct is not None else None,
+                "roe_pct": float(roe_pct) if roe_pct is not None else None,
+                "institutional_ownership_pct": float(institutional_ownership_pct) if institutional_ownership_pct is not None else None,
+                "shares_float": float(shares_float) if shares_float is not None else None,
+                "shares_outstanding": float(shares_outstanding) if shares_outstanding is not None else None,
+                "eps_this_y_pct": float(eps_this_y_pct) if eps_this_y_pct is not None else None,
+                "eps_next_y_pct": float(eps_next_y_pct) if eps_next_y_pct is not None else None,
+                "eps_next_5y_pct": float(eps_next_5y_pct) if eps_next_5y_pct is not None else None,
+                "sales_qq_pct": float(sales_qq_pct) if sales_qq_pct is not None else None,
+                "eps_qq_pct": float(eps_qq_pct) if eps_qq_pct is not None else None,
+                "perf_month_pct": float(perf_month_pct) if perf_month_pct is not None else None,
+                "perf_quarter_pct": float(perf_quarter_pct) if perf_quarter_pct is not None else None,
+                "perf_half_pct": float(perf_half_pct) if perf_half_pct is not None else None,
+                "perf_year_pct": float(perf_year_pct) if perf_year_pct is not None else None,
+                "perf_ytd_pct": float(perf_ytd_pct) if perf_ytd_pct is not None else None,
+                "volatility_week_pct": float(volatility_week_pct) if volatility_week_pct is not None else None,
+                "volatility_month_pct": float(volatility_month_pct) if volatility_month_pct is not None else None,
+                "source": source,
+                "source_url": source_url,
+                "parse_status": parse_status,
+                "parse_error": parse_error,
+            }
+        return result
+
     def load_latest_rating_snapshots_for_tickers(self, tickers: Iterable[str]) -> dict[str, dict[str, Any]]:
         normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
         if not normalized:
@@ -1010,7 +1164,12 @@ class RatingsRepository:
             }
         return result
 
-    def load_latest_technical_rating_snapshots_for_tickers(self, tickers: Iterable[str]) -> dict[str, dict[str, Any]]:
+    def load_latest_technical_rating_snapshots_for_tickers(
+        self,
+        tickers: Iterable[str],
+        *,
+        as_of_date: dt.date | None = None,
+    ) -> dict[str, dict[str, Any]]:
         normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
         if not normalized:
             return {}
@@ -1033,11 +1192,12 @@ class RatingsRepository:
             LEFT JOIN ticker_metadata tm
               ON tm.ticker = r.ticker
             WHERE r.ticker = ANY(%s)
+              AND (%s::date IS NULL OR r.as_of_date = %s)
             ORDER BY r.ticker, r.as_of_date DESC, r.updated_at DESC
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (normalized,))
+                cursor.execute(sql, (normalized, as_of_date, as_of_date))
                 rows = cursor.fetchall()
         result: dict[str, dict[str, Any]] = {}
         for (

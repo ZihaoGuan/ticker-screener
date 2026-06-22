@@ -34,6 +34,11 @@ PIPELINES = (
         "fallback_filename": "peg_earnings_gap_{date}.json",
     },
     {
+        "id": "canslim",
+        "label": "CANSLIM",
+        "filename": "canslim_{date}.json",
+    },
+    {
         "id": "vcp",
         "label": "VCP",
         "filename": "vcp_{date}.json",
@@ -195,6 +200,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "weekly_rs": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sean_peg": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "legacy_peg": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "canslim": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "cup_handle": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "weekly_htf_pullback": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

@@ -30,6 +30,9 @@ class FinvizApiParserTests(unittest.TestCase):
                 "Gross Marg": "74.15%",
                 "ROA": "82.97%",
                 "ROE": "114.29%",
+                "Inst Own": "42.50%",
+                "Shs Float": "2.41B",
+                "Shs Outstand": "2.46B",
                 "EPS this Y": "87.17%",
                 "EPS growth next Y": "39.83%",
                 "EPS next 5Y": "45.51%",
@@ -53,6 +56,9 @@ class FinvizApiParserTests(unittest.TestCase):
         self.assertEqual(snapshot.gross_margin_pct, 74.15)
         self.assertEqual(snapshot.perf_quarter_pct, 13.84)
         self.assertEqual(snapshot.volatility_month_pct, 3.58)
+        self.assertEqual(snapshot.institutional_ownership_pct, 42.5)
+        self.assertEqual(snapshot.shares_float, 2_410_000_000.0)
+        self.assertEqual(snapshot.shares_outstanding, 2_460_000_000.0)
         self.assertFalse(snapshot_needs_fallback(snapshot))
 
     def test_missing_required_metric_does_not_trigger_fallback_when_classification_exists(self) -> None:

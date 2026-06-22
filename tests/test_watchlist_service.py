@@ -129,6 +129,11 @@ class WatchlistServiceTests(unittest.TestCase):
             modified_at=dt.datetime(2026, 6, 12, 1, 0, tzinfo=dt.timezone.utc),
         )
         self._write_watchlist(
+            "canslim_2026-06-11",
+            tickers=["NVDA", "PLTR", "APP"],
+            modified_at=dt.datetime(2026, 6, 12, 0, 52, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
             "cup_detection_2026-06-11",
             tickers=["U"],
             modified_at=dt.datetime(2026, 6, 12, 0, 55, tzinfo=dt.timezone.utc),
@@ -170,6 +175,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["rs"]["entry_count"], 2)
         self.assertEqual(cards["daily_rs_new_high"]["stem"], "daily_rs_new_high_2026-06-11")
         self.assertEqual(cards["daily_rs_new_high"]["entry_count"], 3)
+        self.assertEqual(cards["canslim"]["stem"], "canslim_2026-06-11")
+        self.assertEqual(cards["canslim"]["entry_count"], 3)
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-11")
         self.assertEqual(cards["sean_gap_up"]["entry_count"], 2)
         self.assertEqual(cards["cup_detection"]["stem"], "cup_detection_2026-06-11")
@@ -203,6 +210,11 @@ class WatchlistServiceTests(unittest.TestCase):
             "fearzone_2026-06-12",
             tickers=["TSLA", "HOOD"],
             modified_at=dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "canslim_2026-06-12",
+            tickers=["NVDA", "APP"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 39, tzinfo=dt.timezone.utc),
         )
         self._write_watchlist(
             "vcs_critical_tightness_2026-06-12",
@@ -251,6 +263,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["rs"]["preview_tickers"], ["PLTR", "CRWV"])
         self.assertEqual(cards["daily_rs_new_high"]["stem"], "daily_rs_new_high_2026-06-12")
         self.assertEqual(cards["daily_rs_new_high"]["preview_tickers"], ["AAPL", "PLTR", "CRWV"])
+        self.assertEqual(cards["canslim"]["stem"], "canslim_2026-06-12")
+        self.assertEqual(cards["canslim"]["preview_tickers"], ["NVDA", "APP"])
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-12")
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-12")
         self.assertEqual(cards["vcs_critical_tightness"]["stem"], "vcs_critical_tightness_2026-06-12")

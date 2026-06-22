@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS ticker_fundamentals_snapshots (
   gross_margin_pct NUMERIC(18,6),
   roa_pct NUMERIC(18,6),
   roe_pct NUMERIC(18,6),
+  institutional_ownership_pct NUMERIC(18,6),
+  shares_float NUMERIC(24,6),
+  shares_outstanding NUMERIC(24,6),
   eps_this_y_pct NUMERIC(18,6),
   eps_next_y_pct NUMERIC(18,6),
   eps_next_5y_pct NUMERIC(18,6),
@@ -102,6 +105,15 @@ CREATE INDEX IF NOT EXISTS idx_ticker_fundamentals_snapshots_date_ticker
 
 CREATE INDEX IF NOT EXISTS idx_ticker_fundamentals_snapshots_date_sector
   ON ticker_fundamentals_snapshots(as_of_date, sector);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS institutional_ownership_pct NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS shares_float NUMERIC(24,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS shares_outstanding NUMERIC(24,6);
 
 CREATE TABLE IF NOT EXISTS ticker_chart_fundamentals_cache (
   ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),

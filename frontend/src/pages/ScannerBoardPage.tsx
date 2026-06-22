@@ -14,6 +14,7 @@ const CARD_ART: Record<string, string> = {
   rs: "M24 118 L72 102 L118 84 L158 88 L204 54 L248 58 L276 44",
   sean_gap_up: "M24 122 L96 64 L142 88 L188 42 L188 84 L276 84",
   gap_fill: "M24 116 L88 114 L142 112 L182 76 L228 76 L276 48",
+  canslim: "M24 120 L74 112 L122 98 L166 78 L208 60 L246 46 L276 34",
   inside_dryup_v2: "M24 74 L92 74 L140 74 L188 76 L234 78 L276 80",
   wyckoff_buy_signal: "M24 118 L72 120 L118 108 L152 126 L190 94 L228 84 L276 52",
   wyckoff_sell_signal: "M24 48 L76 44 L118 58 L162 54 L208 82 L246 104 L276 118",
@@ -97,7 +98,7 @@ export function ScannerBoardPage() {
         <div className="scanner-board-console-row">
           <div>
             <span className="eyebrow">Board logic</span>
-            <p className="panel-copy">Weekly RS New High, Weekly RS New High Before Price, Daily RS New High, RS New High Before Price, Sean Gap Up, Gap Fill, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Cup Detection, 8 Week Run Up (Doubler), Three Weeks Tight, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Fearzone, and TD9 Bullish.</p>
+            <p className="panel-copy">Weekly RS New High, Weekly RS New High Before Price, Daily RS New High, RS New High Before Price, Sean Gap Up, Gap Fill, CANSLIM High Score, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Cup Detection, 8 Week Run Up (Doubler), Three Weeks Tight, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Fearzone, and TD9 Bullish.</p>
           </div>
           <div>
             <span className="eyebrow">Navigation</span>

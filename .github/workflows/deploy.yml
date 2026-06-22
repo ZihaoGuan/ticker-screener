@@ -82,5 +82,13 @@ jobs:
             cd "${APP_DIR}"
             docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
             cd deploy
+            docker-compose up -d db
+            for _ in $(seq 1 30); do
+              if docker-compose exec -T db sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then
+                break
+              fi
+              sleep 2
+            done
+            docker-compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < ../sql/postgres_app_schema.sql
             docker-compose ${COMPOSE_COMMAND}
             docker-compose ps

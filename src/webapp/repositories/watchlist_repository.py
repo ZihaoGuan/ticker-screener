@@ -197,6 +197,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("pre_earnings_ma_stack", "pre_earnings_ma_stack", "Pre Earnings MA Stack"),
         ("earnings_weekly_criteria", "earnings_weekly_criteria", "Earnings Weekly Criteria"),
         ("earnings_growth", "earnings_growth", "Earnings Growth"),
+        ("canslim", "canslim", "CANSLIM"),
         ("peg", "peg", "PEG"),
         ("rs", "rs", "RS"),
     )

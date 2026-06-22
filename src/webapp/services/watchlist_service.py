@@ -139,6 +139,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "amber",
     },
     {
+        "id": "canslim",
+        "strategy_id": "canslim",
+        "label": "CANSLIM High Score",
+        "description": "Finviz plus local technical composite leaders ranked by CANSLIM-style growth, supply, leadership, and market context.",
+        "timeframe": "Daily",
+        "accent": "lime",
+    },
+    {
         "id": "macd_golden_cross",
         "strategy_id": "macd_golden_cross",
         "label": "MACD Golden Cross",
