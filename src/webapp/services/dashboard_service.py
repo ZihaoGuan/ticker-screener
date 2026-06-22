@@ -295,15 +295,16 @@ def _build_bearish_td9_payload(*, frame: pd.DataFrame, ticker: str, data_source:
 
 
 def _build_options_positioning_payload(*, repository: DashboardRepository, ticker: str) -> dict[str, Any]:
-    summary = repository.get_latest_screen_run_summary(strategy_id="flashalpha_gex_close")
+    options_ticker = "SPX"
+    summary = repository.get_latest_screen_run_summary(strategy_id="flashalpha_gex_close", preferred_ticker=options_ticker)
     if not isinstance(summary, dict):
         return {
-            "ticker": ticker,
+            "ticker": options_ticker,
             "data_source": "unavailable",
             "latest": None,
         }
     return {
-        "ticker": str(summary.get("ticker") or ticker).strip().upper(),
+        "ticker": str(summary.get("ticker") or options_ticker).strip().upper(),
         "data_source": "database",
         "latest": {
             "as_of": str(summary.get("api_as_of") or summary.get("as_of_date") or ""),

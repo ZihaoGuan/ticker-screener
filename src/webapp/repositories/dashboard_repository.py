@@ -21,7 +21,7 @@ class DashboardRepository:
             "screen_run_count": None,
         }
 
-    def get_latest_screen_run_summary(self, *, strategy_id: str) -> dict[str, Any] | None:
+    def get_latest_screen_run_summary(self, *, strategy_id: str, preferred_ticker: str | None = None) -> dict[str, Any] | None:
         rows = self.history_repository.list_screen_runs(strategy_id=strategy_id, limit=10)
         if not rows:
             return None
@@ -32,6 +32,15 @@ class DashboardRepository:
                 candidates.append(payload)
         if not candidates:
             return None
+        normalized_preferred_ticker = str(preferred_ticker or "").strip().upper()
+        if normalized_preferred_ticker:
+            preferred_candidates = [
+                payload
+                for payload in candidates
+                if str(payload.get("ticker") or "").strip().upper() == normalized_preferred_ticker
+            ]
+            if preferred_candidates:
+                candidates = preferred_candidates
         return max(candidates, key=self._summary_completeness_score)
 
     def _coerce_summary_payload(self, payload: Any) -> dict[str, Any] | None:

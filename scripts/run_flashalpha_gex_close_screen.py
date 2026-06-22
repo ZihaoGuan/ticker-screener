@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config" / "market_config.json"))
     parser.add_argument("--date-label", help="Override artifact date label (YYYY-MM-DD).")
     parser.add_argument("--as-of-date", help="Label the snapshot with a trading date (YYYY-MM-DD).")
-    parser.add_argument("--symbol", help="Underlying symbol. Defaults to benchmark ticker from config.")
+    parser.add_argument("--symbol", help="Underlying symbol. Defaults to SPX for the dashboard options-positioning snapshot.")
     parser.add_argument("--expiration", help="Optional expiry filter (YYYY-MM-DD).")
     parser.add_argument("--min-oi", type=int, default=0, help="Optional minimum effective OI filter applied to the CBOE chain.")
     return parser.parse_args()
@@ -43,7 +43,7 @@ def main() -> int:
     config = load_app_config(args.config)
     as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else dt.date.today()
     date_label = args.date_label or today_label(as_of_date)
-    symbol = str(args.symbol or config.benchmark_ticker).strip().upper()
+    symbol = str(args.symbol or "SPX").strip().upper()
 
     api_payload = fetch_gex_snapshot(symbol=symbol, expiration=args.expiration, min_oi=max(0, int(args.min_oi or 0)))
     summary_snapshot = summarize_gex_payload(api_payload)

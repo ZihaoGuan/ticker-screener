@@ -12,20 +12,20 @@ from src.webapp.services.dashboard_service import DashboardService
 
 def _mock_options_positioning_summary() -> dict[str, object]:
     return {
-        "ticker": "SPY",
+        "ticker": "SPX",
         "api_as_of": "2026-06-22T20:00:00Z",
-        "spot": 600.0,
+        "spot": 6000.0,
         "net_gex": 123456789.0,
         "gex_regime": "positive",
         "gex_label": "Positive Gamma",
-        "gamma_flip": 592.0,
+        "gamma_flip": 5920.0,
         "distance_to_flip_pct": 1.35,
-        "call_wall": 605.0,
-        "put_wall": 590.0,
-        "atm_pin_strike": 600.0,
+        "call_wall": 6050.0,
+        "put_wall": 5900.0,
+        "atm_pin_strike": 6000.0,
         "put_call_oi_ratio": 0.82,
-        "summary": "Dealers likely dampen moves; spot above gamma flip 592.00; put wall 590.00, call wall 605.00.",
-        "methodology": "FlashAlpha GEX API snapshot persisted at close; dashboard reads stored DB summary only.",
+        "summary": "Dealers likely dampen moves; spot above gamma flip 5920.00; put wall 5900.00, call wall 6050.00.",
+        "methodology": "CBOE delayed options snapshot persisted at close; dashboard reads stored DB summary only.",
     }
 
 
@@ -35,6 +35,18 @@ def _mock_sparse_options_positioning_summary() -> dict[str, object]:
         "as_of_date": "2026-06-21",
         "gex_regime": "positive",
     }
+
+
+def _mock_spy_options_positioning_summary() -> dict[str, object]:
+    payload = _mock_options_positioning_summary().copy()
+    payload["ticker"] = "SPY"
+    payload["spot"] = 600.0
+    payload["gamma_flip"] = 592.0
+    payload["call_wall"] = 605.0
+    payload["put_wall"] = 590.0
+    payload["atm_pin_strike"] = 600.0
+    payload["summary"] = "Legacy SPY payload."
+    return payload
 
 
 class DashboardServiceTests(unittest.TestCase):
@@ -90,7 +102,7 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(spy_extension["label"], "10W SMA")
         self.assertEqual(spy_extension["data_source"], "database")
         self.assertIsNotNone(spy_extension["latest"])
-        self.assertEqual(options_positioning["ticker"], "SPY")
+        self.assertEqual(options_positioning["ticker"], "SPX")
         self.assertEqual(options_positioning["data_source"], "database")
         self.assertIsNotNone(options_positioning["latest"])
         latest = spy_extension["latest"]
@@ -131,8 +143,46 @@ class DashboardServiceTests(unittest.TestCase):
         latest = options_positioning["latest"]
         self.assertIsNotNone(latest)
         assert latest is not None
-        self.assertEqual(latest["spot"], 600.0)
+        self.assertEqual(options_positioning["ticker"], "SPX")
+        self.assertEqual(latest["spot"], 6000.0)
         self.assertEqual(latest["gex_label"], "Positive Gamma")
+        self.assertEqual(latest["summary"], _mock_options_positioning_summary()["summary"])
+
+    def test_get_dashboard_context_prefers_spx_options_positioning_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
+            index = pd.date_range(start="2026-01-05", periods=90, freq="B")
+            close_values = [100.0 + (idx * 0.8) for idx in range(len(index) - 8)]
+            close_values.extend([176.0, 181.0, 187.0, 194.0, 201.0, 208.0, 214.0, 210.0])
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[
+                    {"result_summary_json": _mock_spy_options_positioning_summary()},
+                    {"result_summary_json": _mock_options_positioning_summary()},
+                ],
+            ):
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        options_positioning = payload["market_health"]["options_positioning"]
+        latest = options_positioning["latest"]
+        self.assertEqual(options_positioning["ticker"], "SPX")
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest["spot"], 6000.0)
         self.assertEqual(latest["summary"], _mock_options_positioning_summary()["summary"])
 
     def test_get_dashboard_context_handles_missing_spy_market_health(self) -> None:

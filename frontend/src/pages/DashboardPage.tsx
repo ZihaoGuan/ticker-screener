@@ -129,10 +129,10 @@ export function DashboardPage() {
 
           <article className="metric-card">
             <div className="metric-card-head">
-              <h3>{optionsPositioning?.ticker ?? "SPY"} Options Positioning</h3>
+              <h3>{optionsPositioning?.ticker ?? "SPX"} Options Positioning</h3>
               <span className={`accent-mark accent-${optionsLatest?.gex_regime === "negative" ? "down" : "up"}`} />
             </div>
-            <p className="card-meta">FlashAlpha close snapshot loaded from persisted DB summary, not live-fetched on dashboard load.</p>
+            <p className="card-meta">CBOE-delayed close snapshot loaded from persisted DB summary, not live-fetched on dashboard load.</p>
             <div className="metric-value">
               {optionsLatest?.gex_label ?? "Unavailable"} <span>{optionsLatest ? `Flip ${formatPrice(optionsLatest.gamma_flip)}` : "No options snapshot"}</span>
             </div>
