@@ -328,14 +328,33 @@ export function ChartsPage() {
         .filter((marker): marker is NonNullable<typeof marker> => marker !== null),
     [overlayPayload?.setup_markers],
   );
-  const markDailyExtendMarkers = wyckoffMarkers.filter((marker) => marker.label === "Mark Extend");
-  const nonMarkMarkers = wyckoffMarkers.filter((marker) => marker.label !== "Mark Extend");
-  const wyckoffPrimaryMarkers = nonMarkMarkers.filter((marker) => marker.label !== "HOLD");
-  const wyckoffHoldMarkers = nonMarkMarkers.filter((marker) => marker.label === "HOLD");
+  const markDailyExtendMarkers = useMemo(() => wyckoffMarkers.filter((marker) => marker.label === "Mark Extend"), [wyckoffMarkers]);
+  const nonMarkMarkers = useMemo(() => wyckoffMarkers.filter((marker) => marker.label !== "Mark Extend"), [wyckoffMarkers]);
+  const wyckoffPrimaryMarkers = useMemo(() => nonMarkMarkers.filter((marker) => marker.label !== "HOLD"), [nonMarkMarkers]);
+  const wyckoffHoldMarkers = useMemo(() => nonMarkMarkers.filter((marker) => marker.label === "HOLD"), [nonMarkMarkers]);
   const wyckoffClimaxCount = wyckoffPrimaryMarkers.filter((marker) => marker.label === "BC").length;
   const wyckoffBuyCount = wyckoffPrimaryMarkers.filter((marker) => marker.label === "BUY").length;
   const wyckoffSellCount = wyckoffPrimaryMarkers.filter((marker) => marker.label === "SELL").length;
   const wyckoffHoldCount = wyckoffHoldMarkers.length;
+  const priceChartExtraMarkers = useMemo(
+    () => [
+      ...atrExtensionMarkers,
+      ...markDailyExtendMarkers,
+      ...(chartVisibility.wyckoffSignals ? wyckoffPrimaryMarkers : []),
+      ...(chartVisibility.wyckoffHoldSignals ? wyckoffHoldMarkers : []),
+      ...(chartVisibility.sellSignals ? sellIntoStrengthMarkers : []),
+    ],
+    [
+      atrExtensionMarkers,
+      chartVisibility.sellSignals,
+      chartVisibility.wyckoffHoldSignals,
+      chartVisibility.wyckoffSignals,
+      markDailyExtendMarkers,
+      sellIntoStrengthMarkers,
+      wyckoffHoldMarkers,
+      wyckoffPrimaryMarkers,
+    ],
+  );
   const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
     { key: "ema8", label: "EMA 8" },
     { key: "ema21", label: "EMA 21" },
@@ -1073,13 +1092,7 @@ export function ChartsPage() {
               ticker={requestedTicker}
               candles={chartData}
               overlays={chartPayload ?? undefined}
-              extraMarkers={[
-                ...atrExtensionMarkers,
-                ...markDailyExtendMarkers,
-                ...(chartVisibility.wyckoffSignals ? wyckoffPrimaryMarkers : []),
-                ...(chartVisibility.wyckoffHoldSignals ? wyckoffHoldMarkers : []),
-                ...(chartVisibility.sellSignals ? sellIntoStrengthMarkers : []),
-              ]}
+              extraMarkers={priceChartExtraMarkers}
               visibility={chartVisibility}
               forceFearzonePanel
               hoveredTime={syncedHoverTime}
