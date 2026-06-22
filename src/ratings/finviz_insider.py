@@ -3,12 +3,16 @@ from __future__ import annotations
 import datetime as dt
 from html.parser import HTMLParser
 import json
+import logging
 from pathlib import Path
 import time
 from typing import Any
 from urllib.parse import urljoin
 
 import requests
+
+
+logger = logging.getLogger(__name__)
 
 
 FINVIZ_INSIDER_CACHE_TTL_HOURS = 12
@@ -63,11 +67,17 @@ def load_finviz_insider_signal_map(
         cache_key = _cache_key(ticker=ticker, as_of_date=as_of_date.isoformat(), lookback_days=lookback_days)
         window = normalized_caches.get(cache_key)
         if _is_cache_window_fresh(window, ttl_hours=ttl_hours):
+            logger.info("Finviz insider cache hit for %s as_of=%s lookback=%s", ticker, as_of_date.isoformat(), lookback_days)
             continue
         try:
             entries = fetch_finviz_insider_trades(ticker, session=active_session)
-        except (FinvizInsiderError, requests.RequestException):
+        except (FinvizInsiderError, requests.RequestException) as exc:
             entries = None
+            logger.warning("Finviz insider refresh failed for %s: %s", ticker, exc)
+            if isinstance(window, dict) and isinstance(window.get("entries"), list):
+                logger.info("Finviz insider using stale cache for %s", ticker)
+            else:
+                logger.info("Finviz insider skipping overlay for %s because no cache available", ticker)
         if entries is not None:
             normalized_caches[cache_key] = {
                 "ticker": ticker,
@@ -78,6 +88,7 @@ def load_finviz_insider_signal_map(
                 "entries": entries,
             }
             refreshed_any = True
+            logger.info("Finviz insider refreshed %s rows=%s", ticker, len(entries))
         if index < len(normalized_tickers) - 1:
             time.sleep(0.2)
 
@@ -89,6 +100,7 @@ def load_finviz_insider_signal_map(
             "caches": normalized_caches,
         }
         cache_path.write_text(json.dumps(wrapped, indent=2), encoding="utf-8")
+        logger.info("Finviz insider cache wrote %s", cache_path)
     return _build_signal_map(
         caches=normalized_caches,
         tickers=normalized_tickers,
