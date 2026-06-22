@@ -64,16 +64,20 @@ def load_finviz_insider_signal_map(
         window = normalized_caches.get(cache_key)
         if _is_cache_window_fresh(window, ttl_hours=ttl_hours):
             continue
-        entries = fetch_finviz_insider_trades(ticker, session=active_session)
-        normalized_caches[cache_key] = {
-            "ticker": ticker,
-            "requested_tickers": [ticker],
-            "as_of_date": as_of_date.isoformat(),
-            "lookback_days": max(1, int(lookback_days)),
-            "refreshed_at": now_text,
-            "entries": entries,
-        }
-        refreshed_any = True
+        try:
+            entries = fetch_finviz_insider_trades(ticker, session=active_session)
+        except (FinvizInsiderError, requests.RequestException):
+            entries = None
+        if entries is not None:
+            normalized_caches[cache_key] = {
+                "ticker": ticker,
+                "requested_tickers": [ticker],
+                "as_of_date": as_of_date.isoformat(),
+                "lookback_days": max(1, int(lookback_days)),
+                "refreshed_at": now_text,
+                "entries": entries,
+            }
+            refreshed_any = True
         if index < len(normalized_tickers) - 1:
             time.sleep(0.2)
 

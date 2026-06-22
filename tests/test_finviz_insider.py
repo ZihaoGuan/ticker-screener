@@ -6,6 +6,8 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
+import requests
+
 from src.ratings.finviz_insider import _normalize_parsed_rows, fetch_finviz_insider_trades, load_finviz_insider_signal_map
 
 
@@ -140,6 +142,24 @@ class FinvizInsiderTests(unittest.TestCase):
             self.assertEqual(signal_map["RKT"]["discretionary_sell_amount"], 250_000.0)
             self.assertEqual(signal_map["RKT"]["net_amount_excl_10b5_1"], 500_000.0)
             self.assertTrue((artifacts_dir / "raw" / "insider" / "finviz_insider_trades_latest.json").exists())
+
+    def test_load_signal_map_ignores_http_error_and_keeps_batch_running(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            with patch(
+                "src.ratings.finviz_insider.fetch_finviz_insider_trades",
+                side_effect=requests.HTTPError("404 Client Error"),
+            ):
+                signal_map = load_finviz_insider_signal_map(
+                    ["AEFC"],
+                    as_of_date=dt.date(2026, 6, 22),
+                    lookback_days=30,
+                    artifacts_dir=artifacts_dir,
+                    ttl_hours=12,
+                )
+
+            self.assertEqual(signal_map, {})
+            self.assertFalse((artifacts_dir / "raw" / "insider" / "finviz_insider_trades_latest.json").exists())
 
 
 if __name__ == "__main__":
