@@ -184,6 +184,7 @@ export function ScannerResultPage() {
     const startIndex = (normalizedPage - 1) * pageSize;
     return filteredRows.slice(startIndex, startIndex + pageSize);
   }, [filteredRows, normalizedPage, pageSize]);
+  const pagedTickerKey = useMemo(() => pagedRows.map((row) => row.ticker).join("|"), [pagedRows]);
 
   useEffect(() => {
     if (currentPage !== normalizedPage) {
@@ -251,7 +252,7 @@ export function ScannerResultPage() {
     return () => {
       ignore = true;
     };
-  }, [chartLoadingTickers, chartPayloads, pagedRows, viewMode]);
+  }, [pagedTickerKey, viewMode]);
 
   const topNote = useMemo(() => {
     const first = detail?.entries.find((entry) => typeof entry.master_note === "string" && entry.master_note.trim());
