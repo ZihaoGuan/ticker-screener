@@ -41,6 +41,13 @@ type ScheduledActionOption = {
 };
 
 type ScheduleCadence = "weekdays" | "weekly_saturday";
+type ScheduleCronDraft = {
+  cadence: ScheduleCadence;
+  time: string;
+  cronExpr: string;
+  hasUnsupportedCron: boolean;
+  cadenceTouched: boolean;
+};
 
 export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const screenersMode = mode === "screeners";
@@ -100,6 +107,13 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const consoleRef = useRef<HTMLPreElement | null>(null);
   const shouldAutoScrollConsoleRef = useRef(true);
   const lastAutoScheduleIdentityRef = useRef<{ jobId: string; jobLabel: string }>({ jobId: "", jobLabel: "" });
+  const scheduleCronDraftRef = useRef<ScheduleCronDraft>({
+    cadence: "weekdays",
+    time: "16:30",
+    cronExpr: "30 16 * * 1-5",
+    hasUnsupportedCron: false,
+    cadenceTouched: false,
+  });
 
   const loadScheduledJobs = () => {
     if (!canManageSchedules) {
@@ -593,6 +607,13 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     const nextActionId = sortedScheduledActions[0]?.id ?? "weekly_rs";
     const nextAction = sortedScheduledActions.find((item) => item.id === nextActionId) ?? null;
     const nextIdentity = buildDefaultScheduleIdentity(nextAction);
+    scheduleCronDraftRef.current = {
+      cadence: "weekdays",
+      time: "16:30",
+      cronExpr: "30 16 * * 1-5",
+      hasUnsupportedCron: false,
+      cadenceTouched: false,
+    };
     setScheduleJobId(nextIdentity.jobId);
     setScheduleJobLabel(nextIdentity.jobLabel);
     setScheduleActionId(nextActionId);
@@ -616,13 +637,14 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setScheduleNotice("");
     try {
       const parsedOptions = parseScheduleOptionsJson(scheduleOptionsJson);
+      const scheduleCronPayload = resolveScheduleCronDraft(scheduleCronDraftRef.current);
       await fetchJson<{ ok: boolean }>("/api/admin/schedules", {
         method: "POST",
         body: JSON.stringify({
           job_id: scheduleJobId,
           job_label: scheduleJobLabel,
           action_id: scheduleActionId,
-          cron_expr: scheduleCronPreview,
+          cron_expr: scheduleCronPayload,
           cron_tz: scheduleCronTz,
           enabled: scheduleEnabled,
           options: parsedOptions,
@@ -641,6 +663,13 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 
   const handleEditSchedule = (job: ScheduledJobConfig) => {
     const parsedCron = parseSimpleScheduleCron(job.cron_expr);
+    scheduleCronDraftRef.current = {
+      cadence: parsedCron.cadence,
+      time: parsedCron.time,
+      cronExpr: job.cron_expr,
+      hasUnsupportedCron: !parsedCron.supported,
+      cadenceTouched: false,
+    };
     setScheduleJobId(job.job_id);
     setScheduleJobLabel(job.job_label);
     setScheduleActionId(job.action_id);
@@ -1594,7 +1623,13 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     <select
                       value={scheduleCadence}
                       onChange={(event) => {
-                        setScheduleCadence(event.target.value as ScheduleCadence);
+                        const nextCadence = event.target.value as ScheduleCadence;
+                        scheduleCronDraftRef.current = {
+                          ...scheduleCronDraftRef.current,
+                          cadence: nextCadence,
+                          cadenceTouched: true,
+                        };
+                        setScheduleCadence(nextCadence);
                         setScheduleCadenceTouched(true);
                       }}
                     >
@@ -1608,6 +1643,11 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                       type="time"
                       value={scheduleTime}
                       onChange={(event) => {
+                        scheduleCronDraftRef.current = {
+                          ...scheduleCronDraftRef.current,
+                          time: event.target.value,
+                          cadenceTouched: true,
+                        };
                         setScheduleTime(event.target.value);
                         setScheduleCadenceTouched(true);
                       }}
@@ -2113,6 +2153,13 @@ function buildScheduleCronExpr(cadence: ScheduleCadence, timeValue: string): str
   const [hours, minutes] = normalizedTime.split(":");
   const weekday = cadence === "weekly_saturday" ? "6" : "1-5";
   return `${Number(minutes)} ${Number(hours)} * * ${weekday}`;
+}
+
+function resolveScheduleCronDraft(draft: ScheduleCronDraft): string {
+  if (draft.hasUnsupportedCron && !draft.cadenceTouched) {
+    return draft.cronExpr;
+  }
+  return buildScheduleCronExpr(draft.cadence, draft.time);
 }
 
 function parseSimpleScheduleCron(cronExpr: string): { supported: boolean; cadence: ScheduleCadence; time: string } {
