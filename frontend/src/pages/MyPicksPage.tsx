@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
+import { PaginationControls } from "../components/PaginationControls";
+import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { MyPickRow, MyPicksContextResponse } from "../lib/types";
+import type { CandlePoint, MyPickRow, MyPicksContextResponse, WatchlistChartResponse } from "../lib/types";
 
 const EMPTY_CONTEXT: MyPicksContextResponse = {
   database_configured: false,
@@ -11,6 +13,9 @@ const EMPTY_CONTEXT: MyPicksContextResponse = {
   rows: [],
   available_added_dates: [],
 };
+const LIST_PAGE_SIZE = 50;
+const CHART_PAGE_SIZE = 9;
+type MyPicksViewMode = "list" | "charts";
 
 export function MyPicksPage() {
   const [context, setContext] = useState<MyPicksContextResponse>(EMPTY_CONTEXT);
@@ -22,6 +27,11 @@ export function MyPicksPage() {
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(false);
   const [sortDirection, setSortDirection] = useState<"desc" | "asc">("desc");
+  const [viewMode, setViewMode] = useState<MyPicksViewMode>("list");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [chartPayloads, setChartPayloads] = useState<Record<string, WatchlistChartResponse | null | undefined>>({});
+  const [chartErrors, setChartErrors] = useState<Record<string, string>>({});
+  const [chartLoadingTickers, setChartLoadingTickers] = useState<Record<string, boolean>>({});
 
   const loadPicks = () => {
     setIsLoading(true);
@@ -68,6 +78,94 @@ export function MyPicksPage() {
     });
     return Array.from(groups.entries()).map(([label, rows]) => ({ label, rows }));
   }, [filteredRows]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [groupByDate, search, sortDirection, viewMode]);
+
+  const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE : LIST_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const normalizedPage = Math.min(currentPage, totalPages);
+  const pagedRows = useMemo(() => {
+    const startIndex = (normalizedPage - 1) * pageSize;
+    return filteredRows.slice(startIndex, startIndex + pageSize);
+  }, [filteredRows, normalizedPage, pageSize]);
+  const groupedPagedRows = useMemo(() => {
+    const groups = new Map<string, MyPickRow[]>();
+    pagedRows.forEach((row) => {
+      const key = row.added_date || "Unknown date";
+      groups.set(key, [...(groups.get(key) ?? []), row]);
+    });
+    return Array.from(groups.entries()).map(([label, rows]) => ({ label, rows }));
+  }, [pagedRows]);
+  const pagedTickerKey = useMemo(() => pagedRows.map((row) => row.ticker).join("|"), [pagedRows]);
+
+  useEffect(() => {
+    if (currentPage !== normalizedPage) {
+      setCurrentPage(normalizedPage);
+    }
+  }, [currentPage, normalizedPage]);
+
+  useEffect(() => {
+    if (viewMode !== "charts" || pagedRows.length === 0) {
+      return;
+    }
+    const missingTickers = pagedRows
+      .map((row) => row.ticker)
+      .filter((ticker) => chartPayloads[ticker] === undefined && !chartLoadingTickers[ticker]);
+    if (missingTickers.length === 0) {
+      return;
+    }
+    let ignore = false;
+    setChartLoadingTickers((current) => {
+      const next = { ...current };
+      for (const ticker of missingTickers) {
+        next[ticker] = true;
+      }
+      return next;
+    });
+    void Promise.allSettled(
+      missingTickers.map(async (ticker) => {
+        const payload = await fetchJson<WatchlistChartResponse>(`/api/charts/${ticker}?period=18mo`);
+        return { ticker, payload };
+      }),
+    ).then((results) => {
+      if (ignore) {
+        return;
+      }
+      setChartPayloads((current) => {
+        const next = { ...current };
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            next[result.value.ticker] = result.value.payload;
+          }
+        }
+        return next;
+      });
+      setChartErrors((current) => {
+        const next = { ...current };
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            delete next[result.value.ticker];
+            return;
+          }
+          const failedTicker = missingTickers[index];
+          next[failedTicker] = result.reason instanceof Error ? result.reason.message : "Failed to load chart.";
+        });
+        return next;
+      });
+      setChartLoadingTickers((current) => {
+        const next = { ...current };
+        for (const ticker of missingTickers) {
+          delete next[ticker];
+        }
+        return next;
+      });
+    });
+    return () => {
+      ignore = true;
+    };
+  }, [pagedTickerKey, viewMode]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -134,6 +232,10 @@ export function MyPicksPage() {
             <strong>{sortDirection === "desc" ? "Newest first" : "Oldest first"}</strong>
           </div>
           <div className="earnings-metric">
+            <span className="eyebrow">View</span>
+            <strong>{viewMode === "charts" ? "Charts" : "List"}</strong>
+          </div>
+          <div className="earnings-metric">
             <span className="eyebrow">Latest Added</span>
             <strong>{formatLocalDateTime(filteredRows[0]?.added_at)}</strong>
           </div>
@@ -175,6 +277,13 @@ export function MyPicksPage() {
               <option value="asc">Oldest first</option>
             </select>
           </label>
+          <label className="field">
+            <span>View</span>
+            <select value={viewMode} onChange={(event) => setViewMode(event.target.value as MyPicksViewMode)}>
+              <option value="list">List</option>
+              <option value="charts">Charts</option>
+            </select>
+          </label>
           <div className="weekly-watchlist-actions">
             <Link className="ghost-button" to="/ratings">
               Open Ratings
@@ -188,15 +297,81 @@ export function MyPicksPage() {
       <section className="panel earnings-calendar-panel">
         <div className="panel-head earnings-calendar-head">
           <div>
-            <h2>{groupByDate ? "Grouped Picks" : "All Picks"}</h2>
+            <h2>{viewMode === "charts" ? "Chart View" : groupByDate ? "Grouped Picks" : "All Picks"}</h2>
             <span className="eyebrow">{formatCount(filteredRows.length)} names</span>
           </div>
         </div>
-        {!groupByDate && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
-        {!groupByDate && filteredRows.length > 0 ? <PicksTable rows={filteredRows} onDelete={handleDelete} isSaving={isSaving} /> : null}
-        {groupByDate && groupedRows.length === 0 ? <p className="panel-copy">No grouped picks match current filter.</p> : null}
-        {groupByDate
-          ? groupedRows.map((group) => (
+        {filteredRows.length > 0 ? (
+          <PaginationControls
+            currentPage={normalizedPage}
+            totalItems={filteredRows.length}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+          />
+        ) : null}
+        {viewMode === "charts" && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
+        {viewMode === "charts" && filteredRows.length > 0 ? (
+          <div className="scanner-result-chart-grid is-3-col">
+            {pagedRows.map((row) => {
+              const chartPayload = chartPayloads[row.ticker];
+              const chartCandles = buildMiniChartCandles(chartPayload);
+              const isChartLoading = Boolean(chartLoadingTickers[row.ticker]);
+              const chartError = chartErrors[row.ticker];
+              const latestCandle = chartCandles[chartCandles.length - 1] ?? null;
+              return (
+                <article key={row.id} className="scanner-chart-card">
+                  <div className="scanner-chart-card-header">
+                    <div className="scanner-chart-card-heading">
+                      <div className="scanner-chart-card-symbol-row">
+                        <Link className="scanner-result-symbol" to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>
+                          <span>{row.ticker}</span>
+                        </Link>
+                      </div>
+                      <strong>{[row.sector, row.industry].filter(Boolean).join(" / ") || "Watch name"}</strong>
+                      <span>Added {formatLocalDateTime(row.added_at)}</span>
+                    </div>
+                    <div className="scanner-chart-card-price">
+                      <strong>{latestCandle ? latestCandle.close.toFixed(2) : formatPrice(row.latest_close)}</strong>
+                      <span className={toneForPercent(row.distance_to_ema21_pct)}>
+                        {formatSignedPercent(row.distance_to_ema21_pct)} vs EMA21
+                      </span>
+                    </div>
+                  </div>
+                  <div className="scanner-chart-card-score-row">
+                    <span className={`scanner-score-pill ${toneForScore(row.als_score, 100)}`}>ALS {formatScoreInteger(row.als_score)}</span>
+                    <span className={`scanner-score-pill ${toneForScore(row.fundamental_rating, 100)}`}>FA {formatScoreInteger(row.fundamental_rating)}</span>
+                    <span className={`scanner-score-pill ${toneForScore(row.technical_rating, 10)}`}>TA {formatScore(row.technical_rating)}</span>
+                  </div>
+                  <div className="scanner-chart-card-body">
+                    {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
+                    {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
+                    {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
+                    {!isChartLoading && !chartError && chartCandles.length > 0 ? (
+                      <ScannerMiniChart
+                        ticker={row.ticker}
+                        candles={chartCandles}
+                        ema9={buildExponentialMovingAverage(chartCandles, 9)}
+                        ema21={chartPayload?.ema21 ?? buildExponentialMovingAverage(chartCandles, 21)}
+                      />
+                    ) : null}
+                  </div>
+                  <div className="scanner-chart-card-footer">
+                    <span>
+                      EMA9 {formatPrice(row.daily_ema9)} | EMA21 {formatPrice(row.daily_ema21)}
+                    </span>
+                    <Link to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>Analyze Full Chart</Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
+        {viewMode === "list" && !groupByDate && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
+        {viewMode === "list" && !groupByDate && filteredRows.length > 0 ? <PicksTable rows={pagedRows} onDelete={handleDelete} isSaving={isSaving} /> : null}
+        {viewMode === "list" && groupByDate && groupedRows.length === 0 ? <p className="panel-copy">No grouped picks match current filter.</p> : null}
+        {viewMode === "list" && groupByDate
+          ? groupedPagedRows.map((group) => (
               <div key={group.label} className="detail-subsection">
                 <div className="panel-head earnings-calendar-head">
                   <div>
@@ -208,6 +383,15 @@ export function MyPicksPage() {
               </div>
             ))
           : null}
+        {filteredRows.length > 0 ? (
+          <PaginationControls
+            currentPage={normalizedPage}
+            totalItems={filteredRows.length}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+          />
+        ) : null}
       </section>
     </div>
   );
@@ -230,6 +414,11 @@ function PicksTable({
             <th>Added</th>
             <th>Ticker</th>
             <th>Sector / Industry</th>
+            <th>Close</th>
+            <th>EMA9</th>
+            <th>vs EMA9</th>
+            <th>EMA21</th>
+            <th>vs EMA21</th>
             <th>ALS</th>
             <th>FA</th>
             <th>TA</th>
@@ -250,6 +439,15 @@ function PicksTable({
                 <Link to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
               </td>
               <td data-label="Sector / Industry">{[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}</td>
+              <td data-label="Close">{formatPrice(row.latest_close)}</td>
+              <td data-label="EMA9">{formatPrice(row.daily_ema9)}</td>
+              <td data-label="vs EMA9">
+                <span className={toneForPercent(row.distance_to_ema9_pct)}>{formatSignedPercent(row.distance_to_ema9_pct)}</span>
+              </td>
+              <td data-label="EMA21">{formatPrice(row.daily_ema21)}</td>
+              <td data-label="vs EMA21">
+                <span className={toneForPercent(row.distance_to_ema21_pct)}>{formatSignedPercent(row.distance_to_ema21_pct)}</span>
+              </td>
               <td data-label="ALS">{formatScore(row.als_score)}</td>
               <td data-label="FA">{formatScore(row.fundamental_rating)}</td>
               <td data-label="TA">{formatScore(row.technical_rating)}</td>
@@ -286,4 +484,77 @@ function formatScore(value: number | null | undefined) {
     return "--";
   }
   return value.toFixed(2);
+}
+
+function formatScoreInteger(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  return Math.round(value).toString();
+}
+
+function formatPrice(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  return value.toFixed(2);
+}
+
+function formatSignedPercent(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(2)}%`;
+}
+
+function toneForPercent(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return "";
+  }
+  if (value > 0) {
+    return "my-picks-percent is-positive";
+  }
+  if (value < 0) {
+    return "my-picks-percent is-negative";
+  }
+  return "my-picks-percent";
+}
+
+function toneForScore(value: number | null | undefined, maxValue: number) {
+  if (value == null || Number.isNaN(value)) {
+    return "is-neutral";
+  }
+  const ratio = maxValue > 0 ? value / maxValue : 0;
+  if (ratio >= 0.75) {
+    return "is-strong";
+  }
+  if (ratio >= 0.5) {
+    return "is-warm";
+  }
+  return "is-neutral";
+}
+
+function buildMiniChartCandles(payload: WatchlistChartResponse | null | undefined): CandlePoint[] {
+  if (!payload) {
+    return [];
+  }
+  return (payload.candles ?? []).map((item, index) => ({
+    ...item,
+    volume: payload.volume[index]?.value ?? 0,
+  }));
+}
+
+function buildExponentialMovingAverage(candles: CandlePoint[], length: number): Array<{ time: string; value: number }> {
+  if (candles.length === 0 || length <= 0) {
+    return [];
+  }
+  const alpha = 2 / (length + 1);
+  let ema = candles[0].close;
+  const points = [{ time: candles[0].time, value: Number(ema.toFixed(2)) }];
+  for (let index = 1; index < candles.length; index += 1) {
+    ema = (candles[index].close * alpha) + (ema * (1 - alpha));
+    points.push({ time: candles[index].time, value: Number(ema.toFixed(2)) });
+  }
+  return points;
 }

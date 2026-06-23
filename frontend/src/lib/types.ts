@@ -1537,6 +1537,12 @@ export type MyPickRow = {
     strategy_id: string;
     signal_date: string | null;
   }>;
+  trendline_as_of_date: string | null;
+  latest_close: number | null;
+  daily_ema9: number | null;
+  daily_ema21: number | null;
+  distance_to_ema9_pct: number | null;
+  distance_to_ema21_pct: number | null;
 };
 
 export type MyPicksContextResponse = {

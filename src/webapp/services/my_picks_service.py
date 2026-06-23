@@ -5,6 +5,7 @@ from typing import Any
 
 from src.ratings.repository import RatingsRepository
 from src.ticker_filters import normalize_ticker_symbol
+from src.trendline_snapshots import load_latest_trendline_snapshot_map
 from src.webapp.repositories.my_picks_repository import MyPicksRepository
 
 
@@ -18,6 +19,7 @@ class MyPicksService:
         picks = [self._serialize_pick(row) for row in self.repository.list_picks()]
         self._attach_rating_context(picks)
         self._attach_signal_context(picks)
+        self._attach_trendline_context(picks)
         return {
             "database_configured": self.repository.is_configured(),
             "total_count": len(picks),
@@ -45,6 +47,7 @@ class MyPicksService:
         row = self._serialize_pick(created)
         self._attach_rating_context([row])
         self._attach_signal_context([row])
+        self._attach_trendline_context([row])
         return row
 
     def delete_pick(self, pick_id: int) -> None:
@@ -93,6 +96,27 @@ class MyPicksService:
             row["latest_signal_date"] = summary.get("latest_signal_date")
             row["recent_signals"] = list(summary.get("recent_signals") or [])
 
+    def _attach_trendline_context(self, rows: list[dict[str, Any]]) -> None:
+        tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
+        if not tickers:
+            return
+        snapshot_map = load_latest_trendline_snapshot_map(
+            tickers,
+            as_of_date=dt.date.today(),
+            database_url=self.database_url,
+        )
+        for row in rows:
+            snapshot = snapshot_map.get(str(row.get("ticker") or "").upper()) or {}
+            close = _safe_float(snapshot.get("close"))
+            daily_ema9 = _safe_float(snapshot.get("daily_ema9"))
+            daily_ema21 = _safe_float(snapshot.get("daily_ema21"))
+            row["trendline_as_of_date"] = _to_iso_date(snapshot.get("trade_date"))
+            row["latest_close"] = close
+            row["daily_ema9"] = daily_ema9
+            row["daily_ema21"] = daily_ema21
+            row["distance_to_ema9_pct"] = _percent_distance(close, daily_ema9)
+            row["distance_to_ema21_pct"] = _percent_distance(close, daily_ema21)
+
     def _serialize_pick(self, row: dict[str, Any]) -> dict[str, Any]:
         added_at = _to_iso_datetime(row.get("created_at"))
         added_date = added_at.split("T", 1)[0] if added_at else None
@@ -120,6 +144,12 @@ class MyPicksService:
             "recent_signal_count": 0,
             "latest_signal_date": None,
             "recent_signals": [],
+            "trendline_as_of_date": None,
+            "latest_close": None,
+            "daily_ema9": None,
+            "daily_ema21": None,
+            "distance_to_ema9_pct": None,
+            "distance_to_ema21_pct": None,
         }
 
     def _normalize_ticker(self, ticker: str) -> str:
@@ -135,6 +165,15 @@ class MyPicksService:
 
 def _to_iso_datetime(value: object) -> str | None:
     if hasattr(value, "isoformat"):
+        return value.isoformat()
+    text = str(value or "").strip()
+    return text or None
+
+
+def _to_iso_date(value: object) -> str | None:
+    if isinstance(value, dt.datetime):
+        return value.date().isoformat()
+    if isinstance(value, dt.date):
         return value.isoformat()
     text = str(value or "").strip()
     return text or None
@@ -163,3 +202,9 @@ def _average_present(values: list[float | None]) -> float | None:
     if not numbers:
         return None
     return sum(float(value) for value in numbers) / len(numbers)
+
+
+def _percent_distance(value: float | None, baseline: float | None) -> float | None:
+    if value is None or baseline is None or baseline == 0:
+        return None
+    return ((value - baseline) / baseline) * 100.0

@@ -3961,6 +3961,18 @@ a {
   font-weight: 700;
 }
 
+.my-picks-percent {
+  font-weight: 700;
+}
+
+.my-picks-percent.is-positive {
+  color: #4ade80;
+}
+
+.my-picks-percent.is-negative {
+  color: #f87171;
+}
+
 .scanner-result-footer {
   display: flex;
   align-items: center;

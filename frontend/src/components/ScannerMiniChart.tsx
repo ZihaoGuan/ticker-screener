@@ -5,9 +5,11 @@ import type { CandlePoint } from "../lib/types";
 type ScannerMiniChartProps = {
   ticker: string;
   candles: CandlePoint[];
+  ema9?: Array<{ time: string; value: number }>;
+  ema21?: Array<{ time: string; value: number }>;
 };
 
-export function ScannerMiniChart({ ticker, candles }: ScannerMiniChartProps) {
+export function ScannerMiniChart({ ticker, candles, ema9 = [], ema21 = [] }: ScannerMiniChartProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -61,6 +63,18 @@ export function ScannerMiniChart({ ticker, candles }: ScannerMiniChartProps) {
       priceLineVisible: false,
       lastValueVisible: false,
     });
+    const ema9Series = chart.addLineSeries({
+      color: "#2dd4bf",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const ema21Series = chart.addLineSeries({
+      color: "#f59e0b",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
     chart.priceScale("").applyOptions({
       scaleMargins: {
         top: 0.76,
@@ -85,6 +99,8 @@ export function ScannerMiniChart({ ticker, candles }: ScannerMiniChartProps) {
         color: item.close >= item.open ? "rgba(48, 209, 88, 0.34)" : "rgba(255, 69, 58, 0.34)",
       })),
     );
+    ema9Series.setData(ema9);
+    ema21Series.setData(ema21);
     chart.timeScale().fitContent();
 
     const resizeObserver = new ResizeObserver(() => {
@@ -99,7 +115,7 @@ export function ScannerMiniChart({ ticker, candles }: ScannerMiniChartProps) {
       resizeObserver.disconnect();
       chart.remove();
     };
-  }, [candles, ticker]);
+  }, [candles, ema9, ema21, ticker]);
 
   return <div ref={rootRef} className="scanner-mini-chart" aria-label={`${ticker} candlestick chart`} />;
 }
