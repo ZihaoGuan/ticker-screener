@@ -6,7 +6,7 @@ import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type { ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell } from "../lib/types";
 
-type SortKey = "hits" | "ticker" | "sector" | "close" | "change" | "rs" | "ta" | "fa";
+type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "rs" | "ta" | "fa";
 type SortDirection = "asc" | "desc";
 const PAGE_SIZE = 50;
 
@@ -53,7 +53,10 @@ export function ScannerTopHitsPage() {
     if (eliteOnly) {
       nextRows = nextRows.filter(isElitePick);
     }
-    return [...nextRows].sort((left, right) => compareRows(left, right, sortBy, sortDirection));
+    return [...nextRows].sort((left, right) => compareRows(left, right, sortBy, sortDirection, {
+      sectorLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeSectorKey(item.sector)) : new Map<string, string>(),
+      industryLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeIndustryKey(item.industry)) : new Map<string, string>(),
+    }));
   }, [eliteOnly, rows, search, sectorFilter, sortBy, sortDirection]);
 
   useEffect(() => {
@@ -71,18 +74,14 @@ export function ScannerTopHitsPage() {
     if (!eliteOnly) {
       return new Map<string, string>();
     }
-    const leaders = new Map<string, ScannerTopHitRow>();
-    for (const row of filteredRows) {
-      const industryKey = normalizeIndustryKey(row.industry);
-      if (!industryKey) {
-        continue;
-      }
-      const currentLeader = leaders.get(industryKey);
-      if (!currentLeader || compareEliteIndustryLeader(row, currentLeader) < 0) {
-        leaders.set(industryKey, row);
-      }
+    return buildEliteLeaderMap(filteredRows, (row) => normalizeIndustryKey(row.industry));
+  }, [eliteOnly, filteredRows]);
+
+  const eliteSectorLeaders = useMemo(() => {
+    if (!eliteOnly) {
+      return new Map<string, string>();
     }
-    return new Map(Array.from(leaders.entries()).map(([industry, row]) => [industry, row.ticker]));
+    return buildEliteLeaderMap(filteredRows, (row) => normalizeSectorKey(row.sector));
   }, [eliteOnly, filteredRows]);
 
   useEffect(() => {
@@ -197,7 +196,8 @@ export function ScannerTopHitsPage() {
                     <th>1W</th>
                     <th>{renderSortButton("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>FA Rank</th>
-                    {eliteOnly ? <th>Industry Top Hit</th> : null}
+                    {eliteOnly ? <th>{renderSortButton("Sector Top Hit", "sectorTopHit", sortBy, sortDirection, setSortBy, setSortDirection)}</th> : null}
+                    {eliteOnly ? <th>{renderSortButton("Industry Top Hit", "industryTopHit", sortBy, sortDirection, setSortBy, setSortDirection)}</th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -242,6 +242,15 @@ export function ScannerTopHitsPage() {
                       <td data-label="1W">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1w"])}</td>
                       <td data-label="FA">{formatRating(row.fa_rating)}</td>
                       <td data-label="FA Rank">{row.fa_current_rank != null ? `#${formatCount(row.fa_current_rank)}` : "--"}</td>
+                      {eliteOnly ? (
+                        <td data-label="Sector Top Hit">
+                          {eliteSectorLeaders.get(normalizeSectorKey(row.sector)) === row.ticker ? (
+                            <span className="scanner-score-pill is-strong">Top Hit</span>
+                          ) : (
+                            "--"
+                          )}
+                        </td>
+                      ) : null}
                       {eliteOnly ? (
                         <td data-label="Industry Top Hit">
                           {eliteIndustryLeaders.get(normalizeIndustryKey(row.industry)) === row.ticker ? (
@@ -316,12 +325,32 @@ function renderSortButton(
   );
 }
 
-function compareRows(left: ScannerTopHitRow, right: ScannerTopHitRow, sortBy: SortKey, sortDirection: SortDirection) {
+function compareRows(
+  left: ScannerTopHitRow,
+  right: ScannerTopHitRow,
+  sortBy: SortKey,
+  sortDirection: SortDirection,
+  leaderMaps: { sectorLeaders: Map<string, string>; industryLeaders: Map<string, string> },
+) {
   if (sortBy === "ticker") {
     return compareText(left.ticker, right.ticker, sortDirection);
   }
   if (sortBy === "sector") {
     return compareText(left.sector, right.sector, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "sectorTopHit") {
+    return compareNullableNumber(
+      leaderMaps.sectorLeaders.get(normalizeSectorKey(left.sector)) === left.ticker ? 1 : 0,
+      leaderMaps.sectorLeaders.get(normalizeSectorKey(right.sector)) === right.ticker ? 1 : 0,
+      sortDirection,
+    ) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "industryTopHit") {
+    return compareNullableNumber(
+      leaderMaps.industryLeaders.get(normalizeIndustryKey(left.industry)) === left.ticker ? 1 : 0,
+      leaderMaps.industryLeaders.get(normalizeIndustryKey(right.industry)) === right.ticker ? 1 : 0,
+      sortDirection,
+    ) || left.ticker.localeCompare(right.ticker);
   }
   if (sortBy === "hits") {
     return compareNullableNumber(left.scanner_count, right.scanner_count, sortDirection) || left.ticker.localeCompare(right.ticker);
@@ -387,6 +416,28 @@ function normalizeIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined
 
 function normalizeIndustryKey(industry: string | null | undefined) {
   return String(industry || "").trim().toLowerCase();
+}
+
+function normalizeSectorKey(sector: string | null | undefined) {
+  return String(sector || "").trim().toLowerCase();
+}
+
+function buildEliteLeaderMap(
+  rows: ScannerTopHitRow[],
+  resolveKey: (row: ScannerTopHitRow) => string,
+) {
+  const leaders = new Map<string, ScannerTopHitRow>();
+  for (const row of rows) {
+    const key = resolveKey(row);
+    if (!key) {
+      continue;
+    }
+    const currentLeader = leaders.get(key);
+    if (!currentLeader || compareEliteIndustryLeader(row, currentLeader) < 0) {
+      leaders.set(key, row);
+    }
+  }
+  return new Map(Array.from(leaders.entries()).map(([key, row]) => [key, row.ticker]));
 }
 
 function compareEliteIndustryLeader(left: ScannerTopHitRow, right: ScannerTopHitRow) {
