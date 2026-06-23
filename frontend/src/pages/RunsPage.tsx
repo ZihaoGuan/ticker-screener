@@ -33,7 +33,7 @@ type ScheduledActionOption = {
   fields: Array<{
     id: string;
     label: string;
-    type: "text" | "number" | "date" | "select" | "multiselect";
+    type: "text" | "number" | "date" | "select" | "multiselect" | "boolean";
     placeholder?: string | null;
     help_text?: string | null;
     options: Array<{ value: string; label: string }>;
@@ -395,8 +395,8 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     });
   }, [selectedJob]);
   const suggestedScheduleOptionsJson = useMemo(
-    () => buildScheduleOptionsTemplate(scheduleActionId),
-    [scheduleActionId],
+    () => buildScheduleOptionsTemplate(selectedScheduledAction),
+    [selectedScheduledAction],
   );
 
   useEffect(() => {
@@ -553,7 +553,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       fields: Array<{
         id: string;
         label: string;
-        type: "text" | "number" | "date" | "select" | "multiselect";
+        type: "text" | "number" | "date" | "select" | "multiselect" | "boolean";
         placeholder?: string | null;
         help_text?: string | null;
         options: Array<{ value: string; label: string }>;
@@ -604,7 +604,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setScheduleCronTz("America/New_York");
     setScheduleEnabled(true);
     setScheduleActionSearch("");
-    const nextSuggested = buildScheduleOptionsTemplate(nextActionId);
+    const nextSuggested = buildScheduleOptionsTemplate(nextAction);
     setScheduleOptionsJson(nextSuggested);
     setLastSuggestedOptionsJson(nextSuggested);
     lastAutoScheduleIdentityRef.current = nextIdentity;
@@ -1650,7 +1650,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     <p className="file-meta">Existing cron does not match simplified daily/weekly rules yet. Save keeps raw cron unless you change schedule above.</p>
                   ) : null}
                   <p className="panel-copy">
-                    Supported date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
+                    Supported date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_minus_7}}'}</code>, <code>{'{{local_date_minus_14}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
                   </p>
                   <p className="panel-copy">Action Options JSON may be left blank or set to <code>null</code> when no options are needed.</p>
                   <p className="panel-copy">Suggested options:</p>
@@ -2208,92 +2208,90 @@ function scheduledGroupRank(label: string): number {
   return 5;
 }
 
-function buildScheduleOptionsTemplate(actionId: string): string {
-  const sharedUniverseTemplate = {
-    market_data_source: "database-first",
-    filter_precedence: "exclude",
-  };
+function buildScheduleOptionsTemplate(action: ScheduledActionOption | null): string {
+  if (!action) {
+    return "{}";
+  }
 
-  if (actionId === "earnings_weekly_criteria") {
-    return JSON.stringify({ reference_date: "{{local_date}}" }, null, 2);
+  const template: Record<string, unknown> = {};
+  const fieldIds = new Set(action.fields.map((field) => field.id));
+
+  if (fieldIds.has("market_data_source")) {
+    template.market_data_source = "database-first";
   }
-  if (actionId === "legacy_peg" || actionId === "sean_peg" || actionId === "sean_gap_up") {
-    return JSON.stringify(
-      {
-        source: "earnings-watchlist",
-        reference_date: "{{local_date}}",
-        market_data_source: "database-first",
-      },
-      null,
-      2,
-    );
+  if (fieldIds.has("filter_precedence")) {
+    template.filter_precedence = "exclude";
   }
-  if (actionId === "screener_history_batch") {
-    return JSON.stringify(
-      {
-        strategy_ids: ["rs", "vcp"],
-        start_date: "{{local_date_plus_14}}",
-        end_date: "{{local_date}}",
-        market_data_source: "database-first",
-        overwrite_policy: "skip_existing",
-        scope: {},
-      },
-      null,
-      2,
-    );
+  if (fieldIds.has("as_of_date")) {
+    template.as_of_date = "{{local_date}}";
   }
-  if (actionId === "signal_warm_batch") {
-    return JSON.stringify(
-      {
-        strategy_ids: ["rs", "vcp", "gap_fill", "fearzone"],
-        start_date: "{{local_date_plus_14}}",
-        end_date: "{{local_date}}",
-        market_data_source: "database-first",
-        overwrite_policy: "skip_existing",
-        candidate_threshold: 4,
-        max_parallel: 5,
-      },
-      null,
-      2,
-    );
+  if (fieldIds.has("trade_date")) {
+    template.trade_date = "{{local_date}}";
   }
-  if (actionId === "overlap_backtest_v1") {
-    return JSON.stringify(
-      {
-        strategy_ids: ["rs", "vcp", "gap_fill", "fearzone"],
-        start_date: "{{local_date_plus_14}}",
-        end_date: "{{local_date}}",
-        entry_signal_threshold: 4,
-        hold_periods_json: "[5, 10]",
-      },
-      null,
-      2,
-    );
+  if (fieldIds.has("reference_date")) {
+    template.reference_date = "{{local_date}}";
   }
-  if (actionId === "sync_finviz_fundamentals" || actionId === "run_finviz_ratings_pipeline") {
-    return JSON.stringify(
-      {
-        as_of_date: "{{local_date}}",
-        overwrite_policy: "skip-existing",
-      },
-      null,
-      2,
-    );
+  if (fieldIds.has("overwrite_policy")) {
+    template.overwrite_policy = "skip-existing";
   }
-  if (actionId === "reload_postgres_market_data_date") {
-    return JSON.stringify(
-      {
-        trade_date: "{{local_date}}",
-        chunk_size: 100,
-        max_retries: 4,
-        retry_base_seconds: 2,
-        chunk_sleep_seconds: 1,
-        single_ticker_sleep_seconds: 0.5,
-        batch_size: 5000,
-      },
-      null,
-      2,
-    );
+  if (fieldIds.has("candidate_threshold")) {
+    template.candidate_threshold = 4;
   }
-  return JSON.stringify(sharedUniverseTemplate, null, 2);
+  if (fieldIds.has("entry_signal_threshold")) {
+    template.entry_signal_threshold = 4;
+  }
+  if (fieldIds.has("max_parallel")) {
+    template.max_parallel = 5;
+  }
+  if (fieldIds.has("hold_periods_json")) {
+    template.hold_periods_json = "[5, 10]";
+  }
+
+  for (const field of action.fields) {
+    if (field.type !== "number") {
+      continue;
+    }
+    if (field.id in template) {
+      continue;
+    }
+    const parsed = parseScheduleNumericPlaceholder(field.placeholder);
+    if (parsed != null) {
+      template[field.id] = parsed;
+    }
+  }
+
+  if (action.id === "legacy_peg" || action.id === "sean_peg" || action.id === "sean_gap_up") {
+    template.source = "earnings-watchlist";
+  }
+  if (action.id === "signal_warm_batch" || action.id === "overlap_backtest_v1" || action.id === "screener_history_batch") {
+    template.start_date = "{{local_date_minus_14}}";
+    template.end_date = "{{local_date}}";
+  } else if (fieldIds.has("start_date") || fieldIds.has("end_date")) {
+    if (fieldIds.has("start_date")) {
+      template.start_date = "{{local_date}}";
+    }
+    if (fieldIds.has("end_date")) {
+      template.end_date = "{{local_date}}";
+    }
+  }
+  if (fieldIds.has("strategy_ids")) {
+    template.strategy_ids = ["rs", "vcp", "gap_fill", "fearzone"];
+  }
+  if (action.id === "screener_history_batch") {
+    template.scope = {};
+  }
+
+  return JSON.stringify(template, null, 2);
+}
+
+function parseScheduleNumericPlaceholder(value?: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed || /^optional$/i.test(trimmed)) {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
 }

@@ -1213,7 +1213,7 @@ export type ScheduledJobConfigResponse = {
     fields: Array<{
       id: string;
       label: string;
-      type: "text" | "number" | "date" | "select" | "multiselect";
+      type: "text" | "number" | "date" | "select" | "multiselect" | "boolean";
       placeholder?: string | null;
       help_text?: string | null;
       options: Array<{ value: string; label: string }>;

@@ -262,6 +262,8 @@ def _resolve_template_value(value: object, *, local_now: dt.datetime) -> object:
     if isinstance(value, str):
         replacements = {
             "{{local_date}}": local_now.date().isoformat(),
+            "{{local_date_minus_7}}": (local_now.date() - dt.timedelta(days=7)).isoformat(),
+            "{{local_date_minus_14}}": (local_now.date() - dt.timedelta(days=14)).isoformat(),
             "{{local_date_plus_7}}": (local_now.date() + dt.timedelta(days=7)).isoformat(),
             "{{local_date_plus_14}}": (local_now.date() + dt.timedelta(days=14)).isoformat(),
         }

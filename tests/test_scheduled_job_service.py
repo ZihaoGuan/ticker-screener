@@ -131,9 +131,10 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         resolved = _resolve_template_value(
             {
+                "prior_reference_date": "{{local_date_minus_7}}",
                 "reference_date": "{{local_date}}",
                 "secondary_reference_date": "{{local_date_plus_7}}",
-                "nested": ["{{local_date_plus_14}}"],
+                "nested": ["{{local_date_minus_14}}", "{{local_date_plus_14}}"],
             },
             local_now=local_now,
         )
@@ -141,9 +142,10 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertEqual(
             resolved,
             {
+                "prior_reference_date": "2026-05-30",
                 "reference_date": "2026-06-06",
                 "secondary_reference_date": "2026-06-13",
-                "nested": ["2026-06-20"],
+                "nested": ["2026-05-23", "2026-06-20"],
             },
         )
 
