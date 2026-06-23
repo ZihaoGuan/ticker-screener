@@ -66,8 +66,10 @@ export function ChartsPage() {
   const [isListDialogOpen, setIsListDialogOpen] = useState(false);
   const [listDialogMode, setListDialogMode] = useState<"addExclusion" | "removeExclusion">("addExclusion");
   const [isSavingListAction, setIsSavingListAction] = useState(false);
+  const [isSavingMyPick, setIsSavingMyPick] = useState(false);
   const [isLaunchingBackfill, setIsLaunchingBackfill] = useState(false);
   const [backfillNotice, setBackfillNotice] = useState("");
+  const [myPickNotice, setMyPickNotice] = useState("");
   const [expandedHeroGroup, setExpandedHeroGroup] = useState<string | null>(null);
   const [availableSectorOptions, setAvailableSectorOptions] = useState<string[]>([]);
   const [selectedSectorOption, setSelectedSectorOption] = useState("");
@@ -631,6 +633,28 @@ export function ChartsPage() {
     }
   };
 
+  const handleAddToMyPicks = async () => {
+    if (!requestedTicker) {
+      return;
+    }
+    setIsSavingMyPick(true);
+    setMyPickNotice("");
+    try {
+      await fetchJson<{ ok: boolean; pick: { ticker: string } }>("/api/admin/my-picks", {
+        method: "POST",
+        body: JSON.stringify({
+          ticker: requestedTicker,
+          notes: requestedDate ? `Added from chart view (${requestedDate}).` : "Added from chart view.",
+        }),
+      });
+      setMyPickNotice(`${requestedTicker} added to My Picks.`);
+    } catch (error) {
+      setMyPickNotice(error instanceof Error ? error.message : "Failed to add ticker to My Picks.");
+    } finally {
+      setIsSavingMyPick(false);
+    }
+  };
+
   return (
     <div className="page-grid charts-page">
       <section className="hero-strip">
@@ -689,6 +713,14 @@ export function ChartsPage() {
           ) : null}
           {canManageExclusions ? (
             <div className="button-row" style={{ marginTop: 12 }}>
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={!requestedTicker || isSavingMyPick}
+                onClick={() => void handleAddToMyPicks()}
+              >
+                {isSavingMyPick ? "Adding To My Picks..." : "Add To My Picks"}
+              </button>
               {showAddExclusionButton ? (
                 <button
                   className="ghost-button"
@@ -717,6 +749,7 @@ export function ChartsPage() {
               ) : null}
             </div>
           ) : null}
+          {myPickNotice ? <p className="panel-copy">{myPickNotice}</p> : null}
           {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, SMA overlays, 10W extension overlay, gap zones, HTF box, fearzone panel, and SEPA dashboard snapshot.</p>}
           {canManageExclusions && requestedTicker ? (
             <p className="panel-copy">
