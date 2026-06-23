@@ -11,6 +11,7 @@ const navItems = [
   { to: "/charts", label: "Charts", icon: "◍" },
   { to: "/earnings", label: "Earnings", icon: "◒" },
   { to: "/watchlists", label: "Watchlists", icon: "◌", roles: ["admin"] as RoleName[] },
+  { to: "/my-picks", label: "My Picks", icon: "◔", roles: ["admin"] as RoleName[], expo: true, capability: "manage_exclusions" as CapabilityName },
   { to: "/rotation/sector", label: "Rotation", icon: "◎", roles: ["premium", "admin"] as RoleName[] },
   { to: "/report", label: "Report", icon: "◈", roles: ["admin"] as RoleName[] },
   { to: "/screeners", label: "Screeners", icon: "◉", roles: ["admin"] as RoleName[], capability: "run_screeners" as CapabilityName },

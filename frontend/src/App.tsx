@@ -13,6 +13,7 @@ import { GuidePage } from "./pages/GuidePage";
 import { LoginPage } from "./pages/LoginPage";
 import { OverlapPage } from "./pages/OverlapPage";
 import { PortfolioPage } from "./pages/PortfolioPage";
+import { MyPicksPage } from "./pages/MyPicksPage";
 import { ChartsPage } from "./pages/ChartsPage";
 import { RatingsPage } from "./pages/RatingsPage";
 import { RrgPage } from "./pages/RrgPage";
@@ -152,6 +153,14 @@ export default function App() {
           }
         />
         <Route path="/overlap" element={<Navigate to="/report" replace />} />
+        <Route
+          path="/my-picks"
+          element={
+            <RoleRoute allowedRoles={["admin"]}>
+              <MyPicksPage />
+            </RoleRoute>
+          }
+        />
         <Route
           path="/portfolio"
           element={

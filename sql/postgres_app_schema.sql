@@ -619,6 +619,20 @@ CREATE TABLE IF NOT EXISTS portfolio_advice_snapshots (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS my_picks (
+  id BIGSERIAL PRIMARY KEY,
+  ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
+  notes TEXT,
+  created_by_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_my_picks_created_at
+  ON my_picks(created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_my_picks_ticker_created_at
+  ON my_picks(ticker, created_at DESC);
+
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS scope_json JSONB NOT NULL DEFAULT '{}'::jsonb;

@@ -1510,6 +1510,42 @@ export type PortfolioRefreshResponse = {
   }>;
 };
 
+export type MyPickRow = {
+  id: number;
+  ticker: string;
+  notes: string;
+  created_by_user_id: number | null;
+  added_at: string | null;
+  added_date: string | null;
+  sector: string | null;
+  industry: string | null;
+  ratings_as_of_date: string | null;
+  perf_year_pct: number | null;
+  perf_ytd_pct: number | null;
+  fundamental_rating: number | null;
+  fundamental_rank: number | null;
+  fundamental_status: string | null;
+  technical_rating: number | null;
+  leadership_score: number | null;
+  technical_band: string | null;
+  technical_status: string | null;
+  technical_indicator_ratings: Record<string, TechnicalIndicatorRatingCell>;
+  als_score: number | null;
+  recent_signal_count: number;
+  latest_signal_date: string | null;
+  recent_signals: Array<{
+    strategy_id: string;
+    signal_date: string | null;
+  }>;
+};
+
+export type MyPicksContextResponse = {
+  database_configured: boolean;
+  total_count: number;
+  rows: MyPickRow[];
+  available_added_dates: string[];
+};
+
 export type RrgUniverse = "sector" | "industry" | "theme";
 export type RrgCadence = "weekly" | "daily-2m";
 

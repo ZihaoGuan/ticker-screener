@@ -24,6 +24,7 @@ from src.webapp.services.audit_service import AuditService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
+from src.webapp.services.my_picks_service import MyPicksService
 from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.portfolio_service import PortfolioService
@@ -97,6 +98,10 @@ def get_overlap_backtest_service() -> OverlapBacktestService:
 
 def get_portfolio_service() -> PortfolioService:
     return PortfolioService(database_url=config.database_url)
+
+
+def get_my_picks_service() -> MyPicksService:
+    return MyPicksService(database_url=config.database_url)
 
 
 def get_rrg_service() -> RrgService:

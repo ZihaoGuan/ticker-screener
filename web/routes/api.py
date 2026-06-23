@@ -17,6 +17,7 @@ from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
+from src.webapp.services.my_picks_service import MyPicksService
 from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.portfolio_service import PortfolioService
@@ -38,6 +39,7 @@ from web.dependencies import (
     get_dashboard_service,
     get_discord_notification_service,
     get_earnings_calendar_service,
+    get_my_picks_service,
     get_overlap_backtest_service,
     get_overlap_service,
     get_portfolio_service,
@@ -1622,6 +1624,74 @@ def admin_portfolio_context(
         return JSONResponse(jsonable_encoder(service.get_context()))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/admin/my-picks", response_class=JSONResponse)
+def admin_my_picks_context(
+    service: MyPicksService = Depends(get_my_picks_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    try:
+        return JSONResponse(jsonable_encoder(service.get_context()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/admin/my-picks", response_class=JSONResponse)
+def admin_create_my_pick(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: MyPicksService = Depends(get_my_picks_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        pick = service.create_pick(
+            ticker=str(request_payload.get("ticker") or ""),
+            notes=str(request_payload.get("notes") or ""),
+            actor_user_id=principal.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="my_pick.create",
+        resource_type="my_pick",
+        resource_id=str(pick.get("id") or ""),
+        resource_label=str(pick.get("ticker") or ""),
+        message=f"Added {pick.get('ticker')} to My Picks.",
+        metadata=pick,
+    )
+    return JSONResponse({"ok": True, "pick": pick})
+
+
+@router.post("/admin/my-picks/{pick_id}/delete", response_class=JSONResponse)
+def admin_delete_my_pick(
+    request: Request,
+    pick_id: int,
+    service: MyPicksService = Depends(get_my_picks_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    try:
+        service.delete_pick(pick_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="my_pick.delete",
+        resource_type="my_pick",
+        resource_id=str(pick_id),
+        resource_label=str(pick_id),
+        message=f"Deleted My Pick {pick_id}.",
+        metadata={"pick_id": pick_id},
+    )
+    return JSONResponse({"ok": True})
 
 
 @router.post("/admin/portfolio/positions", response_class=JSONResponse)

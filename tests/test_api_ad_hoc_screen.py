@@ -20,6 +20,7 @@ if TestClient is not None:
         get_current_principal,
         get_dashboard_service,
         get_earnings_calendar_service,
+        get_my_picks_service,
         get_portfolio_service,
         get_run_service,
         get_screener_history_service,
@@ -909,6 +910,76 @@ class _FakePortfolioService:
         }
 
 
+class _FakeMyPicksService:
+    def get_context(self):
+        return {
+            "database_configured": True,
+            "total_count": 1,
+            "available_added_dates": ["2026-06-23"],
+            "rows": [
+                {
+                    "id": 1,
+                    "ticker": "NVDA",
+                    "notes": "leader",
+                    "created_by_user_id": 1,
+                    "added_at": "2026-06-23T12:00:00+00:00",
+                    "added_date": "2026-06-23",
+                    "sector": "Technology",
+                    "industry": "Semiconductors",
+                    "ratings_as_of_date": "2026-06-23",
+                    "perf_year_pct": 40.0,
+                    "perf_ytd_pct": 20.0,
+                    "fundamental_rating": 8.6,
+                    "fundamental_rank": 11,
+                    "fundamental_status": "ok",
+                    "technical_rating": 8.9,
+                    "leadership_score": 92.0,
+                    "technical_band": "A",
+                    "technical_status": "ok",
+                    "technical_indicator_ratings": {
+                        "1d": {"rating_label": "Strong"},
+                        "1w": {"rating_label": "Buy"},
+                    },
+                    "als_score": 36.5,
+                    "recent_signal_count": 3,
+                    "latest_signal_date": "2026-06-20",
+                    "recent_signals": [{"strategy_id": "weekly_rs", "signal_date": "2026-06-20"}],
+                }
+            ],
+        }
+
+    def create_pick(self, **kwargs: object):
+        return {
+            "id": 2,
+            "ticker": str(kwargs.get("ticker") or "").upper(),
+            "notes": str(kwargs.get("notes") or ""),
+            "created_by_user_id": int(kwargs.get("actor_user_id") or 0) or None,
+            "added_at": "2026-06-23T12:30:00+00:00",
+            "added_date": "2026-06-23",
+            "sector": "Technology",
+            "industry": "Software",
+            "ratings_as_of_date": "2026-06-23",
+            "perf_year_pct": 30.0,
+            "perf_ytd_pct": 12.0,
+            "fundamental_rating": 8.1,
+            "fundamental_rank": 19,
+            "fundamental_status": "ok",
+            "technical_rating": 7.9,
+            "leadership_score": 88.0,
+            "technical_band": "A",
+            "technical_status": "ok",
+            "technical_indicator_ratings": {},
+            "als_score": 34.67,
+            "recent_signal_count": 1,
+            "latest_signal_date": "2026-06-21",
+            "recent_signals": [],
+        }
+
+    def delete_pick(self, pick_id: int):
+        _ = pick_id
+        return None
+
+
 @unittest.skipIf(TestClient is None, "fastapi test dependencies are not installed")
 class ApiAdHocScreenTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -923,6 +994,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_watchlist_service] = lambda: _FakeWatchlistService()
         app.dependency_overrides[get_earnings_calendar_service] = lambda: _FakeEarningsCalendarService()
         app.dependency_overrides[get_portfolio_service] = lambda: _FakePortfolioService()
+        app.dependency_overrides[get_my_picks_service] = lambda: _FakeMyPicksService()
         app.dependency_overrides[get_current_principal] = anonymous_principal
         self.client = TestClient(app)
 
@@ -1282,3 +1354,50 @@ class ApiAdHocScreenTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["transaction"]["side"], "sell")
         self.assertEqual(payload["transaction"]["position_id"], 1)
+
+    def test_admin_can_access_my_picks(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/my-picks")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["rows"][0]["ticker"], "NVDA")
+        self.assertEqual(payload["rows"][0]["recent_signal_count"], 3)
+
+    def test_premium_cannot_access_my_picks(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=2,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/my-picks")
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_create_my_pick(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.post("/api/admin/my-picks", json={"ticker": "msft", "notes": "watch"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["pick"]["ticker"], "MSFT")
+
+    def test_admin_can_delete_my_pick(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.post("/api/admin/my-picks/1/delete")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
