@@ -6,8 +6,6 @@ import { RrgValueChart } from "../components/RrgValueChart";
 import { fetchJson } from "../lib/api";
 import type { RrgCadence, RrgResponse, RrgSeries, RrgUniverse } from "../lib/types";
 
-const RRG_CACHE_PREFIX = "rrg-page-cache-v1";
-const RRG_CACHE_TTL_MS = 60 * 60 * 1000;
 const QUADRANT_ORDER = ["Leading", "Improving", "Lagging", "Weakening"] as const;
 
 const DEFAULT_RESPONSE: RrgResponse = {
@@ -49,23 +47,16 @@ export function RrgPage() {
   const [hasError, setHasError] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const [cacheNotice, setCacheNotice] = useState("");
   const [focusQuadrant, setFocusQuadrant] = useState<string>("All");
+
+  useEffect(() => {
+    clearAllRrgCache();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setHasError(false);
-    setCacheNotice("");
-    const cacheKey = buildRrgCacheKey(universe, cadence);
-    const cached = refreshNonce === 0 ? readRrgCache(cacheKey) : null;
-    if (cached) {
-      setPayload(cached);
-      setActiveGroupId(cached.groups?.[0]?.id ?? "");
-      setLoading(false);
-      setCacheNotice("Showing device-cached rotation data. Refresh to pull newest server data.");
-      return () => controller.abort();
-    }
     void fetchJson<RrgResponse>(`/api/rrg/${universe}?benchmark=SPY&period=3y&trailWeeks=12&cadence=${cadence}`, {
       signal: controller.signal,
     })
@@ -73,7 +64,6 @@ export function RrgPage() {
         setPayload(response);
         setActiveGroupId(response.groups?.[0]?.id ?? "");
         setLoading(false);
-        writeRrgCache(cacheKey, response);
       })
       .catch((error) => {
         if (error instanceof Error && error.name === "AbortError") {
@@ -202,21 +192,13 @@ export function RrgPage() {
               ))}
             </div>
           </div>
-          <div className="rrg-cache-pill">
-            <span className="rrg-cache-dot" />
-            <span>Data cached for 1h</span>
-          </div>
-          {cacheNotice ? <span className="rrg-cache-copy">{cacheNotice}</span> : null}
         </div>
         <div className="rrg-utility-right">
           <span className="rrg-latest-stamp">Latest: {latestLabel}</span>
           <button
             type="button"
             className="ghost-button"
-            onClick={() => {
-              clearRrgCache(universe, cadence);
-              setRefreshNonce((current) => current + 1);
-            }}
+            onClick={() => setRefreshNonce((current) => current + 1)}
           >
             Manual Refresh
           </button>
@@ -521,45 +503,15 @@ function holdingsUrl(ticker: string): string {
   return `https://nz.finance.yahoo.com/quote/${encodeURIComponent(ticker)}/holdings/`;
 }
 
-function buildRrgCacheKey(universe: RrgUniverse, cadence: RrgCadence): string {
-  return `${RRG_CACHE_PREFIX}:${universe}:${cadence}`;
-}
-
-function readRrgCache(key: string): RrgResponse | null {
+function clearAllRrgCache() {
   try {
-    const raw = localStorage.getItem(key);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as { savedAt?: number; value?: RrgResponse };
-    if (!parsed.savedAt || !parsed.value || Date.now() - parsed.savedAt > RRG_CACHE_TTL_MS) {
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (!key || !key.startsWith("rrg-page-cache-v1:")) {
+        continue;
+      }
       localStorage.removeItem(key);
-      return null;
     }
-    return parsed.value;
-  } catch {
-    localStorage.removeItem(key);
-    return null;
-  }
-}
-
-function writeRrgCache(key: string, value: RrgResponse) {
-  try {
-    localStorage.setItem(
-      key,
-      JSON.stringify({
-        savedAt: Date.now(),
-        value,
-      }),
-    );
-  } catch {
-    // Ignore cache write failures so a valid API response still renders.
-  }
-}
-
-function clearRrgCache(universe: RrgUniverse, cadence: RrgCadence) {
-  try {
-    localStorage.removeItem(buildRrgCacheKey(universe, cadence));
   } catch {
     // Ignore cache clear failures.
   }

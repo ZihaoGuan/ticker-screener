@@ -28,12 +28,6 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   flexSr: false,
 };
 const CHART_CACHE_PREFIX = "chart-screen-cache-v6";
-const CHART_CACHE_TTL_MS_BY_KIND: Record<"payload" | "overlays" | "fundamentals" | "insider", number> = {
-  payload: 10 * 60 * 1000,
-  overlays: 10 * 60 * 1000,
-  fundamentals: 60 * 60 * 1000,
-  insider: 4 * 60 * 60 * 1000,
-};
 const EXCLUSION_REASON_OPTIONS = [
   "Bad data quality",
   "Not tradable / structured product",
@@ -79,6 +73,10 @@ export function ChartsPage() {
   const [syncedHoverTime, setSyncedHoverTime] = useState<string | null>(null);
 
   useEffect(() => {
+    clearAllChartCache();
+  }, []);
+
+  useEffect(() => {
     setTickerInput(requestedTicker);
     setDateInput(requestedDate);
   }, [requestedDate, requestedTicker]);
@@ -106,27 +104,8 @@ export function ChartsPage() {
     if (requestedDate) {
       query.set("asOfDate", requestedDate);
     }
-    const payloadCacheSuffix = `${requestedDate || "latest"}:base`;
-    const cacheKey = buildChartCacheKey("payload", requestedTicker, payloadCacheSuffix);
-    const cached = refreshNonce === 0 ? readChartCache<WatchlistChartResponse>(cacheKey) : null;
-    if (cached && hasUsableChartData(cached)) {
-      setPayload(cached);
-      if (!requestedDate && cached.resolved_as_of_date) {
-        setDateInput(cached.resolved_as_of_date);
-      }
-      if (requestedDate && cached.resolved_as_of_date && cached.resolved_as_of_date !== requestedDate) {
-        setNotice(`Requested ${requestedDate}. Used last trading day ${cached.resolved_as_of_date}.`);
-      }
-      setIsLoading(false);
-      return;
-    }
     void fetchJson<WatchlistChartResponse>(`/api/charts/${requestedTicker}?${query.toString()}`)
       .then((response) => {
-        if (hasUsableChartData(response)) {
-          writeChartCache(cacheKey, response);
-        } else {
-          clearChartCacheKey(cacheKey);
-        }
         setPayload(response);
         if (!requestedDate && response.resolved_as_of_date) {
           setDateInput(response.resolved_as_of_date);
@@ -149,18 +128,8 @@ export function ChartsPage() {
       return;
     }
     const query = new URLSearchParams({ period: "18mo", asOfDate: payload.resolved_as_of_date, includeSetupMarkers: "true" });
-    const overlayCacheSuffix = `${payload.resolved_as_of_date}:setup-markers`;
-    const cacheKey = buildChartCacheKey("overlays", requestedTicker, overlayCacheSuffix);
-    const cached = refreshNonce === 0 ? readChartCache<ChartOverlaysResponse>(cacheKey) : null;
-    if (cached) {
-      setOverlayPayload(cached);
-      return;
-    }
     void fetchJson<ChartOverlaysResponse>(`/api/chart-overlays/${requestedTicker}?${query.toString()}`)
-      .then((response) => {
-        writeChartCache(cacheKey, response);
-        setOverlayPayload(response);
-      })
+      .then((response) => setOverlayPayload(response))
       .catch(() => setOverlayPayload(null));
   }, [payload?.resolved_as_of_date, refreshNonce, requestedTicker]);
 
@@ -178,19 +147,8 @@ export function ChartsPage() {
     } else if (requestedDate) {
       query.set("asOfDate", requestedDate);
     }
-    const insiderAsOfDate = payload?.resolved_as_of_date || requestedDate || "latest";
-    const cacheKey = buildChartCacheKey("insider", requestedTicker, insiderAsOfDate);
-    const cached = refreshNonce === 0 ? readChartCache<ChartInsiderResponse>(cacheKey) : null;
-    if (cached) {
-      setInsiderPayload(cached);
-      setIsInsiderLoading(false);
-      return;
-    }
     void fetchJson<ChartInsiderResponse>(`/api/chart-insider/${requestedTicker}?${query.toString()}`)
-      .then((response) => {
-        writeChartCache(cacheKey, response);
-        setInsiderPayload(response);
-      })
+      .then((response) => setInsiderPayload(response))
       .catch((error) => {
         setInsiderPayload(null);
         setInsiderNotice(error instanceof Error ? error.message : "Failed to load insider trades.");
@@ -219,23 +177,8 @@ export function ChartsPage() {
     }
     setIsFundamentalsLoading(true);
     setFundamentalsNotice("");
-    const cacheKey = buildChartCacheKey("fundamentals", requestedTicker, "latest");
-    const cached = refreshNonce === 0 ? readChartCache<ChartFundamentalsResponse>(cacheKey) : null;
-    if (cached && cached.rating_snapshot) {
-      setFundamentalsPayload(cached);
-      const earningsStatus = cached.diagnostics.earnings.status;
-      const holdersStatus = cached.diagnostics.holders.status;
-      const statisticsStatus = cached.diagnostics.statistics.status;
-      const optionsStatus = cached.diagnostics.options.status;
-      if (earningsStatus !== "ok" || holdersStatus !== "ok" || statisticsStatus !== "ok" || optionsStatus !== "ok") {
-        setFundamentalsNotice(`Diagnostics: earnings=${earningsStatus}, holders=${holdersStatus}, statistics=${statisticsStatus}, options=${optionsStatus}`);
-      }
-      setIsFundamentalsLoading(false);
-      return;
-    }
     void fetchJson<ChartFundamentalsResponse>(`/api/chart-fundamentals/${requestedTicker}?earningsLimit=4`)
       .then((response) => {
-        writeChartCache(cacheKey, response);
         setFundamentalsPayload(response);
         const earningsStatus = response.diagnostics.earnings.status;
         const holdersStatus = response.diagnostics.holders.status;
@@ -549,7 +492,6 @@ export function ChartsPage() {
   };
 
   const handleRefresh = () => {
-    clearChartCacheForTicker(requestedTicker);
     setRefreshNonce((current) => current + 1);
   };
 
@@ -826,7 +768,7 @@ export function ChartsPage() {
             </button>
           </div>
         </form>
-        {requestedTicker ? <p className="panel-copy">Browser cache lasts 1 hour for chart, fundamentals, and insider data. Refresh to bypass cache.</p> : null}
+        {requestedTicker ? <p className="panel-copy">Refresh re-runs live chart, fundamentals, and insider requests for this ticker.</p> : null}
       </Panel>
 
       {showBackfillSection ? (
@@ -1542,81 +1484,11 @@ function ratingToChartY(
   return top + ((100 - clamped) / 100) * usableHeight;
 }
 
-function buildChartCacheKey(kind: "payload" | "overlays" | "fundamentals" | "insider", ticker: string, scope: string) {
-  return `${CHART_CACHE_PREFIX}:${kind}:${ticker}:${scope}`;
-}
-
-function readChartCache<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as { value?: T; expiresAt?: number };
-    if (!parsed || typeof parsed !== "object" || typeof parsed.expiresAt !== "number" || parsed.expiresAt <= Date.now()) {
-      localStorage.removeItem(key);
-      return null;
-    }
-    return (parsed.value ?? null) as T | null;
-  } catch {
-    localStorage.removeItem(key);
-    return null;
-  }
-}
-
-function writeChartCache<T>(key: string, value: T) {
-  const kind = resolveChartCacheKind(key);
-  const ttlMs = kind ? CHART_CACHE_TTL_MS_BY_KIND[kind] : 0;
-  if (ttlMs <= 0) {
-    return;
-  }
-  localStorage.setItem(
-    key,
-    JSON.stringify({
-      value,
-      expiresAt: Date.now() + ttlMs,
-    }),
-  );
-}
-
-function clearChartCacheKey(key: string) {
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // Ignore storage errors while clearing stale chart cache entries.
-  }
-}
-
-function resolveChartCacheKind(key: string): "payload" | "overlays" | "fundamentals" | "insider" | null {
-  const suffix = key.replace(`${CHART_CACHE_PREFIX}:`, "");
-  if (suffix.startsWith("payload:")) {
-    return "payload";
-  }
-  if (suffix.startsWith("overlays:")) {
-    return "overlays";
-  }
-  if (suffix.startsWith("fundamentals:")) {
-    return "fundamentals";
-  }
-  if (suffix.startsWith("insider:")) {
-    return "insider";
-  }
-  return null;
-}
-
-function hasUsableChartData(payload: WatchlistChartResponse | null | undefined): boolean {
-  return Boolean(payload && Array.isArray(payload.candles) && payload.candles.length > 0);
-}
-
-function clearChartCacheForTicker(ticker: string) {
-  if (!ticker) {
-    return;
-  }
+function clearAllChartCache() {
   const prefix = `${CHART_CACHE_PREFIX}:`;
-  const tickerFragment = `:${ticker}:`;
   for (let index = localStorage.length - 1; index >= 0; index -= 1) {
     const key = localStorage.key(index);
-    if (!key || !key.startsWith(prefix) || !key.includes(tickerFragment)) {
+    if (!key || !key.startsWith(prefix)) {
       continue;
     }
     localStorage.removeItem(key);
