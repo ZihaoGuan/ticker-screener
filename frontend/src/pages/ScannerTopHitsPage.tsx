@@ -67,6 +67,24 @@ export function ScannerTopHitsPage() {
     return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
   }, [filteredRows, normalizedPage]);
 
+  const eliteIndustryLeaders = useMemo(() => {
+    if (!eliteOnly) {
+      return new Map<string, string>();
+    }
+    const leaders = new Map<string, ScannerTopHitRow>();
+    for (const row of filteredRows) {
+      const industryKey = normalizeIndustryKey(row.industry);
+      if (!industryKey) {
+        continue;
+      }
+      const currentLeader = leaders.get(industryKey);
+      if (!currentLeader || compareEliteIndustryLeader(row, currentLeader) < 0) {
+        leaders.set(industryKey, row);
+      }
+    }
+    return new Map(Array.from(leaders.entries()).map(([industry, row]) => [industry, row.ticker]));
+  }, [eliteOnly, filteredRows]);
+
   useEffect(() => {
     if (currentPage !== normalizedPage) {
       setCurrentPage(normalizedPage);
@@ -179,6 +197,7 @@ export function ScannerTopHitsPage() {
                     <th>1W</th>
                     <th>{renderSortButton("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>FA Rank</th>
+                    {eliteOnly ? <th>Industry Top Hit</th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -223,6 +242,15 @@ export function ScannerTopHitsPage() {
                       <td data-label="1W">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1w"])}</td>
                       <td data-label="FA">{formatRating(row.fa_rating)}</td>
                       <td data-label="FA Rank">{row.fa_current_rank != null ? `#${formatCount(row.fa_current_rank)}` : "--"}</td>
+                      {eliteOnly ? (
+                        <td data-label="Industry Top Hit">
+                          {eliteIndustryLeaders.get(normalizeIndustryKey(row.industry)) === row.ticker ? (
+                            <span className="scanner-score-pill is-strong">Top Hit</span>
+                          ) : (
+                            "--"
+                          )}
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>
@@ -355,6 +383,31 @@ function isElitePick(row: ScannerTopHitRow) {
 
 function normalizeIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {
   return String(value?.rating_label || "").trim().toLowerCase();
+}
+
+function normalizeIndustryKey(industry: string | null | undefined) {
+  return String(industry || "").trim().toLowerCase();
+}
+
+function compareEliteIndustryLeader(left: ScannerTopHitRow, right: ScannerTopHitRow) {
+  if (left.scanner_count !== right.scanner_count) {
+    return right.scanner_count - left.scanner_count;
+  }
+  const leftFaRank = left.fa_current_rank ?? Number.POSITIVE_INFINITY;
+  const rightFaRank = right.fa_current_rank ?? Number.POSITIVE_INFINITY;
+  if (leftFaRank !== rightFaRank) {
+    return leftFaRank - rightFaRank;
+  }
+  if ((left.fa_rating ?? Number.NEGATIVE_INFINITY) !== (right.fa_rating ?? Number.NEGATIVE_INFINITY)) {
+    return (right.fa_rating ?? Number.NEGATIVE_INFINITY) - (left.fa_rating ?? Number.NEGATIVE_INFINITY);
+  }
+  if ((left.ta_rating ?? Number.NEGATIVE_INFINITY) !== (right.ta_rating ?? Number.NEGATIVE_INFINITY)) {
+    return (right.ta_rating ?? Number.NEGATIVE_INFINITY) - (left.ta_rating ?? Number.NEGATIVE_INFINITY);
+  }
+  if ((left.rs_rating ?? Number.NEGATIVE_INFINITY) !== (right.rs_rating ?? Number.NEGATIVE_INFINITY)) {
+    return (right.rs_rating ?? Number.NEGATIVE_INFINITY) - (left.rs_rating ?? Number.NEGATIVE_INFINITY);
+  }
+  return left.ticker.localeCompare(right.ticker);
 }
 
 function renderChange(value: number | null) {
