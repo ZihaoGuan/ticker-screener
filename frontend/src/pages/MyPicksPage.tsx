@@ -342,6 +342,7 @@ export function MyPicksPage() {
                     <span className={`scanner-score-pill ${toneForScore(row.als_score, 100)}`}>ALS {formatScoreInteger(row.als_score)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.fundamental_rating, 100)}`}>FA {formatScoreInteger(row.fundamental_rating)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.technical_rating, 10)}`}>TA {formatScore(row.technical_rating)}</span>
+                    <span className={`scanner-score-pill ${toneForScore(row.leadership_score, 100)}`}>RS {formatScoreInteger(row.leadership_score)}</span>
                   </div>
                   <div className="scanner-chart-card-body">
                     {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
@@ -422,7 +423,7 @@ function PicksTable({
             <th>ALS</th>
             <th>FA</th>
             <th>TA</th>
-            <th>ARS</th>
+            <th>RS Rating</th>
             <th>1D</th>
             <th>1W</th>
             <th>Signals</th>
@@ -451,7 +452,7 @@ function PicksTable({
               <td data-label="ALS">{formatScore(row.als_score)}</td>
               <td data-label="FA">{formatScore(row.fundamental_rating)}</td>
               <td data-label="TA">{formatScore(row.technical_rating)}</td>
-              <td data-label="ARS">{formatScore(row.leadership_score)}</td>
+              <td data-label="RS Rating">{formatScore(row.leadership_score)}</td>
               <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? "-"}</td>
               <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? "-"}</td>
               <td data-label="Signals">
