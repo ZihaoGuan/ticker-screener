@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
+import { PaginationControls } from "../components/PaginationControls";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type { ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell } from "../lib/types";
@@ -15,6 +16,7 @@ export function ScannerTopHitsPage() {
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [sectorFilter, setSectorFilter] = useState("all");
+  const [eliteOnly, setEliteOnly] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>("hits");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [currentPage, setCurrentPage] = useState(1);
@@ -48,12 +50,15 @@ export function ScannerTopHitsPage() {
         [row.ticker, row.company, row.sector, row.industry, row.scanner_labels.join(" ")].join(" ").toLowerCase().includes(query),
       );
     }
+    if (eliteOnly) {
+      nextRows = nextRows.filter(isElitePick);
+    }
     return [...nextRows].sort((left, right) => compareRows(left, right, sortBy, sortDirection));
-  }, [rows, search, sectorFilter, sortBy, sortDirection]);
+  }, [eliteOnly, rows, search, sectorFilter, sortBy, sortDirection]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, sectorFilter, sortBy, sortDirection]);
+  }, [eliteOnly, search, sectorFilter, sortBy, sortDirection]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const normalizedPage = Math.min(currentPage, totalPages);
@@ -122,6 +127,11 @@ export function ScannerTopHitsPage() {
             ))}
           </select>
         </label>
+        <label className="scanner-result-filter panel">
+          <span>Elite Pick</span>
+          <input type="checkbox" checked={eliteOnly} onChange={(event) => setEliteOnly(event.target.checked)} />
+          <span className="panel-copy">1D + 1W Strong Buy, and FA rank top 200 when present.</span>
+        </label>
         <div className="scanner-result-filter panel scanner-result-filter-actions">
           <span>Board Snapshot</span>
           <div className="scanner-result-view-actions">
@@ -143,25 +153,13 @@ export function ScannerTopHitsPage() {
               <span>{formatCount(filteredRows.length)} names</span>
               <span>Latest board date {formatLocalDate(payload?.target_trading_date)}</span>
             </div>
-            <div className="scanner-result-pagination">
-              <span className="scanner-result-pagination-status">
-                Showing {formatCount((normalizedPage - 1) * PAGE_SIZE + 1)}-{formatCount(Math.min(normalizedPage * PAGE_SIZE, filteredRows.length))} of {formatCount(filteredRows.length)}
-              </span>
-              <div className="scanner-result-pagination-actions">
-                <button className="ghost-button" type="button" onClick={() => setCurrentPage(1)} disabled={normalizedPage <= 1}>
-                  First
-                </button>
-                <button className="ghost-button" type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={normalizedPage <= 1}>
-                  Prev
-                </button>
-                <button className="ghost-button" type="button" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={normalizedPage >= totalPages}>
-                  Next
-                </button>
-                <button className="ghost-button" type="button" onClick={() => setCurrentPage(totalPages)} disabled={normalizedPage >= totalPages}>
-                  Last
-                </button>
-              </div>
-            </div>
+            <PaginationControls
+              currentPage={normalizedPage}
+              totalItems={filteredRows.length}
+              totalPages={totalPages}
+              pageSize={PAGE_SIZE}
+              onPageChange={setCurrentPage}
+            />
             <div className="data-table-responsive scanner-result-table-wrap">
               <table className="data-table scanner-result-table scanner-top-hits-table">
                 <thead>
@@ -230,6 +228,13 @@ export function ScannerTopHitsPage() {
                 </tbody>
               </table>
             </div>
+            <PaginationControls
+              currentPage={normalizedPage}
+              totalItems={filteredRows.length}
+              totalPages={totalPages}
+              pageSize={PAGE_SIZE}
+              onPageChange={setCurrentPage}
+            />
           </>
         ) : null}
       </section>
@@ -339,6 +344,17 @@ function formatCompactNumber(value: number | null | undefined) {
 
 function formatTechnicalIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {
   return value?.rating_label ?? "--";
+}
+
+function isElitePick(row: ScannerTopHitRow) {
+  const dailyLabel = normalizeIndicatorLabel(row.technical_indicator_ratings?.["1d"]);
+  const weeklyLabel = normalizeIndicatorLabel(row.technical_indicator_ratings?.["1w"]);
+  const faRankOk = row.fa_current_rank == null || row.fa_current_rank <= 200;
+  return dailyLabel === "strong buy" && weeklyLabel === "strong buy" && faRankOk;
+}
+
+function normalizeIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {
+  return String(value?.rating_label || "").trim().toLowerCase();
 }
 
 function renderChange(value: number | null) {

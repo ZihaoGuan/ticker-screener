@@ -3855,6 +3855,23 @@ a {
   flex-wrap: wrap;
 }
 
+.scanner-result-pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scanner-result-page-button {
+  min-width: 2.5rem;
+}
+
+.scanner-result-page-button.is-active {
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+}
+
 .scanner-result-table-wrap {
   border-top: 1px solid #27272a;
 }

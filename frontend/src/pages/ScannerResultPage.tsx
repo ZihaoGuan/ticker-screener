@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
+import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
@@ -418,25 +419,13 @@ export function ScannerResultPage() {
         {!isLoading && !notice && filteredRows.length === 0 ? <p className="panel-copy">No tickers match current scanner filters.</p> : null}
         {!isLoading && filteredRows.length > 0 ? (
           <>
-            <div className="scanner-result-pagination">
-              <span className="scanner-result-pagination-status">
-                Showing {formatCount((normalizedPage - 1) * pageSize + 1)}-{formatCount(Math.min(normalizedPage * pageSize, filteredRows.length))} of {formatCount(filteredRows.length)}
-              </span>
-              <div className="scanner-result-pagination-actions">
-                <button className="ghost-button" type="button" onClick={() => setCurrentPage(1)} disabled={normalizedPage <= 1}>
-                  First
-                </button>
-                <button className="ghost-button" type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={normalizedPage <= 1}>
-                  Prev
-                </button>
-                <button className="ghost-button" type="button" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={normalizedPage >= totalPages}>
-                  Next
-                </button>
-                <button className="ghost-button" type="button" onClick={() => setCurrentPage(totalPages)} disabled={normalizedPage >= totalPages}>
-                  Last
-                </button>
-              </div>
-            </div>
+            <PaginationControls
+              currentPage={normalizedPage}
+              totalItems={filteredRows.length}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+            />
             {viewMode === "charts" ? (
               <div className={`scanner-result-chart-grid is-${chartColumns}-col`}>
                 {pagedRows.map((row, index) => {
@@ -552,6 +541,13 @@ export function ScannerResultPage() {
                 </table>
               </div>
             )}
+            <PaginationControls
+              currentPage={normalizedPage}
+              totalItems={filteredRows.length}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+            />
             <div className="scanner-result-footer">
               <span>Page {normalizedPage} shows {formatCount(pagedRows.length)} stocks</span>
               <div className="scanner-result-preview-pills">

@@ -4,21 +4,21 @@ import { useAuth } from "../auth/AuthContext";
 import type { CapabilityName, RoleName } from "../lib/types";
 
 const navItems = [
-  { to: "/", label: "Dashboard", icon: "▦" },
-  { to: "/scanner", label: "Scanner", icon: "◭" },
-  { to: "/ratings", label: "Ratings", icon: "◬" },
-  { to: "/guide", label: "Guide", icon: "◫", roles: ["premium", "admin"] as RoleName[] },
-  { to: "/charts", label: "Charts", icon: "◍" },
-  { to: "/earnings", label: "Earnings", icon: "◒" },
-  { to: "/watchlists", label: "Watchlists", icon: "◌", roles: ["admin"] as RoleName[] },
-  { to: "/my-picks", label: "My Picks", icon: "◔", roles: ["admin"] as RoleName[], expo: true, capability: "manage_exclusions" as CapabilityName },
-  { to: "/rotation/sector", label: "Rotation", icon: "◎", roles: ["premium", "admin"] as RoleName[] },
-  { to: "/report", label: "Report", icon: "◈", roles: ["admin"] as RoleName[] },
-  { to: "/screeners", label: "Screeners", icon: "◉", roles: ["admin"] as RoleName[], capability: "run_screeners" as CapabilityName },
-  { to: "/warmup", label: "Warmup", icon: "◍", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
-  { to: "/backtests", label: "Backtests", icon: "◌", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
-  { to: "/portfolio", label: "Portfolio", icon: "◐", roles: ["admin"] as RoleName[], expo: true, capability: "manage_exclusions" as CapabilityName },
-  { to: "/admin", label: "Admin", icon: "◔", capability: "manage_exclusions" as CapabilityName },
+  { to: "/", label: "Dashboard", icon: "D" },
+  { to: "/scanner", label: "Scanner", icon: "S" },
+  { to: "/ratings", label: "Ratings", icon: "R" },
+  { to: "/guide", label: "Guide", icon: "G", roles: ["premium", "admin"] as RoleName[] },
+  { to: "/charts", label: "Charts", icon: "C" },
+  { to: "/earnings", label: "Earnings", icon: "E" },
+  { to: "/watchlists", label: "Watchlists", icon: "W", roles: ["admin"] as RoleName[] },
+  { to: "/my-picks", label: "My Picks", icon: "M", roles: ["admin"] as RoleName[], expo: true, capability: "manage_exclusions" as CapabilityName },
+  { to: "/rotation/sector", label: "Rotation", icon: "O" },
+  { to: "/report", label: "Report", icon: "P", roles: ["admin"] as RoleName[] },
+  { to: "/screeners", label: "Screeners", icon: "N", roles: ["admin"] as RoleName[], capability: "run_screeners" as CapabilityName },
+  { to: "/warmup", label: "Warmup", icon: "U", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
+  { to: "/backtests", label: "Backtests", icon: "B", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
+  { to: "/portfolio", label: "Portfolio", icon: "F", roles: ["admin"] as RoleName[], expo: true, capability: "manage_exclusions" as CapabilityName },
+  { to: "/admin", label: "Admin", icon: "A", capability: "manage_exclusions" as CapabilityName },
 ];
 
 export function AppLayout({ children }: PropsWithChildren) {

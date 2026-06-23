@@ -116,19 +116,11 @@ export default function App() {
         />
         <Route
           path="/rotation"
-          element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
-              <Navigate to="/rotation/sector" replace />
-            </RoleRoute>
-          }
+          element={<Navigate to="/rotation/sector" replace />}
         />
         <Route
           path="/rotation/:universe"
-          element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
-              <RrgPage />
-            </RoleRoute>
-          }
+          element={<RrgPage />}
         />
         <Route path="/rrg" element={<Navigate to="/rotation/sector" replace />} />
         <Route path="/rrg/:universe" element={<LegacyRrgRedirect />} />

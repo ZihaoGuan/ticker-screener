@@ -22,6 +22,7 @@ if TestClient is not None:
         get_earnings_calendar_service,
         get_my_picks_service,
         get_portfolio_service,
+        get_rrg_service,
         get_run_service,
         get_screener_history_service,
         get_user_admin_service,
@@ -980,6 +981,40 @@ class _FakeMyPicksService:
         return None
 
 
+class _FakeRrgService:
+    def get_latest_report(self):
+        return self.get_universe_report(universe="sector", benchmark="SPY", period="3y", trail_weeks=12, cadence="weekly")
+
+    def get_universe_report(self, *, universe: str, benchmark: str, period: str, trail_weeks: int, cadence: str):
+        return {
+            "universe": universe,
+            "benchmark": benchmark,
+            "period": period,
+            "trail_weeks": trail_weeks,
+            "cadence": cadence,
+            "generated_at": "2026-06-23T00:00:00+00:00",
+            "series": [
+                {
+                    "ticker": "XLK",
+                    "label": "Technology",
+                    "points": [{"x": 104.0, "y": 102.0, "date": "2026-06-20"}],
+                    "latest": {"x": 104.0, "y": 102.0, "date": "2026-06-20"},
+                    "quadrant": "Leading",
+                    "distance": 4.5,
+                    "fearzone": {
+                        "active": False,
+                        "signal_date": None,
+                        "signal_age_bars": None,
+                        "trigger_labels": [],
+                        "conditions": [],
+                    },
+                }
+            ],
+            "quadrants": {"center_x": 100, "center_y": 100, "definitions": []},
+            "meta": {"count": 1, "notes": ["Test payload"], "failed_tickers": []},
+        }
+
+
 @unittest.skipIf(TestClient is None, "fastapi test dependencies are not installed")
 class ApiAdHocScreenTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -995,6 +1030,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_earnings_calendar_service] = lambda: _FakeEarningsCalendarService()
         app.dependency_overrides[get_portfolio_service] = lambda: _FakePortfolioService()
         app.dependency_overrides[get_my_picks_service] = lambda: _FakeMyPicksService()
+        app.dependency_overrides[get_rrg_service] = lambda: _FakeRrgService()
         app.dependency_overrides[get_current_principal] = anonymous_principal
         self.client = TestClient(app)
 
@@ -1099,6 +1135,13 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["days"][1]["after_market"][0]["ticker"], "BBB")
         self.assertTrue(payload["filters"]["only_criteria"])
         self.assertEqual(payload["criteria_filter"]["strategy_id"], "earnings_weekly_criteria")
+
+    def test_anonymous_can_get_rrg_universe(self) -> None:
+        response = self.client.get("/api/rrg/sector?benchmark=SPY&period=3y&trailWeeks=12&cadence=weekly")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["universe"], "sector")
+        self.assertEqual(payload["series"][0]["ticker"], "XLK")
 
     def test_post_screener_runs_batch_requires_strategy_ids(self) -> None:
         response = self.client.post("/api/screener-runs/batch", json={"start_date": "2026-01-01", "end_date": "2026-01-31"})
