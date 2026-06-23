@@ -49,27 +49,15 @@ export default function App() {
         <Route path="/earnings" element={<EarningsPage />} />
         <Route
           path="/scanner"
-          element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
-              <ScannerBoardPage />
-            </RoleRoute>
-          }
+          element={<ScannerBoardPage />}
         />
         <Route
           path="/scanner/top-hits"
-          element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
-              <ScannerTopHitsPage />
-            </RoleRoute>
-          }
+          element={<ScannerTopHitsPage />}
         />
         <Route
           path="/scanner/:scannerId"
-          element={
-            <RoleRoute allowedRoles={["premium", "admin"]}>
-              <ScannerResultPage />
-            </RoleRoute>
-          }
+          element={<ScannerResultPage />}
         />
         <Route
           path="/ratings"

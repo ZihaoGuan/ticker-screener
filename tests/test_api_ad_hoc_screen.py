@@ -1031,9 +1031,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["ticker"], "NVDA")
         self.assertEqual(payload["setup_markers"][0]["kind"], "ftd_sweep_breakout")
 
-    def test_get_scanner_board(self) -> None:
-        app.dependency_overrides[get_current_principal] = lambda: premium_principal()
-
+    def test_anonymous_can_get_scanner_board(self) -> None:
         response = self.client.get("/api/scanner-board")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -1043,6 +1041,12 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(cards["weekly_rs_new_high"]["entry_count"], 8)
         self.assertEqual(cards["weekly_rs_before_price"]["entry_count"], 6)
         self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
+
+    def test_anonymous_can_get_scanner_watchlist_detail(self) -> None:
+        response = self.client.get("/api/watchlists/rs_new_high_before_price_2026-06-12")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["stem"], "rs_new_high_before_price_2026-06-12")
 
     def test_dashboard_and_ratings_are_public_for_visitors(self) -> None:
         dashboard_response = self.client.get("/api/dashboard")

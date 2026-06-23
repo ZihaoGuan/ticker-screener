@@ -928,7 +928,7 @@ def watchlists_data(
 @router.get("/scanner-board", response_class=JSONResponse)
 def scanner_board_data(
     service: WatchlistService = Depends(get_watchlist_service),
-    _: Principal = Depends(require_member_access),
+    _: Principal = Depends(get_current_principal),
 ) -> JSONResponse:
     return JSONResponse(service.get_scanner_board())
 
@@ -947,7 +947,7 @@ def scanner_board_refresh_data(
 def scanner_top_hits_data(
     service: WatchlistService = Depends(get_watchlist_service),
     rrg_service: RrgService = Depends(get_rrg_service),
-    _: Principal = Depends(require_member_access),
+    _: Principal = Depends(get_current_principal),
 ) -> JSONResponse:
     return JSONResponse(service.get_scanner_top_hits_payload(rrg_service=rrg_service))
 
@@ -965,7 +965,7 @@ def weekly_watchlist_data(
 def watchlist_detail_data(
     stem: str,
     service: WatchlistService = Depends(get_watchlist_service),
-    principal: Principal = Depends(require_member_access),
+    principal: Principal = Depends(get_current_principal),
 ) -> JSONResponse:
     try:
         return JSONResponse(service.get_watchlist_detail(stem, allow_deprecated=principal.role == "admin"))

@@ -5,7 +5,7 @@ import type { CapabilityName, RoleName } from "../lib/types";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: "▦" },
-  { to: "/scanner", label: "Scanner", icon: "◭", roles: ["premium", "admin"] as RoleName[] },
+  { to: "/scanner", label: "Scanner", icon: "◭" },
   { to: "/ratings", label: "Ratings", icon: "◬" },
   { to: "/guide", label: "Guide", icon: "◫", roles: ["premium", "admin"] as RoleName[] },
   { to: "/charts", label: "Charts", icon: "◍" },
