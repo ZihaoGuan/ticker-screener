@@ -127,12 +127,16 @@ export function DashboardPage() {
             </p>
           </article>
 
-          <article className="metric-card">
+          <article className={`metric-card${optionsLatest?.plots ? " metric-card-wide" : ""}`}>
             <div className="metric-card-head">
               <h3>{optionsPositioning?.ticker ?? "SPX"} Options Positioning</h3>
               <span className={`accent-mark accent-${optionsLatest?.gex_regime === "negative" ? "down" : "up"}`} />
             </div>
-            <p className="card-meta">CBOE-delayed close snapshot loaded from persisted DB summary, not live-fetched on dashboard load.</p>
+            <p className="card-meta">
+              {optionsLatest?.plots
+                ? "Admin-refreshed SPX gamma exposure cache. Dashboard reads stored plot artifacts only."
+                : "CBOE-delayed close snapshot loaded from persisted DB summary, not live-fetched on dashboard load."}
+            </p>
             <div className="metric-value">
               {optionsLatest?.gex_label ?? "Unavailable"} <span>{optionsLatest ? `Flip ${formatPrice(optionsLatest.gamma_flip)}` : "No options snapshot"}</span>
             </div>
@@ -151,8 +155,20 @@ export function DashboardPage() {
                 ? `Tracked strikes ${optionsLatest.strike_count ?? "--"} · Put/Call OI ${formatRatio(optionsLatest.put_call_oi_ratio)}`
                 : ""}
             </p>
+            <p className="card-meta">
+              {optionsLatest
+                ? `Next expiry ${optionsLatest.next_expiry || "--"} · Next monthly ${optionsLatest.next_monthly_expiry || "--"}`
+                : ""}
+            </p>
             <p className="card-meta">{optionsLatest?.summary ?? ""}</p>
             <p className="card-meta">{optionsLatest?.methodology ?? ""}</p>
+            {optionsLatest?.plots ? (
+              <div className="gex-admin-plot-grid">
+                <div className="gex-admin-plot" dangerouslySetInnerHTML={{ __html: optionsLatest.plots.absolute }} />
+                <div className="gex-admin-plot" dangerouslySetInnerHTML={{ __html: optionsLatest.plots.by_option_type }} />
+                <div className="gex-admin-plot gex-admin-plot-wide" dangerouslySetInnerHTML={{ __html: optionsLatest.plots.profile }} />
+              </div>
+            ) : null}
             <p className="card-meta">
               {optionsLatest ? `As of ${optionsLatest.as_of}` : "Waiting for market data."}
               {optionsPositioning?.data_source ? ` · Source ${optionsPositioning.data_source}` : ""}

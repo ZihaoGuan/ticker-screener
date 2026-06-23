@@ -296,6 +296,43 @@ def _build_bearish_td9_payload(*, frame: pd.DataFrame, ticker: str, data_source:
 
 def _build_options_positioning_payload(*, repository: DashboardRepository, ticker: str) -> dict[str, Any]:
     options_ticker = "SPX"
+    cached_plot = repository.get_cached_gamma_exposure_plot(symbol=options_ticker)
+    if isinstance(cached_plot, dict):
+        return {
+            "ticker": str(cached_plot.get("symbol") or options_ticker).strip().upper(),
+            "data_source": "artifact-cache",
+            "latest": {
+                "as_of": str(cached_plot.get("as_of") or ""),
+                "spot": _to_number(cached_plot.get("underlying_price")),
+                "net_gex": _to_number(cached_plot.get("net_gex")),
+                "gex_regime": "negative" if (_to_number(cached_plot.get("net_gex")) or 0.0) < 0 else "positive",
+                "gex_label": "Negative Gamma" if (_to_number(cached_plot.get("net_gex")) or 0.0) < 0 else "Positive Gamma",
+                "gamma_flip": _to_number(cached_plot.get("gamma_flip")),
+                "distance_to_flip_pct": _distance_to_flip_pct(
+                    spot=_to_number(cached_plot.get("underlying_price")),
+                    gamma_flip=_to_number(cached_plot.get("gamma_flip")),
+                ),
+                "call_wall": _to_number(cached_plot.get("call_wall")),
+                "put_wall": _to_number(cached_plot.get("put_wall")),
+                "atm_pin_strike": _to_number(cached_plot.get("atm_pin_strike")),
+                "put_call_oi_ratio": _to_number(cached_plot.get("put_call_oi_ratio")),
+                "strike_count": _to_number(cached_plot.get("strike_count")),
+                "implied_move_pct": None,
+                "front_expiry": str(cached_plot.get("next_expiry") or ""),
+                "summary": str(cached_plot.get("summary") or ""),
+                "methodology": str(cached_plot.get("methodology") or ""),
+                "source_symbol": str(cached_plot.get("source_symbol") or ""),
+                "source_url": str(cached_plot.get("source_url") or ""),
+                "next_expiry": str(cached_plot.get("next_expiry") or ""),
+                "next_monthly_expiry": str(cached_plot.get("next_monthly_expiry") or ""),
+                "plots": {
+                    "absolute": str(((cached_plot.get("plots") or {}).get("absolute")) or ""),
+                    "by_option_type": str(((cached_plot.get("plots") or {}).get("by_option_type")) or ""),
+                    "profile": str(((cached_plot.get("plots") or {}).get("profile")) or ""),
+                },
+            },
+        }
+
     summary = repository.get_latest_screen_run_summary(strategy_id="flashalpha_gex_close", preferred_ticker=options_ticker)
     if not isinstance(summary, dict):
         return {
@@ -323,6 +360,11 @@ def _build_options_positioning_payload(*, repository: DashboardRepository, ticke
             "front_expiry": str(summary.get("front_expiry") or ""),
             "summary": str(summary.get("summary") or ""),
             "methodology": str(summary.get("methodology") or ""),
+            "source_symbol": "",
+            "source_url": "",
+            "next_expiry": str(summary.get("front_expiry") or ""),
+            "next_monthly_expiry": "",
+            "plots": None,
         },
     }
 
@@ -334,3 +376,9 @@ def _to_number(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _distance_to_flip_pct(*, spot: float | None, gamma_flip: float | None) -> float | None:
+    if spot in (None, 0.0) or gamma_flip in (None, 0.0):
+        return None
+    return round(((spot / gamma_flip) - 1.0) * 100.0, 2)

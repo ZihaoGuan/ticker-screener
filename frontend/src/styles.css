@@ -506,6 +506,10 @@ a {
   padding: 18px;
 }
 
+.metric-card-wide {
+  grid-column: span 2;
+}
+
 .market-matrix-card {
   grid-column: span 2;
 }
@@ -2595,6 +2599,11 @@ a {
   .detail-grid,
   .exclusion-grid {
     grid-template-columns: 1fr;
+  }
+
+  .metric-card-wide,
+  .market-matrix-card {
+    grid-column: auto;
   }
 
   .watchlist-group-list {

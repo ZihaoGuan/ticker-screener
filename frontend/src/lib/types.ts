@@ -327,6 +327,15 @@ export type DashboardResponse = {
         front_expiry: string;
         summary: string;
         methodology: string;
+        source_symbol: string;
+        source_url: string;
+        next_expiry: string;
+        next_monthly_expiry: string;
+        plots: {
+          absolute: string;
+          by_option_type: string;
+          profile: string;
+        } | null;
       } | null;
     };
     spy_extension: {

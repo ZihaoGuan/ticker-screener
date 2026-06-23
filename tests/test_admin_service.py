@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from src.gamma_exposure_cache import load_gamma_exposure_plot_context
 from src.ratings.finviz_missing_tickers import record_missing_finviz_ticker
 from src.webapp.services.admin_service import AdminService, _build_missing_ranges
 
@@ -215,15 +216,20 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(payload["sector"], "Technology")
 
     def test_get_gamma_exposure_plot_context_includes_rendered_svgs(self) -> None:
-        service = AdminService(database_url="postgres://example")
-        with patch("src.webapp.services.admin_service.build_gamma_exposure_report", return_value={"symbol": "SPX", "net_gex": 1.0}), patch(
-            "src.webapp.services.admin_service.render_gamma_exposure_report_svgs",
-            return_value={"absolute": "<svg/>", "by_option_type": "<svg/>", "profile": "<svg/>"},
-        ):
-            payload = service.get_gamma_exposure_plot_context(symbol="SPX")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = AdminService(database_url="postgres://example", artifacts_dir=Path(temp_dir))
+            with patch("src.webapp.services.admin_service.build_gamma_exposure_report", return_value={"symbol": "SPX", "net_gex": 1.0}), patch(
+                "src.webapp.services.admin_service.render_gamma_exposure_report_svgs",
+                return_value={"absolute": "<svg/>", "by_option_type": "<svg/>", "profile": "<svg/>"},
+            ):
+                payload = service.get_gamma_exposure_plot_context(symbol="SPX")
+
+            cached = load_gamma_exposure_plot_context(artifacts_dir=Path(temp_dir), symbol="SPX")
 
         self.assertEqual(payload["symbol"], "SPX")
         self.assertEqual(payload["plots"]["profile"], "<svg/>")
+        assert cached is not None
+        self.assertEqual((cached.get("plots") or {}).get("profile"), "<svg/>")
 
     def test_request_web_restart_schedules_self_exit(self) -> None:
         service = AdminService(database_url="postgres://example")

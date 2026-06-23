@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.gamma_exposure_cache import load_gamma_exposure_plot_context
+
 from .history_repository import HistoryRepository
 
 
@@ -42,6 +44,10 @@ class DashboardRepository:
             if preferred_candidates:
                 candidates = preferred_candidates
         return max(candidates, key=self._summary_completeness_score)
+
+    def get_cached_gamma_exposure_plot(self, *, symbol: str = "SPX") -> dict[str, Any] | None:
+        payload = load_gamma_exposure_plot_context(artifacts_dir=self.artifacts_dir, symbol=symbol)
+        return payload if isinstance(payload, dict) else None
 
     def _coerce_summary_payload(self, payload: Any) -> dict[str, Any] | None:
         if isinstance(payload, dict):

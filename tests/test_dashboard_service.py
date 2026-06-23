@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from src.gamma_exposure_cache import persist_gamma_exposure_plot_context
 from src.webapp.services.dashboard_service import DashboardService
 
 
@@ -47,6 +48,32 @@ def _mock_spy_options_positioning_summary() -> dict[str, object]:
     payload["atm_pin_strike"] = 600.0
     payload["summary"] = "Legacy SPY payload."
     return payload
+
+
+def _mock_gamma_plot_payload() -> dict[str, object]:
+    return {
+        "symbol": "SPX",
+        "source_symbol": "_SPX",
+        "source": "cboe_delayed_quotes",
+        "source_url": "https://example.test/_SPX.json",
+        "underlying_price": 6012.25,
+        "as_of": "2026-06-23T20:00:00+00:00",
+        "next_expiry": "2026-06-23",
+        "next_monthly_expiry": "2026-06-19",
+        "call_gex_total": 4_200_000_000.0,
+        "put_gex_total": -3_700_000_000.0,
+        "net_gex": 500_000_000.0,
+        "gamma_flip": 5965.0,
+        "strike_count": 88,
+        "call_wall": 6050.0,
+        "put_wall": 5900.0,
+        "atm_pin_strike": 6000.0,
+        "top_net_gex_strike": 6050.0,
+        "put_call_oi_ratio": 0.79,
+        "summary": "Cached all-expiry SPX gamma profile.",
+        "methodology": "Cached admin-only plot payload.",
+        "plots": {"absolute": "<svg>absolute</svg>", "by_option_type": "<svg>types</svg>", "profile": "<svg>profile</svg>"},
+    }
 
 
 class DashboardServiceTests(unittest.TestCase):
@@ -109,6 +136,43 @@ class DashboardServiceTests(unittest.TestCase):
         assert latest is not None
         self.assertIn(latest["state"], {"warning", "extreme"})
         self.assertGreater(latest["extension_pct"], 11.0)
+
+    def test_get_dashboard_context_prefers_cached_gamma_plot_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            persist_gamma_exposure_plot_context(artifacts_dir=artifacts_dir, payload=_mock_gamma_plot_payload())
+            service = DashboardService(database_url="", artifacts_dir=artifacts_dir)
+            index = pd.date_range(start="2026-01-05", periods=90, freq="B")
+            close_values = [100.0 + (idx * 0.8) for idx in range(len(index) - 8)]
+            close_values.extend([176.0, 181.0, 187.0, 194.0, 201.0, 208.0, 214.0, 210.0])
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        options_positioning = payload["market_health"]["options_positioning"]
+        latest = options_positioning["latest"]
+        self.assertEqual(options_positioning["data_source"], "artifact-cache")
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest["spot"], 6012.25)
+        self.assertEqual(latest["plots"]["profile"], "<svg>profile</svg>")
+        self.assertEqual(latest["summary"], "Cached all-expiry SPX gamma profile.")
 
     def test_get_dashboard_context_prefers_most_complete_options_positioning_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

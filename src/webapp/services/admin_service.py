@@ -19,6 +19,7 @@ from src.exclusion_registry import (
     remove_user_exclusion,
 )
 from src.flashalpha_gex import build_gamma_exposure_report, render_gamma_exposure_report_svgs
+from src.gamma_exposure_cache import persist_gamma_exposure_plot_context
 from src.market_data_access import resolve_database_url
 from src.ratings.finviz_missing_tickers import load_missing_finviz_tickers, remove_missing_finviz_ticker
 from src.ticker_filters import normalize_ticker_symbol
@@ -295,10 +296,12 @@ class AdminService:
 
     def get_gamma_exposure_plot_context(self, *, symbol: str = "SPX") -> dict[str, Any]:
         report = build_gamma_exposure_report(symbol=symbol)
-        return {
+        payload = {
             **report,
             "plots": render_gamma_exposure_report_svgs(report),
         }
+        persist_gamma_exposure_plot_context(artifacts_dir=self.artifacts_dir, payload=payload)
+        return payload
 
     def request_web_restart(self, *, delay_seconds: float = 1.0) -> dict[str, Any]:
         normalized_delay = max(0.2, float(delay_seconds))
