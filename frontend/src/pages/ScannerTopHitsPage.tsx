@@ -1,25 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell } from "../lib/types";
+import type { MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "rs" | "ta" | "fa";
 type SortDirection = "asc" | "desc";
 const PAGE_SIZE = 50;
 
 export function ScannerTopHitsPage() {
+  const auth = useAuth();
   const [payload, setPayload] = useState<ScannerTopHitsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [myPicksNotice, setMyPicksNotice] = useState("");
   const [search, setSearch] = useState("");
   const [sectorFilter, setSectorFilter] = useState("all");
   const [eliteOnly, setEliteOnly] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>("hits");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [currentPage, setCurrentPage] = useState(1);
+  const [myPickTickers, setMyPickTickers] = useState<Set<string>>(new Set());
+  const [savingMyPickTickers, setSavingMyPickTickers] = useState<Record<string, boolean>>({});
+  const canManageMyPicks = auth.hasCapability("manage_exclusions");
 
   useEffect(() => {
     setIsLoading(true);
@@ -32,6 +38,20 @@ export function ScannerTopHitsPage() {
       })
       .finally(() => setIsLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!canManageMyPicks) {
+      setMyPickTickers(new Set());
+      return;
+    }
+    void fetchJson<MyPicksContextResponse>("/api/admin/my-picks")
+      .then((response) => {
+        setMyPickTickers(new Set(response.rows.map((row) => row.ticker.toUpperCase())));
+      })
+      .catch(() => {
+        setMyPickTickers(new Set());
+      });
+  }, [canManageMyPicks]);
 
   const rows = payload?.rows ?? [];
   const sectors = useMemo(
@@ -89,6 +109,34 @@ export function ScannerTopHitsPage() {
       setCurrentPage(normalizedPage);
     }
   }, [currentPage, normalizedPage]);
+
+  const handleAddToMyPicks = async (ticker: string) => {
+    const normalizedTicker = ticker.trim().toUpperCase();
+    if (!normalizedTicker || myPickTickers.has(normalizedTicker) || savingMyPickTickers[normalizedTicker]) {
+      return;
+    }
+    setSavingMyPickTickers((current) => ({ ...current, [normalizedTicker]: true }));
+    setMyPicksNotice("");
+    try {
+      await fetchJson<{ ok: boolean; pick: { ticker: string } }>("/api/admin/my-picks", {
+        method: "POST",
+        body: JSON.stringify({
+          ticker: normalizedTicker,
+          notes: "Added from scanner top hits.",
+        }),
+      });
+      setMyPickTickers((current) => new Set([...current, normalizedTicker]));
+      setMyPicksNotice(`${normalizedTicker} added to My Picks.`);
+    } catch (error) {
+      setMyPicksNotice(error instanceof Error ? error.message : "Failed to add ticker to My Picks.");
+    } finally {
+      setSavingMyPickTickers((current) => {
+        const next = { ...current };
+        delete next[normalizedTicker];
+        return next;
+      });
+    }
+  };
 
   return (
     <div className="page-grid scanner-top-hits-page">
@@ -163,6 +211,7 @@ export function ScannerTopHitsPage() {
       <section className="scanner-result-table-shell panel">
         {isLoading ? <LoadingBlock label="Loading scanner top hits…" /> : null}
         {notice ? <p className="panel-copy">{notice}</p> : null}
+        {!notice && myPicksNotice ? <p className="panel-copy earnings-console-note">{myPicksNotice}</p> : null}
         {!isLoading && !notice && filteredRows.length === 0 ? <p className="panel-copy">No tickers match current filters.</p> : null}
         {!isLoading && !notice && filteredRows.length > 0 ? (
           <>
@@ -181,6 +230,7 @@ export function ScannerTopHitsPage() {
               <table className="data-table scanner-result-table scanner-top-hits-table">
                 <thead>
                   <tr>
+                    {canManageMyPicks ? <th>My Pick</th> : null}
                     <th>{renderSortButton("Ticker", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("Hits", "hits", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>Scanners</th>
@@ -203,6 +253,21 @@ export function ScannerTopHitsPage() {
                 <tbody>
                   {pagedRows.map((row) => (
                     <tr key={row.ticker}>
+                      {canManageMyPicks ? (
+                        <td data-label="My Pick">
+                          <input
+                            type="checkbox"
+                            checked={myPickTickers.has(row.ticker)}
+                            disabled={myPickTickers.has(row.ticker) || Boolean(savingMyPickTickers[row.ticker])}
+                            aria-label={myPickTickers.has(row.ticker) ? `${row.ticker} already in My Picks` : `Add ${row.ticker} to My Picks`}
+                            onChange={(event) => {
+                              if (event.target.checked) {
+                                void handleAddToMyPicks(row.ticker);
+                              }
+                            }}
+                          />
+                        </td>
+                      ) : null}
                       <td data-label="Ticker">
                         <div className="scanner-result-company">
                           <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)}>
