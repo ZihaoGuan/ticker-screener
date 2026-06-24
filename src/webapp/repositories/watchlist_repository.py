@@ -191,6 +191,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("weinstein_stage2_early", "weinstein_stage2_early", "Weinstein Stage 2 Early"),
         ("three_weeks_tight", "three_weeks_tight", "Three Weeks Tight"),
         ("fearzone", "fearzone", "Fearzone"),
+        ("gamma_squeeze", "gamma_squeeze", "Gamma Squeeze"),
         ("near_200ma", "near_200ma", "Near 200MA"),
         ("lost_21ema", "lost_21ema", "Lost 21EMA"),
         ("trend_template", "trend_template", "Trend Template"),

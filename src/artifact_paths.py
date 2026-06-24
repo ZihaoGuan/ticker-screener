@@ -318,6 +318,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("flashalpha_gex_close_{date_label}.json",),
         "legacy_summary_templates": ("flashalpha_gex_close_run_summary_{date_label}.json",),
     },
+    "gamma_squeeze": {
+        "stem_template": "gamma_squeeze_{date_label}",
+        "legacy_watchlist_templates": ("gamma_squeeze_{date_label}.json",),
+        "legacy_raw_templates": ("gamma_squeeze_{date_label}.json",),
+        "legacy_summary_templates": ("gamma_squeeze_run_summary_{date_label}.json",),
+    },
     "legacy_peg": {
         "stem_template": "legacy_peg_earnings_gap_{date_label}",
         "legacy_watchlist_templates": ("legacy_peg_earnings_gap_{date_label}.json", "peg_earnings_gap_{date_label}.json"),
@@ -373,6 +379,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("pre_earnings_focus", "pre_earnings_focus"),
     ("earnings_weekly_criteria", "earnings_weekly_criteria"),
     ("flashalpha_gex_close", "flashalpha_gex_close"),
+    ("gamma_squeeze", "gamma_squeeze"),
     ("earnings_growth", "earnings_growth"),
     ("canslim", "canslim"),
     ("venu_scanner", "venu_scanner"),

@@ -47,6 +47,22 @@ class DiscordNotificationServiceTests(unittest.TestCase):
         assert message is not None
         self.assertIn("https://ticker.example.com/screeners", message)
 
+    def test_build_completion_message_links_gamma_squeeze_route(self) -> None:
+        service = DiscordNotificationService(project_root=self.project_root, app_base_url="https://ticker.example.com")
+
+        message = service.build_completion_message(
+            action_id="gamma_squeeze",
+            job_label="Gamma Squeeze",
+            status="success",
+            success_count=4,
+            trigger_source="scheduler",
+            watchlist_file="/tmp/gamma_squeeze_2026-06-24.json",
+            app_base_url="https://ticker.example.com",
+        )
+
+        assert message is not None
+        self.assertIn("https://ticker.example.com/scanner/gamma_squeeze", message)
+
     def test_notify_job_completion_skips_when_settings_incomplete(self) -> None:
         service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
         service._post_webhook = MagicMock()

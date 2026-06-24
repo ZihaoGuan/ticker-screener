@@ -26,6 +26,7 @@ _SCANNER_ROUTE_CONFIG: tuple[tuple[str, str], ...] = (
     ("trend_template", "trend_template"),
     ("sean_breakout", "sean_breakout"),
     ("fearzone", "fearzone"),
+    ("gamma_squeeze", "gamma_squeeze"),
     ("td9_bullish", "td9_bullish"),
 )
 

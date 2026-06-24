@@ -285,6 +285,19 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "bb_squeeze_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "bb_squeeze")
 
+    def test_group_key_supports_gamma_squeeze(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="gamma_squeeze",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "gamma_squeeze_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "gamma_squeeze")
+
     def test_group_key_supports_ema21_pullback_buy(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",

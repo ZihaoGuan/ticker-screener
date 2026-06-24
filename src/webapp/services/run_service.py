@@ -377,6 +377,19 @@ class RunService:
                 _as_of_date_field,
             ),
         ),
+        "gamma_squeeze": RunAction(
+            "gamma_squeeze",
+            "Run Gamma Squeeze",
+            "scripts/run_gamma_squeeze_screen.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+            ),
+            bias_group="bullish",
+            bullish_subgroup="leaders",
+        ),
         "sync_finviz_fundamentals": RunAction(
             "sync_finviz_fundamentals",
             "Sync Finviz Fundamentals",

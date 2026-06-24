@@ -161,6 +161,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "gamma_squeeze",
+        "strategy_id": "gamma_squeeze",
+        "label": "Gamma Squeeze",
+        "description": "Options positioning setups where negative or fragile gamma, nearby gamma flip, and call-wall pressure can force upside hedging.",
+        "timeframe": "Daily",
+        "accent": "amber",
+        "bias_group": "bullish",
+    },
+    {
         "id": "macd_golden_cross",
         "strategy_id": "macd_golden_cross",
         "label": "MACD Golden Cross",
