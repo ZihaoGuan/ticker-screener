@@ -7,7 +7,7 @@ import { Panel } from "../components/Panel";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
 import { formatLocalDate } from "../lib/format";
-import type { AdminTickerListStatusResponse, CandlePoint, ChartFundamentalsResponse, ChartInsiderResponse, ChartOverlaysResponse, MissingSectorAdminResponse, WatchlistChartResponse } from "../lib/types";
+import type { AdminTickerListStatusResponse, CandlePoint, ChartFundamentalsResponse, ChartGexResponse, ChartInsiderResponse, ChartOverlaysResponse, MissingSectorAdminResponse, WatchlistChartResponse } from "../lib/types";
 
 const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
@@ -45,12 +45,15 @@ export function ChartsPage() {
   const [dateInput, setDateInput] = useState(requestedDate);
   const [payload, setPayload] = useState<WatchlistChartResponse | null>(null);
   const [overlayPayload, setOverlayPayload] = useState<ChartOverlaysResponse | null>(null);
+  const [gexPayload, setGexPayload] = useState<ChartGexResponse | null>(null);
   const [fundamentalsPayload, setFundamentalsPayload] = useState<ChartFundamentalsResponse | null>(null);
   const [insiderPayload, setInsiderPayload] = useState<ChartInsiderResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGexLoading, setIsGexLoading] = useState(false);
   const [isFundamentalsLoading, setIsFundamentalsLoading] = useState(false);
   const [isInsiderLoading, setIsInsiderLoading] = useState(false);
   const [notice, setNotice] = useState("");
+  const [gexNotice, setGexNotice] = useState("");
   const [fundamentalsNotice, setFundamentalsNotice] = useState("");
   const [insiderNotice, setInsiderNotice] = useState("");
   const [chartVisibility, setChartVisibility] = useState<ChartVisibility>(DEFAULT_CHART_VISIBILITY);
@@ -89,10 +92,12 @@ export function ChartsPage() {
     if (!requestedTicker) {
       setPayload(null);
       setOverlayPayload(null);
+      setGexPayload(null);
       setFundamentalsPayload(null);
       setInsiderPayload(null);
       setSyncedHoverTime(null);
       setNotice("");
+      setGexNotice("");
       setFundamentalsNotice("");
       setInsiderNotice("");
       setBackfillNotice("");
@@ -132,6 +137,29 @@ export function ChartsPage() {
       .then((response) => setOverlayPayload(response))
       .catch(() => setOverlayPayload(null));
   }, [payload?.resolved_as_of_date, refreshNonce, requestedTicker]);
+
+  useEffect(() => {
+    if (!requestedTicker) {
+      setGexPayload(null);
+      setGexNotice("");
+      return;
+    }
+    setGexPayload(null);
+    setIsGexLoading(true);
+    setGexNotice("");
+    void fetchJson<ChartGexResponse>(`/api/chart-gex/${requestedTicker}`)
+      .then((response) => {
+        setGexPayload(response);
+        if (!response.available && response.error) {
+          setGexNotice(response.error);
+        }
+      })
+      .catch((error) => {
+        setGexPayload(null);
+        setGexNotice(error instanceof Error ? error.message : "Failed to load GEX.");
+      })
+      .finally(() => setIsGexLoading(false));
+  }, [refreshNonce, requestedTicker]);
 
   useEffect(() => {
     if (!requestedTicker) {
@@ -769,6 +797,55 @@ export function ChartsPage() {
           </div>
         </form>
         {requestedTicker ? <p className="panel-copy">Refresh re-runs live chart, fundamentals, and insider requests for this ticker.</p> : null}
+      </Panel>
+
+      <Panel title="Options GEX" aside={<span className="eyebrow">CBOE delayed all-expiry profile</span>}>
+        {!requestedTicker ? <p className="panel-copy">Load ticker to inspect latest GEX profile.</p> : null}
+        {requestedTicker && isGexLoading ? <LoadingBlock label="Loading options GEX…" compact /> : null}
+        {requestedTicker && !isGexLoading && !gexPayload ? <p className="panel-copy">No GEX response returned for this ticker.</p> : null}
+        {requestedTicker && gexNotice ? <p className="panel-copy">{gexNotice}</p> : null}
+        {gexPayload?.available ? (
+          <>
+            <p className="panel-copy">
+              {gexPayload.gex_label ?? "Unavailable"}
+              {" · "}
+              Spot {formatPrice(gexPayload.spot ?? null)}
+              {" · "}
+              Net GEX {formatCompactCurrency(gexPayload.net_gex)}
+              {" · "}
+              Flip {formatPrice(gexPayload.gamma_flip ?? null)}
+              {" · "}
+              {formatFlipDistance(gexPayload.distance_to_flip_pct)}
+            </p>
+            <p className="panel-copy">
+              Call wall {formatPrice(gexPayload.call_wall ?? null)}
+              {" · "}
+              Put wall {formatPrice(gexPayload.put_wall ?? null)}
+              {" · "}
+              ATM pin {formatPrice(gexPayload.atm_pin_strike ?? null)}
+              {" · "}
+              Put/Call OI {formatRatio(gexPayload.put_call_oi_ratio)}
+            </p>
+            <p className="panel-copy">
+              Next expiry {gexPayload.next_expiry || "--"}
+              {" · "}
+              Next monthly {gexPayload.next_monthly_expiry || "--"}
+              {" · "}
+              Strikes {gexPayload.strike_count ?? "--"}
+              {" · "}
+              As of {gexPayload.as_of || "--"}
+            </p>
+            {gexPayload.summary ? <p className="panel-copy">{gexPayload.summary}</p> : null}
+            {gexPayload.methodology ? <p className="panel-copy">{gexPayload.methodology}</p> : null}
+            {gexPayload.plots ? (
+              <div className="list-grid">
+                <div className="chart-card" dangerouslySetInnerHTML={{ __html: gexPayload.plots.absolute }} />
+                <div className="chart-card" dangerouslySetInnerHTML={{ __html: gexPayload.plots.by_option_type }} />
+                <div className="chart-card" style={{ gridColumn: "1 / -1" }} dangerouslySetInnerHTML={{ __html: gexPayload.plots.profile }} />
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </Panel>
 
       {showBackfillSection ? (
@@ -1523,8 +1600,37 @@ function formatMetric(value: number | null | undefined) {
   return value == null ? "--" : value.toFixed(2);
 }
 
+function formatCompactCurrency(value: number | null | undefined) {
+  if (value == null) {
+    return "--";
+  }
+  const absValue = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (absValue >= 1_000_000_000) {
+    return `${sign}$${(absValue / 1_000_000_000).toFixed(2)}B`;
+  }
+  if (absValue >= 1_000_000) {
+    return `${sign}$${(absValue / 1_000_000).toFixed(2)}M`;
+  }
+  if (absValue >= 1_000) {
+    return `${sign}$${(absValue / 1_000).toFixed(2)}K`;
+  }
+  return `${sign}$${absValue.toFixed(2)}`;
+}
+
 function formatPercent(value: number | null | undefined) {
   return value == null ? "--" : `${value.toFixed(2)}%`;
+}
+
+function formatFlipDistance(value: number | null | undefined) {
+  if (value == null) {
+    return "Flip dist --";
+  }
+  return `${value >= 0 ? "Above flip" : "Below flip"} ${formatPercent(value)}`;
+}
+
+function formatRatio(value: number | null | undefined) {
+  return value == null ? "--" : `${value.toFixed(2)}x`;
 }
 
 function formatAtrMultiple(value: number | null | undefined) {

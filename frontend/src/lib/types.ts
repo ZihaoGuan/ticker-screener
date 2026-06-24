@@ -685,6 +685,36 @@ export type ChartOverlaysResponse = Pick<
   | "sepa_dashboard"
 >;
 
+export type ChartGexResponse = {
+  ticker: string;
+  available: boolean;
+  error?: string;
+  as_of?: string;
+  spot?: number | null;
+  net_gex?: number | null;
+  gex_regime?: "positive" | "negative";
+  gex_label?: string;
+  gamma_flip?: number | null;
+  distance_to_flip_pct?: number | null;
+  call_gex_total?: number | null;
+  put_gex_total?: number | null;
+  call_wall?: number | null;
+  put_wall?: number | null;
+  atm_pin_strike?: number | null;
+  put_call_oi_ratio?: number | null;
+  strike_count?: number | null;
+  next_expiry?: string;
+  next_monthly_expiry?: string;
+  summary?: string;
+  methodology?: string;
+  source_url?: string;
+  plots?: {
+    absolute: string;
+    by_option_type: string;
+    profile: string;
+  } | null;
+};
+
 export type ChartFundamentalsResponse = {
   ticker: string;
   earnings_eps_history: Array<{

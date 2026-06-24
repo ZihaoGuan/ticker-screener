@@ -1032,6 +1032,14 @@ def ticker_chart_overlays_data(
     )
 
 
+@router.get("/chart-gex/{ticker}", response_class=JSONResponse)
+def ticker_chart_gex_data(
+    ticker: str,
+    service: WatchlistService = Depends(get_chart_watchlist_service),
+) -> JSONResponse:
+    return JSONResponse(service.get_chart_gex_payload(ticker=ticker.upper()))
+
+
 @router.get("/chart-fundamentals/{ticker}", response_class=JSONResponse)
 def chart_fundamentals_data(
     ticker: str,
