@@ -175,6 +175,17 @@ export function DashboardPage() {
             </p>
           </article>
 
+          {optionsLatest?.plots?.v2 ? (
+            <article className="metric-card metric-card-wide">
+              <div className="metric-card-head">
+                <h3>{optionsPositioning?.ticker ?? "SPX"} GEX Plot Chart V2</h3>
+                <span className={`accent-mark accent-${optionsLatest.gex_regime === "negative" ? "down" : "up"}`} />
+              </div>
+              <p className="card-meta">Explainer-style net GEX by strike with gamma flip, call wall, and put wall.</p>
+              <div className="gex-v2-card" dangerouslySetInnerHTML={{ __html: optionsLatest.plots.v2 }} />
+            </article>
+          ) : null}
+
           <article className="metric-card">
             <div className="metric-card-head">
               <h3>{spyExtension?.ticker ?? "SPY"} Extension</h3>

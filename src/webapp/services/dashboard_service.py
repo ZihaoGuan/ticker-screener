@@ -8,6 +8,7 @@ import pandas as pd
 import yfinance as yf
 
 from ...config import load_app_config
+from ...flashalpha_gex import render_gamma_exposure_report_svgs
 from ...market_data_access import load_daily_bars_frame_from_db
 from ...market_extension import build_moving_average, compute_extension_frame, resample_to_weekly
 from ...rsi_divergence import find_latest_bearish_rsi_divergence_top
@@ -298,6 +299,7 @@ def _build_options_positioning_payload(*, repository: DashboardRepository, ticke
     options_ticker = "SPX"
     cached_plot = repository.get_cached_gamma_exposure_plot(symbol=options_ticker)
     if isinstance(cached_plot, dict):
+        cached_plots = _coerce_cached_gex_plots(cached_plot)
         return {
             "ticker": str(cached_plot.get("symbol") or options_ticker).strip().upper(),
             "data_source": "artifact-cache",
@@ -325,11 +327,7 @@ def _build_options_positioning_payload(*, repository: DashboardRepository, ticke
                 "source_url": str(cached_plot.get("source_url") or ""),
                 "next_expiry": str(cached_plot.get("next_expiry") or ""),
                 "next_monthly_expiry": str(cached_plot.get("next_monthly_expiry") or ""),
-                "plots": {
-                    "absolute": str(((cached_plot.get("plots") or {}).get("absolute")) or ""),
-                    "by_option_type": str(((cached_plot.get("plots") or {}).get("by_option_type")) or ""),
-                    "profile": str(((cached_plot.get("plots") or {}).get("profile")) or ""),
-                },
+                "plots": cached_plots,
             },
         }
 
@@ -366,6 +364,21 @@ def _build_options_positioning_payload(*, repository: DashboardRepository, ticke
             "next_monthly_expiry": "",
             "plots": None,
         },
+    }
+
+
+def _coerce_cached_gex_plots(cached_plot: dict[str, Any]) -> dict[str, str] | None:
+    raw_plots = cached_plot.get("plots")
+    if not isinstance(raw_plots, dict) or not raw_plots:
+        if isinstance(cached_plot.get("strikes"), list):
+            raw_plots = render_gamma_exposure_report_svgs(cached_plot)
+        else:
+            return None
+    return {
+        "absolute": str(raw_plots.get("absolute") or ""),
+        "by_option_type": str(raw_plots.get("by_option_type") or ""),
+        "profile": str(raw_plots.get("profile") or ""),
+        "v2": str(raw_plots.get("v2") or ""),
     }
 
 

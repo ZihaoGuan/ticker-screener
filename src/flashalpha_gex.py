@@ -176,6 +176,7 @@ def render_gamma_exposure_report_svgs(report: dict[str, Any]) -> dict[str, str]:
     import matplotlib
 
     matplotlib.use("Agg")
+    import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
 
     strikes = report.get("strikes") if isinstance(report.get("strikes"), list) else []
@@ -190,6 +191,9 @@ def render_gamma_exposure_report_svgs(report: dict[str, Any]) -> dict[str, str]:
     profile_ex_next_monthly = [float(value) for value in profile.get("excluding_next_monthly") or []]
     spot = _to_float(report.get("underlying_price"))
     gamma_flip = _to_float(report.get("gamma_flip"))
+    call_wall = _to_float(report.get("call_wall"))
+    put_wall = _to_float(report.get("put_wall"))
+    net_gex = _to_float(report.get("net_gex")) or 0.0
     symbol = str(report.get("symbol") or "SPX")
 
     def render_figure(fig: Any) -> str:
@@ -245,10 +249,83 @@ def render_gamma_exposure_report_svgs(report: dict[str, Any]) -> dict[str, str]:
     ax3.grid(axis="y", alpha=0.18)
     ax3.legend(loc="upper left")
 
+    fig4, ax4 = plt.subplots(figsize=(12, 6))
+    colors = ["#2ecc71" if value >= 0 else "#e74c3c" for value in total_gamma_bn]
+    ax4.bar(
+        strike_values,
+        total_gamma_bn,
+        width=_estimate_bar_width(strike_values),
+        color=colors,
+        edgecolor="#ffffff",
+        linewidth=0.5,
+    )
+    ax4.axhline(0.0, color="#ffffff", linewidth=0.8, alpha=0.5)
+    if gamma_flip is not None:
+        ax4.axvline(
+            gamma_flip,
+            color="#ffffff",
+            linestyle="--",
+            linewidth=1.4,
+            label=f"Gamma flip: {gamma_flip:.1f}",
+        )
+    if call_wall is not None:
+        ax4.axvline(
+            call_wall,
+            color="#2ecc71",
+            linestyle="--",
+            linewidth=1.4,
+            label=f"Call wall: {call_wall:.0f}",
+        )
+    if put_wall is not None:
+        ax4.axvline(
+            put_wall,
+            color="#e74c3c",
+            linestyle="--",
+            linewidth=1.4,
+            label=f"Put wall: {put_wall:.0f}",
+        )
+    total_sign = "+" if net_gex >= 0 else ""
+    regime_label = "Positive (mean-reversion)" if net_gex >= 0 else "Negative (momentum)"
+    ax4.set_title(
+        f"{symbol} GEX Profile by Strike\nTotal GEX: {total_sign}{net_gex / 1_000_000_000.0:.2f}B  |  Regime: {regime_label}",
+        fontsize=13,
+        color="#ffffff",
+        pad=14,
+    )
+    ax4.set_xlabel("Strike", fontsize=12, color="#cccccc")
+    ax4.set_ylabel("Net GEX ($B)", fontsize=12, color="#cccccc")
+    ax4.tick_params(colors="#aaaaaa")
+    ax4.spines["bottom"].set_color("#555555")
+    ax4.spines["left"].set_color("#555555")
+    ax4.spines["top"].set_visible(False)
+    ax4.spines["right"].set_visible(False)
+    ax4.grid(axis="y", alpha=0.12)
+    fig4.patch.set_facecolor("#1e1e2e")
+    ax4.set_facecolor("#1e1e2e")
+    legend_handles = [
+        mpatches.Patch(color="#2ecc71", label="Positive GEX"),
+        mpatches.Patch(color="#e74c3c", label="Negative GEX"),
+    ]
+    if gamma_flip is not None:
+        legend_handles.append(plt.Line2D([0], [0], color="#ffffff", linestyle="--", label=f"Gamma flip: {gamma_flip:.1f}"))
+    if call_wall is not None:
+        legend_handles.append(plt.Line2D([0], [0], color="#2ecc71", linestyle="--", label=f"Call wall: {call_wall:.0f}"))
+    if put_wall is not None:
+        legend_handles.append(plt.Line2D([0], [0], color="#e74c3c", linestyle="--", label=f"Put wall: {put_wall:.0f}"))
+    ax4.legend(
+        handles=legend_handles,
+        loc="upper left",
+        framealpha=0.3,
+        facecolor="#2a2a3e",
+        labelcolor="#cccccc",
+        fontsize=9,
+    )
+
     return {
         "absolute": render_figure(fig1),
         "by_option_type": render_figure(fig2),
         "profile": render_figure(fig3),
+        "v2": render_figure(fig4),
     }
 
 

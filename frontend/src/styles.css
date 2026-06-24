@@ -1013,6 +1013,25 @@ a {
   grid-column: 1 / -1;
 }
 
+.gex-v2-section {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.gex-v2-card {
+  background: #ffffff;
+  border-radius: 10px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.gex-v2-card svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
+}
+
 .console-surface,
 .inline-code,
 .mono {

@@ -335,6 +335,7 @@ export type DashboardResponse = {
           absolute: string;
           by_option_type: string;
           profile: string;
+          v2?: string;
         } | null;
       } | null;
     };
@@ -712,6 +713,7 @@ export type ChartGexResponse = {
     absolute: string;
     by_option_type: string;
     profile: string;
+    v2?: string;
   } | null;
 };
 
@@ -1374,6 +1376,7 @@ export type GammaExposurePlotAdminResponse = {
     absolute: string;
     by_option_type: string;
     profile: string;
+    v2?: string;
   };
 };
 

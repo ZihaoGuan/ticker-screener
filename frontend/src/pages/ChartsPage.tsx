@@ -837,6 +837,13 @@ export function ChartsPage() {
             </p>
             {gexPayload.summary ? <p className="panel-copy">{gexPayload.summary}</p> : null}
             {gexPayload.methodology ? <p className="panel-copy">{gexPayload.methodology}</p> : null}
+            {gexPayload.plots?.v2 ? (
+              <div className="gex-v2-section">
+                <div className="chart-rs-header">GEX Plot Chart V2</div>
+                <p className="panel-copy">Explainer-style net GEX by strike with gamma flip, call wall, and put wall.</p>
+                <div className="gex-v2-card" dangerouslySetInnerHTML={{ __html: gexPayload.plots.v2 }} />
+              </div>
+            ) : null}
             {gexPayload.plots ? (
               <div className="list-grid">
                 <div className="chart-card" dangerouslySetInnerHTML={{ __html: gexPayload.plots.absolute }} />
