@@ -1432,6 +1432,59 @@ class WatchlistServiceTests(unittest.TestCase):
         markers_patch.assert_not_called()
         self.assertEqual(payload["setup_markers"], [])
 
+    def test_get_chart_gex_payload_uses_existing_report_renderer_and_cache(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name))
+        report = {
+            "symbol": "NVDA",
+            "as_of": "2026-06-24T20:15:00+00:00",
+            "underlying_price": 155.25,
+            "net_gex": 1_250_000_000.0,
+            "gamma_flip": 152.0,
+            "call_gex_total": 2_100_000_000.0,
+            "put_gex_total": -850_000_000.0,
+            "call_wall": 160.0,
+            "put_wall": 150.0,
+            "atm_pin_strike": 155.0,
+            "put_call_oi_ratio": 0.91,
+            "strike_count": 48,
+            "next_expiry": "2026-06-26",
+            "next_monthly_expiry": "2026-07-17",
+            "summary": "NVDA all-expiry profile.",
+            "methodology": "CBOE delayed chain with all listed expiries.",
+            "source_url": "https://cdn.cboe.com/api/global/delayed_quotes/options/NVDA.json",
+        }
+
+        with patch(
+            "src.webapp.services.watchlist_service.build_gamma_exposure_report",
+            return_value=report,
+        ) as report_patch, patch(
+            "src.webapp.services.watchlist_service.render_gamma_exposure_report_svgs",
+            return_value={"absolute": "<svg/>", "by_option_type": "<svg/>", "profile": "<svg/>"},
+        ) as render_patch:
+            first = service.get_chart_gex_payload("NVDA")
+            second = service.get_chart_gex_payload("NVDA")
+
+        report_patch.assert_called_once_with(symbol="NVDA", timeout_seconds=12)
+        render_patch.assert_called_once_with(report)
+        self.assertTrue(first["available"])
+        self.assertEqual(first["gex_label"], "Positive Gamma")
+        self.assertEqual(first["plots"]["profile"], "<svg/>")
+        self.assertEqual(first, second)
+
+    def test_get_chart_gex_payload_returns_unavailable_payload_when_report_fails(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name))
+
+        with patch(
+            "src.webapp.services.watchlist_service.build_gamma_exposure_report",
+            side_effect=ValueError("No options rows available for expiry 2026-06-24."),
+        ):
+            payload = service.get_chart_gex_payload("XYZ")
+
+        self.assertEqual(payload["ticker"], "XYZ")
+        self.assertFalse(payload["available"])
+        self.assertIn("No options rows available", payload["error"])
+        self.assertIsNone(payload["plots"])
+
     def test_get_chart_payload_skips_heavy_overlay_computation(self) -> None:
         service = WatchlistService(
             artifacts_dir=Path(self.temp_dir.name),

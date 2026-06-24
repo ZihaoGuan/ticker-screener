@@ -1,6 +1,111 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+  .gex-panel {
+    display: none;
+    margin-top: 12px;
+    padding: 14px;
+    border-radius: 16px;
+    background: #f8fafc;
+    border: 1px solid #dbe4f0;
+  }
+
+  .gex-panel.is-visible {
+    display: block;
+  }
+
+  .gex-panel-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+
+  .gex-panel-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #122033;
+  }
+
+  .gex-panel-meta {
+    font-size: 0.8rem;
+    color: #5b6b82;
+  }
+
+  .gex-panel-copy {
+    color: #334155;
+    font-size: 0.9rem;
+    margin: 0 0 10px;
+  }
+
+  .gex-panel-error {
+    color: #9f1239;
+  }
+
+  .gex-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .gex-metric {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+  }
+
+  .gex-metric-label {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    margin-bottom: 4px;
+  }
+
+  .gex-metric-value {
+    font-size: 0.98rem;
+    color: #0f172a;
+  }
+
+  .gex-plot-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .gex-plot {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 8px;
+    overflow: auto;
+  }
+
+  .gex-plot-wide {
+    grid-column: 1 / -1;
+  }
+
+  .gex-plot svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  @media (max-width: 960px) {
+    .gex-plot-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .gex-plot-wide {
+      grid-column: auto;
+    }
+  }
+</style>
 <section class="band chart-band">
   <div class="section-head">
     <div>
@@ -16,6 +121,7 @@
     <div class="chart-surface">
       <div id="priceChart" class="chart-canvas"></div>
       <div id="fearzonePanel" style="display:none; margin-top:12px; padding:10px 12px 12px; border-radius:16px; background:#0f172a;"></div>
+      <div id="gexPanel" class="gex-panel"></div>
       <div id="chartSummary" class="chart-summary">{{ entries[0].get("summary", "") if entries else "No watchlist entries available." }}</div>
     </div>
     <aside class="chart-sidebar">
@@ -83,6 +189,8 @@
   const chartTrigger = document.getElementById('chartTrigger');
   const chartStop = document.getElementById('chartStop');
   const fearzonePanelRoot = document.getElementById('fearzonePanel');
+  const gexPanelRoot = document.getElementById('gexPanel');
+  let activeTickerRequestId = 0;
 
   const chart = LightweightCharts.createChart(chartRoot, {
     layout: {
@@ -176,7 +284,99 @@
     chart.timeScale().fitContent();
   }
 
+  function formatGexPrice(value) {
+    if (value == null || Number.isNaN(Number(value))) {
+      return '--';
+    }
+    return Number(value).toFixed(2);
+  }
+
+  function formatGexCompact(value) {
+    if (value == null || Number.isNaN(Number(value))) {
+      return '--';
+    }
+    const numericValue = Number(value);
+    const absValue = Math.abs(numericValue);
+    const sign = numericValue < 0 ? '-' : '';
+    if (absValue >= 1_000_000_000) {
+      return `${sign}$${(absValue / 1_000_000_000).toFixed(2)}B`;
+    }
+    if (absValue >= 1_000_000) {
+      return `${sign}$${(absValue / 1_000_000).toFixed(2)}M`;
+    }
+    if (absValue >= 1_000) {
+      return `${sign}$${(absValue / 1_000).toFixed(2)}K`;
+    }
+    return `${sign}$${absValue.toFixed(2)}`;
+  }
+
+  function formatGexRatio(value) {
+    if (value == null || Number.isNaN(Number(value))) {
+      return '--';
+    }
+    return `${Number(value).toFixed(2)}x`;
+  }
+
+  function formatGexFlipDistance(value) {
+    if (value == null || Number.isNaN(Number(value))) {
+      return '--';
+    }
+    const numericValue = Number(value);
+    const prefix = numericValue > 0 ? '+' : '';
+    return `${prefix}${numericValue.toFixed(2)}%`;
+  }
+
+  function renderGexPanel(payload) {
+    if (!gexPanelRoot) {
+      return;
+    }
+    if (!payload || !payload.available) {
+      const errorText = payload?.error ? String(payload.error) : 'No listed options GEX data available.';
+      gexPanelRoot.innerHTML = `
+        <div class="gex-panel-head">
+          <div class="gex-panel-title">Options GEX</div>
+        </div>
+        <p class="gex-panel-copy gex-panel-error">${errorText}</p>
+      `;
+      gexPanelRoot.classList.add('is-visible');
+      return;
+    }
+
+    const summary = payload.summary ? String(payload.summary) : '';
+    const methodology = payload.methodology ? String(payload.methodology) : '';
+    const plots = payload.plots || {};
+    gexPanelRoot.innerHTML = `
+      <div class="gex-panel-head">
+        <div class="gex-panel-title">${payload.ticker} Options GEX</div>
+        <div class="gex-panel-meta">As of ${payload.as_of || '--'}</div>
+      </div>
+      <div class="gex-metrics">
+        <div class="gex-metric"><span class="gex-metric-label">Regime</span><strong class="gex-metric-value">${payload.gex_label || '--'}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Spot</span><strong class="gex-metric-value">${formatGexPrice(payload.spot)}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Net GEX</span><strong class="gex-metric-value">${formatGexCompact(payload.net_gex)}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Gamma Flip</span><strong class="gex-metric-value">${formatGexPrice(payload.gamma_flip)}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Flip Dist</span><strong class="gex-metric-value">${formatGexFlipDistance(payload.distance_to_flip_pct)}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Call Wall</span><strong class="gex-metric-value">${formatGexPrice(payload.call_wall)}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Put Wall</span><strong class="gex-metric-value">${formatGexPrice(payload.put_wall)}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">ATM Pin</span><strong class="gex-metric-value">${formatGexPrice(payload.atm_pin_strike)}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Put/Call OI</span><strong class="gex-metric-value">${formatGexRatio(payload.put_call_oi_ratio)}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Strikes</span><strong class="gex-metric-value">${payload.strike_count ?? '--'}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Next Expiry</span><strong class="gex-metric-value">${payload.next_expiry || '--'}</strong></div>
+        <div class="gex-metric"><span class="gex-metric-label">Next Monthly</span><strong class="gex-metric-value">${payload.next_monthly_expiry || '--'}</strong></div>
+      </div>
+      ${summary ? `<p class="gex-panel-copy">${summary}</p>` : ''}
+      ${methodology ? `<p class="gex-panel-copy">${methodology}</p>` : ''}
+      <div class="gex-plot-grid">
+        <div class="gex-plot">${plots.absolute || ''}</div>
+        <div class="gex-plot">${plots.by_option_type || ''}</div>
+        <div class="gex-plot gex-plot-wide">${plots.profile || ''}</div>
+      </div>
+    `;
+    gexPanelRoot.classList.add('is-visible');
+  }
+
   async function loadTicker(row) {
+    const requestId = ++activeTickerRequestId;
     const ticker = row.dataset.ticker;
     if (!ticker) {
       return;
@@ -190,14 +390,22 @@
     chartTrigger.textContent = row.dataset.trigger || '-';
     chartStop.textContent = row.dataset.stop || '-';
 
-    const response = await fetch(`/watchlists/api/chart/${ticker}`);
-    const payload = await response.json();
-    candleSeries.setData(payload.candles || []);
-    volumeSeries.setData(payload.volume || []);
-    ma20Series.setData(payload.ma20 || []);
-    ma50Series.setData(payload.ma50 || []);
-    ma200Series.setData(payload.ma200 || []);
-    renderFearzonePanel(payload, row.dataset.setup || '');
+    const [chartPayload, gexPayload] = await Promise.all([
+      fetch(`/watchlists/api/chart/${ticker}`).then((response) => response.json()),
+      fetch(`/watchlists/api/gex/${ticker}`)
+        .then((response) => response.json())
+        .catch(() => ({ ticker, available: false, error: 'Failed to load GEX.' })),
+    ]);
+    if (requestId !== activeTickerRequestId) {
+      return;
+    }
+    candleSeries.setData(chartPayload.candles || []);
+    volumeSeries.setData(chartPayload.volume || []);
+    ma20Series.setData(chartPayload.ma20 || []);
+    ma50Series.setData(chartPayload.ma50 || []);
+    ma200Series.setData(chartPayload.ma200 || []);
+    renderFearzonePanel(chartPayload, row.dataset.setup || '');
+    renderGexPanel(gexPayload);
     chart.timeScale().fitContent();
   }
 

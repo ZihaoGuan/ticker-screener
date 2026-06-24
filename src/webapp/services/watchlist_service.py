@@ -23,6 +23,7 @@ from ...config import AppConfig
 from ...canslim_screen import CANSLIM_HISTORY_DAYS, CANSLIM_INSIDER_LOOKBACK_DAYS, compute_canslim_frame_metrics, evaluate_canslim_ticker
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
+from ...flashalpha_gex import build_gamma_exposure_report, render_gamma_exposure_report_svgs
 from ...market_extension import compute_extension_frame, resample_to_weekly
 from ...market_data_access import (
     db_frame_has_recent_coverage,
@@ -78,6 +79,7 @@ _YAHOO_ANALYSIS_HOLDERS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "pr
 _YAHOO_OPTIONS_PROBE_SCRIPT = _REPO_ROOT / "frontend" / "scripts" / "probe_yahoo_options_playwright.mjs"
 _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
+_CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -85,6 +87,8 @@ _SCANNER_BOARD_CUTOFF_HOUR = 20
 _SCANNER_BOARD_CUTOFF_MINUTE = 30
 _chart_payload_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
 _chart_payload_cache_lock = threading.Lock()
+_chart_gex_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_chart_gex_cache_lock = threading.Lock()
 _chart_overlay_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
 _chart_overlay_cache_lock = threading.Lock()
 _scanner_top_hits_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
@@ -740,6 +744,26 @@ class WatchlistService:
         }
         if payload["candles"]:
             _write_chart_payload_cache(cache_key, payload)
+        return payload
+
+    def get_chart_gex_payload(self, ticker: str) -> dict[str, Any]:
+        normalized_ticker = str(ticker or "").strip().upper()
+        cached_payload = _read_chart_gex_cache(normalized_ticker)
+        if cached_payload is not None:
+            return cached_payload
+
+        try:
+            report = build_gamma_exposure_report(symbol=normalized_ticker, timeout_seconds=12)
+            payload = _build_chart_gex_payload(report=report)
+        except Exception as exc:
+            payload = {
+                "ticker": normalized_ticker,
+                "available": False,
+                "error": str(exc),
+                "plots": None,
+            }
+
+        _write_chart_gex_cache(normalized_ticker, payload)
         return payload
 
     def get_chart_overlays_payload(
@@ -1907,6 +1931,39 @@ def _normalize_download_frame(history: pd.DataFrame | None) -> pd.DataFrame | No
     return frame if not frame.empty else None
 
 
+def _build_chart_gex_payload(*, report: dict[str, Any]) -> dict[str, Any]:
+    net_gex = _coerce_optional_float(report.get("net_gex"))
+    gamma_flip = _coerce_optional_float(report.get("gamma_flip"))
+    spot = _coerce_optional_float(report.get("underlying_price"))
+    distance_to_flip_pct = None
+    if spot not in (None, 0.0) and gamma_flip not in (None, 0.0):
+        distance_to_flip_pct = round(((spot / gamma_flip) - 1.0) * 100.0, 2)
+    return {
+        "ticker": str(report.get("symbol") or "").strip().upper(),
+        "available": True,
+        "as_of": str(report.get("as_of") or ""),
+        "spot": spot,
+        "net_gex": net_gex,
+        "gex_regime": "negative" if (net_gex or 0.0) < 0 else "positive",
+        "gex_label": "Negative Gamma" if (net_gex or 0.0) < 0 else "Positive Gamma",
+        "gamma_flip": gamma_flip,
+        "distance_to_flip_pct": distance_to_flip_pct,
+        "call_gex_total": _coerce_optional_float(report.get("call_gex_total")),
+        "put_gex_total": _coerce_optional_float(report.get("put_gex_total")),
+        "call_wall": _coerce_optional_float(report.get("call_wall")),
+        "put_wall": _coerce_optional_float(report.get("put_wall")),
+        "atm_pin_strike": _coerce_optional_float(report.get("atm_pin_strike")),
+        "put_call_oi_ratio": _coerce_optional_float(report.get("put_call_oi_ratio")),
+        "strike_count": _coerce_optional_int(report.get("strike_count")),
+        "next_expiry": str(report.get("next_expiry") or ""),
+        "next_monthly_expiry": str(report.get("next_monthly_expiry") or ""),
+        "summary": str(report.get("summary") or ""),
+        "methodology": str(report.get("methodology") or ""),
+        "source_url": str(report.get("source_url") or ""),
+        "plots": render_gamma_exposure_report_svgs(report),
+    }
+
+
 def _frame_covers_requested_window(
     frame: pd.DataFrame | None,
     *,
@@ -1952,6 +2009,24 @@ def _build_chart_payload_cache_key(
         str(market_data_source or "").strip().lower() or "internet",
         "setup-markers" if include_setup_markers else "base",
     )
+
+
+def _read_chart_gex_cache(ticker: str) -> dict[str, Any] | None:
+    now = time.time()
+    with _chart_gex_cache_lock:
+        cached_entry = _chart_gex_cache.get(ticker)
+        if cached_entry is None:
+            return None
+        expires_at, payload = cached_entry
+        if expires_at <= now:
+            _chart_gex_cache.pop(ticker, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _write_chart_gex_cache(ticker: str, payload: dict[str, Any]) -> None:
+    with _chart_gex_cache_lock:
+        _chart_gex_cache[ticker] = (time.time() + _CHART_GEX_CACHE_TTL_SECONDS, copy.deepcopy(payload))
 
 
 def _read_chart_payload_cache(key: tuple[str, str, str, str, str, str]) -> dict[str, Any] | None:
@@ -2009,6 +2084,8 @@ def _write_sector_momentum_cache(key: tuple[str, str, str, str], payload: dict[s
 
 
 def _clear_chart_payload_cache() -> None:
+    with _chart_gex_cache_lock:
+        _chart_gex_cache.clear()
     with _chart_payload_cache_lock:
         _chart_payload_cache.clear()
     with _chart_overlay_cache_lock:

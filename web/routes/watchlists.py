@@ -57,3 +57,11 @@ def watchlist_chart_data(
     service: WatchlistService = Depends(get_watchlist_service),
 ) -> JSONResponse:
     return JSONResponse(service.get_chart_payload(ticker=ticker.upper(), period=period, as_of_date=as_of_date))
+
+
+@router.get("/api/gex/{ticker}", response_class=JSONResponse)
+def watchlist_gex_data(
+    ticker: str,
+    service: WatchlistService = Depends(get_watchlist_service),
+) -> JSONResponse:
+    return JSONResponse(service.get_chart_gex_payload(ticker=ticker.upper()))
