@@ -416,6 +416,9 @@ function PicksTable({
             <th>Ticker</th>
             <th>Sector / Industry</th>
             <th>Close</th>
+            <th>1D %</th>
+            <th>YTD %</th>
+            <th>Since Add %</th>
             <th>EMA9</th>
             <th>vs EMA9</th>
             <th>EMA21</th>
@@ -441,6 +444,9 @@ function PicksTable({
               </td>
               <td data-label="Sector / Industry">{[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}</td>
               <td data-label="Close">{formatPrice(row.latest_close)}</td>
+              <td data-label="1D %">{renderChange(row.change_1d_pct)}</td>
+              <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
+              <td data-label="Since Add %">{renderChange(row.change_since_added_pct)}</td>
               <td data-label="EMA9">{formatPrice(row.daily_ema9)}</td>
               <td data-label="vs EMA9">
                 <span className={toneForPercent(row.distance_to_ema9_pct)}>{formatSignedPercent(row.distance_to_ema9_pct)}</span>
@@ -507,6 +513,19 @@ function formatSignedPercent(value: number | null | undefined) {
   }
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(2)}%`;
+}
+
+function renderChange(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return <span className="ticker-change neutral">--</span>;
+  }
+  const tone = value >= 0 ? "up" : "down";
+  return (
+    <span className={`ticker-change ${tone}`}>
+      {value >= 0 ? "+" : ""}
+      {value.toFixed(2)}%
+    </span>
+  );
 }
 
 function toneForPercent(value: number | null | undefined) {

@@ -1553,8 +1553,10 @@ export type MyPickRow = {
   sector: string | null;
   industry: string | null;
   ratings_as_of_date: string | null;
+  change_1d_pct: number | null;
   perf_year_pct: number | null;
   perf_ytd_pct: number | null;
+  change_since_added_pct: number | null;
   fundamental_rating: number | null;
   fundamental_rank: number | null;
   fundamental_status: string | null;

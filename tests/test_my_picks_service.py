@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import unittest
+from unittest.mock import patch
 
 from src.webapp.services.my_picks_service import MyPicksService
 
@@ -97,6 +98,18 @@ class _FakeRatingsRepository:
         }
 
 
+def _build_price_frame_map(*tickers: str):
+    import pandas as pd
+
+    frame = pd.DataFrame(
+        {
+            "Close": [100.0, 110.0],
+        },
+        index=pd.to_datetime(["2026-06-23", "2026-06-24"]),
+    )
+    return {ticker: frame.copy() for ticker in tickers}
+
+
 class MyPicksServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.repo = _FakeMyPicksRepository()
@@ -104,7 +117,8 @@ class MyPicksServiceTests(unittest.TestCase):
         self.service.ratings_repository = _FakeRatingsRepository()
 
     def test_create_pick_enriches_rating_and_signal_context(self) -> None:
-        row = self.service.create_pick(ticker="msft", notes="leader", actor_user_id=7)
+        with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("MSFT")):
+            row = self.service.create_pick(ticker="msft", notes="leader", actor_user_id=7)
 
         self.assertEqual(row["ticker"], "MSFT")
         self.assertEqual(row["sector"], "Technology")
@@ -113,17 +127,22 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(row["leadership_score"], 91.0)
         self.assertEqual(row["recent_signal_count"], 2)
         self.assertEqual(row["technical_indicator_ratings"]["1d"]["rating_label"], "Strong")
+        self.assertAlmostEqual(row["change_1d_pct"], 10.0)
+        self.assertAlmostEqual(row["change_since_added_pct"], 10.0)
 
     def test_get_context_sorts_newest_first(self) -> None:
         self.service.create_pick(ticker="AAPL")
         self.service.create_pick(ticker="NVDA")
 
-        payload = self.service.get_context()
+        with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("AAPL", "NVDA")):
+            payload = self.service.get_context()
 
         self.assertEqual(payload["total_count"], 2)
         self.assertEqual(payload["rows"][0]["ticker"], "NVDA")
         self.assertEqual(payload["rows"][1]["ticker"], "AAPL")
         self.assertEqual(payload["available_added_dates"], ["2026-06-23"])
+        self.assertAlmostEqual(payload["rows"][0]["change_1d_pct"], 10.0)
+        self.assertAlmostEqual(payload["rows"][0]["change_since_added_pct"], 10.0)
 
     def test_delete_pick_requires_existing_id(self) -> None:
         row = self.service.create_pick(ticker="PLTR")
