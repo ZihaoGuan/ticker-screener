@@ -19,7 +19,8 @@ def prepare_effective_history(
     Args:
         history: Most-recent-first list of OHLCV dicts (history[0] = latest).
         as_of: ISO date string or None. If None, evaluation session = history[0].
-            If given, the date must exist in history.
+            If given and not present, snap back to the latest loaded session
+            on or before `as_of`.
         required_min_sessions: If the resulting effective_history has fewer rows,
             an "insufficient_lookback" audit flag is appended.
 
@@ -30,7 +31,7 @@ def prepare_effective_history(
             - audit_flags: list[str]
 
     Raises:
-        ValueError: If history is empty or as_of is not found.
+        ValueError: If history is empty or no loaded session is on/before as_of.
     """
     if not history:
         raise ValueError("history is empty; cannot prepare effective_history")
@@ -43,9 +44,15 @@ def prepare_effective_history(
     else:
         idx = next((i for i, row in enumerate(history) if row.get("date") == as_of), None)
         if idx is None:
-            raise ValueError(f"as_of {as_of} not found in loaded history")
+            idx = next(
+                (i for i, row in enumerate(history) if str(row.get("date") or "") <= as_of),
+                None,
+            )
+            if idx is None:
+                raise ValueError(f"as_of {as_of} is earlier than all loaded history")
+            audit["audit_flags"].append("as_of_snapped_to_latest_available_session")
         effective = history[idx:]
-        audit["as_of_resolved"] = as_of
+        audit["as_of_resolved"] = effective[0]["date"]
 
     audit["sessions_available"] = len(effective)
     if len(effective) < required_min_sessions:
