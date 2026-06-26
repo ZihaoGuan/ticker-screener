@@ -332,3 +332,48 @@ def load_ticker_metadata_map(
             "source": source,
         }
     return payload
+
+
+def load_active_universe_from_db(
+    *,
+    as_of_date: dt.date | None = None,
+    limit: int | None = None,
+    database_url: str | None = None,
+):
+    from .universe import UniverseTicker
+
+    connection = _connect(database_url)
+    if connection is None:
+        return []
+
+    cutoff_date = as_of_date or dt.date.today()
+    sql = """
+        SELECT tm.ticker, tm.exchange, tm.sector, tm.industry
+        FROM ticker_metadata tm
+        WHERE COALESCE(tm.is_active, TRUE)
+          AND EXISTS (
+              SELECT 1
+              FROM daily_bars db
+              WHERE db.ticker = tm.ticker
+                AND db.trade_date <= %s
+          )
+        ORDER BY tm.ticker ASC
+    """
+    with connection:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, (cutoff_date,))
+            rows = cursor.fetchall()
+
+    payload = [
+        UniverseTicker(
+            symbol=str(ticker).upper(),
+            exchange=exchange,
+            sector=sector,
+            industry=industry,
+        )
+        for ticker, exchange, sector, industry in rows
+        if str(ticker or "").strip()
+    ]
+    if limit is not None:
+        return payload[: max(0, int(limit))]
+    return payload

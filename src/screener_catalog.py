@@ -32,6 +32,10 @@ from .rs_screen import run_rs_screen
 from .sma200_pullback_buy_screen import find_recent_sma200_pullback_buy_hit
 from .sepa_vcp_screen import SEPA_HISTORY_DAYS, find_recent_sepa_vcp_hit
 from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, ScreenerSpec
+from .stockbee_momentum_burst_screen import (
+    STOCKBEE_MOMENTUM_BURST_HISTORY_DAYS,
+    find_recent_stockbee_momentum_burst_hit,
+)
 from .td_sequential_screen import find_recent_td_sequential_hit
 from .three_weeks_tight_screen import find_three_weeks_tight_hit
 from .trend_template_screen import run_trend_template_screen
@@ -777,6 +781,28 @@ def _run_trend_template(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult
     )
 
 
+def _run_stockbee_momentum_burst(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_stockbee_momentum_burst_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "rating": payload["rating"],
+            "score": payload["score"],
+            "primary_trigger": payload["primary_trigger"],
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
     max_rs_days = int(config.rs_new_high_history_days)
     max_vcp_days = max(int(config.rs_new_high_history_days), 365)
@@ -1106,5 +1132,12 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=320,
             warmup_trading_days=20,
             evaluator=_run_trend_template,
+        ),
+        "stockbee_momentum_burst": ScreenerSpec(
+            id="stockbee_momentum_burst",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=STOCKBEE_MOMENTUM_BURST_HISTORY_DAYS,
+            warmup_trading_days=10,
+            evaluator=_run_stockbee_momentum_burst,
         ),
     }

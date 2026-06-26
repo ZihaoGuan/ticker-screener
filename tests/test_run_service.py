@@ -257,6 +257,13 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["gamma_squeeze"]["label"], "Run Gamma Squeeze")
         self.assertIn("scripts/run_gamma_squeeze_screen.py", actions["gamma_squeeze"]["command"])
 
+    def test_list_actions_includes_stockbee_momentum_burst(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("stockbee_momentum_burst", actions)
+        self.assertEqual(actions["stockbee_momentum_burst"]["label"], "Run Stockbee Momentum Burst")
+        self.assertIn("scripts/run_stockbee_momentum_burst_screen.py", actions["stockbee_momentum_burst"]["command"])
+
     def test_list_actions_includes_market_breadth(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 

@@ -161,6 +161,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "stockbee_momentum_burst",
+        "strategy_id": "stockbee_momentum_burst",
+        "label": "Stockbee Momentum Burst",
+        "description": "Short-term burst candidates with 4% breakouts, dollar breakouts, or range expansions after contraction and manageable trigger-day risk.",
+        "timeframe": "Daily",
+        "accent": "amber",
+        "bias_group": "bullish",
+    },
+    {
         "id": "gamma_squeeze",
         "strategy_id": "gamma_squeeze",
         "label": "Gamma Squeeze",

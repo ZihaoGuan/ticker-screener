@@ -261,6 +261,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("trend_template_{date_label}.json",),
         "legacy_summary_templates": ("trend_template_run_summary_{date_label}.json",),
     },
+    "stockbee_momentum_burst": {
+        "stem_template": "stockbee_momentum_burst_{date_label}",
+        "legacy_watchlist_templates": ("stockbee_momentum_burst_{date_label}.json",),
+        "legacy_raw_templates": ("stockbee_momentum_burst_{date_label}.json",),
+        "legacy_summary_templates": ("stockbee_momentum_burst_run_summary_{date_label}.json",),
+    },
     "eight_week_100_runup": {
         "stem_template": "eight_week_100_runup_{date_label}",
         "legacy_watchlist_templates": (
@@ -375,6 +381,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("near_200ma", "near_200ma"),
     ("lost_21ema", "lost_21ema"),
     ("trend_template", "trend_template"),
+    ("stockbee_momentum_burst", "stockbee_momentum_burst"),
     ("pre_earnings_ma_stack", "pre_earnings_ma_stack"),
     ("pre_earnings_focus", "pre_earnings_focus"),
     ("earnings_weekly_criteria", "earnings_weekly_criteria"),
