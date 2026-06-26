@@ -31,9 +31,11 @@ except ModuleNotFoundError:
 
 # Local imports — relative to scripts/ directory.
 HERE = Path(__file__).resolve().parent
+PROJECT_ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(PROJECT_ROOT))
 
-from data_loader import build_fmp_client, fetch_ohlcv  # noqa: E402
+from data_loader import build_fmp_client, fetch_ohlcv, fetch_ohlcv_from_db  # noqa: E402
 from distribution_day_tracker import (  # noqa: E402
     count_active_in_window,
     detect_distribution_days,
@@ -45,6 +47,7 @@ from math_utils import calc_ema, calc_sma  # noqa: E402
 from models import DDRecord, DistributionDayRule, IndexResult, RiskThresholds  # noqa: E402
 from report_generator import write_json, write_markdown  # noqa: E402
 from risk_classifier import classify_risk, combine_index_risks  # noqa: E402
+from src.webapp.config import load_webapp_config  # noqa: E402
 
 SKILL_ID = "ibd-distribution-day-monitor"
 REPORT_PREFIX = "ibd_distribution_day_monitor"
@@ -137,6 +140,10 @@ def resolve_api_key(cli_key: str | None, config: dict) -> str:
     if env_key:
         return env_key
     raise ValueError("FMP API key required. Pass --api-key or set FMP_API_KEY env var.")
+
+
+def resolve_database_url() -> str:
+    return load_webapp_config().database_url.strip()
 
 
 def _build_rule(config: dict) -> DistributionDayRule:
@@ -398,13 +405,15 @@ def main(argv: list[str] | None = None) -> int:
             {"symbol": s, "benchmark_name": f"{s} proxy"} for s in config["symbols_override"]
         ]
 
-    # FMP client
-    api_key = resolve_api_key(args.api_key, config)
-    client = build_fmp_client(api_key=api_key)
-
     rule = _build_rule(config)
     thresholds = _build_thresholds(config)
     lookback = int(config.get("lookback_days", 80))
+    database_url = resolve_database_url()
+    client = None
+    data_source_label = "database" if database_url else "fmp"
+    if not database_url:
+        api_key = resolve_api_key(args.api_key, config)
+        client = build_fmp_client(api_key=api_key)
 
     aggregate_audit_flags: list[str] = []
     symbols_loaded: list[str] = []
@@ -415,7 +424,15 @@ def main(argv: list[str] | None = None) -> int:
     for entry in indexes_cfg:
         symbol = entry["symbol"]
         benchmark = entry.get("benchmark_name") or f"{symbol} Proxy"
-        history, fetch_audit = fetch_ohlcv(client, symbol, days=lookback + 5)
+        if database_url:
+            history, fetch_audit = fetch_ohlcv_from_db(
+                symbol,
+                days=lookback + 5,
+                as_of=args.as_of,
+                database_url=database_url,
+            )
+        else:
+            history, fetch_audit = fetch_ohlcv(client, symbol, days=lookback + 5)
         aggregate_audit_flags.extend(fetch_audit.get("audit_flags", []))
         skipped_sessions_all.extend(fetch_audit.get("skipped_sessions", []))
 
@@ -458,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
 
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     aggregate_audit = {
-        "data_source": "fmp",
+        "data_source": data_source_label,
         "rule_version": RULE_VERSION,
         "as_of_resolved": as_of_resolved,
         "lookback_days": lookback,

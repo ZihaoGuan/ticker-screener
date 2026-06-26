@@ -6,6 +6,7 @@ issues as audit_flags / skipped_sessions for the report layer.
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any
 
 
@@ -84,6 +85,57 @@ def fetch_ohlcv(
     if not history:
         audit["audit_flags"].append("no_data_returned")
         return [], audit
+
+    flags, skipped = validate_history_quality(history)
+    audit["sessions_loaded"] = len(history)
+    audit["audit_flags"].extend(flags)
+    audit["skipped_sessions"] = skipped
+    return history, audit
+
+
+def fetch_ohlcv_from_db(
+    symbol: str,
+    days: int,
+    *,
+    as_of: str | None = None,
+    database_url: str | None = None,
+) -> tuple[list[dict], dict]:
+    """Fetch most-recent-first OHLCV for `symbol` from Postgres daily_bars."""
+    from src.market_data_access import load_daily_bars_frame_from_db
+
+    resolved_end_date = dt.date.fromisoformat(as_of) if as_of else dt.date.today()
+    start_date = resolved_end_date - dt.timedelta(days=max(10, int(days) * 3))
+    audit: dict = {
+        "data_source": "database",
+        "symbol": symbol,
+        "days_requested": days,
+        "sessions_loaded": 0,
+        "audit_flags": [],
+        "skipped_sessions": [],
+    }
+
+    frame = load_daily_bars_frame_from_db(
+        symbol,
+        start_date,
+        resolved_end_date,
+        database_url=database_url,
+    )
+    if frame is None or frame.empty:
+        audit["audit_flags"].append("no_data_returned")
+        return [], audit
+
+    history: list[dict] = []
+    for index, row in frame.sort_index(ascending=False).iterrows():
+        history.append(
+            {
+                "date": index.date().isoformat(),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(row["Volume"]),
+            }
+        )
 
     flags, skipped = validate_history_quality(history)
     audit["sessions_loaded"] = len(history)
