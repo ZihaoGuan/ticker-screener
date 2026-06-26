@@ -282,6 +282,31 @@ class RunServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_list_actions_includes_uptrend_analysis(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("uptrend_analysis", actions)
+        self.assertEqual(actions["uptrend_analysis"]["label"], "Run Uptrend Analyzer")
+        self.assertIn("scripts/run_uptrend_analysis.py", actions["uptrend_analysis"]["command"])
+
+    def test_build_command_supports_uptrend_analysis_date_label(self) -> None:
+        command = self.service.build_command(
+            "uptrend_analysis",
+            {
+                "date_label": "after-close-2026-06-26",
+            },
+        )
+
+        self.assertEqual(
+            command,
+            [
+                run_service_module.sys.executable,
+                "scripts/run_uptrend_analysis.py",
+                "--date-label",
+                "after-close-2026-06-26",
+            ],
+        )
+
     def test_cancel_marks_job_and_terminates_process(self) -> None:
         process = _DummyProcess()
         job = {

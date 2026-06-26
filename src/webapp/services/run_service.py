@@ -386,6 +386,15 @@ class RunService:
                 _date_label_field,
             ),
         ),
+        "uptrend_analysis": RunAction(
+            "uptrend_analysis",
+            "Run Uptrend Analyzer",
+            "scripts/run_uptrend_analysis.py",
+            supports_limit=False,
+            fields=(
+                _date_label_field,
+            ),
+        ),
         "gamma_squeeze": RunAction(
             "gamma_squeeze",
             "Run Gamma Squeeze",
@@ -2639,7 +2648,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "market_breadth"}:
+        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "market_breadth", "uptrend_analysis"}:
             return "admin_sync"
         return "screen_run"
 
@@ -2669,7 +2678,7 @@ class RunService:
             self._notify_completed_job(job)
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "overlap_backtest_v1", "market_breadth"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "overlap_backtest_v1", "market_breadth", "uptrend_analysis"}:
             self._notify_completed_job(job)
             return
         summary_file = str(job.get("summary_file") or "").strip()

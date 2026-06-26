@@ -55,6 +55,9 @@ class DashboardRepository:
             exclude_names={"market_breadth_history.json"},
         )
 
+    def get_cached_uptrend_analysis(self) -> dict[str, Any] | None:
+        return self._load_latest_json_artifact("uptrend_analysis_*.json")
+
     def _coerce_summary_payload(self, payload: Any) -> dict[str, Any] | None:
         if isinstance(payload, dict):
             return payload

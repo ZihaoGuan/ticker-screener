@@ -30,6 +30,8 @@ export function DashboardPage() {
   const spyLatest = spyExtension?.latest ?? null;
   const breadthScore = dashboard?.market_health?.breadth_score ?? null;
   const breadthLatest = breadthScore?.latest ?? null;
+  const uptrendScore = dashboard?.market_health?.uptrend_score ?? null;
+  const uptrendLatest = uptrendScore?.latest ?? null;
 
   return (
     <div className="page-grid">
@@ -126,6 +128,44 @@ export function DashboardPage() {
                   ? `Data date ${breadthLatest.data_date ?? "--"} · ${formatBreadthAge(breadthLatest.latest_data_days_old)}`
                   : ""}
               {breadthScore?.data_source ? ` · Source ${breadthScore.data_source}` : ""}
+            </p>
+          </article>
+
+          <article className="metric-card">
+            <div className="metric-card-head">
+              <h3>{uptrendScore?.ticker ?? "Monty Uptrend Ratio"}</h3>
+              <span className={`accent-mark accent-${breadthAccent(uptrendLatest?.zone_color)}`} />
+            </div>
+            <p className="card-meta">Monty uptrend ratio composite from persisted artifact cache.</p>
+            <div className="metric-value">
+              {uptrendLatest?.composite_score != null ? `${uptrendLatest.composite_score.toFixed(1)}/100` : "Unavailable"}{" "}
+              <span>{uptrendLatest?.zone_detail ?? uptrendLatest?.zone ?? "No uptrend artifact"}</span>
+            </div>
+            <p className="card-meta">
+              {uptrendLatest
+                ? `Exposure ${uptrendLatest.exposure_guidance ?? "--"} · Ratio ${formatPercentValue(uptrendLatest.ratio_pct)} · Trend ${formatUptrendTrend(uptrendLatest.trend_direction, uptrendLatest.slope_smoothed, uptrendLatest.acceleration_label)}`
+                : "Run uptrend analyzer and persist its JSON artifact to surface this card."}
+            </p>
+            <p className="card-meta">
+              {uptrendLatest
+                ? `Sectors up ${formatUptrendSectorBreadth(uptrendLatest.sector_uptrend_count, uptrendLatest.sector_total)} · Cyclical minus defensive ${formatPercentSigned(uptrendLatest.cyclical_minus_defensive_pct)} · Historical ${formatPercentile(uptrendLatest.historical_percentile)}`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {uptrendLatest
+                ? `Strongest ${uptrendLatest.strongest_label ?? "--"} (${formatBreadthScore(uptrendLatest.strongest_score)}) · Weakest ${uptrendLatest.weakest_label ?? "--"} (${formatBreadthScore(uptrendLatest.weakest_score)})`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {uptrendLatest
+                ? `${uptrendLatest.data_quality_label ?? "Data quality unavailable"}${formatBreadthComponentCoverage(uptrendLatest.available_components, uptrendLatest.total_components)} · Confidence ${uptrendLatest.confidence_label ?? "--"}`
+                : ""}
+            </p>
+            <p className="card-meta">{formatUptrendWarnings(uptrendLatest?.warning_labels, uptrendLatest?.warning_penalty)}</p>
+            <p className="card-meta">{uptrendLatest?.guidance ?? ""}</p>
+            <p className="card-meta">
+              {uptrendLatest ? `Data date ${uptrendLatest.data_date ?? "--"} · ${formatBreadthAge(uptrendLatest.latest_data_days_old)}` : ""}
+              {uptrendScore?.data_source ? ` · Source ${uptrendScore.data_source}` : ""}
             </p>
           </article>
 
@@ -315,6 +355,42 @@ function formatBreadthComponentCoverage(available: number | null | undefined, to
     return "";
   }
   return ` (${available}/${total})`;
+}
+
+function formatPercentValue(value: number | null | undefined) {
+  return value == null ? "--" : `${value.toFixed(1)}%`;
+}
+
+function formatPercentile(value: number | null | undefined) {
+  return value == null ? "--" : `${value.toFixed(1)}th pct`;
+}
+
+function formatUptrendTrend(
+  direction: string | null | undefined,
+  slopeSmoothed: number | null | undefined,
+  accelerationLabel: string | null | undefined,
+) {
+  if (!direction) {
+    return "Unavailable";
+  }
+  const slopeLabel = slopeSmoothed == null ? "--" : `${slopeSmoothed > 0 ? "+" : ""}${slopeSmoothed.toFixed(4)}`;
+  const accelLabel = accelerationLabel ? accelerationLabel.replace(/_/g, " ") : "--";
+  return `${direction} (${slopeLabel}, ${accelLabel})`;
+}
+
+function formatUptrendSectorBreadth(upCount: number | null | undefined, total: number | null | undefined) {
+  if (upCount == null || total == null) {
+    return "--";
+  }
+  return `${upCount}/${total}`;
+}
+
+function formatUptrendWarnings(labels: string[] | null | undefined, warningPenalty: number | null | undefined) {
+  if (!labels || labels.length === 0) {
+    return "";
+  }
+  const penaltyLabel = warningPenalty == null || warningPenalty === 0 ? "" : ` · Penalty ${warningPenalty}`;
+  return `Warnings ${labels.join(", ")}${penaltyLabel}`;
 }
 
 function formatPercentSigned(value: number | null | undefined) {

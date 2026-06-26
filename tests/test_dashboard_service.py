@@ -120,6 +120,50 @@ def _write_market_breadth_artifact(artifacts_dir: Path, payload: dict[str, objec
     artifact_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _mock_uptrend_analysis() -> dict[str, object]:
+    return {
+        "metadata": {
+            "generated_at": "2026-06-25 21:20:00",
+            "latest_data_date": "2026-06-25",
+            "data_source": "Monty's Uptrend Ratio Dashboard (GitHub CSV)",
+        },
+        "composite": {
+            "composite_score": 66.4,
+            "zone": "Bull",
+            "zone_detail": "Bull-Lower",
+            "zone_color": "light_green",
+            "exposure_guidance": "Normal Exposure (80-90%)",
+            "guidance": "Healthy breadth, but keep risk controls on because warnings remain active.",
+            "warning_penalty": -3,
+            "active_warnings": [{"label": "DIVERGENCE WARNING"}],
+            "strongest_component": {"label": "Market Breadth (Overall)", "score": 81},
+            "weakest_component": {"label": "Sector Rotation", "score": 42},
+            "data_quality": {
+                "label": "Complete (5/5 components)",
+                "available_count": 5,
+                "total_components": 5,
+            },
+        },
+        "components": {
+            "market_breadth": {"ratio_pct": 39.4, "trend": "up"},
+            "sector_participation": {"uptrend_count": 8, "total_sectors": 11},
+            "sector_rotation": {"difference_pct": 6.5},
+            "momentum": {"slope_smoothed": 0.0042, "acceleration_label": "accelerating"},
+            "historical_context": {
+                "percentile": 64.7,
+                "confidence": {"confidence_level": "Moderate"},
+            },
+        },
+    }
+
+
+def _write_uptrend_artifact(artifacts_dir: Path, payload: dict[str, object]) -> None:
+    reports_dir = artifacts_dir / "reports" / "after-close-2026-06-25"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = reports_dir / "uptrend_analysis_2026-06-25_212000.json"
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 class DashboardServiceTests(unittest.TestCase):
     def test_get_dashboard_context_includes_spy_market_health(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -257,6 +301,45 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(latest["trend_direction"], "improving")
         self.assertEqual(latest["available_components"], 6)
 
+    def test_get_dashboard_context_includes_cached_uptrend_score(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            _write_uptrend_artifact(artifacts_dir, _mock_uptrend_analysis())
+            service = DashboardService(database_url="", artifacts_dir=artifacts_dir)
+            index = pd.date_range(start="2026-01-05", periods=90, freq="B")
+            close_values = [100.0 + (idx * 0.8) for idx in range(len(index) - 8)]
+            close_values.extend([176.0, 181.0, 187.0, 194.0, 201.0, 208.0, 214.0, 210.0])
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        uptrend = payload["market_health"]["uptrend_score"]
+        latest = uptrend["latest"]
+        self.assertEqual(uptrend["ticker"], "Monty Uptrend Ratio")
+        self.assertEqual(uptrend["data_source"], "artifact-cache")
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest["zone_detail"], "Bull-Lower")
+        self.assertEqual(latest["composite_score"], 66.4)
+        self.assertEqual(latest["sector_uptrend_count"], 8)
+        self.assertEqual(latest["warning_labels"], ["DIVERGENCE WARNING"])
+
     def test_get_dashboard_context_prefers_most_complete_options_positioning_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
@@ -348,6 +431,7 @@ class DashboardServiceTests(unittest.TestCase):
         bearish_td9 = payload["market_health"]["bearish_td9"]
         options_positioning = payload["market_health"]["options_positioning"]
         breadth_score = payload["market_health"]["breadth_score"]
+        uptrend_score = payload["market_health"]["uptrend_score"]
         self.assertEqual(regime["data_source"], "unavailable")
         self.assertIsNone(regime["latest"])
         self.assertEqual(rsi_divergence["data_source"], "unavailable")
@@ -360,6 +444,8 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertIsNone(spy_extension["latest"])
         self.assertEqual(breadth_score["data_source"], "unavailable")
         self.assertIsNone(breadth_score["latest"])
+        self.assertEqual(uptrend_score["data_source"], "unavailable")
+        self.assertIsNone(uptrend_score["latest"])
 
     def test_get_dashboard_context_falls_back_to_internet_when_db_frame_cannot_build_usable_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

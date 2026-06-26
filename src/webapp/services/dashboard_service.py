@@ -47,6 +47,7 @@ class DashboardService:
     def _build_market_health(self) -> dict[str, Any]:
         benchmark = load_app_config().benchmark_ticker.upper()
         breadth_score = _build_market_breadth_payload(repository=self.dashboard_repository)
+        uptrend_score = _build_uptrend_payload(repository=self.dashboard_repository)
         end_date = dt.date.today()
         start_date = end_date - dt.timedelta(days=900)
         try:
@@ -57,20 +58,24 @@ class DashboardService:
         db_payload = _build_payload_if_possible(frame=db_frame, ticker=benchmark, data_source="database", repository=self.dashboard_repository)
         if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
             db_payload["breadth_score"] = breadth_score
+            db_payload["uptrend_score"] = uptrend_score
             return db_payload
 
         internet_frame = _download_history_frame(benchmark, start_date, end_date)
         internet_payload = _build_payload_if_possible(frame=internet_frame, ticker=benchmark, data_source="internet", repository=self.dashboard_repository)
         if internet_payload is not None and not _market_health_payload_has_no_latest(internet_payload):
             internet_payload["breadth_score"] = breadth_score
+            internet_payload["uptrend_score"] = uptrend_score
             return internet_payload
 
         if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
             db_payload["breadth_score"] = breadth_score
+            db_payload["uptrend_score"] = uptrend_score
             return db_payload
 
         payload = _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
         payload["breadth_score"] = breadth_score
+        payload["uptrend_score"] = uptrend_score
         return payload
 
 
@@ -170,6 +175,11 @@ def _build_unavailable_market_health(*, benchmark: str, data_source: str) -> dic
             "data_source": data_source,
             "latest": None,
         },
+        "uptrend_score": {
+            "ticker": "Monty Uptrend Ratio",
+            "data_source": data_source,
+            "latest": None,
+        },
     }
 
 
@@ -219,6 +229,78 @@ def _build_market_breadth_payload(*, repository: DashboardRepository) -> dict[st
             "latest_data_days_old": _coerce_optional_int(freshness.get("days_old")),
             "freshness_warning": str(freshness.get("warning") or "") or None,
             "source_label": str(metadata.get("data_source") or "") or None,
+        },
+    }
+
+
+def _build_uptrend_payload(*, repository: DashboardRepository) -> dict[str, Any]:
+    artifact = repository.get_cached_uptrend_analysis()
+    if not isinstance(artifact, dict):
+        return {
+            "ticker": "Monty Uptrend Ratio",
+            "data_source": "unavailable",
+            "latest": None,
+        }
+
+    metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
+    composite = artifact.get("composite") if isinstance(artifact.get("composite"), dict) else {}
+    components = artifact.get("components") if isinstance(artifact.get("components"), dict) else {}
+    market_breadth = components.get("market_breadth") if isinstance(components.get("market_breadth"), dict) else {}
+    participation = components.get("sector_participation") if isinstance(components.get("sector_participation"), dict) else {}
+    rotation = components.get("sector_rotation") if isinstance(components.get("sector_rotation"), dict) else {}
+    momentum = components.get("momentum") if isinstance(components.get("momentum"), dict) else {}
+    historical = components.get("historical_context") if isinstance(components.get("historical_context"), dict) else {}
+    confidence = historical.get("confidence") if isinstance(historical.get("confidence"), dict) else {}
+    data_quality = composite.get("data_quality") if isinstance(composite.get("data_quality"), dict) else {}
+    strongest = composite.get("strongest_component") if isinstance(composite.get("strongest_component"), dict) else {}
+    weakest = composite.get("weakest_component") if isinstance(composite.get("weakest_component"), dict) else {}
+    latest_data_date = str(metadata.get("latest_data_date") or "") or None
+    latest_data_days_old = None
+    if latest_data_date:
+        try:
+            latest_date_value = dt.date.fromisoformat(latest_data_date)
+            latest_data_days_old = max(0, (dt.date.today() - latest_date_value).days)
+        except ValueError:
+            latest_data_days_old = None
+
+    active_warnings = composite.get("active_warnings") if isinstance(composite.get("active_warnings"), list) else []
+    warning_labels = [
+        str(item.get("label") or "").strip()
+        for item in active_warnings
+        if isinstance(item, dict) and str(item.get("label") or "").strip()
+    ]
+
+    return {
+        "ticker": "Monty Uptrend Ratio",
+        "data_source": "artifact-cache",
+        "latest": {
+            "generated_at": str(metadata.get("generated_at") or "") or None,
+            "data_date": latest_data_date,
+            "composite_score": _coerce_optional_float(composite.get("composite_score")),
+            "zone": str(composite.get("zone") or "") or None,
+            "zone_detail": str(composite.get("zone_detail") or composite.get("zone") or "") or None,
+            "zone_color": str(composite.get("zone_color") or "") or None,
+            "exposure_guidance": str(composite.get("exposure_guidance") or "") or None,
+            "guidance": str(composite.get("guidance") or "") or None,
+            "warning_penalty": _coerce_optional_int(composite.get("warning_penalty")),
+            "warning_labels": warning_labels,
+            "strongest_label": str(strongest.get("label") or "") or None,
+            "strongest_score": _coerce_optional_float(strongest.get("score")),
+            "weakest_label": str(weakest.get("label") or "") or None,
+            "weakest_score": _coerce_optional_float(weakest.get("score")),
+            "ratio_pct": _coerce_optional_float(market_breadth.get("ratio_pct")),
+            "trend_direction": str(market_breadth.get("trend") or "") or None,
+            "slope_smoothed": _coerce_optional_float(momentum.get("slope_smoothed")),
+            "acceleration_label": str(momentum.get("acceleration_label") or "") or None,
+            "sector_uptrend_count": _coerce_optional_int(participation.get("uptrend_count")),
+            "sector_total": _coerce_optional_int(participation.get("total_sectors")),
+            "cyclical_minus_defensive_pct": _coerce_optional_float(rotation.get("difference_pct")),
+            "historical_percentile": _coerce_optional_float(historical.get("percentile")),
+            "confidence_label": str(confidence.get("confidence_level") or "") or None,
+            "data_quality_label": str(data_quality.get("label") or "") or None,
+            "available_components": _coerce_optional_int(data_quality.get("available_count")),
+            "total_components": _coerce_optional_int(data_quality.get("total_components")),
+            "latest_data_days_old": latest_data_days_old,
         },
     }
 

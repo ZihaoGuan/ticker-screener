@@ -138,6 +138,8 @@ export function AdminPage() {
   const [gexSnapshotNotice, setGexSnapshotNotice] = useState("");
   const [isLaunchingMarketBreadth, setIsLaunchingMarketBreadth] = useState(false);
   const [marketBreadthNotice, setMarketBreadthNotice] = useState("");
+  const [isLaunchingUptrendAnalysis, setIsLaunchingUptrendAnalysis] = useState(false);
+  const [uptrendAnalysisNotice, setUptrendAnalysisNotice] = useState("");
   const [isRestartingWebApp, setIsRestartingWebApp] = useState(false);
   const [webRestartNotice, setWebRestartNotice] = useState("");
   const [gammaPlotPayload, setGammaPlotPayload] = useState<GammaExposurePlotAdminResponse | null>(null);
@@ -412,6 +414,24 @@ export function AdminPage() {
       setMarketBreadthNotice(error instanceof Error ? error.message : "Failed to launch market breadth analysis.");
     } finally {
       setIsLaunchingMarketBreadth(false);
+    }
+  };
+
+  const handleRunUptrendAnalysis = async () => {
+    setIsLaunchingUptrendAnalysis(true);
+    setUptrendAnalysisNotice("");
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await fetchJson<{ ok: boolean; job_id: string }>("/api/runs/uptrend_analysis", {
+        method: "POST",
+        body: JSON.stringify({ date_label: today }),
+      });
+      setUptrendAnalysisNotice(`Uptrend analysis launched for ${today}: ${response.job_id}`);
+      loadAudit();
+    } catch (error) {
+      setUptrendAnalysisNotice(error instanceof Error ? error.message : "Failed to launch uptrend analysis.");
+    } finally {
+      setIsLaunchingUptrendAnalysis(false);
     }
   };
 
@@ -1322,6 +1342,21 @@ export function AdminPage() {
             <span className="panel-copy">Also available under the Runs / Screeners page and schedulable from the scheduler.</span>
           </div>
           {marketBreadthNotice ? <div className="panel-copy">{marketBreadthNotice}</div> : null}
+        </div>
+      </Panel>
+
+      <Panel title="Run Uptrend Analyzer" aside={<span className="eyebrow">Monty uptrend ratio cache refresh</span>}>
+        <div className="run-toolbar">
+          <p className="panel-copy">
+            Launches `uptrend_analysis` for today and persists the latest uptrend JSON artifact used by the dashboard uptrend card.
+          </p>
+          <div className="run-action-footer">
+            <button className="primary-button" type="button" disabled={isLaunchingUptrendAnalysis} onClick={() => void handleRunUptrendAnalysis()}>
+              {isLaunchingUptrendAnalysis ? "Launching..." : "Run Now"}
+            </button>
+            <span className="panel-copy">Also available under Runs / Screeners and schedulable from scheduler.</span>
+          </div>
+          {uptrendAnalysisNotice ? <div className="panel-copy">{uptrendAnalysisNotice}</div> : null}
         </div>
       </Panel>
 
