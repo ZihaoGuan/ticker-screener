@@ -114,6 +114,78 @@ export type WatchlistFile = {
   deprecation_reason?: string | null;
 };
 
+export type PairTradeReportSummary = {
+  stem: string;
+  captured_at: string;
+  date_label: string;
+  as_of_date: string;
+  group_mode: string;
+  included_groups: string[];
+  universe_size: number | null;
+  pairs_analyzed: number | null;
+  cointegrated_pairs: number | null;
+  actionable_pairs: number | null;
+  top_pair: string;
+};
+
+export type PairTradeCandidate = {
+  pair: string;
+  stock_a: string;
+  stock_b: string;
+  company_a?: string | null;
+  company_b?: string | null;
+  sector?: string | null;
+  industry?: string | null;
+  group_name: string;
+  correlation: number | null;
+  beta: number | null;
+  cointegration_pvalue: number | null;
+  adf_statistic: number | null;
+  half_life_days: number | null;
+  current_zscore: number | null;
+  signal: string;
+  actionable: boolean;
+  opportunity_score: number | null;
+  latest_date?: string | null;
+  price_a?: number | null;
+  price_b?: number | null;
+  market_cap_a?: number | null;
+  market_cap_b?: number | null;
+  avg_volume_a?: number | null;
+  avg_volume_b?: number | null;
+};
+
+export type PairTradeReportDetail = {
+  report_type: string;
+  generated_at: string;
+  metadata: {
+    date_label: string;
+    as_of_date: string;
+    group_mode: string;
+    included_groups: string[];
+    lookback_days: number;
+    min_history_days: number;
+    min_correlation: number;
+    max_half_life: number;
+    entry_zscore: number;
+    tickers_per_group: number;
+    stats_test_mode?: string;
+    data_sources: {
+      universe: string;
+      history: string;
+    };
+  };
+  summary: {
+    universe_size: number;
+    pairs_analyzed: number;
+    correlation_pass: number;
+    cointegrated_pairs: number;
+    actionable_pairs: number;
+    top_pair: string | null;
+  };
+  pairs: PairTradeCandidate[];
+};
+
 export type ScannerBoardCard = {
   id: string;
   strategy_id: string;

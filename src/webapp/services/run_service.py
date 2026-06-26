@@ -121,6 +121,8 @@ class RunService:
     )
     _start_date_field = RunField("start_date", "Start Date", "date")
     _end_date_field = RunField("end_date", "End Date", "date")
+    _lookback_days_field = RunField("lookback_days", "Lookback Days", "number", placeholder="504")
+    _min_correlation_field = RunField("min_correlation", "Min Correlation", "number", placeholder="0.8")
     _chunk_size_field = RunField("chunk_size", "Chunk Size", "number", placeholder="100")
     _max_retries_field = RunField("max_retries", "Max Retries", "number", placeholder="4")
     _retry_base_seconds_field = RunField("retry_base_seconds", "Retry Base Seconds", "number", placeholder="2")
@@ -402,6 +404,19 @@ class RunService:
             supports_limit=False,
             fields=(
                 _date_label_field,
+            ),
+        ),
+        "pair_trade_screener": RunAction(
+            "pair_trade_screener",
+            "Run Pair Trade Screener",
+            "scripts/run_pair_trade_screener.py",
+            fields=(
+                _limit_field,
+                _as_of_date_field,
+                _lookback_days_field,
+                _min_correlation_field,
+                _include_sectors_field,
+                _include_industries_field,
             ),
         ),
         "ibd_distribution_day_monitor": RunAction(
@@ -2004,6 +2019,10 @@ class RunService:
             command.extend(["--date-label", str(normalized_options["date_label"])])
         if normalized_options.get("as_of_date"):
             command.extend(["--as-of-date", str(normalized_options["as_of_date"])])
+        if normalized_options.get("lookback_days") is not None:
+            command.extend(["--lookback-days", str(normalized_options["lookback_days"])])
+        if normalized_options.get("min_correlation") is not None:
+            command.extend(["--min-correlation", str(normalized_options["min_correlation"])])
         if normalized_options.get("source"):
             command.extend(["--source", str(normalized_options["source"])])
         if normalized_options.get("reference_date"):
@@ -2154,7 +2173,7 @@ class RunService:
                 except ValueError as exc:
                     raise ValueError("As Of Date must be YYYY-MM-DD.") from exc
 
-        for key in ("chunk_size", "max_retries", "batch_size", "candidate_threshold", "entry_signal_threshold", "max_parallel", "fundamental_limit", "technical_limit", "upcoming_weeks", "earnings_limit"):
+        for key in ("chunk_size", "max_retries", "batch_size", "candidate_threshold", "entry_signal_threshold", "max_parallel", "fundamental_limit", "technical_limit", "upcoming_weeks", "earnings_limit", "lookback_days"):
             value = options.get(key)
             if value in (None, ""):
                 continue
@@ -2162,7 +2181,7 @@ class RunService:
                 normalized[key] = int(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{key.replace('_', ' ').title()} must be an integer.") from exc
-        for key in ("delay_min_seconds", "delay_max_seconds", "rest_seconds", "min_category_metrics", "retry_base_seconds", "chunk_sleep_seconds", "single_ticker_sleep_seconds"):
+        for key in ("delay_min_seconds", "delay_max_seconds", "rest_seconds", "min_category_metrics", "retry_base_seconds", "chunk_sleep_seconds", "single_ticker_sleep_seconds", "min_correlation"):
             value = options.get(key)
             if value in (None, ""):
                 continue
@@ -2675,7 +2694,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "market_breadth", "uptrend_analysis", "theme_detector", "ibd_distribution_day_monitor", "exposure_coach"}:
+        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach"}:
             return "admin_sync"
         return "screen_run"
 
@@ -2705,7 +2724,7 @@ class RunService:
             self._notify_completed_job(job)
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "overlap_backtest_v1", "market_breadth", "uptrend_analysis", "theme_detector", "ibd_distribution_day_monitor", "exposure_coach"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "overlap_backtest_v1", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach"}:
             self._notify_completed_job(job)
             return
         summary_file = str(job.get("summary_file") or "").strip()

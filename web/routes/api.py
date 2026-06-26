@@ -20,6 +20,7 @@ from src.webapp.services.earnings_calendar_service import EarningsCalendarServic
 from src.webapp.services.my_picks_service import MyPicksService
 from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
+from src.webapp.services.pair_trade_service import PairTradeService
 from src.webapp.services.portfolio_service import PortfolioService
 from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
@@ -42,6 +43,7 @@ from web.dependencies import (
     get_my_picks_service,
     get_overlap_backtest_service,
     get_overlap_service,
+    get_pair_trade_service,
     get_portfolio_service,
     get_rrg_service,
     get_run_service,
@@ -973,6 +975,26 @@ def watchlist_detail_data(
         message = str(exc)
         status_code = 403 if message.startswith("Deprecated watchlist is admin-only:") else 404
         raise HTTPException(status_code=status_code, detail=message) from exc
+
+
+@router.get("/pair-trades", response_class=JSONResponse)
+def pair_trade_reports_data(
+    service: PairTradeService = Depends(get_pair_trade_service),
+    _: Principal = Depends(require_run_screeners),
+) -> JSONResponse:
+    return JSONResponse({"reports": service.list_reports(limit=100)})
+
+
+@router.get("/pair-trades/{stem}", response_class=JSONResponse)
+def pair_trade_report_detail_data(
+    stem: str,
+    service: PairTradeService = Depends(get_pair_trade_service),
+    _: Principal = Depends(require_run_screeners),
+) -> JSONResponse:
+    try:
+        return JSONResponse(service.get_report(stem))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/watchlists/{stem}/chart/{ticker}", response_class=JSONResponse)

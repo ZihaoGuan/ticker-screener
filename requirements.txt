@@ -3,5 +3,6 @@ matplotlib>=3.8
 numpy>=1.26
 pandas>=2.2
 requests>=2.31
+statsmodels>=0.14
 yfinance>=0.2
 yahoofinancials>=1.20

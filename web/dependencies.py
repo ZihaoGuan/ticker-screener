@@ -27,6 +27,7 @@ from src.webapp.services.earnings_calendar_service import EarningsCalendarServic
 from src.webapp.services.my_picks_service import MyPicksService
 from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
+from src.webapp.services.pair_trade_service import PairTradeService
 from src.webapp.services.portfolio_service import PortfolioService
 from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.run_service import RunService
@@ -94,6 +95,10 @@ def get_overlap_service() -> OverlapService:
 
 def get_overlap_backtest_service() -> OverlapBacktestService:
     return OverlapBacktestService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
+
+
+def get_pair_trade_service() -> PairTradeService:
+    return PairTradeService(artifacts_dir=config.artifacts_dir)
 
 
 def get_portfolio_service() -> PortfolioService:

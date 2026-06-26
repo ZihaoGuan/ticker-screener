@@ -11,6 +11,7 @@ const navItems = [
   { to: "/charts", label: "Charts", icon: "C" },
   { to: "/earnings", label: "Earnings", icon: "E" },
   { to: "/watchlists", label: "Watchlists", icon: "W", roles: ["admin"] as RoleName[] },
+  { to: "/pair-trades", label: "Pair Trades", icon: "T", roles: ["admin"] as RoleName[], capability: "run_screeners" as CapabilityName },
   { to: "/my-picks", label: "My Picks", icon: "M", roles: ["admin"] as RoleName[], expo: true, capability: "manage_exclusions" as CapabilityName },
   { to: "/rotation/sector", label: "Rotation", icon: "O" },
   { to: "/report", label: "Report", icon: "P", roles: ["admin"] as RoleName[] },

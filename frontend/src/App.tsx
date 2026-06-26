@@ -12,6 +12,7 @@ import { EarningsPage } from "./pages/EarningsPage";
 import { GuidePage } from "./pages/GuidePage";
 import { LoginPage } from "./pages/LoginPage";
 import { OverlapPage } from "./pages/OverlapPage";
+import { PairTradesPage } from "./pages/PairTradesPage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { MyPicksPage } from "./pages/MyPicksPage";
 import { ChartsPage } from "./pages/ChartsPage";
@@ -111,6 +112,14 @@ export default function App() {
           element={
             <RoleRoute allowedRoles={["admin"]}>
               <WatchlistsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/pair-trades"
+          element={
+            <RoleRoute allowedRoles={["admin"]}>
+              <PairTradesPage />
             </RoleRoute>
           }
         />
