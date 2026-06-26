@@ -136,6 +136,8 @@ export function AdminPage() {
   const [isLoadingRatingsRunJob, setIsLoadingRatingsRunJob] = useState(false);
   const [isLaunchingGexSnapshot, setIsLaunchingGexSnapshot] = useState(false);
   const [gexSnapshotNotice, setGexSnapshotNotice] = useState("");
+  const [isLaunchingMarketBreadth, setIsLaunchingMarketBreadth] = useState(false);
+  const [marketBreadthNotice, setMarketBreadthNotice] = useState("");
   const [isRestartingWebApp, setIsRestartingWebApp] = useState(false);
   const [webRestartNotice, setWebRestartNotice] = useState("");
   const [gammaPlotPayload, setGammaPlotPayload] = useState<GammaExposurePlotAdminResponse | null>(null);
@@ -392,6 +394,24 @@ export function AdminPage() {
       setGexSnapshotNotice(error instanceof Error ? error.message : "Failed to launch FlashAlpha GEX snapshot.");
     } finally {
       setIsLaunchingGexSnapshot(false);
+    }
+  };
+
+  const handleRunMarketBreadth = async () => {
+    setIsLaunchingMarketBreadth(true);
+    setMarketBreadthNotice("");
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await fetchJson<{ ok: boolean; job_id: string }>("/api/runs/market_breadth", {
+        method: "POST",
+        body: JSON.stringify({ date_label: today }),
+      });
+      setMarketBreadthNotice(`Market breadth analysis launched for ${today}: ${response.job_id}`);
+      loadAudit();
+    } catch (error) {
+      setMarketBreadthNotice(error instanceof Error ? error.message : "Failed to launch market breadth analysis.");
+    } finally {
+      setIsLaunchingMarketBreadth(false);
     }
   };
 
@@ -1287,6 +1307,21 @@ export function AdminPage() {
             <span className="panel-copy">Uses default symbol `SPX` and today date label.</span>
           </div>
           {gexSnapshotNotice ? <div className="panel-copy">{gexSnapshotNotice}</div> : null}
+        </div>
+      </Panel>
+
+      <Panel title="Run Market Breadth" aside={<span className="eyebrow">TraderMonty CSV cache refresh</span>}>
+        <div className="run-toolbar">
+          <p className="panel-copy">
+            Launches `market_breadth` for today and persists the latest breadth JSON artifact used by the dashboard breadth card.
+          </p>
+          <div className="run-action-footer">
+            <button className="primary-button" type="button" disabled={isLaunchingMarketBreadth} onClick={() => void handleRunMarketBreadth()}>
+              {isLaunchingMarketBreadth ? "Launching..." : "Run Now"}
+            </button>
+            <span className="panel-copy">Also available under the Runs / Screeners page and schedulable from the scheduler.</span>
+          </div>
+          {marketBreadthNotice ? <div className="panel-copy">{marketBreadthNotice}</div> : null}
         </div>
       </Panel>
 

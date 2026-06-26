@@ -257,6 +257,31 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["gamma_squeeze"]["label"], "Run Gamma Squeeze")
         self.assertIn("scripts/run_gamma_squeeze_screen.py", actions["gamma_squeeze"]["command"])
 
+    def test_list_actions_includes_market_breadth(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("market_breadth", actions)
+        self.assertEqual(actions["market_breadth"]["label"], "Run Market Breadth")
+        self.assertIn("scripts/run_market_breadth_analysis.py", actions["market_breadth"]["command"])
+
+    def test_build_command_supports_market_breadth_date_label(self) -> None:
+        command = self.service.build_command(
+            "market_breadth",
+            {
+                "date_label": "after-close-2026-06-26",
+            },
+        )
+
+        self.assertEqual(
+            command,
+            [
+                run_service_module.sys.executable,
+                "scripts/run_market_breadth_analysis.py",
+                "--date-label",
+                "after-close-2026-06-26",
+            ],
+        )
+
     def test_cancel_marks_job_and_terminates_process(self) -> None:
         process = _DummyProcess()
         job = {
