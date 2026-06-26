@@ -140,6 +140,10 @@ export function AdminPage() {
   const [marketBreadthNotice, setMarketBreadthNotice] = useState("");
   const [isLaunchingUptrendAnalysis, setIsLaunchingUptrendAnalysis] = useState(false);
   const [uptrendAnalysisNotice, setUptrendAnalysisNotice] = useState("");
+  const [isLaunchingIbdMonitor, setIsLaunchingIbdMonitor] = useState(false);
+  const [ibdMonitorNotice, setIbdMonitorNotice] = useState("");
+  const [isLaunchingExposureCoach, setIsLaunchingExposureCoach] = useState(false);
+  const [exposureCoachNotice, setExposureCoachNotice] = useState("");
   const [isRestartingWebApp, setIsRestartingWebApp] = useState(false);
   const [webRestartNotice, setWebRestartNotice] = useState("");
   const [gammaPlotPayload, setGammaPlotPayload] = useState<GammaExposurePlotAdminResponse | null>(null);
@@ -432,6 +436,42 @@ export function AdminPage() {
       setUptrendAnalysisNotice(error instanceof Error ? error.message : "Failed to launch uptrend analysis.");
     } finally {
       setIsLaunchingUptrendAnalysis(false);
+    }
+  };
+
+  const handleRunIbdMonitor = async () => {
+    setIsLaunchingIbdMonitor(true);
+    setIbdMonitorNotice("");
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await fetchJson<{ ok: boolean; job_id: string }>("/api/runs/ibd_distribution_day_monitor", {
+        method: "POST",
+        body: JSON.stringify({ as_of_date: today }),
+      });
+      setIbdMonitorNotice(`IBD monitor launched for ${today}: ${response.job_id}`);
+      loadAudit();
+    } catch (error) {
+      setIbdMonitorNotice(error instanceof Error ? error.message : "Failed to launch IBD monitor.");
+    } finally {
+      setIsLaunchingIbdMonitor(false);
+    }
+  };
+
+  const handleRunExposureCoach = async () => {
+    setIsLaunchingExposureCoach(true);
+    setExposureCoachNotice("");
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await fetchJson<{ ok: boolean; job_id: string }>("/api/runs/exposure_coach", {
+        method: "POST",
+        body: JSON.stringify({ date_label: today }),
+      });
+      setExposureCoachNotice(`Exposure Coach launched for ${today}: ${response.job_id}`);
+      loadAudit();
+    } catch (error) {
+      setExposureCoachNotice(error instanceof Error ? error.message : "Failed to launch Exposure Coach.");
+    } finally {
+      setIsLaunchingExposureCoach(false);
     }
   };
 
@@ -1357,6 +1397,36 @@ export function AdminPage() {
             <span className="panel-copy">Also available under Runs / Screeners and schedulable from scheduler.</span>
           </div>
           {uptrendAnalysisNotice ? <div className="panel-copy">{uptrendAnalysisNotice}</div> : null}
+        </div>
+      </Panel>
+
+      <Panel title="Run IBD Distribution Day Monitor" aside={<span className="eyebrow">QQQ / SPY deterioration check</span>}>
+        <div className="run-toolbar">
+          <p className="panel-copy">
+            Launches `ibd_distribution_day_monitor` for today and persists the latest risk/action artifact used by the dashboard IBD card.
+          </p>
+          <div className="run-action-footer">
+            <button className="primary-button" type="button" disabled={isLaunchingIbdMonitor} onClick={() => void handleRunIbdMonitor()}>
+              {isLaunchingIbdMonitor ? "Launching..." : "Run Now"}
+            </button>
+            <span className="panel-copy">Uses default QQQ/SPY config and current TQQQ policy settings unless CLI overrides are added later.</span>
+          </div>
+          {ibdMonitorNotice ? <div className="panel-copy">{ibdMonitorNotice}</div> : null}
+        </div>
+      </Panel>
+
+      <Panel title="Run Exposure Coach" aside={<span className="eyebrow">Market posture summary</span>}>
+        <div className="run-toolbar">
+          <p className="panel-copy">
+            Launches `exposure_coach` using the latest cached breadth, uptrend, and IBD-derived top-risk proxy to persist a market posture artifact for the dashboard.
+          </p>
+          <div className="run-action-footer">
+            <button className="primary-button" type="button" disabled={isLaunchingExposureCoach} onClick={() => void handleRunExposureCoach()}>
+              {isLaunchingExposureCoach ? "Launching..." : "Run Now"}
+            </button>
+            <span className="panel-copy">Partial inputs are allowed; confidence drops when upstream artifacts are missing.</span>
+          </div>
+          {exposureCoachNotice ? <div className="panel-copy">{exposureCoachNotice}</div> : null}
         </div>
       </Panel>
 

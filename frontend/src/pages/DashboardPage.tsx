@@ -32,6 +32,10 @@ export function DashboardPage() {
   const breadthLatest = breadthScore?.latest ?? null;
   const uptrendScore = dashboard?.market_health?.uptrend_score ?? null;
   const uptrendLatest = uptrendScore?.latest ?? null;
+  const ibdDistribution = dashboard?.market_health?.ibd_distribution ?? null;
+  const ibdLatest = ibdDistribution?.latest ?? null;
+  const exposurePosture = dashboard?.market_health?.exposure_posture ?? null;
+  const exposureLatest = exposurePosture?.latest ?? null;
 
   return (
     <div className="page-grid">
@@ -166,6 +170,74 @@ export function DashboardPage() {
             <p className="card-meta">
               {uptrendLatest ? `Data date ${uptrendLatest.data_date ?? "--"} · ${formatBreadthAge(uptrendLatest.latest_data_days_old)}` : ""}
               {uptrendScore?.data_source ? ` · Source ${uptrendScore.data_source}` : ""}
+            </p>
+          </article>
+
+          <article className="metric-card">
+            <div className="metric-card-head">
+              <h3>{exposurePosture?.ticker ?? "Exposure Coach"}</h3>
+              <span className={`accent-mark accent-${exposureAccent(exposureLatest?.recommendation)}`} />
+            </div>
+            <p className="card-meta">Synthesized posture from latest breadth, uptrend, and top-risk style signals.</p>
+            <div className="metric-value">
+              {exposureLatest?.exposure_ceiling_pct != null ? `${exposureLatest.exposure_ceiling_pct}%` : "Unavailable"}{" "}
+              <span>{exposureLatest?.recommendation ?? "No posture artifact"}</span>
+            </div>
+            <p className="card-meta">
+              {exposureLatest
+                ? `Bias ${exposureLatest.bias ?? "--"} · Participation ${exposureLatest.participation ?? "--"} · Confidence ${exposureLatest.confidence ?? "--"}`
+                : "Run Exposure Coach to surface recommended exposure ceiling."}
+            </p>
+            <p className="card-meta">
+              {exposureLatest
+                ? `Composite ${formatBreadthScore(exposureLatest.composite_score)} · Breadth ${formatBreadthScore(exposureLatest.breadth_score)} · Uptrend ${formatBreadthScore(exposureLatest.uptrend_score)} · Top Risk ${formatBreadthScore(exposureLatest.top_risk_score)}`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {exposureLatest
+                ? `Inputs ${formatExposureInputs(exposureLatest.inputs_provided, exposureLatest.inputs_missing)}`
+                : ""}
+            </p>
+            <p className="card-meta">{exposureLatest?.rationale ?? ""}</p>
+            <p className="card-meta">
+              {exposureLatest ? `${formatBreadthAge(exposureLatest.latest_data_days_old)}` : ""}
+              {exposurePosture?.data_source ? ` · Source ${exposurePosture.data_source}` : ""}
+            </p>
+          </article>
+
+          <article className="metric-card">
+            <div className="metric-card-head">
+              <h3>{ibdDistribution?.ticker ?? "IBD Distribution Day Monitor"}</h3>
+              <span className={`accent-mark accent-${ibdRiskAccent(ibdLatest?.overall_risk_level)}`} />
+            </div>
+            <p className="card-meta">QQQ/SPY distribution-day cluster monitor with exposure action.</p>
+            <div className="metric-value">
+              {ibdLatest?.overall_risk_level ?? "Unavailable"} <span>{ibdLatest?.recommended_action ?? "No IBD artifact"}</span>
+            </div>
+            <p className="card-meta">
+              {ibdLatest
+                ? `QQQ d5/d15/d25 ${formatIbdCluster(ibdLatest.qqq_d5_count, ibdLatest.qqq_d15_count, ibdLatest.qqq_d25_count)} · SPY ${formatIbdCluster(ibdLatest.spy_d5_count, ibdLatest.spy_d15_count, ibdLatest.spy_d25_count)}`
+                : "Run IBD Distribution Day Monitor to surface cluster risk."}
+            </p>
+            <p className="card-meta">
+              {ibdLatest
+                ? `Primary ${ibdLatest.primary_signal_symbol ?? "--"} · Today DD ${formatBoolLabel(ibdLatest.primary_is_distribution_day_today)} · Below 21EMA/50SMA ${formatBoolLabel(ibdLatest.market_below_21ema_or_50ma)}`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {ibdLatest
+                ? `Exposure ${formatPercentInt(ibdLatest.current_exposure_pct)} -> ${formatPercentInt(ibdLatest.target_exposure_pct)} · Trail ${formatPercentInt(ibdLatest.trailing_stop_pct)}`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {ibdLatest
+                ? `${ibdLatest.alternative_action ? `Alt ${ibdLatest.alternative_action} · ` : ""}${formatAuditFlags(ibdLatest.audit_flags)}`
+                : ""}
+            </p>
+            <p className="card-meta">{ibdLatest?.rationale ?? ""}</p>
+            <p className="card-meta">
+              {ibdLatest ? `As of ${ibdLatest.as_of ?? "--"} · ${formatBreadthAge(ibdLatest.latest_data_days_old)}` : ""}
+              {ibdDistribution?.data_source ? ` · Source ${ibdDistribution.data_source}` : ""}
             </p>
           </article>
 
@@ -391,6 +463,64 @@ function formatUptrendWarnings(labels: string[] | null | undefined, warningPenal
   }
   const penaltyLabel = warningPenalty == null || warningPenalty === 0 ? "" : ` · Penalty ${warningPenalty}`;
   return `Warnings ${labels.join(", ")}${penaltyLabel}`;
+}
+
+function formatExposureInputs(provided: string[] | null | undefined, missing: string[] | null | undefined) {
+  const providedLabel = provided && provided.length > 0 ? provided.join(", ") : "--";
+  const missingLabel = missing && missing.length > 0 ? missing.join(", ") : "none";
+  return `Provided ${providedLabel} · Missing ${missingLabel}`;
+}
+
+function formatIbdCluster(
+  d5: number | null | undefined,
+  d15: number | null | undefined,
+  d25: number | null | undefined,
+) {
+  return `${d5 ?? "--"}/${d15 ?? "--"}/${d25 ?? "--"}`;
+}
+
+function formatBoolLabel(value: boolean | null | undefined) {
+  if (value == null) {
+    return "--";
+  }
+  return value ? "yes" : "no";
+}
+
+function formatPercentInt(value: number | null | undefined) {
+  return value == null ? "--" : `${value}%`;
+}
+
+function formatAuditFlags(flags: string[] | null | undefined) {
+  if (!flags || flags.length === 0) {
+    return "Audit clean";
+  }
+  return `Audit ${flags.join(", ")}`;
+}
+
+function exposureAccent(recommendation: string | null | undefined) {
+  if (recommendation === "NEW_ENTRY_ALLOWED") {
+    return "up";
+  }
+  if (recommendation === "REDUCE_ONLY") {
+    return "neutral";
+  }
+  if (recommendation === "CASH_PRIORITY") {
+    return "down";
+  }
+  return "neutral";
+}
+
+function ibdRiskAccent(riskLevel: string | null | undefined) {
+  if (riskLevel === "NORMAL") {
+    return "up";
+  }
+  if (riskLevel === "CAUTION") {
+    return "neutral";
+  }
+  if (riskLevel === "HIGH" || riskLevel === "SEVERE") {
+    return "down";
+  }
+  return "neutral";
 }
 
 function formatPercentSigned(value: number | null | undefined) {

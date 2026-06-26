@@ -164,6 +164,81 @@ def _write_uptrend_artifact(artifacts_dir: Path, payload: dict[str, object]) -> 
     artifact_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _mock_ibd_distribution_monitor() -> dict[str, object]:
+    return {
+        "market_distribution_state": {
+            "as_of": "2026-06-25",
+            "generated_at": "2026-06-25T21:25:00+00:00",
+            "overall_risk_level": "HIGH",
+            "primary_signal_symbol": "QQQ",
+            "index_results": [
+                {
+                    "symbol": "QQQ",
+                    "d5_count": 2,
+                    "d15_count": 3,
+                    "d25_count": 5,
+                    "is_distribution_day_today": True,
+                    "trend_filters": {"market_below_21ema_or_50ma": False},
+                },
+                {
+                    "symbol": "SPY",
+                    "d5_count": 1,
+                    "d15_count": 2,
+                    "d25_count": 3,
+                    "is_distribution_day_today": False,
+                    "trend_filters": {"market_below_21ema_or_50ma": False},
+                },
+            ],
+        },
+        "portfolio_action": {
+            "recommended_action": "REDUCE_EXPOSURE",
+            "target_exposure_pct": 50,
+            "current_exposure_pct": 100,
+            "trailing_stop_pct": 5,
+            "alternative_action": "SWITCH_PARTIAL_TO_QQQ",
+            "rationale": "Distribution cluster elevated for Nasdaq proxy.",
+        },
+        "audit": {
+            "generated_at": "2026-06-25T21:25:00+00:00",
+            "audit_flags": [],
+        },
+    }
+
+
+def _write_ibd_distribution_artifact(artifacts_dir: Path, payload: dict[str, object]) -> None:
+    reports_dir = artifacts_dir / "reports" / "after-close-2026-06-25"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = reports_dir / "ibd_distribution_day_monitor_2026-06-25_212500.json"
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _mock_exposure_posture() -> dict[str, object]:
+    return {
+        "generated_at": "2026-06-25T21:30:00+00:00",
+        "exposure_ceiling_pct": 58,
+        "bias": "GROWTH",
+        "participation": "MODERATE",
+        "recommendation": "REDUCE_ONLY",
+        "confidence": "MEDIUM",
+        "composite_score": 58.2,
+        "component_scores": {
+            "breadth_score": 72,
+            "uptrend_score": 66,
+            "top_risk_score": 40,
+        },
+        "inputs_provided": ["breadth", "uptrend", "top_risk"],
+        "inputs_missing": ["regime", "ftd", "theme", "sector", "institutional"],
+        "rationale": "Breadth remains constructive, but top-risk proxy prevents aggressive adds.",
+    }
+
+
+def _write_exposure_posture_artifact(artifacts_dir: Path, payload: dict[str, object]) -> None:
+    reports_dir = artifacts_dir / "reports" / "after-close-2026-06-25"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = reports_dir / "exposure_posture_2026-06-25_213000.json"
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 class DashboardServiceTests(unittest.TestCase):
     def test_get_dashboard_context_includes_spy_market_health(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -340,6 +415,82 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(latest["sector_uptrend_count"], 8)
         self.assertEqual(latest["warning_labels"], ["DIVERGENCE WARNING"])
 
+    def test_get_dashboard_context_includes_cached_ibd_distribution_monitor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            _write_ibd_distribution_artifact(artifacts_dir, _mock_ibd_distribution_monitor())
+            service = DashboardService(database_url="", artifacts_dir=artifacts_dir)
+            index = pd.date_range(start="2026-01-05", periods=90, freq="B")
+            close_values = [100.0 + (idx * 0.8) for idx in range(len(index) - 8)]
+            close_values.extend([176.0, 181.0, 187.0, 194.0, 201.0, 208.0, 214.0, 210.0])
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        ibd = payload["market_health"]["ibd_distribution"]
+        latest = ibd["latest"]
+        self.assertEqual(ibd["ticker"], "IBD Distribution Day Monitor")
+        self.assertEqual(ibd["data_source"], "artifact-cache")
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest["overall_risk_level"], "HIGH")
+        self.assertEqual(latest["qqq_d25_count"], 5)
+        self.assertEqual(latest["recommended_action"], "REDUCE_EXPOSURE")
+
+    def test_get_dashboard_context_includes_cached_exposure_posture(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            _write_exposure_posture_artifact(artifacts_dir, _mock_exposure_posture())
+            service = DashboardService(database_url="", artifacts_dir=artifacts_dir)
+            index = pd.date_range(start="2026-01-05", periods=90, freq="B")
+            close_values = [100.0 + (idx * 0.8) for idx in range(len(index) - 8)]
+            close_values.extend([176.0, 181.0, 187.0, 194.0, 201.0, 208.0, 214.0, 210.0])
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        exposure = payload["market_health"]["exposure_posture"]
+        latest = exposure["latest"]
+        self.assertEqual(exposure["ticker"], "Exposure Coach")
+        self.assertEqual(exposure["data_source"], "artifact-cache")
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest["exposure_ceiling_pct"], 58)
+        self.assertEqual(latest["recommendation"], "REDUCE_ONLY")
+        self.assertEqual(latest["provided_count"], 3)
+
     def test_get_dashboard_context_prefers_most_complete_options_positioning_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
@@ -432,6 +583,8 @@ class DashboardServiceTests(unittest.TestCase):
         options_positioning = payload["market_health"]["options_positioning"]
         breadth_score = payload["market_health"]["breadth_score"]
         uptrend_score = payload["market_health"]["uptrend_score"]
+        ibd_distribution = payload["market_health"]["ibd_distribution"]
+        exposure_posture = payload["market_health"]["exposure_posture"]
         self.assertEqual(regime["data_source"], "unavailable")
         self.assertIsNone(regime["latest"])
         self.assertEqual(rsi_divergence["data_source"], "unavailable")
@@ -446,6 +599,10 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertIsNone(breadth_score["latest"])
         self.assertEqual(uptrend_score["data_source"], "unavailable")
         self.assertIsNone(uptrend_score["latest"])
+        self.assertEqual(ibd_distribution["data_source"], "unavailable")
+        self.assertIsNone(ibd_distribution["latest"])
+        self.assertEqual(exposure_posture["data_source"], "unavailable")
+        self.assertIsNone(exposure_posture["latest"])
 
     def test_get_dashboard_context_falls_back_to_internet_when_db_frame_cannot_build_usable_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

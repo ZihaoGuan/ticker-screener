@@ -48,6 +48,8 @@ class DashboardService:
         benchmark = load_app_config().benchmark_ticker.upper()
         breadth_score = _build_market_breadth_payload(repository=self.dashboard_repository)
         uptrend_score = _build_uptrend_payload(repository=self.dashboard_repository)
+        ibd_distribution = _build_ibd_distribution_payload(repository=self.dashboard_repository)
+        exposure_posture = _build_exposure_posture_payload(repository=self.dashboard_repository)
         end_date = dt.date.today()
         start_date = end_date - dt.timedelta(days=900)
         try:
@@ -59,6 +61,8 @@ class DashboardService:
         if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
             db_payload["breadth_score"] = breadth_score
             db_payload["uptrend_score"] = uptrend_score
+            db_payload["ibd_distribution"] = ibd_distribution
+            db_payload["exposure_posture"] = exposure_posture
             return db_payload
 
         internet_frame = _download_history_frame(benchmark, start_date, end_date)
@@ -66,16 +70,22 @@ class DashboardService:
         if internet_payload is not None and not _market_health_payload_has_no_latest(internet_payload):
             internet_payload["breadth_score"] = breadth_score
             internet_payload["uptrend_score"] = uptrend_score
+            internet_payload["ibd_distribution"] = ibd_distribution
+            internet_payload["exposure_posture"] = exposure_posture
             return internet_payload
 
         if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
             db_payload["breadth_score"] = breadth_score
             db_payload["uptrend_score"] = uptrend_score
+            db_payload["ibd_distribution"] = ibd_distribution
+            db_payload["exposure_posture"] = exposure_posture
             return db_payload
 
         payload = _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
         payload["breadth_score"] = breadth_score
         payload["uptrend_score"] = uptrend_score
+        payload["ibd_distribution"] = ibd_distribution
+        payload["exposure_posture"] = exposure_posture
         return payload
 
 
@@ -177,6 +187,16 @@ def _build_unavailable_market_health(*, benchmark: str, data_source: str) -> dic
         },
         "uptrend_score": {
             "ticker": "Monty Uptrend Ratio",
+            "data_source": data_source,
+            "latest": None,
+        },
+        "ibd_distribution": {
+            "ticker": "IBD Distribution Day Monitor",
+            "data_source": data_source,
+            "latest": None,
+        },
+        "exposure_posture": {
+            "ticker": "Exposure Coach",
             "data_source": data_source,
             "latest": None,
         },
@@ -300,6 +320,108 @@ def _build_uptrend_payload(*, repository: DashboardRepository) -> dict[str, Any]
             "data_quality_label": str(data_quality.get("label") or "") or None,
             "available_components": _coerce_optional_int(data_quality.get("available_count")),
             "total_components": _coerce_optional_int(data_quality.get("total_components")),
+            "latest_data_days_old": latest_data_days_old,
+        },
+    }
+
+
+def _build_ibd_distribution_payload(*, repository: DashboardRepository) -> dict[str, Any]:
+    artifact = repository.get_cached_ibd_distribution_day_monitor()
+    if not isinstance(artifact, dict):
+        return {
+            "ticker": "IBD Distribution Day Monitor",
+            "data_source": "unavailable",
+            "latest": None,
+        }
+
+    state = artifact.get("market_distribution_state") if isinstance(artifact.get("market_distribution_state"), dict) else {}
+    portfolio_action = artifact.get("portfolio_action") if isinstance(artifact.get("portfolio_action"), dict) else {}
+    audit = artifact.get("audit") if isinstance(artifact.get("audit"), dict) else {}
+    index_results = state.get("index_results") if isinstance(state.get("index_results"), list) else []
+    qqq_result = _find_ibd_index_result(index_results, "QQQ")
+    spy_result = _find_ibd_index_result(index_results, "SPY")
+    primary_symbol = str(state.get("primary_signal_symbol") or "") or None
+    primary_result = _find_ibd_index_result(index_results, primary_symbol) if primary_symbol else None
+    if primary_result is None and index_results:
+        primary_result = index_results[0] if isinstance(index_results[0], dict) else None
+    latest_as_of = str(state.get("as_of") or "") or None
+    latest_data_days_old = None
+    if latest_as_of:
+        try:
+            latest_date_value = dt.date.fromisoformat(latest_as_of)
+            latest_data_days_old = max(0, (dt.date.today() - latest_date_value).days)
+        except ValueError:
+            latest_data_days_old = None
+
+    return {
+        "ticker": "IBD Distribution Day Monitor",
+        "data_source": "artifact-cache",
+        "latest": {
+            "generated_at": str(state.get("generated_at") or audit.get("generated_at") or "") or None,
+            "as_of": latest_as_of,
+            "overall_risk_level": str(state.get("overall_risk_level") or "") or None,
+            "primary_signal_symbol": primary_symbol,
+            "qqq_d5_count": _coerce_optional_int((qqq_result or {}).get("d5_count")),
+            "qqq_d15_count": _coerce_optional_int((qqq_result or {}).get("d15_count")),
+            "qqq_d25_count": _coerce_optional_int((qqq_result or {}).get("d25_count")),
+            "spy_d5_count": _coerce_optional_int((spy_result or {}).get("d5_count")),
+            "spy_d15_count": _coerce_optional_int((spy_result or {}).get("d15_count")),
+            "spy_d25_count": _coerce_optional_int((spy_result or {}).get("d25_count")),
+            "primary_is_distribution_day_today": _coerce_optional_bool((primary_result or {}).get("is_distribution_day_today")),
+            "market_below_21ema_or_50ma": _coerce_optional_bool(((primary_result or {}).get("trend_filters") or {}).get("market_below_21ema_or_50ma")),
+            "recommended_action": str(portfolio_action.get("recommended_action") or "") or None,
+            "target_exposure_pct": _coerce_optional_int(portfolio_action.get("target_exposure_pct")),
+            "current_exposure_pct": _coerce_optional_int(portfolio_action.get("current_exposure_pct")),
+            "trailing_stop_pct": _coerce_optional_int(portfolio_action.get("trailing_stop_pct")),
+            "alternative_action": str(portfolio_action.get("alternative_action") or "") or None,
+            "rationale": str(portfolio_action.get("rationale") or "") or None,
+            "audit_flags": [str(flag) for flag in audit.get("audit_flags") or [] if str(flag)],
+            "latest_data_days_old": latest_data_days_old,
+        },
+    }
+
+
+def _build_exposure_posture_payload(*, repository: DashboardRepository) -> dict[str, Any]:
+    artifact = repository.get_cached_exposure_posture()
+    if not isinstance(artifact, dict):
+        return {
+            "ticker": "Exposure Coach",
+            "data_source": "unavailable",
+            "latest": None,
+        }
+
+    generated_at = str(artifact.get("generated_at") or "") or None
+    latest_data_days_old = None
+    if generated_at:
+        generated_date = generated_at[:10]
+        try:
+            latest_date_value = dt.date.fromisoformat(generated_date)
+            latest_data_days_old = max(0, (dt.date.today() - latest_date_value).days)
+        except ValueError:
+            latest_data_days_old = None
+    inputs_provided = artifact.get("inputs_provided") if isinstance(artifact.get("inputs_provided"), list) else []
+    inputs_missing = artifact.get("inputs_missing") if isinstance(artifact.get("inputs_missing"), list) else []
+    component_scores = artifact.get("component_scores") if isinstance(artifact.get("component_scores"), dict) else {}
+
+    return {
+        "ticker": "Exposure Coach",
+        "data_source": "artifact-cache",
+        "latest": {
+            "generated_at": generated_at,
+            "exposure_ceiling_pct": _coerce_optional_int(artifact.get("exposure_ceiling_pct")),
+            "bias": str(artifact.get("bias") or "") or None,
+            "participation": str(artifact.get("participation") or "") or None,
+            "recommendation": str(artifact.get("recommendation") or "") or None,
+            "confidence": str(artifact.get("confidence") or "") or None,
+            "composite_score": _coerce_optional_float(artifact.get("composite_score")),
+            "breadth_score": _coerce_optional_int(component_scores.get("breadth_score")),
+            "uptrend_score": _coerce_optional_int(component_scores.get("uptrend_score")),
+            "top_risk_score": _coerce_optional_int(component_scores.get("top_risk_score")),
+            "inputs_provided": [str(item) for item in inputs_provided if str(item)],
+            "inputs_missing": [str(item) for item in inputs_missing if str(item)],
+            "provided_count": len(inputs_provided),
+            "missing_count": len(inputs_missing),
+            "rationale": str(artifact.get("rationale") or "") or None,
             "latest_data_days_old": latest_data_days_old,
         },
     }
@@ -545,6 +667,26 @@ def _coerce_optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _find_ibd_index_result(index_results: list[Any], symbol: str | None) -> dict[str, Any] | None:
+    normalized_symbol = str(symbol or "").strip().upper()
+    if not normalized_symbol:
+        return None
+    for item in index_results:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("symbol") or "").strip().upper() == normalized_symbol:
+            return item
+    return None
 
 
 def _distance_to_flip_pct(*, spot: float | None, gamma_flip: float | None) -> float | None:

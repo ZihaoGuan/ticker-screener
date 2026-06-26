@@ -58,6 +58,12 @@ class DashboardRepository:
     def get_cached_uptrend_analysis(self) -> dict[str, Any] | None:
         return self._load_latest_json_artifact("uptrend_analysis_*.json")
 
+    def get_cached_ibd_distribution_day_monitor(self) -> dict[str, Any] | None:
+        return self._load_latest_json_artifact("ibd_distribution_day_monitor_*.json")
+
+    def get_cached_exposure_posture(self) -> dict[str, Any] | None:
+        return self._load_latest_json_artifact("exposure_posture_*.json")
+
     def _coerce_summary_payload(self, payload: Any) -> dict[str, Any] | None:
         if isinstance(payload, dict):
             return payload

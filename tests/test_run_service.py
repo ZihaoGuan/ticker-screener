@@ -307,6 +307,56 @@ class RunServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_list_actions_includes_ibd_distribution_day_monitor(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("ibd_distribution_day_monitor", actions)
+        self.assertEqual(actions["ibd_distribution_day_monitor"]["label"], "Run IBD Distribution Day Monitor")
+        self.assertIn("scripts/run_ibd_distribution_day_monitor.py", actions["ibd_distribution_day_monitor"]["command"])
+
+    def test_build_command_supports_ibd_distribution_day_monitor_as_of_date(self) -> None:
+        command = self.service.build_command(
+            "ibd_distribution_day_monitor",
+            {
+                "as_of_date": "2026-06-26",
+            },
+        )
+
+        self.assertEqual(
+            command,
+            [
+                run_service_module.sys.executable,
+                "scripts/run_ibd_distribution_day_monitor.py",
+                "--as-of-date",
+                "2026-06-26",
+            ],
+        )
+
+    def test_list_actions_includes_exposure_coach(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("exposure_coach", actions)
+        self.assertEqual(actions["exposure_coach"]["label"], "Run Exposure Coach")
+        self.assertIn("scripts/run_exposure_coach.py", actions["exposure_coach"]["command"])
+
+    def test_build_command_supports_exposure_coach_date_label(self) -> None:
+        command = self.service.build_command(
+            "exposure_coach",
+            {
+                "date_label": "after-close-2026-06-26",
+            },
+        )
+
+        self.assertEqual(
+            command,
+            [
+                run_service_module.sys.executable,
+                "scripts/run_exposure_coach.py",
+                "--date-label",
+                "after-close-2026-06-26",
+            ],
+        )
+
     def test_cancel_marks_job_and_terminates_process(self) -> None:
         process = _DummyProcess()
         job = {

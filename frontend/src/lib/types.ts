@@ -416,6 +416,54 @@ export type DashboardResponse = {
         latest_data_days_old: number | null;
       } | null;
     };
+    ibd_distribution: {
+      ticker: string;
+      data_source: string;
+      latest: {
+        generated_at: string | null;
+        as_of: string | null;
+        overall_risk_level: string | null;
+        primary_signal_symbol: string | null;
+        qqq_d5_count: number | null;
+        qqq_d15_count: number | null;
+        qqq_d25_count: number | null;
+        spy_d5_count: number | null;
+        spy_d15_count: number | null;
+        spy_d25_count: number | null;
+        primary_is_distribution_day_today: boolean | null;
+        market_below_21ema_or_50ma: boolean | null;
+        recommended_action: string | null;
+        target_exposure_pct: number | null;
+        current_exposure_pct: number | null;
+        trailing_stop_pct: number | null;
+        alternative_action: string | null;
+        rationale: string | null;
+        audit_flags: string[];
+        latest_data_days_old: number | null;
+      } | null;
+    };
+    exposure_posture: {
+      ticker: string;
+      data_source: string;
+      latest: {
+        generated_at: string | null;
+        exposure_ceiling_pct: number | null;
+        bias: string | null;
+        participation: string | null;
+        recommendation: string | null;
+        confidence: string | null;
+        composite_score: number | null;
+        breadth_score: number | null;
+        uptrend_score: number | null;
+        top_risk_score: number | null;
+        inputs_provided: string[];
+        inputs_missing: string[];
+        provided_count: number;
+        missing_count: number;
+        rationale: string | null;
+        latest_data_days_old: number | null;
+      } | null;
+    };
   };
   recent_watchlists: WatchlistFile[];
   strategy_cards: StrategyCard[];
