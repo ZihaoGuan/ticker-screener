@@ -17,14 +17,17 @@ API key resolution order: --api-key > config.data.api_key > $FMP_API_KEY.
 from __future__ import annotations
 
 import argparse
+import copy
 import os
 import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-# pyyaml may not be installed in all envs (pyproject does include it).
-import yaml  # type: ignore
+try:
+    import yaml  # type: ignore
+except ModuleNotFoundError:
+    yaml = None  # type: ignore[assignment]
 
 # Local imports — relative to scripts/ directory.
 HERE = Path(__file__).resolve().parent
@@ -47,6 +50,52 @@ SKILL_ID = "ibd-distribution-day-monitor"
 REPORT_PREFIX = "ibd_distribution_day_monitor"
 RULE_VERSION = "ibd_dd_v1.0"
 DEFAULT_CONFIG_PATH = HERE.parent / "config" / "default.yaml"
+FALLBACK_DEFAULT_CONFIG = {
+    "skill_name": "ibd-distribution-day-monitor",
+    "rule_version": "ibd_dd_v1.0",
+    "indexes": [
+        {"symbol": "QQQ", "benchmark_name": "Nasdaq Proxy"},
+        {"symbol": "SPY", "benchmark_name": "S&P500 Proxy"},
+    ],
+    "lookback_days": 80,
+    "data": {
+        "provider": "fmp",
+        "api_key": None,
+        "allow_cached_data": False,
+    },
+    "distribution_day_rule": {
+        "min_decline_pct": -0.002,
+        "expiration_sessions": 25,
+        "invalidation_gain_pct": 0.05,
+        "invalidation_price_source": "high",
+        "invalidation_session_scope": "after_distribution_day_only",
+    },
+    "risk_thresholds": {
+        "caution": {"d25_count": 3},
+        "high": {
+            "d25_count": 5,
+            "d15_count": 3,
+            "d5_count": 2,
+        },
+        "severe": {
+            "d25_count": 6,
+            "d15_count": 4,
+            "severe_ma_d25": 5,
+        },
+    },
+    "moving_average_filters": {
+        "enabled": True,
+        "ema_periods": [21],
+        "sma_periods": [50],
+    },
+    "strategy_context": {
+        "instrument": "TQQQ",
+        "current_exposure_pct": 100,
+        "base_trailing_stop_pct": 10,
+        "allow_switch_to_qqq": True,
+        "allow_hedge_recommendation": False,
+    },
+}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -67,6 +116,12 @@ def load_config(path: str | None) -> dict:
     config_path = Path(path) if path else DEFAULT_CONFIG_PATH
     if not config_path.exists():
         raise FileNotFoundError(f"config not found: {config_path}")
+    if yaml is None:
+        print(
+            "WARNING: PyYAML not installed. Using built-in default IBD config.",
+            file=sys.stderr,
+        )
+        return copy.deepcopy(FALLBACK_DEFAULT_CONFIG)
     with open(config_path, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
