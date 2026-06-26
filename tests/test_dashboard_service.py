@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -74,6 +75,49 @@ def _mock_gamma_plot_payload() -> dict[str, object]:
         "methodology": "Cached admin-only plot payload.",
         "plots": {"absolute": "<svg>absolute</svg>", "by_option_type": "<svg>types</svg>", "profile": "<svg>profile</svg>"},
     }
+
+
+def _mock_market_breadth_analysis() -> dict[str, object]:
+    return {
+        "metadata": {
+            "generated_at": "2026-06-23 21:15:00",
+            "data_source": "TraderMonty Market Breadth CSV",
+            "data_freshness": {
+                "latest_date": "2026-06-23",
+                "days_old": 1,
+                "warning": "",
+            },
+        },
+        "composite": {
+            "composite_score": 72.3,
+            "zone": "Healthy",
+            "zone_color": "blue",
+            "exposure_guidance": "75-90%",
+            "guidance": "Above-average breadth. Normal operations with standard risk management.",
+            "strongest_health": {"label": "Current Breadth Level & Trend", "score": 82},
+            "weakest_health": {"label": "S&P 500 vs Breadth Divergence", "score": 55},
+            "data_quality": {
+                "label": "Complete (6/6 components)",
+                "available_count": 6,
+                "total_components": 6,
+            },
+        },
+        "trend_summary": {
+            "delta": 4.2,
+            "direction": "improving",
+            "entries": [
+                {"data_date": "2026-06-19", "composite_score": 68.1},
+                {"data_date": "2026-06-23", "composite_score": 72.3},
+            ],
+        },
+    }
+
+
+def _write_market_breadth_artifact(artifacts_dir: Path, payload: dict[str, object]) -> None:
+    reports_dir = artifacts_dir / "reports" / "after-close-2026-06-23"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = reports_dir / "market_breadth_2026-06-23_211500.json"
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 class DashboardServiceTests(unittest.TestCase):
@@ -174,6 +218,45 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(latest["plots"]["profile"], "<svg>profile</svg>")
         self.assertEqual(latest["summary"], "Cached all-expiry SPX gamma profile.")
 
+    def test_get_dashboard_context_includes_cached_market_breadth_score(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            _write_market_breadth_artifact(artifacts_dir, _mock_market_breadth_analysis())
+            service = DashboardService(database_url="", artifacts_dir=artifacts_dir)
+            index = pd.date_range(start="2026-01-05", periods=90, freq="B")
+            close_values = [100.0 + (idx * 0.8) for idx in range(len(index) - 8)]
+            close_values.extend([176.0, 181.0, 187.0, 194.0, 201.0, 208.0, 214.0, 210.0])
+            frame = pd.DataFrame(
+                {
+                    "Open": [value - 1.0 for value in close_values],
+                    "High": [value + 2.0 for value in close_values],
+                    "Low": [value - 2.0 for value in close_values],
+                    "Close": close_values,
+                    "Volume": [1_500_000 for _ in close_values],
+                },
+                index=index,
+            )
+
+            with patch("src.webapp.services.dashboard_service.load_daily_bars_frame_from_db", return_value=frame.copy()), patch(
+                "src.webapp.services.dashboard_service.load_app_config"
+            ) as mock_config, patch(
+                "src.webapp.repositories.dashboard_repository.HistoryRepository.list_screen_runs",
+                return_value=[{"result_summary_json": _mock_options_positioning_summary()}],
+            ):
+                mock_config.return_value.benchmark_ticker = "SPY"
+                payload = service.get_dashboard_context()
+
+        breadth = payload["market_health"]["breadth_score"]
+        latest = breadth["latest"]
+        self.assertEqual(breadth["ticker"], "S&P 500 Breadth")
+        self.assertEqual(breadth["data_source"], "artifact-cache")
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest["zone"], "Healthy")
+        self.assertEqual(latest["composite_score"], 72.3)
+        self.assertEqual(latest["trend_direction"], "improving")
+        self.assertEqual(latest["available_components"], 6)
+
     def test_get_dashboard_context_prefers_most_complete_options_positioning_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = DashboardService(database_url="", artifacts_dir=Path(temp_dir))
@@ -264,6 +347,7 @@ class DashboardServiceTests(unittest.TestCase):
         rsi_divergence = payload["market_health"]["rsi_divergence"]
         bearish_td9 = payload["market_health"]["bearish_td9"]
         options_positioning = payload["market_health"]["options_positioning"]
+        breadth_score = payload["market_health"]["breadth_score"]
         self.assertEqual(regime["data_source"], "unavailable")
         self.assertIsNone(regime["latest"])
         self.assertEqual(rsi_divergence["data_source"], "unavailable")
@@ -274,6 +358,8 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertIsNone(options_positioning["latest"])
         self.assertEqual(spy_extension["data_source"], "unavailable")
         self.assertIsNone(spy_extension["latest"])
+        self.assertEqual(breadth_score["data_source"], "unavailable")
+        self.assertIsNone(breadth_score["latest"])
 
     def test_get_dashboard_context_falls_back_to_internet_when_db_frame_cannot_build_usable_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

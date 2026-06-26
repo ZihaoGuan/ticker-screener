@@ -357,6 +357,32 @@ export type DashboardResponse = {
         extension_pct: number;
       } | null;
     };
+    breadth_score: {
+      ticker: string;
+      data_source: string;
+      latest: {
+        generated_at: string | null;
+        data_date: string | null;
+        composite_score: number | null;
+        zone: string | null;
+        zone_color: string | null;
+        exposure_guidance: string | null;
+        guidance: string | null;
+        strongest_label: string | null;
+        strongest_score: number | null;
+        weakest_label: string | null;
+        weakest_score: number | null;
+        trend_direction: string | null;
+        trend_delta: number | null;
+        trend_observations: number;
+        data_quality_label: string | null;
+        available_components: number | null;
+        total_components: number | null;
+        latest_data_days_old: number | null;
+        freshness_warning: string | null;
+        source_label: string | null;
+      } | null;
+    };
   };
   recent_watchlists: WatchlistFile[];
   strategy_cards: StrategyCard[];

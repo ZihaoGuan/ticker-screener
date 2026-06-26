@@ -46,6 +46,7 @@ class DashboardService:
 
     def _build_market_health(self) -> dict[str, Any]:
         benchmark = load_app_config().benchmark_ticker.upper()
+        breadth_score = _build_market_breadth_payload(repository=self.dashboard_repository)
         end_date = dt.date.today()
         start_date = end_date - dt.timedelta(days=900)
         try:
@@ -55,17 +56,22 @@ class DashboardService:
 
         db_payload = _build_payload_if_possible(frame=db_frame, ticker=benchmark, data_source="database", repository=self.dashboard_repository)
         if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
+            db_payload["breadth_score"] = breadth_score
             return db_payload
 
         internet_frame = _download_history_frame(benchmark, start_date, end_date)
         internet_payload = _build_payload_if_possible(frame=internet_frame, ticker=benchmark, data_source="internet", repository=self.dashboard_repository)
         if internet_payload is not None and not _market_health_payload_has_no_latest(internet_payload):
+            internet_payload["breadth_score"] = breadth_score
             return internet_payload
 
         if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
+            db_payload["breadth_score"] = breadth_score
             return db_payload
 
-        return _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
+        payload = _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
+        payload["breadth_score"] = breadth_score
+        return payload
 
 
 def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_source: str, repository: DashboardRepository) -> dict[str, Any]:
@@ -103,7 +109,7 @@ def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_sourc
             "extreme_pct": 15.0,
             "data_source": data_source,
             "latest": latest,
-        }
+        },
     }
 
 
@@ -158,6 +164,61 @@ def _build_unavailable_market_health(*, benchmark: str, data_source: str) -> dic
             "extreme_pct": 15.0,
             "data_source": data_source,
             "latest": None,
+        },
+        "breadth_score": {
+            "ticker": "S&P 500 Breadth",
+            "data_source": data_source,
+            "latest": None,
+        },
+    }
+
+
+def _build_market_breadth_payload(*, repository: DashboardRepository) -> dict[str, Any]:
+    artifact = repository.get_cached_market_breadth_analysis()
+    if not isinstance(artifact, dict):
+        return {
+            "ticker": "S&P 500 Breadth",
+            "data_source": "unavailable",
+            "latest": None,
+        }
+
+    metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
+    composite = artifact.get("composite") if isinstance(artifact.get("composite"), dict) else {}
+    trend_summary = artifact.get("trend_summary") if isinstance(artifact.get("trend_summary"), dict) else {}
+    freshness = metadata.get("data_freshness") if isinstance(metadata.get("data_freshness"), dict) else {}
+    strongest = composite.get("strongest_health") if isinstance(composite.get("strongest_health"), dict) else {}
+    weakest = composite.get("weakest_health") if isinstance(composite.get("weakest_health"), dict) else {}
+    data_quality = composite.get("data_quality") if isinstance(composite.get("data_quality"), dict) else {}
+    trend_entries = trend_summary.get("entries") if isinstance(trend_summary.get("entries"), list) else []
+    latest_data_date = str(freshness.get("latest_date") or "") or None
+    if latest_data_date is None and trend_entries:
+        latest_entry = trend_entries[-1] if isinstance(trend_entries[-1], dict) else {}
+        latest_data_date = str(latest_entry.get("data_date") or "") or None
+
+    return {
+        "ticker": "S&P 500 Breadth",
+        "data_source": "artifact-cache",
+        "latest": {
+            "generated_at": str(metadata.get("generated_at") or "") or None,
+            "data_date": latest_data_date,
+            "composite_score": _coerce_optional_float(composite.get("composite_score")),
+            "zone": str(composite.get("zone") or "") or None,
+            "zone_color": str(composite.get("zone_color") or "") or None,
+            "exposure_guidance": str(composite.get("exposure_guidance") or "") or None,
+            "guidance": str(composite.get("guidance") or "") or None,
+            "strongest_label": str(strongest.get("label") or "") or None,
+            "strongest_score": _coerce_optional_float(strongest.get("score")),
+            "weakest_label": str(weakest.get("label") or "") or None,
+            "weakest_score": _coerce_optional_float(weakest.get("score")),
+            "trend_direction": str(trend_summary.get("direction") or "") or None,
+            "trend_delta": _coerce_optional_float(trend_summary.get("delta")),
+            "trend_observations": len(trend_entries),
+            "data_quality_label": str(data_quality.get("label") or "") or None,
+            "available_components": _coerce_optional_int(data_quality.get("available_count")),
+            "total_components": _coerce_optional_int(data_quality.get("total_components")),
+            "latest_data_days_old": _coerce_optional_int(freshness.get("days_old")),
+            "freshness_warning": str(freshness.get("warning") or "") or None,
+            "source_label": str(metadata.get("data_source") or "") or None,
         },
     }
 
@@ -387,6 +448,19 @@ def _to_number(value: Any) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    return _to_number(value)
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 

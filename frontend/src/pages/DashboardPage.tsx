@@ -28,6 +28,8 @@ export function DashboardPage() {
   const optionsLatest = optionsPositioning?.latest ?? null;
   const spyExtension = dashboard?.market_health?.spy_extension ?? null;
   const spyLatest = spyExtension?.latest ?? null;
+  const breadthScore = dashboard?.market_health?.breadth_score ?? null;
+  const breadthLatest = breadthScore?.latest ?? null;
 
   return (
     <div className="page-grid">
@@ -88,6 +90,42 @@ export function DashboardPage() {
             </div>
             <p className="card-meta">
               {regimeLatest ? `Active setup: ${regimeLatest.regime_label}.` : "Waiting for market data."}
+            </p>
+          </article>
+
+          <article className="metric-card">
+            <div className="metric-card-head">
+              <h3>{breadthScore?.ticker ?? "S&P 500 Breadth"}</h3>
+              <span className={`accent-mark accent-${breadthAccent(breadthLatest?.zone_color)}`} />
+            </div>
+            <p className="card-meta">TraderMonty 6-component breadth composite from persisted artifact cache.</p>
+            <div className="metric-value">
+              {breadthLatest?.composite_score != null ? `${breadthLatest.composite_score.toFixed(1)}/100` : "Unavailable"}{" "}
+              <span>{breadthLatest?.zone ?? "No breadth artifact"}</span>
+            </div>
+            <p className="card-meta">
+              {breadthLatest
+                ? `Exposure ${breadthLatest.exposure_guidance ?? "--"} · Trend ${formatBreadthTrend(breadthLatest.trend_direction, breadthLatest.trend_delta, breadthLatest.trend_observations)}`
+                : "Run breadth analyzer and persist its JSON artifact to surface this card."}
+            </p>
+            <p className="card-meta">
+              {breadthLatest
+                ? `Strongest ${breadthLatest.strongest_label ?? "--"} (${formatBreadthScore(breadthLatest.strongest_score)}) · Weakest ${breadthLatest.weakest_label ?? "--"} (${formatBreadthScore(breadthLatest.weakest_score)})`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {breadthLatest
+                ? `${breadthLatest.data_quality_label ?? "Data quality unavailable"}${formatBreadthComponentCoverage(breadthLatest.available_components, breadthLatest.total_components)}`
+                : ""}
+            </p>
+            <p className="card-meta">{breadthLatest?.guidance ?? ""}</p>
+            <p className="card-meta">
+              {breadthLatest?.freshness_warning
+                ? breadthLatest.freshness_warning
+                : breadthLatest
+                  ? `Data date ${breadthLatest.data_date ?? "--"} · ${formatBreadthAge(breadthLatest.latest_data_days_old)}`
+                  : ""}
+              {breadthScore?.data_source ? ` · Source ${breadthScore.data_source}` : ""}
             </p>
           </article>
 
@@ -253,6 +291,32 @@ function formatPrice(value: number | null | undefined) {
   return value == null ? "--" : `$${value.toFixed(2)}`;
 }
 
+function formatBreadthScore(value: number | null | undefined) {
+  return value == null ? "--" : `${value.toFixed(0)}/100`;
+}
+
+function formatBreadthTrend(direction: string | null | undefined, delta: number | null | undefined, observations: number) {
+  if (!direction) {
+    return "Unavailable";
+  }
+  const deltaLabel = delta == null ? "--" : `${delta > 0 ? "+" : ""}${delta.toFixed(1)}`;
+  return `${direction} (${deltaLabel}, ${observations} obs)`;
+}
+
+function formatBreadthAge(daysOld: number | null | undefined) {
+  if (daysOld == null) {
+    return "Age unknown";
+  }
+  return `${daysOld} day${daysOld === 1 ? "" : "s"} old`;
+}
+
+function formatBreadthComponentCoverage(available: number | null | undefined, total: number | null | undefined) {
+  if (available == null || total == null) {
+    return "";
+  }
+  return ` (${available}/${total})`;
+}
+
 function formatPercentSigned(value: number | null | undefined) {
   if (value == null) {
     return "--";
@@ -301,6 +365,19 @@ function regimeAccent(regime: MarketRegime | null | undefined) {
     return "neutral";
   }
   return "up";
+}
+
+function breadthAccent(zoneColor: string | null | undefined) {
+  if (zoneColor === "green" || zoneColor === "blue") {
+    return "up";
+  }
+  if (zoneColor === "yellow") {
+    return "neutral";
+  }
+  if (zoneColor === "orange" || zoneColor === "red") {
+    return "down";
+  }
+  return "neutral";
 }
 
 function rsiSignalSubLabel(latest: DashboardResponse["market_health"]["rsi_divergence"]["latest"] | null | undefined) {

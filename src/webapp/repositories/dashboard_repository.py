@@ -49,6 +49,12 @@ class DashboardRepository:
         payload = load_gamma_exposure_plot_context(artifacts_dir=self.artifacts_dir, symbol=symbol)
         return payload if isinstance(payload, dict) else None
 
+    def get_cached_market_breadth_analysis(self) -> dict[str, Any] | None:
+        return self._load_latest_json_artifact(
+            "market_breadth_*.json",
+            exclude_names={"market_breadth_history.json"},
+        )
+
     def _coerce_summary_payload(self, payload: Any) -> dict[str, Any] | None:
         if isinstance(payload, dict):
             return payload
@@ -80,3 +86,19 @@ class DashboardRepository:
                 populated_keys += 1
         has_api_as_of = 1 if payload.get("api_as_of") not in (None, "") else 0
         return (populated_keys, has_api_as_of)
+
+    def _load_latest_json_artifact(self, pattern: str, *, exclude_names: set[str] | None = None) -> dict[str, Any] | None:
+        excluded = exclude_names or set()
+        candidates = [
+            path
+            for path in self.artifacts_dir.rglob(pattern)
+            if path.is_file() and path.name not in excluded
+        ]
+        if not candidates:
+            return None
+        latest_path = max(candidates, key=lambda path: (path.stat().st_mtime, str(path)))
+        try:
+            parsed = json.loads(latest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
