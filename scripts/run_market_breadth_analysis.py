@@ -9,7 +9,7 @@ import sys
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ANALYZER_SCRIPT = PROJECT_ROOT / "trading-skills" / "skills" / "market-breadth-analyzer" / "scripts" / "market_breadth_analyzer.py"
+ANALYZER_SCRIPT = PROJECT_ROOT / "src" / "market_breadth_analyzer" / "market_breadth_analyzer.py"
 
 
 def parse_args() -> argparse.Namespace:
