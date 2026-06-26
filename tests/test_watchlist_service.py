@@ -258,6 +258,11 @@ class WatchlistServiceTests(unittest.TestCase):
             modified_at=dt.datetime(2026, 6, 12, 23, 39, tzinfo=dt.timezone.utc),
         )
         self._write_watchlist(
+            "canslim_v2_2026-06-12",
+            tickers=["NVDA"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 39, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
             "vcs_critical_tightness_2026-06-12",
             tickers=["APP", "NVDA"],
             modified_at=dt.datetime(2026, 6, 12, 23, 42, tzinfo=dt.timezone.utc),
@@ -306,6 +311,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["daily_rs_new_high"]["preview_tickers"], ["AAPL", "PLTR", "CRWV"])
         self.assertEqual(cards["canslim"]["stem"], "canslim_2026-06-12")
         self.assertEqual(cards["canslim"]["preview_tickers"], ["NVDA", "APP"])
+        self.assertEqual(cards["canslim_v2"]["stem"], "canslim_v2_2026-06-12")
+        self.assertEqual(cards["canslim_v2"]["preview_tickers"], ["NVDA"])
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-12")
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-12")
         self.assertEqual(cards["vcs_critical_tightness"]["stem"], "vcs_critical_tightness_2026-06-12")

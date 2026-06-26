@@ -162,6 +162,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "lime",
     },
     {
+        "id": "canslim_v2",
+        "strategy_id": "canslim_v2",
+        "label": "CANSLIM V2",
+        "description": "Weighted 0-100 CANSLIM composite using local fundamentals, cached price history, leadership, and market context. Scanner card only shows score-above-80 entries.",
+        "timeframe": "Daily",
+        "accent": "lime",
+        "bias_group": "bullish",
+    },
+    {
         "id": "venu_scanner",
         "strategy_id": "venu_scanner",
         "label": "Venu Scanner",

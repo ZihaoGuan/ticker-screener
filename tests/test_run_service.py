@@ -257,6 +257,13 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["vcp_scored"]["label"], "Run VCP Scored")
         self.assertIn("scripts/run_vcp_scored_screen.py", actions["vcp_scored"]["command"])
 
+    def test_list_actions_includes_canslim_v2(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("canslim_v2", actions)
+        self.assertEqual(actions["canslim_v2"]["label"], "Run CANSLIM V2")
+        self.assertIn("scripts/run_canslim_v2_screen.py", actions["canslim_v2"]["command"])
+
     def test_list_actions_includes_gamma_squeeze(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 

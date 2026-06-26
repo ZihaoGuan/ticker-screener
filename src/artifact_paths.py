@@ -312,6 +312,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("canslim_{date_label}.json",),
         "legacy_summary_templates": ("canslim_run_summary_{date_label}.json",),
     },
+    "canslim_v2": {
+        "stem_template": "canslim_v2_{date_label}",
+        "legacy_watchlist_templates": ("canslim_v2_{date_label}.json",),
+        "legacy_raw_templates": ("canslim_v2_{date_label}.json",),
+        "legacy_summary_templates": ("canslim_v2_run_summary_{date_label}.json",),
+    },
     "venu_scanner": {
         "stem_template": "venu_scanner_{date_label}",
         "legacy_watchlist_templates": ("venu_scanner_{date_label}.json",),
@@ -394,6 +400,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("flashalpha_gex_close", "flashalpha_gex_close"),
     ("gamma_squeeze", "gamma_squeeze"),
     ("earnings_growth", "earnings_growth"),
+    ("canslim_v2", "canslim_v2"),
     ("canslim", "canslim"),
     ("venu_scanner", "venu_scanner"),
     ("inside_dryup_v2", "inside_dryup_v2"),

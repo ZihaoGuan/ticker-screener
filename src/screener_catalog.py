@@ -32,6 +32,7 @@ from .rs_screen import run_rs_screen
 from .sma200_pullback_buy_screen import find_recent_sma200_pullback_buy_hit
 from .sepa_vcp_screen import SEPA_HISTORY_DAYS, find_recent_sepa_vcp_hit
 from .screener_engine import ScreenerEvaluationResult, ScreenerInputBundle, ScreenerSpec
+from .canslim_v2_screen import CANSLIM_V2_HISTORY_DAYS, run_canslim_v2_screen
 from .stockbee_momentum_burst_screen import (
     STOCKBEE_MOMENTUM_BURST_HISTORY_DAYS,
     find_recent_stockbee_momentum_burst_hit,
@@ -103,6 +104,11 @@ def _run_rs_weekly(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
 def _run_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     return _single_ticker_result(bundle, run_vcp_screen, config)
+
+
+def _run_canslim_v2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    return _single_ticker_result(bundle, run_canslim_v2_screen, config)
 
 
 def _run_td9_bullish(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
@@ -885,6 +891,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=max(max_vcp_days, VCP_SCORED_HISTORY_DAYS),
             warmup_trading_days=40,
             evaluator=_run_vcp_scored,
+        ),
+        "canslim_v2": ScreenerSpec(
+            id="canslim_v2",
+            required_inputs=("metadata",),
+            lookback_trading_days=CANSLIM_V2_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_canslim_v2,
         ),
         "cup_handle": ScreenerSpec(
             id="cup_handle",
