@@ -395,6 +395,15 @@ class RunService:
                 _date_label_field,
             ),
         ),
+        "theme_detector": RunAction(
+            "theme_detector",
+            "Run Theme Detector",
+            "scripts/run_theme_detector.py",
+            supports_limit=False,
+            fields=(
+                _date_label_field,
+            ),
+        ),
         "ibd_distribution_day_monitor": RunAction(
             "ibd_distribution_day_monitor",
             "Run IBD Distribution Day Monitor",
@@ -2666,7 +2675,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "market_breadth", "uptrend_analysis", "ibd_distribution_day_monitor", "exposure_coach"}:
+        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "market_breadth", "uptrend_analysis", "theme_detector", "ibd_distribution_day_monitor", "exposure_coach"}:
             return "admin_sync"
         return "screen_run"
 
@@ -2696,7 +2705,7 @@ class RunService:
             self._notify_completed_job(job)
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "overlap_backtest_v1", "market_breadth", "uptrend_analysis", "ibd_distribution_day_monitor", "exposure_coach"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "overlap_backtest_v1", "market_breadth", "uptrend_analysis", "theme_detector", "ibd_distribution_day_monitor", "exposure_coach"}:
             self._notify_completed_job(job)
             return
         summary_file = str(job.get("summary_file") or "").strip()
