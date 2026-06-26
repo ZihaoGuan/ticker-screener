@@ -103,6 +103,7 @@ def _build_price_frame_map(*tickers: str):
 
     frame = pd.DataFrame(
         {
+            "Low": [99.0, 100.0],
             "Close": [100.0, 110.0],
         },
         index=pd.to_datetime(["2026-06-23", "2026-06-24"]),
@@ -129,6 +130,8 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(row["technical_indicator_ratings"]["1d"]["rating_label"], "Strong")
         self.assertAlmostEqual(row["change_1d_pct"], 10.0)
         self.assertAlmostEqual(row["change_since_added_pct"], 10.0)
+        self.assertTrue(row["ema9_tested_since_added"])
+        self.assertTrue(row["ema21_tested_since_added"])
 
     def test_get_context_sorts_newest_first(self) -> None:
         self.service.create_pick(ticker="AAPL")
@@ -143,6 +146,8 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(payload["available_added_dates"], ["2026-06-23"])
         self.assertAlmostEqual(payload["rows"][0]["change_1d_pct"], 10.0)
         self.assertAlmostEqual(payload["rows"][0]["change_since_added_pct"], 10.0)
+        self.assertTrue(payload["rows"][0]["ema9_tested_since_added"])
+        self.assertTrue(payload["rows"][0]["ema21_tested_since_added"])
 
     def test_delete_pick_requires_existing_id(self) -> None:
         row = self.service.create_pick(ticker="PLTR")

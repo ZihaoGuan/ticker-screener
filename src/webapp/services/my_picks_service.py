@@ -134,7 +134,7 @@ class MyPicksService:
             tickers,
             start_date=min(baseline_dates),
             end_date=today,
-            trading_days_needed=7,
+            trading_days_needed=30,
             database_url=self.database_url,
         )
         for row in rows:
@@ -142,6 +142,8 @@ class MyPicksService:
             frame = frames.get(ticker)
             row["change_1d_pct"] = None
             row["change_since_added_pct"] = None
+            row["ema9_tested_since_added"] = None
+            row["ema21_tested_since_added"] = None
             if frame is None or frame.empty or "Close" not in frame:
                 continue
             close_series = frame["Close"].dropna()
@@ -161,6 +163,8 @@ class MyPicksService:
             if added_baseline is None and added_date is not None:
                 added_baseline = _close_on_or_before(frame, added_date)
             row["change_since_added_pct"] = _percent_change(latest_close, added_baseline)
+            row["ema9_tested_since_added"] = _was_ema_tested_since_date(frame, added_date, 9)
+            row["ema21_tested_since_added"] = _was_ema_tested_since_date(frame, added_date, 21)
 
     def _serialize_pick(self, row: dict[str, Any]) -> dict[str, Any]:
         added_at = _to_iso_datetime(row.get("created_at"))
@@ -179,6 +183,8 @@ class MyPicksService:
             "perf_ytd_pct": None,
             "change_1d_pct": None,
             "change_since_added_pct": None,
+            "ema9_tested_since_added": None,
+            "ema21_tested_since_added": None,
             "fundamental_rating": None,
             "fundamental_rank": None,
             "fundamental_status": None,
@@ -291,3 +297,24 @@ def _close_on_or_after(frame: Any, target_date: dt.date) -> float | None:
     if history.empty:
         return None
     return _safe_float(history.iloc[0])
+
+
+def _was_ema_tested_since_date(frame: Any, target_date: dt.date | None, length: int) -> bool | None:
+    if target_date is None or frame is None or frame.empty or "Close" not in frame:
+        return None
+    try:
+        ema_series = frame["Close"].ewm(span=length, adjust=False).mean()
+    except Exception:
+        return None
+    probe_series = frame["Low"] if "Low" in frame else frame["Close"]
+    if probe_series is None:
+        return None
+    history = frame.loc[frame.index.date >= target_date].copy()
+    if history.empty:
+        return None
+    history["ema"] = ema_series.loc[history.index]
+    history["probe"] = probe_series.loc[history.index]
+    history = history.dropna(subset=["ema", "probe"])
+    if history.empty:
+        return None
+    return bool((history["probe"] <= history["ema"]).any())

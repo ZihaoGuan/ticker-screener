@@ -419,6 +419,8 @@ function PicksTable({
             <th>1D %</th>
             <th>YTD %</th>
             <th>Since Add %</th>
+            <th>EMA9 Test</th>
+            <th>EMA21 Test</th>
             <th>EMA9</th>
             <th>vs EMA9</th>
             <th>EMA21</th>
@@ -447,6 +449,8 @@ function PicksTable({
               <td data-label="1D %">{renderChange(row.change_1d_pct)}</td>
               <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
               <td data-label="Since Add %">{renderChange(row.change_since_added_pct)}</td>
+              <td data-label="EMA9 Test">{renderTestFlag(row.ema9_tested_since_added)}</td>
+              <td data-label="EMA21 Test">{renderTestFlag(row.ema21_tested_since_added)}</td>
               <td data-label="EMA9">{formatPrice(row.daily_ema9)}</td>
               <td data-label="vs EMA9">
                 <span className={toneForPercent(row.distance_to_ema9_pct)}>{formatSignedPercent(row.distance_to_ema9_pct)}</span>
@@ -526,6 +530,13 @@ function renderChange(value: number | null | undefined) {
       {value.toFixed(2)}%
     </span>
   );
+}
+
+function renderTestFlag(value: boolean | null | undefined) {
+  if (value == null) {
+    return <span className="ticker-change neutral">--</span>;
+  }
+  return <span className={`ticker-change ${value ? "down" : "up"}`}>{value ? "Tested" : "No"}</span>;
 }
 
 function toneForPercent(value: number | null | undefined) {
