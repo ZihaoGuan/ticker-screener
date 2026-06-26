@@ -129,6 +129,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "vcp_scored",
+        "strategy_id": "vcp_scored",
+        "label": "VCP Scored",
+        "description": "Additional Minervini-style VCP scanner with composite score, execution state, and only score-above-80 entries shown on the scanner card.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+        "bias_group": "bullish",
+    },
+    {
         "id": "sean_gap_up",
         "strategy_id": "sean_gap_up",
         "label": "Sean Gap Up",

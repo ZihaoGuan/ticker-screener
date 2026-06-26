@@ -203,7 +203,7 @@ def run_vcp_screen(
         ):
             for ticker in ticker_batch:
                 position += 1
-                print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}")
+                print(f"[{position}/{total_tickers}] screening {ticker.symbol} | passed={len(hits)}", flush=True)
                 try:
                     financials = cookstock.cookFinancials(
                         ticker.symbol,
@@ -296,9 +296,9 @@ def run_vcp_screen(
                     hits.append(_to_hit(ticker, config.benchmark_ticker, screen_profile, payload, run_date))
                 except Exception as exc:
                     failures.append({"ticker": ticker.symbol, "error": str(exc)})
-                    print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}")
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} error: {exc} | passed={len(hits)}", flush=True)
 
-    print(f"screen complete: passed={len(hits)}, failed={len(failures)}, total={total_tickers}")
+    print(f"screen complete: passed={len(hits)}, failed={len(failures)}, total={total_tickers}", flush=True)
 
     return VcpScreenResult(
         run_date=run_date.isoformat(),

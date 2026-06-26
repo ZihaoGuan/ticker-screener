@@ -250,6 +250,13 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["venu_scanner"]["label"], "Run Venu Scanner")
         self.assertIn("scripts/run_venu_scanner.py", actions["venu_scanner"]["command"])
 
+    def test_list_actions_includes_vcp_scored(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("vcp_scored", actions)
+        self.assertEqual(actions["vcp_scored"]["label"], "Run VCP Scored")
+        self.assertIn("scripts/run_vcp_scored_screen.py", actions["vcp_scored"]["command"])
+
     def test_list_actions_includes_gamma_squeeze(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 

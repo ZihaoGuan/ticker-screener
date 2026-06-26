@@ -36,6 +36,7 @@ from .stockbee_momentum_burst_screen import (
     STOCKBEE_MOMENTUM_BURST_HISTORY_DAYS,
     find_recent_stockbee_momentum_burst_hit,
 )
+from .vcp_scored_screen import VCP_SCORED_HISTORY_DAYS, score_vcp_hit
 from .td_sequential_screen import find_recent_td_sequential_hit
 from .three_weeks_tight_screen import find_three_weeks_tight_hit
 from .trend_template_screen import run_trend_template_screen
@@ -803,6 +804,35 @@ def _run_stockbee_momentum_burst(bundle: ScreenerInputBundle) -> ScreenerEvaluat
     )
 
 
+def _run_vcp_scored(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    result = run_vcp_screen(config, [_ticker_from_bundle(bundle)], as_of_date=bundle.as_of_date)
+    hits = list(getattr(result, "hits", []))
+    failures = list(getattr(result, "failed_tickers", []))
+    if failures:
+        return ScreenerEvaluationResult(passed=False, error=str(failures[0].get("error") or "unknown screener failure"))
+    if not hits:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    if bundle.benchmark_bars is None:
+        return ScreenerEvaluationResult(passed=False, error="missing benchmark bars for scored vcp")
+    hit = score_vcp_hit(hits[0], bars=bundle.bars, benchmark_bars=bundle.benchmark_bars)
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, error="unable to score vcp candidate")
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "composite_score": payload["composite_score"],
+            "rating": payload["rating"],
+            "execution_state": payload["execution_state"],
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
     max_rs_days = int(config.rs_new_high_history_days)
     max_vcp_days = max(int(config.rs_new_high_history_days), 365)
@@ -848,6 +878,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=max_vcp_days,
             warmup_trading_days=40,
             evaluator=_run_vcp,
+        ),
+        "vcp_scored": ScreenerSpec(
+            id="vcp_scored",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=max(max_vcp_days, VCP_SCORED_HISTORY_DAYS),
+            warmup_trading_days=40,
+            evaluator=_run_vcp_scored,
         ),
         "cup_handle": ScreenerSpec(
             id="cup_handle",
