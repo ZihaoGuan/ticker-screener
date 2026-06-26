@@ -36,6 +36,8 @@ export function DashboardPage() {
   const ibdLatest = ibdDistribution?.latest ?? null;
   const exposurePosture = dashboard?.market_health?.exposure_posture ?? null;
   const exposureLatest = exposurePosture?.latest ?? null;
+  const themeDetector = dashboard?.market_health?.theme_detector ?? null;
+  const themeLatest = themeDetector?.latest ?? null;
 
   return (
     <div className="page-grid">
@@ -202,6 +204,46 @@ export function DashboardPage() {
             <p className="card-meta">
               {exposureLatest ? `${formatBreadthAge(exposureLatest.latest_data_days_old)}` : ""}
               {exposurePosture?.data_source ? ` · Source ${exposurePosture.data_source}` : ""}
+            </p>
+          </article>
+
+          <article className="metric-card">
+            <div className="metric-card-head">
+              <h3>{themeDetector?.ticker ?? "Theme Detector"}</h3>
+              <span className={`accent-mark accent-${themeAccent(themeLatest?.bullish_count, themeLatest?.bearish_count)}`} />
+            </div>
+            <p className="card-meta">Latest thematic leadership and laggard summary from persisted theme detector artifact.</p>
+            <div className="metric-value">
+              {themeLatest?.total_themes != null ? `${themeLatest.total_themes} themes` : "Unavailable"}{" "}
+              <span>
+                {themeLatest
+                  ? `${themeLatest.bullish_count ?? 0} bullish · ${themeLatest.bearish_count ?? 0} bearish`
+                  : "No theme detector artifact"}
+              </span>
+            </div>
+            <p className="card-meta">
+              {themeLatest
+                ? `Leaders ${themeLatest.top_bullish_name ?? "--"} (${formatThemeHeat(themeLatest.top_bullish_heat)}) · ${themeLatest.top_bullish_stage ?? "--"} · ${themeLatest.top_bullish_confidence ?? "--"}`
+                : "Run Theme Detector to surface thematic market summary."}
+            </p>
+            <p className="card-meta">
+              {themeLatest
+                ? `Laggards ${themeLatest.top_bearish_name ?? "--"} (${formatThemeHeat(themeLatest.top_bearish_heat)}) · ${themeLatest.top_bearish_stage ?? "--"} · ${themeLatest.top_bearish_confidence ?? "--"}`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {themeLatest?.top_theme_names.length
+                ? `Top stack ${themeLatest.top_theme_names.join(" · ")}`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {themeLatest
+                ? `Mode ${themeLatest.data_mode ?? "--"} · FINVIZ ${themeLatest.finviz_mode ?? "--"} · Uptrend sectors ${themeLatest.uptrend_sectors ?? "--"}`
+                : ""}
+            </p>
+            <p className="card-meta">
+              {themeLatest ? `${formatBreadthAge(themeLatest.latest_data_days_old)}` : ""}
+              {themeDetector?.data_source ? ` · Source ${themeDetector.data_source}` : ""}
             </p>
           </article>
 
@@ -463,6 +505,25 @@ function formatUptrendWarnings(labels: string[] | null | undefined, warningPenal
   }
   const penaltyLabel = warningPenalty == null || warningPenalty === 0 ? "" : ` · Penalty ${warningPenalty}`;
   return `Warnings ${labels.join(", ")}${penaltyLabel}`;
+}
+
+function formatThemeHeat(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) {
+    return "--";
+  }
+  return `${value.toFixed(1)} heat`;
+}
+
+function themeAccent(bullishCount: number | null | undefined, bearishCount: number | null | undefined) {
+  const bulls = bullishCount ?? 0;
+  const bears = bearishCount ?? 0;
+  if (bulls > bears) {
+    return "bull";
+  }
+  if (bears > bulls) {
+    return "bear";
+  }
+  return "neutral";
 }
 
 function formatExposureInputs(provided: string[] | null | undefined, missing: string[] | null | undefined) {

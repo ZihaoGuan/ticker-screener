@@ -64,6 +64,9 @@ class DashboardRepository:
     def get_cached_exposure_posture(self) -> dict[str, Any] | None:
         return self._load_latest_json_artifact("exposure_posture_*.json")
 
+    def get_cached_theme_detector(self) -> dict[str, Any] | None:
+        return self._load_latest_json_artifact("theme_detector_*.json")
+
     def _coerce_summary_payload(self, payload: Any) -> dict[str, Any] | None:
         if isinstance(payload, dict):
             return payload

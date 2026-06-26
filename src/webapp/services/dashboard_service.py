@@ -50,6 +50,7 @@ class DashboardService:
         uptrend_score = _build_uptrend_payload(repository=self.dashboard_repository)
         ibd_distribution = _build_ibd_distribution_payload(repository=self.dashboard_repository)
         exposure_posture = _build_exposure_posture_payload(repository=self.dashboard_repository)
+        theme_detector = _build_theme_detector_payload(repository=self.dashboard_repository)
         end_date = dt.date.today()
         start_date = end_date - dt.timedelta(days=900)
         try:
@@ -63,6 +64,7 @@ class DashboardService:
             db_payload["uptrend_score"] = uptrend_score
             db_payload["ibd_distribution"] = ibd_distribution
             db_payload["exposure_posture"] = exposure_posture
+            db_payload["theme_detector"] = theme_detector
             return db_payload
 
         internet_frame = _download_history_frame(benchmark, start_date, end_date)
@@ -72,6 +74,7 @@ class DashboardService:
             internet_payload["uptrend_score"] = uptrend_score
             internet_payload["ibd_distribution"] = ibd_distribution
             internet_payload["exposure_posture"] = exposure_posture
+            internet_payload["theme_detector"] = theme_detector
             return internet_payload
 
         if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
@@ -79,6 +82,7 @@ class DashboardService:
             db_payload["uptrend_score"] = uptrend_score
             db_payload["ibd_distribution"] = ibd_distribution
             db_payload["exposure_posture"] = exposure_posture
+            db_payload["theme_detector"] = theme_detector
             return db_payload
 
         payload = _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
@@ -86,6 +90,7 @@ class DashboardService:
         payload["uptrend_score"] = uptrend_score
         payload["ibd_distribution"] = ibd_distribution
         payload["exposure_posture"] = exposure_posture
+        payload["theme_detector"] = theme_detector
         return payload
 
 
@@ -197,6 +202,11 @@ def _build_unavailable_market_health(*, benchmark: str, data_source: str) -> dic
         },
         "exposure_posture": {
             "ticker": "Exposure Coach",
+            "data_source": data_source,
+            "latest": None,
+        },
+        "theme_detector": {
+            "ticker": "Theme Detector",
             "data_source": data_source,
             "latest": None,
         },
@@ -422,6 +432,67 @@ def _build_exposure_posture_payload(*, repository: DashboardRepository) -> dict[
             "provided_count": len(inputs_provided),
             "missing_count": len(inputs_missing),
             "rationale": str(artifact.get("rationale") or "") or None,
+            "latest_data_days_old": latest_data_days_old,
+        },
+    }
+
+
+def _build_theme_detector_payload(*, repository: DashboardRepository) -> dict[str, Any]:
+    artifact = repository.get_cached_theme_detector()
+    if not isinstance(artifact, dict):
+        return {
+            "ticker": "Theme Detector",
+            "data_source": "unavailable",
+            "latest": None,
+        }
+
+    metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
+    summary = artifact.get("summary") if isinstance(artifact.get("summary"), dict) else {}
+    themes = artifact.get("themes") if isinstance(artifact.get("themes"), dict) else {}
+    bullish = themes.get("bullish") if isinstance(themes.get("bullish"), list) else []
+    bearish = themes.get("bearish") if isinstance(themes.get("bearish"), list) else []
+
+    top_bullish = bullish[0] if bullish and isinstance(bullish[0], dict) else {}
+    top_bearish = bearish[0] if bearish and isinstance(bearish[0], dict) else {}
+    generated_at = str(artifact.get("generated_at") or metadata.get("generated_at") or "") or None
+    latest_data_days_old = None
+    if generated_at:
+        generated_date = generated_at[:10]
+        try:
+            latest_date_value = dt.date.fromisoformat(generated_date)
+            latest_data_days_old = max(0, (dt.date.today() - latest_date_value).days)
+        except ValueError:
+            latest_data_days_old = None
+
+    all_themes = themes.get("all") if isinstance(themes.get("all"), list) else []
+    top_theme_names = [
+        str(item.get("name") or "").strip()
+        for item in all_themes[:3]
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    ]
+
+    return {
+        "ticker": "Theme Detector",
+        "data_source": "artifact-cache",
+        "latest": {
+            "generated_at": generated_at,
+            "data_mode": str(metadata.get("data_mode") or "") or None,
+            "finviz_mode": str(metadata.get("finviz_mode") or "") or None,
+            "total_themes": _coerce_optional_int(summary.get("total_themes")),
+            "bullish_count": _coerce_optional_int(summary.get("bullish_count")),
+            "bearish_count": _coerce_optional_int(summary.get("bearish_count")),
+            "top_theme_names": top_theme_names,
+            "top_bullish_name": str(top_bullish.get("name") or summary.get("top_bullish") or "") or None,
+            "top_bullish_heat": _coerce_optional_float(top_bullish.get("heat")),
+            "top_bullish_stage": str(top_bullish.get("stage") or "") or None,
+            "top_bullish_confidence": str(top_bullish.get("confidence") or "") or None,
+            "top_bearish_name": str(top_bearish.get("name") or summary.get("top_bearish") or "") or None,
+            "top_bearish_heat": _coerce_optional_float(top_bearish.get("heat")),
+            "top_bearish_stage": str(top_bearish.get("stage") or "") or None,
+            "top_bearish_confidence": str(top_bearish.get("confidence") or "") or None,
+            "uptrend_sectors": _coerce_optional_int((metadata.get("data_sources") or {}).get("uptrend_sectors"))
+            if isinstance(metadata.get("data_sources"), dict)
+            else None,
             "latest_data_days_old": latest_data_days_old,
         },
     }

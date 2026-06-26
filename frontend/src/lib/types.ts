@@ -464,6 +464,29 @@ export type DashboardResponse = {
         latest_data_days_old: number | null;
       } | null;
     };
+    theme_detector: {
+      ticker: string;
+      data_source: string;
+      latest: {
+        generated_at: string | null;
+        data_mode: string | null;
+        finviz_mode: string | null;
+        total_themes: number | null;
+        bullish_count: number | null;
+        bearish_count: number | null;
+        top_theme_names: string[];
+        top_bullish_name: string | null;
+        top_bullish_heat: number | null;
+        top_bullish_stage: string | null;
+        top_bullish_confidence: string | null;
+        top_bearish_name: string | null;
+        top_bearish_heat: number | null;
+        top_bearish_stage: string | null;
+        top_bearish_confidence: string | null;
+        uptrend_sectors: number | null;
+        latest_data_days_old: number | null;
+      } | null;
+    };
   };
   recent_watchlists: WatchlistFile[];
   strategy_cards: StrategyCard[];
