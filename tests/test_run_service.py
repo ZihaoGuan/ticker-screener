@@ -264,6 +264,13 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["canslim_v2"]["label"], "Run CANSLIM V2")
         self.assertIn("scripts/run_canslim_v2_screen.py", actions["canslim_v2"]["command"])
 
+    def test_list_actions_includes_fundamental_quality(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("fundamental_quality", actions)
+        self.assertEqual(actions["fundamental_quality"]["label"], "Run Fundamental Quality")
+        self.assertIn("scripts/run_fundamental_quality_screen.py", actions["fundamental_quality"]["command"])
+
     def test_list_actions_excludes_gamma_squeeze(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 

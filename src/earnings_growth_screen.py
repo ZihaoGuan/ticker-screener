@@ -113,6 +113,66 @@ def _normalize_pct(value: float | None) -> float | None:
     return value
 
 
+def _find_frame_index_label(
+    frame: pd.DataFrame,
+    *,
+    exact_candidates: tuple[str, ...],
+    contains_candidates: tuple[str, ...] = (),
+    excluded_tokens: tuple[str, ...] = (),
+) -> str | None:
+    if frame is None or frame.empty:
+        return None
+    labels = [str(label) for label in frame.index]
+    for candidate in exact_candidates:
+        if candidate in frame.index:
+            return candidate
+    for label in labels:
+        normalized = label.casefold().strip()
+        if excluded_tokens and any(token in normalized for token in excluded_tokens):
+            continue
+        if any(candidate in normalized for candidate in contains_candidates):
+            return label
+    return None
+
+
+def _extract_annual_fundamentals_from_frame(frame: pd.DataFrame | None, limit: int = 4) -> list[dict[str, Any]]:
+    if frame is None or frame.empty:
+        return []
+
+    revenue_row_name = _find_frame_index_label(
+        frame,
+        exact_candidates=("Total Revenue", "Operating Revenue", "Revenue"),
+        contains_candidates=("total revenue", "operating revenue", "revenue"),
+    )
+    diluted_eps_row_name = _find_frame_index_label(
+        frame,
+        exact_candidates=("Diluted EPS",),
+        contains_candidates=("diluted eps",),
+        excluded_tokens=("avg", "shares", "share"),
+    )
+    if revenue_row_name is None and diluted_eps_row_name is None:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for column in list(frame.columns)[: max(1, int(limit))]:
+        date_value = column.date() if hasattr(column, "date") else None
+        if date_value is None:
+            continue
+        revenue_value = _safe_float(frame.at[revenue_row_name, column]) if revenue_row_name is not None else None
+        diluted_eps_value = _safe_float(frame.at[diluted_eps_row_name, column]) if diluted_eps_row_name is not None else None
+        if revenue_value is None and diluted_eps_value is None:
+            continue
+        payload: dict[str, Any] = {"date": date_value.isoformat()}
+        if revenue_value is not None:
+            payload["revenue"] = revenue_value
+        if diluted_eps_value is not None:
+            payload["diluted_eps"] = diluted_eps_value
+        rows.append(payload)
+
+    rows.sort(key=lambda item: str(item.get("date") or ""), reverse=True)
+    return rows[: max(1, int(limit))]
+
+
 class FMPClient:
     def __init__(self, api_key: str, timeout_seconds: int = 20) -> None:
         self.api_key = api_key.strip()
@@ -268,6 +328,13 @@ class YFinanceGrowthClient:
                 }
             )
         return rows
+
+    def get_annual_fundamentals(self, ticker: str, limit: int = 4) -> list[dict[str, Any]]:
+        stock = self.yf.Ticker(ticker)
+        frame = getattr(stock, "income_stmt", None)
+        if frame is None or frame.empty:
+            frame = getattr(stock, "financials", None)
+        return _extract_annual_fundamentals_from_frame(frame, limit=limit)
 
     def get_latest_institutional_ownership_pct(self, ticker: str) -> float | None:
         stock = self.yf.Ticker(ticker)
@@ -432,6 +499,19 @@ class AKShareGrowthClient:
             if rows:
                 return rows[:limit]
         return candidates
+
+    def get_annual_fundamentals(self, ticker: str, limit: int = 4) -> list[dict[str, Any]]:
+        for loader in (
+            self._load_analysis_indicator_rows,
+            self._load_report_rows,
+        ):
+            try:
+                rows = loader(ticker, limit)
+            except Exception:
+                rows = []
+            if rows:
+                return rows[:limit]
+        return []
 
     def _load_analysis_indicator_rows(self, ticker: str, limit: int) -> list[dict[str, Any]]:
         frame = self.ak.stock_financial_us_analysis_indicator_em(symbol=ticker)

@@ -173,6 +173,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "fundamental_quality",
+        "strategy_id": "fundamental_quality",
+        "label": "Fundamental Quality",
+        "description": "Finviz-prefiltered quality compounders with mid-cap-and-up size, strong margins and ROE, then local annual revenue CAGR and diluted EPS growth confirmation.",
+        "timeframe": "Daily",
+        "accent": "emerald",
+        "bias_group": "bullish",
+    },
+    {
         "id": "venu_scanner",
         "strategy_id": "venu_scanner",
         "label": "Venu Scanner",

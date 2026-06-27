@@ -40,6 +40,7 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertIn("sync_postgres_market_data", actions)
         self.assertIn("reload_postgres_market_data_date", actions)
         self.assertIn("venu_scanner", actions)
+        self.assertIn("fundamental_quality", actions)
         self.assertNotIn("gamma_squeeze", actions)
 
     def test_available_actions_include_grouping_metadata(self) -> None:

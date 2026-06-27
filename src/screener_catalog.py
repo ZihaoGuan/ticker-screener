@@ -13,6 +13,7 @@ from .ema21_pullback_buy_screen import find_recent_ema21_pullback_buy_hit
 from .cup_handle_screen import run_cup_handle_screen
 from .fearzone_zeiierman_screen import find_recent_fearzone_zeiierman_hit
 from .fearzone_screen import find_recent_fearzone_hit
+from .fundamental_quality_screen import evaluate_fundamental_quality_ticker
 from .ftd_sweep_screen import find_recent_ftd_sweep_hit
 from .gap_fill_screen import run_gap_fill_screen
 from .high_tight_flag_screen import HTF_SLOPE_LOOKBACK, HTF_SMA_LONG_PERIOD, find_high_tight_flag_hit
@@ -109,6 +110,26 @@ def _run_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
 def _run_canslim_v2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     return _single_ticker_result(bundle, run_canslim_v2_screen, config)
+
+
+def _run_fundamental_quality(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = evaluate_fundamental_quality_ticker(bundle.ticker, as_of_date=bundle.as_of_date)
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "revenue_3y_cagr_pct": payload["revenue_3y_cagr_pct"],
+            "diluted_eps_1y_growth_pct": payload["diluted_eps_1y_growth_pct"],
+        },
+        reasons=(
+            f"Revenue 3Y CAGR {float(payload['revenue_3y_cagr_pct']):.1f}%",
+            f"Diluted EPS 1Y growth {float(payload['diluted_eps_1y_growth_pct']):.1f}%",
+        ),
+        hit=payload,
+    )
 
 
 def _run_td9_bullish(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
@@ -898,6 +919,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=CANSLIM_V2_HISTORY_DAYS,
             warmup_trading_days=20,
             evaluator=_run_canslim_v2,
+        ),
+        "fundamental_quality": ScreenerSpec(
+            id="fundamental_quality",
+            required_inputs=("metadata",),
+            lookback_trading_days=1,
+            warmup_trading_days=0,
+            evaluator=_run_fundamental_quality,
         ),
         "cup_handle": ScreenerSpec(
             id="cup_handle",

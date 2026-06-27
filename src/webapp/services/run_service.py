@@ -1585,6 +1585,19 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="leaders",
         ),
+        "fundamental_quality": RunAction(
+            "fundamental_quality",
+            "Run Fundamental Quality",
+            "scripts/run_fundamental_quality_screen.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+            ),
+            bias_group="bullish",
+            bullish_subgroup="leaders",
+        ),
         "venu_scanner": RunAction(
             "venu_scanner",
             "Run Venu Scanner",

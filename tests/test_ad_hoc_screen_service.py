@@ -1458,6 +1458,41 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["screeners"][0]["id"], "hve")
         self.assertTrue(payload["screeners"][0]["passed"])
 
+    def test_run_supports_fundamental_quality_catalog_entry(self) -> None:
+        ticker_frame = _frame("2026-01-02", 40)
+        benchmark_frame = _frame("2026-01-02", 40)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ), patch(
+            "src.screener_catalog.evaluate_fundamental_quality_ticker",
+            return_value=type(
+                "FakeHit",
+                (),
+                {
+                    "to_dict": lambda self: {
+                        "ticker": "AAPL",
+                        "revenue_3y_cagr_pct": 24.5,
+                        "diluted_eps_1y_growth_pct": 42.0,
+                    }
+                },
+            )(),
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2026, 6, 28),
+                screener_ids=["fundamental_quality"],
+            )
+
+        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
+        self.assertEqual(payload["screeners"][0]["id"], "fundamental_quality")
+        self.assertTrue(payload["screeners"][0]["passed"])
+
     def test_run_supports_hv1_only_signal_for_hve_catalog_entry(self) -> None:
         ticker_frame = _hv1_only_frame()
         benchmark_frame = _frame("2024-01-02", 320)
