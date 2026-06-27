@@ -1648,7 +1648,7 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["screeners"][0]["hit"]["signal_type"], "buy")
         self.assertTrue(payload["screeners"][0]["passed"])
 
-    def test_run_supports_wyckoff_sell_signal_catalog_entry(self) -> None:
+    def test_run_rejects_removed_wyckoff_sell_signal_catalog_entry(self) -> None:
         ticker_frame = _wyckoff_sell_frame()
         benchmark_frame = _frame("2025-01-02", 260)
         service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
@@ -1660,16 +1660,12 @@ class AdHocScreenServiceTests(unittest.TestCase):
             "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
             return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
         ):
-            payload = service.run(
-                ticker="AAPL",
-                as_of_date=dt.date(2025, 11, 5),
-                screener_ids=["wyckoff_sell_signal"],
-            )
-
-        self.assertEqual(payload["summary"]["passed_screener_count"], 1)
-        self.assertEqual(payload["screeners"][0]["id"], "wyckoff_sell_signal")
-        self.assertEqual(payload["screeners"][0]["hit"]["signal_type"], "sell")
-        self.assertTrue(payload["screeners"][0]["passed"])
+            with self.assertRaises(ValueError):
+                service.run(
+                    ticker="AAPL",
+                    as_of_date=dt.date(2025, 11, 5),
+                    screener_ids=["wyckoff_sell_signal"],
+                )
 
     def test_run_supports_td9_bullish_catalog_entry(self) -> None:
         ticker_frame = _bullish_td9_frame()

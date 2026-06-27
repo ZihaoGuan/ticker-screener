@@ -926,7 +926,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["venu_scanner"]["entry_count"], 2)
         self.assertEqual(cards["venu_scanner"]["preview_tickers"], ["PLTR", "APP"])
 
-    def test_get_scanner_board_includes_gamma_squeeze_card(self) -> None:
+    def test_get_scanner_board_excludes_gamma_squeeze_card(self) -> None:
         self._write_watchlist(
             "gamma_squeeze_2026-06-12",
             tickers=["NVDA", "TSLA"],
@@ -938,9 +938,7 @@ class WatchlistServiceTests(unittest.TestCase):
         )
 
         cards = {item["id"]: item for item in payload["cards"]}
-        self.assertTrue(cards["gamma_squeeze"]["available"])
-        self.assertEqual(cards["gamma_squeeze"]["entry_count"], 2)
-        self.assertEqual(cards["gamma_squeeze"]["preview_tickers"], ["NVDA", "TSLA"])
+        self.assertNotIn("gamma_squeeze", cards)
 
     def test_get_scanner_board_includes_range_tightness_index_card(self) -> None:
         self._write_watchlist(
@@ -1144,8 +1142,7 @@ class WatchlistServiceTests(unittest.TestCase):
         cards = {item["id"]: item for item in payload["cards"]}
         self.assertTrue(cards["wyckoff_buy_signal"]["available"])
         self.assertEqual(cards["wyckoff_buy_signal"]["preview_tickers"], ["AAPL", "MSFT"])
-        self.assertTrue(cards["wyckoff_sell_signal"]["available"])
-        self.assertEqual(cards["wyckoff_sell_signal"]["preview_tickers"], ["TSLA"])
+        self.assertNotIn("wyckoff_sell_signal", cards)
 
     def test_get_scanner_board_marks_card_unavailable_when_all_results_excluded(self) -> None:
         self._write_watchlist(

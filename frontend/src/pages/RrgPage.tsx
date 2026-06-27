@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { RrgChart } from "../components/RrgChart";
-import { RrgValueChart } from "../components/RrgValueChart";
 import { fetchJson } from "../lib/api";
 import type { RrgCadence, RrgResponse, RrgSeries, RrgUniverse } from "../lib/types";
 
@@ -413,10 +412,6 @@ export function RrgPage() {
                     <div className="rrg-item-chart">
                       <div className="rrg-item-chart-label">RRG Trail</div>
                       <RrgChart benchmark={payload.benchmark} series={[entry]} compact showLegend={false} />
-                    </div>
-                    <div className="rrg-item-chart">
-                      <div className="rrg-item-chart-label">RS vs Date</div>
-                      <RrgValueChart series={entry} />
                     </div>
                   </div>
                 </article>

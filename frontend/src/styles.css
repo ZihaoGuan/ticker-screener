@@ -1708,7 +1708,7 @@ a {
 .rrg-card-chart-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .rrg-item-chart {

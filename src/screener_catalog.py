@@ -941,13 +941,6 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             warmup_trading_days=10,
             evaluator=_run_wyckoff_buy_signal,
         ),
-        "wyckoff_sell_signal": ScreenerSpec(
-            id="wyckoff_sell_signal",
-            required_inputs=("daily_bars", "metadata"),
-            lookback_trading_days=WYCKOFF_HISTORY_DAYS,
-            warmup_trading_days=10,
-            evaluator=_run_wyckoff_sell_signal,
-        ),
         "ftd_sweep": ScreenerSpec(
             id="ftd_sweep",
             required_inputs=("daily_bars", "metadata"),

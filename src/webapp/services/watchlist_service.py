@@ -188,15 +188,6 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
-        "id": "gamma_squeeze",
-        "strategy_id": "gamma_squeeze",
-        "label": "Gamma Squeeze",
-        "description": "Options positioning setups where negative or fragile gamma, nearby gamma flip, and call-wall pressure can force upside hedging.",
-        "timeframe": "Daily",
-        "accent": "amber",
-        "bias_group": "bullish",
-    },
-    {
         "id": "macd_golden_cross",
         "strategy_id": "macd_golden_cross",
         "label": "MACD Golden Cross",
@@ -219,15 +210,6 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": "Wyckoff accumulation names where the indicator flips into a fresh BUY state after spring, LPS, or phase progression.",
         "timeframe": "Daily",
         "accent": "lime",
-    },
-    {
-        "id": "wyckoff_sell_signal",
-        "strategy_id": "wyckoff_sell_signal",
-        "label": "Wyckoff Sell Signal",
-        "description": "Wyckoff distribution names where the indicator flips into a fresh SELL state after UTAD, LPSY, or phase deterioration.",
-        "timeframe": "Daily",
-        "accent": "rose",
-        "bias_group": "bearish",
     },
     {
         "id": "ftd_sweep",

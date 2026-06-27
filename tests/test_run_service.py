@@ -264,12 +264,10 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["canslim_v2"]["label"], "Run CANSLIM V2")
         self.assertIn("scripts/run_canslim_v2_screen.py", actions["canslim_v2"]["command"])
 
-    def test_list_actions_includes_gamma_squeeze(self) -> None:
+    def test_list_actions_excludes_gamma_squeeze(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 
-        self.assertIn("gamma_squeeze", actions)
-        self.assertEqual(actions["gamma_squeeze"]["label"], "Run Gamma Squeeze")
-        self.assertIn("scripts/run_gamma_squeeze_screen.py", actions["gamma_squeeze"]["command"])
+        self.assertNotIn("gamma_squeeze", actions)
 
     def test_list_actions_includes_stockbee_momentum_burst(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
@@ -543,7 +541,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("inside_dryup", action_ids)
         self.assertIn("inside_dryup_v2", action_ids)
         self.assertIn("wyckoff_buy_signal", action_ids)
-        self.assertIn("wyckoff_sell_signal", action_ids)
+        self.assertNotIn("wyckoff_sell_signal", action_ids)
         self.assertIn("daily_rs_new_high", action_ids)
         self.assertIn("weekly_rs_new_high", action_ids)
         self.assertIn("weekly_rs_before_price", action_ids)
@@ -557,7 +555,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("run_finviz_ratings_pipeline", action_ids)
         self.assertIn("sync_chart_fundamentals_cache", action_ids)
         self.assertIn("flashalpha_gex_close", action_ids)
-        self.assertIn("gamma_squeeze", action_ids)
+        self.assertNotIn("gamma_squeeze", action_ids)
         self.assertIn("backfill_trendline_snapshots", action_ids)
         self.assertIn("reload_postgres_market_data_date", action_ids)
 
