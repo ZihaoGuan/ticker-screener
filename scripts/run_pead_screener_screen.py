@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -38,6 +39,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--watch-weeks", type=int, default=5, help="PEAD monitoring window in weeks")
     parser.add_argument("--min-grade", choices=("A", "B", "C", "D"), default="B", help="Minimum analyzer grade to feed into PEAD")
     parser.add_argument("--max-api-calls", type=int, default=300, help="FMP API call budget for this run")
+    parser.add_argument(
+        "--price-provider",
+        choices=("auto", "fmp", "yfinance"),
+        default="auto",
+        help="Price history provider for PEAD analysis (default: auto)",
+    )
     parser.add_argument(
         "--analyzer-raw",
         help="Optional path to analyzer raw_results.json. Defaults to same date-label earnings_trade_analyzer artifact.",
@@ -82,6 +89,71 @@ def _load_analyzer_payload(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _load_yfinance():
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise RuntimeError("yfinance is not installed.") from exc
+    return yf
+
+
+def _normalize_yfinance_history(history: Any) -> list[dict[str, Any]]:
+    if history is None or getattr(history, "empty", True):
+        return []
+    frame = history.copy()
+    if getattr(frame, "columns", None) is not None and hasattr(frame.columns, "nlevels") and frame.columns.nlevels > 1:
+        frame.columns = frame.columns.get_level_values(0)
+    frame = frame.rename(columns=str)
+    required = {"Open", "High", "Low", "Close", "Volume"}
+    if not required.issubset(set(frame.columns)):
+        return []
+    frame = frame.loc[:, ["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["High", "Low", "Close", "Volume"])
+    if frame.empty:
+        return []
+    normalized: list[dict[str, Any]] = []
+    for index, row in frame.sort_index(ascending=False).iterrows():
+        trade_date = index.date().isoformat() if hasattr(index, "date") else str(index)[:10]
+        normalized.append(
+            {
+                "date": trade_date,
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(row["Volume"]),
+            }
+        )
+    return normalized
+
+
+def _fetch_yfinance_daily_prices(
+    symbol: str,
+    *,
+    run_date: dt.date,
+    days: int,
+) -> list[dict[str, Any]]:
+    yf = _load_yfinance()
+    start_date = run_date - dt.timedelta(days=max(days * 2, 180))
+    history = yf.download(
+        tickers=symbol,
+        start=start_date.isoformat(),
+        end=(run_date + dt.timedelta(days=1)).isoformat(),
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+    )
+    normalized = _normalize_yfinance_history(history)
+    return normalized[:days] if days > 0 else normalized
+
+
+def _resolve_price_provider(args: argparse.Namespace) -> str:
+    provider = str(getattr(args, "price_provider", "auto") or "auto").strip().lower()
+    if provider == "auto":
+        return "fmp" if ((args.api_key or os.getenv("FMP_API_KEY") or "").strip()) else "yfinance"
+    return provider
 
 
 def main() -> int:
@@ -161,7 +233,18 @@ def main() -> int:
         print("No T+1-eligible earnings events for selected week.", file=sys.stderr)
         return 0
 
-    client = FMPClient(api_key=args.api_key, max_api_calls=args.max_api_calls)
+    price_provider = _resolve_price_provider(args)
+    client: FMPClient | None = None
+    if price_provider == "fmp":
+        client = FMPClient(api_key=args.api_key, max_api_calls=args.max_api_calls)
+    else:
+        try:
+            _load_yfinance()
+        except RuntimeError as exc:
+            raise SystemExit(
+                "PEAD price history unavailable: no FMP API key and yfinance is not installed."
+            ) from exc
+
     failures: list[dict[str, object]] = []
     results: list[dict[str, Any]] = []
 
@@ -193,31 +276,47 @@ def main() -> int:
                 }
             )
             continue
-        try:
-            data = client.get_historical_prices(symbol, days=90)
-        except ApiCallBudgetExceeded:
-            failures.append(
-                {
-                    "ticker": symbol,
-                    "symbol": symbol,
-                    "error": "api_budget_exceeded",
-                    "earnings_date": analyzer_hit.get("earnings_date") or event.event_date.isoformat(),
-                    "eligible_on": analyzer_hit.get("eligible_on") or event.eligible_on.isoformat(),
-                }
-            )
-            break
-        if not data or "historical" not in data:
-            failures.append(
-                {
-                    "ticker": symbol,
-                    "symbol": symbol,
-                    "error": "historical_data_missing",
-                    "earnings_date": analyzer_hit.get("earnings_date") or event.event_date.isoformat(),
-                    "eligible_on": analyzer_hit.get("eligible_on") or event.eligible_on.isoformat(),
-                }
-            )
-            continue
-        daily_prices = data["historical"]
+        if price_provider == "fmp":
+            try:
+                data = client.get_historical_prices(symbol, days=90) if client is not None else None
+            except ApiCallBudgetExceeded:
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "error": "api_budget_exceeded",
+                        "earnings_date": analyzer_hit.get("earnings_date") or event.event_date.isoformat(),
+                        "eligible_on": analyzer_hit.get("eligible_on") or event.eligible_on.isoformat(),
+                    }
+                )
+                break
+            if not data or "historical" not in data:
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "error": "historical_data_missing",
+                        "earnings_date": analyzer_hit.get("earnings_date") or event.event_date.isoformat(),
+                        "eligible_on": analyzer_hit.get("eligible_on") or event.eligible_on.isoformat(),
+                    }
+                )
+                continue
+            daily_prices = data["historical"]
+        else:
+            try:
+                daily_prices = _fetch_yfinance_daily_prices(symbol, run_date=run_date, days=90)
+            except Exception as exc:
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "error": "yfinance_history_failed",
+                        "details": str(exc),
+                        "earnings_date": analyzer_hit.get("earnings_date") or event.event_date.isoformat(),
+                        "eligible_on": analyzer_hit.get("eligible_on") or event.eligible_on.isoformat(),
+                    }
+                )
+                continue
         if not isinstance(daily_prices, list) or not daily_prices:
             failures.append(
                 {
@@ -282,8 +381,9 @@ def main() -> int:
         "metadata": {
             "min_grade": args.min_grade,
             "watch_weeks": int(args.watch_weeks),
-            "api_calls_made": client.api_calls_made,
-            "max_api_calls": client.max_api_calls,
+            "price_provider": price_provider,
+            "api_calls_made": client.api_calls_made if client is not None else 0,
+            "max_api_calls": client.max_api_calls if client is not None else 0,
         },
     }
     summary_payload = {
