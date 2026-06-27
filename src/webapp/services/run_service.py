@@ -576,6 +576,28 @@ class RunService:
             ),
             bias_group="other",
         ),
+        "earnings_trade_analyzer": RunAction(
+            "earnings_trade_analyzer",
+            "Run Earnings Trade Analyzer",
+            "scripts/run_earnings_trade_analyzer_screen.py",
+            fields=(
+                _limit_field,
+                _date_label_field,
+                _reference_date_field,
+            ),
+            bias_group="other",
+        ),
+        "pead_screener": RunAction(
+            "pead_screener",
+            "Run PEAD Screener",
+            "scripts/run_pead_screener_screen.py",
+            fields=(
+                _limit_field,
+                _date_label_field,
+                _reference_date_field,
+            ),
+            bias_group="other",
+        ),
         "rs": RunAction(
             "rs",
             "Run RS",

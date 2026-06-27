@@ -254,6 +254,99 @@ class EarningsCalendarServiceTests(unittest.TestCase):
         self.assertEqual(payload["criteria_filter"]["run_id"], 10)
         self.assertEqual(payload["criteria_filter"]["run_date"], "2026-06-02")
 
+    def test_calendar_entry_includes_latest_analyzer_and_pead_payloads(self) -> None:
+        fake_events = [
+            {
+                "ticker": "AAA",
+                "event_date": dt.date(2026, 6, 8),
+                "summary": "Before market open",
+            }
+        ]
+        self.service._load_criteria_meta_for_week = lambda week_start, week_end: {  # type: ignore[method-assign]
+            "available": False,
+            "strategy_id": "earnings_weekly_criteria",
+            "run_id": None,
+            "run_date": None,
+            "matched_tickers": [],
+            "ticker_details": {},
+        }
+        self.service.history_service.is_configured = lambda: True  # type: ignore[method-assign]
+
+        def fake_list_runs(*, strategy_id: str = "", **kwargs):
+            _ = kwargs
+            if strategy_id == "earnings_trade_analyzer":
+                return [{"id": 21, "run_date": dt.date(2026, 6, 10)}]
+            if strategy_id == "pead_screener":
+                return [{"id": 31, "run_date": dt.date(2026, 6, 11)}]
+            return []
+
+        def fake_get_run(run_id: int, *, include_hits: bool = False, hit_limit: int = 200, hit_offset: int = 0):
+            _ = (include_hits, hit_limit, hit_offset)
+            if run_id == 21:
+                return {
+                    "id": 21,
+                    "hits": [
+                        {
+                            "ticker": "AAA",
+                            "passed": True,
+                            "hit_payload_json": {
+                                "ticker": "AAA",
+                                "earnings_date": "2026-06-08",
+                                "earnings_timing": "bmo",
+                                "eligible_on": "2026-06-09",
+                                "grade": "A",
+                                "grade_description": "Strong earnings reaction",
+                                "composite_score": 89.5,
+                                "gap_pct": 7.8,
+                                "current_price": 145.2,
+                                "guidance": "Monitor for follow-through buying.",
+                                "strongest_component": "Pre-Earnings Trend",
+                                "weakest_component": "MA50 Position",
+                            },
+                        }
+                    ],
+                }
+            if run_id == 31:
+                return {
+                    "id": 31,
+                    "hits": [
+                        {
+                            "ticker": "AAA",
+                            "passed": True,
+                            "hit_payload_json": {
+                                "ticker": "AAA",
+                                "earnings_date": "2026-06-08",
+                                "eligible_on": "2026-06-09",
+                                "stage": "SIGNAL_READY",
+                                "composite_score": 74.2,
+                                "rating": "Good Setup",
+                                "gap_pct": 7.8,
+                                "current_price": 147.1,
+                                "weeks_since_earnings": 1,
+                                "breakout_pct": 0.0,
+                                "risk_reward_ratio": 2.4,
+                                "guidance": "Red candle formed, set alert for breakout.",
+                            },
+                        }
+                    ],
+                }
+            return None
+
+        self.service.history_service.list_runs = fake_list_runs  # type: ignore[method-assign]
+        self.service.history_service.get_run = fake_get_run  # type: ignore[method-assign]
+
+        with patch("src.webapp.services.earnings_calendar_service.load_configured_cookstock", return_value=_FakeCookstock(fake_events)):
+            payload = self.service.get_next_week_calendar(reference_date=dt.date(2026, 6, 10), week_offset=0)
+
+        entry = payload["days"][1]["before_market"][0]
+        self.assertEqual(entry["earnings_trade_analysis"]["grade"], "A")
+        self.assertEqual(entry["earnings_trade_analysis"]["composite_score"], 89.5)
+        self.assertEqual(entry["pead_analysis"]["stage"], "SIGNAL_READY")
+        self.assertEqual(entry["pead_analysis"]["risk_reward_ratio"], 2.4)
+        self.assertEqual(entry["post_earnings_tracking"]["eligible_on"], "2026-06-09")
+        self.assertTrue(entry["post_earnings_tracking"]["analyzer_ready"])
+        self.assertTrue(entry["post_earnings_tracking"]["pead_ready"])
+
 
 if __name__ == "__main__":
     unittest.main()

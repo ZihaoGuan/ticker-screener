@@ -1882,6 +1882,41 @@ export type EarningsCalendarEntry = {
     percent_move?: number | null;
     status?: string | null;
   } | null;
+  post_earnings_tracking?: {
+    eligible_on?: string | null;
+    analyzer_ready: boolean;
+    pead_ready: boolean;
+  } | null;
+  earnings_trade_analysis?: {
+    run_id?: number | null;
+    run_date?: string | null;
+    earnings_date?: string | null;
+    earnings_timing?: string | null;
+    eligible_on?: string | null;
+    grade?: string | null;
+    grade_description?: string | null;
+    composite_score?: number | null;
+    gap_pct?: number | null;
+    current_price?: number | null;
+    guidance?: string | null;
+    strongest_component?: string | null;
+    weakest_component?: string | null;
+  } | null;
+  pead_analysis?: {
+    run_id?: number | null;
+    run_date?: string | null;
+    earnings_date?: string | null;
+    eligible_on?: string | null;
+    stage?: string | null;
+    composite_score?: number | null;
+    rating?: string | null;
+    gap_pct?: number | null;
+    current_price?: number | null;
+    weeks_since_earnings?: number | null;
+    breakout_pct?: number | null;
+    risk_reward_ratio?: number | null;
+    guidance?: string | null;
+  } | null;
   criteria?: {
     passed: boolean;
     criteria: Record<string, boolean>;

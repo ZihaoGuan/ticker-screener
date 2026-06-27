@@ -73,6 +73,13 @@ function formatRatingValue(value: number | null | undefined) {
   return value == null ? "--" : value.toFixed(1);
 }
 
+function formatDateLabel(value: string | null | undefined) {
+  if (!value) return "--";
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(parsed).toUpperCase();
+}
+
 function orderedTechnicalIndicatorRatings(ratings: Record<string, TechnicalIndicatorRatingCell> | null | undefined) {
   return ["1d", "1w", "1m"]
     .map((timeframe) => ratings?.[timeframe] ?? null)
@@ -162,6 +169,74 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
                   ? `IV ${entry.implied_move_signal.percent_move.toFixed(2)}%`
                   : "IV --"}
               </span>
+            </div>
+          ) : null}
+          {entry.earnings_trade_analysis || entry.pead_analysis || entry.post_earnings_tracking ? (
+            <div className="earnings-analysis-stack">
+              {entry.earnings_trade_analysis ? (
+                <div className="earnings-analysis-block">
+                  <div className="earnings-criteria-summary">
+                    <span className="earnings-pass-mode">Analyzer</span>
+                    <span className="earnings-pass-indicator is-pass">
+                      {entry.earnings_trade_analysis.grade ?? "--"} {formatRatingValue(entry.earnings_trade_analysis.composite_score)}
+                    </span>
+                  </div>
+                  <div className="earnings-criteria-pill-row">
+                    <span className="earnings-criteria-pill is-match">
+                      {`Gap ${entry.earnings_trade_analysis.gap_pct != null ? `${entry.earnings_trade_analysis.gap_pct >= 0 ? "+" : ""}${entry.earnings_trade_analysis.gap_pct.toFixed(1)}%` : "--"}`}
+                    </span>
+                    {entry.earnings_trade_analysis.strongest_component ? (
+                      <span className="earnings-criteria-pill is-match">
+                        {`Best ${entry.earnings_trade_analysis.strongest_component}`}
+                      </span>
+                    ) : null}
+                    {entry.earnings_trade_analysis.weakest_component ? (
+                      <span className="earnings-criteria-pill is-miss">
+                        {`Weak ${entry.earnings_trade_analysis.weakest_component}`}
+                      </span>
+                    ) : null}
+                  </div>
+                  {entry.earnings_trade_analysis.guidance ? (
+                    <p className="earnings-analysis-copy">{entry.earnings_trade_analysis.guidance}</p>
+                  ) : null}
+                </div>
+              ) : entry.post_earnings_tracking?.eligible_on ? (
+                <div className="earnings-analysis-block">
+                  <div className="earnings-criteria-summary">
+                    <span className="earnings-pass-mode">Analyzer</span>
+                    <span className="earnings-pass-indicator is-fail">Pending</span>
+                  </div>
+                  <p className="earnings-analysis-copy">
+                    {`Eligible after ${formatDateLabel(entry.post_earnings_tracking.eligible_on)}.`}
+                  </p>
+                </div>
+              ) : null}
+              {entry.pead_analysis ? (
+                <div className="earnings-analysis-block">
+                  <div className="earnings-criteria-summary">
+                    <span className="earnings-pass-mode">PEAD</span>
+                    <span className={`earnings-pass-indicator${entry.pead_analysis.stage === "BREAKOUT" ? " is-pass" : " is-fail"}`}>
+                      {entry.pead_analysis.stage ?? "PENDING"}
+                    </span>
+                  </div>
+                  <div className="earnings-criteria-pill-row">
+                    <span className={`earnings-criteria-pill${entry.pead_analysis.stage === "BREAKOUT" ? " is-match" : " is-miss"}`}>
+                      {`${entry.pead_analysis.rating ?? "--"} ${formatRatingValue(entry.pead_analysis.composite_score)}`}
+                    </span>
+                    {entry.pead_analysis.breakout_pct != null ? (
+                      <span className={`earnings-criteria-pill${(entry.pead_analysis.breakout_pct ?? 0) > 0 ? " is-match" : " is-miss"}`}>
+                        {`BO ${entry.pead_analysis.breakout_pct >= 0 ? "+" : ""}${entry.pead_analysis.breakout_pct.toFixed(1)}%`}
+                      </span>
+                    ) : null}
+                    {entry.pead_analysis.risk_reward_ratio != null ? (
+                      <span className="earnings-criteria-pill is-match">
+                        {`R:R ${entry.pead_analysis.risk_reward_ratio.toFixed(1)}`}
+                      </span>
+                    ) : null}
+                  </div>
+                  {entry.pead_analysis.guidance ? <p className="earnings-analysis-copy">{entry.pead_analysis.guidance}</p> : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
           {entry.criteria ? (

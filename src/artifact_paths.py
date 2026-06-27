@@ -306,6 +306,18 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("earnings_growth_{date_label}.json",),
         "legacy_summary_templates": ("earnings_growth_run_summary_{date_label}.json",),
     },
+    "earnings_trade_analyzer": {
+        "stem_template": "earnings_trade_analyzer_{date_label}",
+        "legacy_watchlist_templates": ("earnings_trade_analyzer_{date_label}.json",),
+        "legacy_raw_templates": ("earnings_trade_analyzer_{date_label}.json",),
+        "legacy_summary_templates": ("earnings_trade_analyzer_run_summary_{date_label}.json",),
+    },
+    "pead_screener": {
+        "stem_template": "pead_screener_{date_label}",
+        "legacy_watchlist_templates": ("pead_screener_{date_label}.json",),
+        "legacy_raw_templates": ("pead_screener_{date_label}.json",),
+        "legacy_summary_templates": ("pead_screener_run_summary_{date_label}.json",),
+    },
     "canslim": {
         "stem_template": "canslim_{date_label}",
         "legacy_watchlist_templates": ("canslim_{date_label}.json",),
@@ -397,6 +409,8 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("pre_earnings_ma_stack", "pre_earnings_ma_stack"),
     ("pre_earnings_focus", "pre_earnings_focus"),
     ("earnings_weekly_criteria", "earnings_weekly_criteria"),
+    ("earnings_trade_analyzer", "earnings_trade_analyzer"),
+    ("pead_screener", "pead_screener"),
     ("flashalpha_gex_close", "flashalpha_gex_close"),
     ("gamma_squeeze", "gamma_squeeze"),
     ("earnings_growth", "earnings_growth"),

@@ -3191,6 +3191,29 @@ a {
   margin: 0;
 }
 
+.earnings-analysis-stack {
+  border-top: 1px solid rgba(63, 63, 70, 0.45);
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.earnings-analysis-block {
+  background: rgba(39, 39, 42, 0.85);
+  border: 1px solid rgba(63, 63, 70, 0.6);
+  border-radius: 4px;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+
+.earnings-analysis-copy {
+  color: #d4d4d8;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+
 .earnings-criteria-block {
   border-top: 1px solid rgba(63, 63, 70, 0.45);
   display: grid;

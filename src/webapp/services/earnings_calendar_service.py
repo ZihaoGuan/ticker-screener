@@ -13,6 +13,8 @@ from .screener_history_service import ScreenerHistoryService
 
 
 CRITERIA_STRATEGY_ID = "earnings_weekly_criteria"
+EARNINGS_TRADE_ANALYZER_STRATEGY_ID = "earnings_trade_analyzer"
+PEAD_SCREENER_STRATEGY_ID = "pead_screener"
 
 
 class EarningsCalendarService:
@@ -47,6 +49,16 @@ class EarningsCalendarService:
         criteria_meta = self._load_criteria_meta_for_week(selected_week_start, selected_week_end)
         matched_tickers = {str(value).upper() for value in criteria_meta.get("matched_tickers", [])}
         criteria_by_ticker = criteria_meta.get("ticker_details", {})
+        earnings_trade_by_ticker = self._load_post_earnings_meta_for_week(
+            EARNINGS_TRADE_ANALYZER_STRATEGY_ID,
+            selected_week_start,
+            selected_week_end,
+        )
+        pead_by_ticker = self._load_post_earnings_meta_for_week(
+            PEAD_SCREENER_STRATEGY_ID,
+            selected_week_start,
+            selected_week_end,
+        )
 
         excluded_sector_keys = {_normalize_filter_value(value) for value in (exclude_sectors or []) if _normalize_filter_value(value)}
         excluded_industry_keys = {_normalize_filter_value(value) for value in (exclude_industries or []) if _normalize_filter_value(value)}
@@ -129,6 +141,13 @@ class EarningsCalendarService:
                     "implied_move_signal": criteria_by_ticker.get(ticker, {}).get("implied_move_signal")
                     if isinstance(criteria_by_ticker.get(ticker), dict)
                     else None,
+                    "post_earnings_tracking": {
+                        "eligible_on": _next_trading_day(event_date).isoformat(),
+                        "analyzer_ready": isinstance(earnings_trade_by_ticker.get(ticker), dict),
+                        "pead_ready": isinstance(pead_by_ticker.get(ticker), dict),
+                    },
+                    "earnings_trade_analysis": earnings_trade_by_ticker.get(ticker),
+                    "pead_analysis": pead_by_ticker.get(ticker),
                 }
             )
 
@@ -227,6 +246,93 @@ class EarningsCalendarService:
         payload.update(best_payload)
         return payload
 
+    def _load_post_earnings_meta_for_week(
+        self,
+        strategy_id: str,
+        week_start: dt.date,
+        week_end: dt.date,
+    ) -> dict[str, dict[str, Any]]:
+        if not self.history_service.is_configured():
+            return {}
+        runs = self.history_service.list_runs(strategy_id=strategy_id, limit=20)
+        if not runs:
+            return {}
+        by_ticker: dict[str, dict[str, Any]] = {}
+        for run in runs:
+            run_id = run.get("id")
+            if not isinstance(run_id, int):
+                continue
+            detail = self.history_service.get_run(run_id, include_hits=True, hit_limit=1000)
+            if not isinstance(detail, dict):
+                continue
+            for ticker, payload in self._build_post_earnings_payload_from_run(
+                strategy_id=strategy_id,
+                detail=detail,
+                run_summary=run,
+                week_start=week_start,
+                week_end=week_end,
+            ).items():
+                if ticker not in by_ticker:
+                    by_ticker[ticker] = payload
+        return by_ticker
+
+    def _build_post_earnings_payload_from_run(
+        self,
+        *,
+        strategy_id: str,
+        detail: dict[str, Any],
+        run_summary: dict[str, Any],
+        week_start: dt.date,
+        week_end: dt.date,
+    ) -> dict[str, dict[str, Any]]:
+        payloads: dict[str, dict[str, Any]] = {}
+        run_date = run_summary.get("run_date")
+        run_date_value = run_date.isoformat() if hasattr(run_date, "isoformat") else str(run_date or "")
+        for hit in detail.get("hits", []):
+            if not isinstance(hit, dict) or not bool(hit.get("passed")):
+                continue
+            raw_payload = hit.get("hit_payload_json")
+            payload_json = raw_payload if isinstance(raw_payload, dict) else {}
+            earnings_date = _parse_iso_date(payload_json.get("earnings_date"))
+            if earnings_date is None or earnings_date < week_start or earnings_date > week_end:
+                continue
+            ticker = str(hit.get("ticker") or payload_json.get("ticker") or payload_json.get("symbol") or "").strip().upper()
+            if not ticker:
+                continue
+            if strategy_id == EARNINGS_TRADE_ANALYZER_STRATEGY_ID:
+                payloads[ticker] = {
+                    "run_id": detail.get("id"),
+                    "run_date": run_date_value,
+                    "earnings_date": payload_json.get("earnings_date"),
+                    "earnings_timing": payload_json.get("earnings_timing"),
+                    "eligible_on": payload_json.get("eligible_on"),
+                    "grade": payload_json.get("grade"),
+                    "grade_description": payload_json.get("grade_description"),
+                    "composite_score": payload_json.get("composite_score"),
+                    "gap_pct": payload_json.get("gap_pct"),
+                    "current_price": payload_json.get("current_price"),
+                    "guidance": payload_json.get("guidance"),
+                    "strongest_component": payload_json.get("strongest_component"),
+                    "weakest_component": payload_json.get("weakest_component"),
+                }
+            elif strategy_id == PEAD_SCREENER_STRATEGY_ID:
+                payloads[ticker] = {
+                    "run_id": detail.get("id"),
+                    "run_date": run_date_value,
+                    "earnings_date": payload_json.get("earnings_date"),
+                    "eligible_on": payload_json.get("eligible_on"),
+                    "stage": payload_json.get("stage"),
+                    "composite_score": payload_json.get("composite_score"),
+                    "rating": payload_json.get("rating"),
+                    "gap_pct": payload_json.get("gap_pct"),
+                    "current_price": payload_json.get("current_price"),
+                    "weeks_since_earnings": payload_json.get("weeks_since_earnings"),
+                    "breakout_pct": payload_json.get("breakout_pct"),
+                    "risk_reward_ratio": payload_json.get("risk_reward_ratio"),
+                    "guidance": payload_json.get("guidance"),
+                }
+        return payloads
+
     def _build_criteria_meta_from_run(
         self,
         detail: dict[str, Any],
@@ -295,3 +401,10 @@ def _criteria_target_week_for_run_date(run_date: dt.date) -> tuple[dt.date, dt.d
     target_week_start = week_start + dt.timedelta(days=7)
     target_week_end = target_week_start + dt.timedelta(days=6)
     return target_week_start, target_week_end
+
+
+def _next_trading_day(date_value: dt.date) -> dt.date:
+    candidate = date_value + dt.timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate += dt.timedelta(days=1)
+    return candidate
