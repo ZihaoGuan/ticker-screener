@@ -194,7 +194,10 @@ export function ScannerTopHitsPage() {
         </label>
         <label className="scanner-result-filter panel">
           <span>Elite Pick</span>
-          <input type="checkbox" checked={eliteOnly} onChange={(event) => setEliteOnly(event.target.checked)} />
+          <span className="scanner-result-check">
+            <input type="checkbox" checked={eliteOnly} onChange={(event) => setEliteOnly(event.target.checked)} />
+            <span>Only show elite candidates</span>
+          </span>
           <span className="panel-copy">1D + 1W Strong Buy, and FA rank top 200 when present.</span>
         </label>
         <div className="scanner-result-filter panel scanner-result-filter-actions">

@@ -28,10 +28,22 @@ export function AppLayout({ children }: PropsWithChildren) {
   const auth = useAuth();
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const showInfraStatus = auth.role === "admin";
+  const infraSummary = showInfraStatus ? "INFRA: WEB HEALTHY / DB CONNECTED / ARTIFACTS REACHABLE" : null;
 
   useEffect(() => {
     setIsMobileNavOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!isMobileNavOpen) {
+      document.body.style.overflow = "";
+      return;
+    }
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isMobileNavOpen]);
 
   const visibleNavItems = navItems.filter(
     (item) => (!item.roles || item.roles.includes(auth.role)) && (!item.capability || auth.hasCapability(item.capability)),
@@ -45,9 +57,19 @@ export function AppLayout({ children }: PropsWithChildren) {
   return (
     <div className="app-shell">
       <aside className={`sidebar${isMobileNavOpen ? " is-open" : ""}`}>
-        <div className="brand-block">
-          <div className="brand-title">Ticker Screener</div>
-          <div className="brand-subtitle">Clinical Analytics</div>
+        <div className="sidebar-head">
+          <div className="brand-block">
+            <div className="brand-title">Ticker Screener</div>
+            <div className="brand-subtitle">Clinical Analytics</div>
+          </div>
+          <button
+            className="sidebar-close"
+            type="button"
+            onClick={() => setIsMobileNavOpen(false)}
+            aria-label="Close navigation menu"
+          >
+            Close
+          </button>
         </div>
         <nav id="primary-navigation" className="sidebar-nav">
           {visibleNavItems.map((item) => (
@@ -81,6 +103,12 @@ export function AppLayout({ children }: PropsWithChildren) {
           )}
         </div>
       </aside>
+      <button
+        type="button"
+        className={`app-shell-backdrop${isMobileNavOpen ? " is-visible" : ""}`}
+        aria-label="Close navigation drawer"
+        onClick={() => setIsMobileNavOpen(false)}
+      />
       <div className="main-shell">
         <header className="topbar">
           <div className="topbar-main">
@@ -90,11 +118,16 @@ export function AppLayout({ children }: PropsWithChildren) {
               onClick={() => setIsMobileNavOpen((current) => !current)}
               aria-expanded={isMobileNavOpen}
               aria-controls="primary-navigation"
+              aria-label={isMobileNavOpen ? "Close navigation menu" : "Open navigation menu"}
             >
               {isMobileNavOpen ? "Close" : "Menu"}
             </button>
+            <div className="topbar-brand">Ticker Screener</div>
           </div>
-          <div className="topbar-status">
+          <div className="topbar-status topbar-status-compact">
+            <span className="status-chip status-chip-compact">{infraSummary ?? (auth.authenticated ? `ROLE: ${auth.role.toUpperCase()}` : "ROLE: VISITOR")}</span>
+          </div>
+          <div className="topbar-status topbar-status-full">
             {showInfraStatus ? <span className="status-chip">WEB: HEALTHY</span> : null}
             {showInfraStatus ? <span className="status-chip">DB: CONNECTED</span> : null}
             {showInfraStatus ? <span className="status-chip">ARTIFACTS: REACHABLE</span> : null}
