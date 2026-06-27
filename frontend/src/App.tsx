@@ -26,6 +26,8 @@ const OverlapPage = lazy(() => import("./pages/OverlapPage").then((module) => ({
 const MyPicksPage = lazy(() => import("./pages/MyPicksPage").then((module) => ({ default: module.MyPicksPage })));
 const PortfolioPage = lazy(() => import("./pages/PortfolioPage").then((module) => ({ default: module.PortfolioPage })));
 const AdminPage = lazy(() => import("./pages/AdminPage").then((module) => ({ default: module.AdminPage })));
+const AdminMissingSectorsPage = lazy(() => import("./pages/AdminMissingSectorsPage").then((module) => ({ default: module.AdminMissingSectorsPage })));
+const AdminMissingFinvizTickersPage = lazy(() => import("./pages/AdminMissingFinvizTickersPage").then((module) => ({ default: module.AdminMissingFinvizTickersPage })));
 const AdminTickerRatingsHealthPage = lazy(() => import("./pages/AdminTickerRatingsHealthPage").then((module) => ({ default: module.AdminTickerRatingsHealthPage })));
 const AdminDiscordPage = lazy(() => import("./pages/AdminDiscordPage").then((module) => ({ default: module.AdminDiscordPage })));
 
@@ -167,6 +169,22 @@ export default function App() {
             element={
               <ProtectedRoute capability="manage_exclusions">
                 <AdminPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/missing-sectors"
+            element={
+              <ProtectedRoute capability="manage_exclusions">
+                <AdminMissingSectorsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/finviz-missing-tickers"
+            element={
+              <ProtectedRoute capability="manage_exclusions">
+                <AdminMissingFinvizTickersPage />
               </ProtectedRoute>
             }
           />

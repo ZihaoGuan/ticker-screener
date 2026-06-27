@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { AdminSubnav } from "../components/AdminSubnav";
 import { ExclusionDialog } from "../components/ExclusionDialog";
 import { LoadingBlock } from "../components/LoadingBlock";
@@ -12,8 +13,6 @@ import type {
   AuditEventsResponse,
   ExclusionEntry,
   GammaExposurePlotAdminResponse,
-  MissingFinvizTickersAdminResponse,
-  MissingSectorAdminResponse,
   PartialTickerDetailResponse,
   RoleName,
 } from "../lib/types";
@@ -43,24 +42,8 @@ const EMPTY_ADMIN_RESPONSE: AdminResponse = {
   },
 };
 
-const EMPTY_MISSING_SECTOR_RESPONSE: MissingSectorAdminResponse = {
-  database_configured: false,
-  missing_count: 0,
-  tickers: [],
-  available_sectors: [],
-  notes: [],
-};
-
-const EMPTY_MISSING_FINVIZ_RESPONSE: MissingFinvizTickersAdminResponse = {
-  missing_count: 0,
-  tickers: [],
-  notes: [],
-};
-
 export function AdminPage() {
   const [payload, setPayload] = useState<AdminResponse>(EMPTY_ADMIN_RESPONSE);
-  const [missingSectorPayload, setMissingSectorPayload] = useState<MissingSectorAdminResponse>(EMPTY_MISSING_SECTOR_RESPONSE);
-  const [missingFinvizPayload, setMissingFinvizPayload] = useState<MissingFinvizTickersAdminResponse>(EMPTY_MISSING_FINVIZ_RESPONSE);
   const [coverageStart, setCoverageStart] = useState("2020-01-01");
   const [syncStartDate, setSyncStartDate] = useState("2020-01-01");
   const [syncEndDate, setSyncEndDate] = useState("");
@@ -106,15 +89,6 @@ export function AdminPage() {
   const [gammaPlotPayload, setGammaPlotPayload] = useState<GammaExposurePlotAdminResponse | null>(null);
   const [isLoadingGammaPlot, setIsLoadingGammaPlot] = useState(true);
   const [gammaPlotNotice, setGammaPlotNotice] = useState("");
-  const [missingSectorFilter, setMissingSectorFilter] = useState("");
-  const [sectorSelections, setSectorSelections] = useState<Record<string, string>>({});
-  const [isLoadingMissingSectors, setIsLoadingMissingSectors] = useState(true);
-  const [isSavingSector, setIsSavingSector] = useState(false);
-  const [sectorNotice, setSectorNotice] = useState("");
-  const [missingFinvizFilter, setMissingFinvizFilter] = useState("");
-  const [isLoadingMissingFinviz, setIsLoadingMissingFinviz] = useState(true);
-  const [isRemovingMissingFinviz, setIsRemovingMissingFinviz] = useState(false);
-  const [missingFinvizNotice, setMissingFinvizNotice] = useState("");
 
   const loadAdmin = (start: string) => {
     setIsLoading(true);
@@ -158,41 +132,6 @@ export function AdminPage() {
       .finally(() => setIsLoadingAudit(false));
   };
 
-  const loadMissingSectors = () => {
-    setIsLoadingMissingSectors(true);
-    void fetchJson<MissingSectorAdminResponse>("/api/admin/missing-sectors")
-      .then((result) => {
-        setMissingSectorPayload(result);
-        setSectorSelections((current) => {
-          const next: Record<string, string> = {};
-          result.tickers.forEach((item) => {
-            next[item.ticker] = current[item.ticker] ?? item.suggested_sector ?? "";
-          });
-          return next;
-        });
-      })
-      .catch(() => {
-        setMissingSectorPayload({
-          ...EMPTY_MISSING_SECTOR_RESPONSE,
-          notes: ["Failed to load missing-sector tickers."],
-        });
-      })
-      .finally(() => setIsLoadingMissingSectors(false));
-  };
-
-  const loadMissingFinvizTickers = () => {
-    setIsLoadingMissingFinviz(true);
-    void fetchJson<MissingFinvizTickersAdminResponse>("/api/admin/finviz-missing-tickers")
-      .then(setMissingFinvizPayload)
-      .catch(() => {
-        setMissingFinvizPayload({
-          ...EMPTY_MISSING_FINVIZ_RESPONSE,
-          notes: ["Failed to load Finviz missing-ticker registry."],
-        });
-      })
-      .finally(() => setIsLoadingMissingFinviz(false));
-  };
-
   const loadGammaExposurePlot = () => {
     setIsLoadingGammaPlot(true);
     setGammaPlotNotice("");
@@ -207,8 +146,6 @@ export function AdminPage() {
 
   useEffect(() => {
     loadAdmin(coverageStart);
-    loadMissingSectors();
-    loadMissingFinvizTickers();
     void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
       .then((result) => {
         setUsers(result.users);
@@ -416,29 +353,6 @@ export function AdminPage() {
     );
   }, [exclusionFilter, payload.excluded_tickers]);
 
-  const filteredMissingSectorTickers = useMemo(() => {
-    const query = missingSectorFilter.trim().toLowerCase();
-    if (!query) {
-      return missingSectorPayload.tickers;
-    }
-    return missingSectorPayload.tickers.filter((entry) =>
-      [entry.ticker, entry.exchange, entry.industry, entry.source, entry.suggested_sector, entry.suggested_industry]
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [missingSectorFilter, missingSectorPayload.tickers]);
-
-  const filteredMissingFinvizTickers = useMemo(() => {
-    const query = missingFinvizFilter.trim().toLowerCase();
-    if (!query) {
-      return missingFinvizPayload.tickers;
-    }
-    return missingFinvizPayload.tickers.filter((entry) =>
-      [entry.ticker, entry.source, entry.reason, entry.first_seen_at, entry.last_seen_at].join(" ").toLowerCase().includes(query),
-    );
-  }, [missingFinvizFilter, missingFinvizPayload.tickers]);
-
   const db = payload.database_status;
   const refreshUsers = () => {
     void fetchJson<{ users: Array<{ id: number; email: string; role: RoleName; is_active: boolean; created_at?: string | null; updated_at?: string | null; last_login_at?: string | null }>; access_requests?: AccessRequestSummary[] }>("/api/admin/users")
@@ -548,46 +462,6 @@ export function AdminPage() {
     loadAudit();
   };
 
-  const handleAssignSector = async (ticker: string) => {
-    const sector = (sectorSelections[ticker] || "").trim();
-    if (!sector) {
-      setSectorNotice("Select a sector before saving.");
-      return;
-    }
-    setIsSavingSector(true);
-    setSectorNotice("");
-    try {
-      await fetchJson<{ ok: boolean; entry: { ticker: string; sector: string } }>(`/api/admin/ticker-sectors/${ticker}`, {
-        method: "POST",
-        body: JSON.stringify({ sector }),
-      });
-      setSectorNotice(`${ticker} sector set to ${sector}.`);
-      loadMissingSectors();
-      loadAudit();
-    } catch (error) {
-      setSectorNotice(error instanceof Error ? error.message : "Failed to update sector.");
-    } finally {
-      setIsSavingSector(false);
-    }
-  };
-
-  const handleRemoveMissingFinvizTicker = async (ticker: string) => {
-    setIsRemovingMissingFinviz(true);
-    setMissingFinvizNotice("");
-    try {
-      await fetchJson<{ ok: boolean; entry: { ticker: string } }>(`/api/admin/finviz-missing-tickers/${ticker}/remove`, {
-        method: "POST",
-      });
-      setMissingFinvizNotice(`${ticker} removed from Finviz 404 skip list.`);
-      loadMissingFinvizTickers();
-      loadAudit();
-    } catch (error) {
-      setMissingFinvizNotice(error instanceof Error ? error.message : "Failed to remove Finviz missing ticker.");
-    } finally {
-      setIsRemovingMissingFinviz(false);
-    }
-  };
-
   return (
     <div className="page-grid">
       <AdminSubnav
@@ -595,173 +469,22 @@ export function AdminPage() {
         description="Manage exclusions, users, notification plumbing, and admin maintenance from one overview page."
       />
 
-      <Panel title="Missing Sector Assignments" aside={<span className="eyebrow">{formatCount(missingSectorPayload.missing_count)} tickers</span>}>
-        {isLoadingMissingSectors ? <LoadingBlock label="Loading missing-sector tickers…" /> : null}
-        <div className="run-toolbar">
-          <div className="run-action-footer">
-            <label className="field" style={{ flex: "1 1 20rem" }}>
-              <span>Filter tickers</span>
-              <input
-                type="text"
-                value={missingSectorFilter}
-                onChange={(event) => setMissingSectorFilter(event.target.value)}
-                placeholder="Ticker, exchange, industry, source"
-              />
-            </label>
-            <button className="ghost-button" type="button" onClick={loadMissingSectors} disabled={isLoadingMissingSectors || isSavingSector}>
-              {isLoadingMissingSectors ? "Refreshing..." : "Refresh Missing Sectors"}
-            </button>
-          </div>
-
-          {missingSectorPayload.notes.length > 0 ? <div className="panel-copy">{missingSectorPayload.notes.join(" ")}</div> : null}
-          {sectorNotice ? <div className="panel-copy">{sectorNotice}</div> : null}
-
-          <div className="pill-list">
-            {missingSectorPayload.available_sectors.map((sector) => (
-              <span key={sector} className="symbol-pill">{sector}</span>
-            ))}
-          </div>
-
-          <div className="data-table-responsive">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th>Industry</th>
-                  <th>Suggested</th>
-                  <th>Source</th>
-                  <th>Updated</th>
-                  <th>Assign Sector</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMissingSectorTickers.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>
-                      {isLoadingMissingSectors ? "Loading missing-sector tickers..." : "No tickers missing sector."}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredMissingSectorTickers.map((item) => (
-                    <tr key={item.ticker}>
-                      <td data-label="Ticker">
-                        <div className="admin-job-cell">
-                          <strong>{item.ticker}</strong>
-                          <span className="file-meta">{item.exchange || "-"}</span>
-                        </div>
-                      </td>
-                      <td data-label="Industry" className="file-meta">
-                        {item.industry || item.suggested_industry || "-"}
-                      </td>
-                      <td data-label="Suggested">{item.suggested_sector || "-"}</td>
-                      <td data-label="Source">{item.source || "-"}</td>
-                      <td data-label="Updated">{formatLocalDateTime(item.updated_at)}</td>
-                      <td data-label="Assign Sector">
-                        <div className="button-row">
-                          <select
-                            value={sectorSelections[item.ticker] ?? ""}
-                            onChange={(event) =>
-                              setSectorSelections((current) => ({
-                                ...current,
-                                [item.ticker]: event.target.value,
-                              }))
-                            }
-                            disabled={isSavingSector}
-                          >
-                            <option value="">Select sector</option>
-                            {missingSectorPayload.available_sectors.map((sector) => (
-                              <option key={`${item.ticker}-${sector}`} value={sector}>
-                                {sector}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            className="table-action-button"
-                            type="button"
-                            onClick={() => void handleAssignSector(item.ticker)}
-                            disabled={isSavingSector || !(sectorSelections[item.ticker] || "").trim()}
-                          >
-                            {isSavingSector ? "Saving..." : "Save"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </Panel>
-
-      <Panel title="Finviz Missing Tickers" aside={<span className="eyebrow">{formatCount(missingFinvizPayload.missing_count)} skipped</span>}>
-        {isLoadingMissingFinviz ? <LoadingBlock label="Loading Finviz missing-ticker registry…" /> : null}
-        <div className="run-toolbar">
-          <div className="run-action-footer">
-            <label className="field" style={{ flex: "1 1 20rem" }}>
-              <span>Filter tickers</span>
-              <input
-                type="text"
-                value={missingFinvizFilter}
-                onChange={(event) => setMissingFinvizFilter(event.target.value)}
-                placeholder="Ticker, source, reason"
-              />
-            </label>
-            <button className="ghost-button" type="button" onClick={loadMissingFinvizTickers} disabled={isLoadingMissingFinviz || isRemovingMissingFinviz}>
-              {isLoadingMissingFinviz ? "Refreshing..." : "Refresh Registry"}
-            </button>
-          </div>
-
-          {missingFinvizPayload.notes.length > 0 ? <div className="panel-copy">{missingFinvizPayload.notes.join(" ")}</div> : null}
-          {missingFinvizNotice ? <div className="panel-copy">{missingFinvizNotice}</div> : null}
-
-          <div className="data-table-responsive">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th>Source</th>
-                  <th>Hit Count</th>
-                  <th>First Seen</th>
-                  <th>Last Seen</th>
-                  <th>Reason</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMissingFinvizTickers.length === 0 ? (
-                  <tr>
-                    <td colSpan={7}>
-                      {isLoadingMissingFinviz ? "Loading Finviz missing tickers..." : "No Finviz missing tickers recorded."}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredMissingFinvizTickers.map((item) => (
-                    <tr key={item.ticker}>
-                      <td data-label="Ticker">
-                        <strong>{item.ticker}</strong>
-                      </td>
-                      <td data-label="Source">{item.source || "-"}</td>
-                      <td data-label="Hit Count">{formatCount(item.hit_count)}</td>
-                      <td data-label="First Seen">{formatLocalDateTime(item.first_seen_at)}</td>
-                      <td data-label="Last Seen">{formatLocalDateTime(item.last_seen_at)}</td>
-                      <td data-label="Reason" className="file-meta">{item.reason || "-"}</td>
-                      <td data-label="Action">
-                        <button
-                          className="table-action-button"
-                          type="button"
-                          disabled={isRemovingMissingFinviz}
-                          onClick={() => void handleRemoveMissingFinvizTicker(item.ticker)}
-                        >
-                          {isRemovingMissingFinviz ? "Removing..." : "Allow Retry"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+      <Panel title="Repair Queues" aside={<span className="eyebrow">Moved to dedicated routes</span>}>
+        <div className="card-grid overlap-cards">
+          <article className="metric-card">
+            <h3>Missing Sector Assignments</h3>
+            <p className="panel-copy">Review unresolved sector metadata, assign sectors, or exclude noisy symbols.</p>
+            <Link className="primary-button" to="/admin/missing-sectors">
+              Open Missing Sectors
+            </Link>
+          </article>
+          <article className="metric-card">
+            <h3>Finviz Missing Tickers</h3>
+            <p className="panel-copy">Inspect the Finviz skip registry, allow retries, or exclude problem symbols.</p>
+            <Link className="primary-button" to="/admin/finviz-missing-tickers">
+              Open Finviz Missing
+            </Link>
+          </article>
         </div>
       </Panel>
 

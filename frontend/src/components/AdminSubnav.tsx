@@ -17,6 +17,12 @@ export function AdminSubnav({ title, description }: AdminSubnavProps) {
         <NavLink to="/admin" end className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}>
           Admin Overview
         </NavLink>
+        <NavLink to="/admin/missing-sectors" className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}>
+          Missing Sectors
+        </NavLink>
+        <NavLink to="/admin/finviz-missing-tickers" className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}>
+          Finviz Missing
+        </NavLink>
         <NavLink to="/admin/ticker-ratings-health" className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}>
           Ticker Ratings Health
         </NavLink>
