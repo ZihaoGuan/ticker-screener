@@ -3301,8 +3301,12 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .scanner-board-console-row {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+
   .scanner-board-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   }
 
   .scanner-result-view-actions {
@@ -3394,12 +3398,8 @@ a {
     grid-template-columns: 320px minmax(0, 1fr);
   }
 
-  .scanner-board-console-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .scanner-board-grid {
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   }
 
   .scanner-result-title-row {
