@@ -123,6 +123,7 @@ class FMPClient:
     RATE_LIMIT_DELAY = 0.3  # 300ms between requests
 
     _ENDPOINT_FAILURE_THRESHOLD = 3  # disable endpoint after N consecutive failures
+    US_EXCHANGES = ["NYSE", "NASDAQ", "AMEX", "NYSEArca", "BATS", "NMS", "NGM", "NCM"]
 
     def __init__(self, api_key: Optional[str] = None, max_api_calls: int = 200):
         self.api_key = api_key or os.getenv("FMP_API_KEY")

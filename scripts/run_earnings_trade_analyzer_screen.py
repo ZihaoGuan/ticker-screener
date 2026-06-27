@@ -18,16 +18,8 @@ from scripts._earnings_post_event_support import load_weekly_earnings_events, re
 from scripts._screen_run_persistence import persist_screen_run_artifacts_if_configured
 from src.artifact_paths import build_screener_artifact_paths
 from src.config import today_label
-
-
-SKILL_SCRIPTS_DIR = (
-    PROJECT_ROOT / "trading-skills" / "skills" / "earnings-trade-analyzer" / "scripts"
-)
-if str(SKILL_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SKILL_SCRIPTS_DIR))
-
-from analyze_earnings_trades import analyze_stock, apply_entry_filter, normalize_timing  # type: ignore[import-not-found]
-from fmp_client import ApiCallBudgetExceeded, FMPClient  # type: ignore[import-not-found]
+from src.earnings_trade_analyzer_runtime import analyze_stock, apply_entry_filter, normalize_timing
+from src.ibd_distribution_day_monitor.fmp_client import ApiCallBudgetExceeded, FMPClient
 
 
 STRATEGY_ID = "earnings_trade_analyzer"
