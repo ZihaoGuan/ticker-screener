@@ -6,6 +6,7 @@ import { useAuth } from "./auth/AuthContext";
 import { LoadingBlock } from "./components/LoadingBlock";
 import { AdminPage } from "./pages/AdminPage";
 import { AdminDiscordPage } from "./pages/AdminDiscordPage";
+import { AdminTickerRatingsHealthPage } from "./pages/AdminTickerRatingsHealthPage";
 import { BacktestsPage } from "./pages/BacktestsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EarningsPage } from "./pages/EarningsPage";
@@ -163,6 +164,14 @@ export default function App() {
           element={
             <ProtectedRoute capability="manage_exclusions">
               <AdminPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/ticker-ratings-health"
+          element={
+            <ProtectedRoute capability="manage_exclusions">
+              <AdminTickerRatingsHealthPage />
             </ProtectedRoute>
           }
         />

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { LoadingBlock } from "../components/LoadingBlock";
-import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
 import type { DashboardResponse } from "../lib/types";
 
@@ -10,6 +9,8 @@ type MarketRegime =
   | "perfect_convergence_bear"
   | "bear_market_rally";
 
+type WatchlistRow = DashboardResponse["recent_watchlists"][number];
+
 export function DashboardPage() {
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -18,6 +19,7 @@ export function DashboardPage() {
     fetchJson<DashboardResponse>("/api/dashboard").then(setDashboard).catch(() => setDashboard(null)).finally(() => setIsLoading(false));
   }, []);
 
+  const overview = dashboard?.overview ?? null;
   const regime = dashboard?.market_health?.regime ?? null;
   const regimeLatest = regime?.latest ?? null;
   const rsiDivergence = dashboard?.market_health?.rsi_divergence ?? null;
@@ -38,394 +40,504 @@ export function DashboardPage() {
   const exposureLatest = exposurePosture?.latest ?? null;
   const themeDetector = dashboard?.market_health?.theme_detector ?? null;
   const themeLatest = themeDetector?.latest ?? null;
+  const recentWatchlists = dashboard?.recent_watchlists ?? [];
+  const strategyCards = dashboard?.strategy_cards ?? [];
+
+  const systemStatus = buildSystemStatus(overview);
+  const gexPlot = optionsLatest?.plots?.v2 ?? optionsLatest?.plots?.profile ?? optionsLatest?.plots?.absolute ?? null;
 
   return (
-    <div className="page-grid">
-      <Panel title="Market Health" aside={<span className="eyebrow">SPY timing check</span>}>
-        {isLoading ? <LoadingBlock label="Loading market health…" compact /> : null}
-        <div className="card-grid">
-          <article className="metric-card">
-            <div className="metric-card-head">
-              <h3>{regime?.ticker ?? spyExtension?.ticker ?? "SPY"}</h3>
-              <span className={`accent-mark accent-${regimeAccent(regimeLatest?.regime)}`} />
+    <div className="page-grid dashboard-page">
+      <section className="dashboard-command-shell">
+        <div className="dashboard-command-head">
+          <div className="dashboard-command-copy">
+            <div className="dashboard-terminal-kicker">
+              <span className="dashboard-terminal-dot" />
+              Market Tape Command Center
             </div>
-            <p className="card-meta">Weekly 21EMA sets primary trend. Daily 21EMA shows short-term pressure.</p>
-            <div className="metric-value">
-              {regimeLatest?.regime_label ?? "Unavailable"} <span>{regimeLatest?.summary ?? "Unavailable"}</span>
+            <h1>Decision Dashboard</h1>
+            <p>
+              A terminal-style market posture board driven by persisted snapshots. Read the tape first, decide risk,
+              then branch into scans, charts, and watchlists.
+            </p>
+          </div>
+          <div className="dashboard-command-status">
+            <StatusTile label="Feed" value={regime?.data_source ? regime.data_source.toUpperCase() : "UNAVAILABLE"} accent="up" />
+            <StatusTile label="Artifacts" value={systemStatus.artifactStatus} accent={systemStatus.artifactAccent} />
+            <StatusTile label="Database" value={systemStatus.databaseStatus} accent={systemStatus.databaseAccent} />
+            <StatusTile label="Last Sync" value={systemStatus.latestSyncLabel} accent="neutral" />
+          </div>
+        </div>
+
+        {isLoading ? <LoadingBlock label="Loading command board..." compact /> : null}
+
+        <div className="dashboard-grid">
+          <article className="dashboard-tile dashboard-span-4 dashboard-regime-tile">
+            <TileHeader
+              title="Market Regime / SPY Context"
+              meta={regimeLatest?.date ? `REF ${regimeLatest.date}` : "Awaiting snapshot"}
+              accent={regimeAccent(regimeLatest?.regime)}
+            />
+            <div className={`dashboard-hero-value accent-${regimeAccent(regimeLatest?.regime)}`}>
+              {regimeLatest?.regime_label ?? "UNAVAILABLE"}
             </div>
-            <p className="card-meta">
-              {regimeLatest
-                ? `Weekly 21EMA: ${regimeLatest.weekly_uptrend ? "Uptrending" : "Below trend"} · Daily 21EMA: ${regimeLatest.daily_downtrend ? "Short-term downtrend" : "Above short-term trend"}`
-                : "No SPY market-health data available."}
-            </p>
-            <p className="card-meta">
-              {regimeLatest
-                ? `Daily ${formatPrice(regimeLatest.daily_close)} vs 21EMA ${formatPrice(regimeLatest.daily_ema21)} (${formatPercentSigned(regimeLatest.daily_distance_pct)})`
-                : "Waiting for market data."}
-            </p>
-            <p className="card-meta">
-              {regimeLatest
-                ? `Weekly ${formatPrice(regimeLatest.weekly_close)} vs 21EMA ${formatPrice(regimeLatest.weekly_ema21)} (${formatPercentSigned(regimeLatest.weekly_distance_pct)})`
-                : ""}
-            </p>
-            <p className="card-meta">{regimeLatest?.explanation ?? ""}</p>
-            <p className="card-meta">
-              {regimeLatest ? `As of ${regimeLatest.date}` : "Waiting for market data."}
-              {regime?.data_source ? ` · Source ${regime.data_source}` : ""}
-            </p>
+            <div className="dashboard-hero-subtitle">{regimeLatest?.summary ?? "No SPY market-health data available."}</div>
+            <div className="dashboard-callout">
+              {regimeLatest?.explanation ?? "Primary trend and short-term pressure will populate here when benchmark history is available."}
+            </div>
+            <div className="dashboard-mini-grid">
+              <MiniStat label="Weekly Trend" value={regimeLatest ? (regimeLatest.weekly_uptrend ? "Bullish" : "Below Trend") : "--"} />
+              <MiniStat
+                label="ST Pressure"
+                value={regimeLatest ? (regimeLatest.daily_downtrend ? "Pullback" : "Constructive") : "--"}
+              />
+            </div>
+            <div className="dashboard-meta-list">
+              <div>{regimeLatest ? `Daily ${formatPrice(regimeLatest.daily_close)} vs 21EMA ${formatPrice(regimeLatest.daily_ema21)} (${formatPercentSigned(regimeLatest.daily_distance_pct)})` : "Waiting for market data."}</div>
+              <div>{regimeLatest ? `Weekly ${formatPrice(regimeLatest.weekly_close)} vs 21EMA ${formatPrice(regimeLatest.weekly_ema21)} (${formatPercentSigned(regimeLatest.weekly_distance_pct)})` : ""}</div>
+            </div>
           </article>
 
-          <article className="metric-card market-matrix-card">
-            <div className="metric-card-head">
-              <h3>Operational Matrix</h3>
-              <span className={`accent-mark accent-${regimeAccent(regimeLatest?.regime)}`} />
-            </div>
-            <p className="card-meta">Use weekly 21EMA as anchor, daily 21EMA as pulse. Active cell shows current market state.</p>
-            <div className="market-matrix">
+          <article className="dashboard-tile dashboard-span-4">
+            <TileHeader
+              title="Operational Matrix"
+              meta={regimeLatest ? `Posture ${operationalPosture(regimeLatest.regime)}` : "Posture pending"}
+              accent={regimeAccent(regimeLatest?.regime)}
+            />
+            <div className="dashboard-matrix">
               {MARKET_MATRIX_CELLS.map((cell) => {
                 const isActive = regimeLatest?.regime === cell.regime;
                 return (
                   <div
                     key={cell.regime}
-                    className={`market-matrix-cell market-matrix-${cell.tone}${isActive ? " is-active" : ""}`}
+                    className={`dashboard-matrix-cell dashboard-matrix-${cell.tone}${isActive ? " is-active" : ""}`}
                   >
-                    <div className="market-matrix-axis">{cell.axis}</div>
+                    <span className="dashboard-matrix-label">{cell.label}</span>
                     <strong>{cell.title}</strong>
-                    <p>{cell.copy}</p>
+                    <div className="dashboard-matrix-value">{isActive ? cell.activeValue : cell.inactiveValue}</div>
                   </div>
                 );
               })}
             </div>
-            <p className="card-meta">
-              {regimeLatest ? `Active setup: ${regimeLatest.regime_label}.` : "Waiting for market data."}
-            </p>
+            <div className="dashboard-footer-note">
+              {regimeLatest ? `Guidance: ${operationalGuidance(regimeLatest.regime)}` : "Use weekly 21EMA as anchor and daily 21EMA as pulse."}
+            </div>
           </article>
 
-          <article className="metric-card">
-            <div className="metric-card-head">
-              <h3>{breadthScore?.ticker ?? "S&P 500 Breadth"}</h3>
-              <span className={`accent-mark accent-${breadthAccent(breadthLatest?.zone_color)}`} />
+          <article className="dashboard-tile dashboard-span-4 dashboard-exposure-tile">
+            <TileHeader
+              title="Exposure Coach"
+              meta={exposureLatest ? `Updated ${formatBreadthAge(exposureLatest.latest_data_days_old)}` : "No posture artifact"}
+              accent={exposureAccent(exposureLatest?.recommendation)}
+            />
+            <div className={`dashboard-exposure-value accent-${exposureAccent(exposureLatest?.recommendation)}`}>
+              {formatExposureRange(exposureLatest?.exposure_ceiling_pct)}
             </div>
-            <p className="card-meta">TraderMonty 6-component breadth composite from persisted artifact cache.</p>
-            <div className="metric-value">
-              {breadthLatest?.composite_score != null ? `${breadthLatest.composite_score.toFixed(1)}/100` : "Unavailable"}{" "}
-              <span>{breadthLatest?.zone ?? "No breadth artifact"}</span>
-            </div>
-            <p className="card-meta">
-              {breadthLatest
-                ? `Exposure ${breadthLatest.exposure_guidance ?? "--"} · Trend ${formatBreadthTrend(breadthLatest.trend_direction, breadthLatest.trend_delta, breadthLatest.trend_observations)}`
-                : "Run breadth analyzer and persist its JSON artifact to surface this card."}
-            </p>
-            <p className="card-meta">
-              {breadthLatest
-                ? `Strongest ${breadthLatest.strongest_label ?? "--"} (${formatBreadthScore(breadthLatest.strongest_score)}) · Weakest ${breadthLatest.weakest_label ?? "--"} (${formatBreadthScore(breadthLatest.weakest_score)})`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {breadthLatest
-                ? `${breadthLatest.data_quality_label ?? "Data quality unavailable"}${formatBreadthComponentCoverage(breadthLatest.available_components, breadthLatest.total_components)}`
-                : ""}
-            </p>
-            <p className="card-meta">{breadthLatest?.guidance ?? ""}</p>
-            <p className="card-meta">
-              {breadthLatest?.freshness_warning
-                ? breadthLatest.freshness_warning
-                : breadthLatest
-                  ? `Data date ${breadthLatest.data_date ?? "--"} · ${formatBreadthAge(breadthLatest.latest_data_days_old)}`
-                  : ""}
-              {breadthScore?.data_source ? ` · Source ${breadthScore.data_source}` : ""}
-            </p>
-          </article>
-
-          <article className="metric-card">
-            <div className="metric-card-head">
-              <h3>{uptrendScore?.ticker ?? "Monty Uptrend Ratio"}</h3>
-              <span className={`accent-mark accent-${breadthAccent(uptrendLatest?.zone_color)}`} />
-            </div>
-            <p className="card-meta">Monty uptrend ratio composite from persisted artifact cache.</p>
-            <div className="metric-value">
-              {uptrendLatest?.composite_score != null ? `${uptrendLatest.composite_score.toFixed(1)}/100` : "Unavailable"}{" "}
-              <span>{uptrendLatest?.zone_detail ?? uptrendLatest?.zone ?? "No uptrend artifact"}</span>
-            </div>
-            <p className="card-meta">
-              {uptrendLatest
-                ? `Exposure ${uptrendLatest.exposure_guidance ?? "--"} · Ratio ${formatPercentValue(uptrendLatest.ratio_pct)} · Trend ${formatUptrendTrend(uptrendLatest.trend_direction, uptrendLatest.slope_smoothed, uptrendLatest.acceleration_label)}`
-                : "Run uptrend analyzer and persist its JSON artifact to surface this card."}
-            </p>
-            <p className="card-meta">
-              {uptrendLatest
-                ? `Sectors up ${formatUptrendSectorBreadth(uptrendLatest.sector_uptrend_count, uptrendLatest.sector_total)} · Cyclical minus defensive ${formatPercentSigned(uptrendLatest.cyclical_minus_defensive_pct)} · Historical ${formatPercentile(uptrendLatest.historical_percentile)}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {uptrendLatest
-                ? `Strongest ${uptrendLatest.strongest_label ?? "--"} (${formatBreadthScore(uptrendLatest.strongest_score)}) · Weakest ${uptrendLatest.weakest_label ?? "--"} (${formatBreadthScore(uptrendLatest.weakest_score)})`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {uptrendLatest
-                ? `${uptrendLatest.data_quality_label ?? "Data quality unavailable"}${formatBreadthComponentCoverage(uptrendLatest.available_components, uptrendLatest.total_components)} · Confidence ${uptrendLatest.confidence_label ?? "--"}`
-                : ""}
-            </p>
-            <p className="card-meta">{formatUptrendWarnings(uptrendLatest?.warning_labels, uptrendLatest?.warning_penalty)}</p>
-            <p className="card-meta">{uptrendLatest?.guidance ?? ""}</p>
-            <p className="card-meta">
-              {uptrendLatest ? `Data date ${uptrendLatest.data_date ?? "--"} · ${formatBreadthAge(uptrendLatest.latest_data_days_old)}` : ""}
-              {uptrendScore?.data_source ? ` · Source ${uptrendScore.data_source}` : ""}
-            </p>
-          </article>
-
-          <article className="metric-card">
-            <div className="metric-card-head">
-              <h3>{exposurePosture?.ticker ?? "Exposure Coach"}</h3>
-              <span className={`accent-mark accent-${exposureAccent(exposureLatest?.recommendation)}`} />
-            </div>
-            <p className="card-meta">Synthesized posture from latest breadth, uptrend, and top-risk style signals.</p>
-            <div className="metric-value">
-              {exposureLatest?.exposure_ceiling_pct != null ? `${exposureLatest.exposure_ceiling_pct}%` : "Unavailable"}{" "}
-              <span>{exposureLatest?.recommendation ?? "No posture artifact"}</span>
-            </div>
-            <p className="card-meta">
-              {exposureLatest
-                ? `Bias ${exposureLatest.bias ?? "--"} · Participation ${exposureLatest.participation ?? "--"} · Confidence ${exposureLatest.confidence ?? "--"}`
-                : "Run Exposure Coach to surface recommended exposure ceiling."}
-            </p>
-            <p className="card-meta">
-              {exposureLatest
-                ? `Composite ${formatBreadthScore(exposureLatest.composite_score)} · Breadth ${formatBreadthScore(exposureLatest.breadth_score)} · Uptrend ${formatBreadthScore(exposureLatest.uptrend_score)} · Top Risk ${formatBreadthScore(exposureLatest.top_risk_score)}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {exposureLatest
-                ? `Inputs ${formatExposureInputs(exposureLatest.inputs_provided, exposureLatest.inputs_missing)}`
-                : ""}
-            </p>
-            <p className="card-meta">{exposureLatest?.rationale ?? ""}</p>
-            <p className="card-meta">
-              {exposureLatest ? `${formatBreadthAge(exposureLatest.latest_data_days_old)}` : ""}
-              {exposurePosture?.data_source ? ` · Source ${exposurePosture.data_source}` : ""}
-            </p>
-          </article>
-
-          <article className="metric-card">
-            <div className="metric-card-head">
-              <h3>{themeDetector?.ticker ?? "Theme Detector"}</h3>
-              <span className={`accent-mark accent-${themeAccent(themeLatest?.bullish_count, themeLatest?.bearish_count)}`} />
-            </div>
-            <p className="card-meta">Latest thematic leadership and laggard summary from persisted theme detector artifact.</p>
-            <div className="metric-value">
-              {themeLatest?.total_themes != null ? `${themeLatest.total_themes} themes` : "Unavailable"}{" "}
-              <span>
-                {themeLatest
-                  ? `${themeLatest.bullish_count ?? 0} bullish · ${themeLatest.bearish_count ?? 0} bearish`
-                  : "No theme detector artifact"}
-              </span>
-            </div>
-            <p className="card-meta">
-              {themeLatest
-                ? `Leaders ${themeLatest.top_bullish_name ?? "--"} (${formatThemeHeat(themeLatest.top_bullish_heat)}) · ${themeLatest.top_bullish_stage ?? "--"} · ${themeLatest.top_bullish_confidence ?? "--"}`
-                : "Run Theme Detector to surface thematic market summary."}
-            </p>
-            <p className="card-meta">
-              {themeLatest
-                ? `Laggards ${themeLatest.top_bearish_name ?? "--"} (${formatThemeHeat(themeLatest.top_bearish_heat)}) · ${themeLatest.top_bearish_stage ?? "--"} · ${themeLatest.top_bearish_confidence ?? "--"}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {themeLatest?.top_theme_names.length
-                ? `Top stack ${themeLatest.top_theme_names.join(" · ")}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {themeLatest
-                ? `Mode ${themeLatest.data_mode ?? "--"} · FINVIZ ${themeLatest.finviz_mode ?? "--"} · Uptrend sectors ${themeLatest.uptrend_sectors ?? "--"}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {themeLatest ? `${formatBreadthAge(themeLatest.latest_data_days_old)}` : ""}
-              {themeDetector?.data_source ? ` · Source ${themeDetector.data_source}` : ""}
-            </p>
-          </article>
-
-          <article className="metric-card">
-            <div className="metric-card-head">
-              <h3>{ibdDistribution?.ticker ?? "IBD Distribution Day Monitor"}</h3>
-              <span className={`accent-mark accent-${ibdRiskAccent(ibdLatest?.overall_risk_level)}`} />
-            </div>
-            <p className="card-meta">QQQ/SPY distribution-day cluster monitor with exposure action.</p>
-            <div className="metric-value">
-              {ibdLatest?.overall_risk_level ?? "Unavailable"} <span>{ibdLatest?.recommended_action ?? "No IBD artifact"}</span>
-            </div>
-            <p className="card-meta">
-              {ibdLatest
-                ? `QQQ d5/d15/d25 ${formatIbdCluster(ibdLatest.qqq_d5_count, ibdLatest.qqq_d15_count, ibdLatest.qqq_d25_count)} · SPY ${formatIbdCluster(ibdLatest.spy_d5_count, ibdLatest.spy_d15_count, ibdLatest.spy_d25_count)}`
-                : "Run IBD Distribution Day Monitor to surface cluster risk."}
-            </p>
-            <p className="card-meta">
-              {ibdLatest
-                ? `Primary ${ibdLatest.primary_signal_symbol ?? "--"} · Today DD ${formatBoolLabel(ibdLatest.primary_is_distribution_day_today)} · Below 21EMA/50SMA ${formatBoolLabel(ibdLatest.market_below_21ema_or_50ma)}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {ibdLatest
-                ? `Exposure ${formatPercentInt(ibdLatest.current_exposure_pct)} -> ${formatPercentInt(ibdLatest.target_exposure_pct)} · Trail ${formatPercentInt(ibdLatest.trailing_stop_pct)}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {ibdLatest
-                ? `${ibdLatest.alternative_action ? `Alt ${ibdLatest.alternative_action} · ` : ""}${formatAuditFlags(ibdLatest.audit_flags)}`
-                : ""}
-            </p>
-            <p className="card-meta">{ibdLatest?.rationale ?? ""}</p>
-            <p className="card-meta">
-              {ibdLatest ? `As of ${ibdLatest.as_of ?? "--"} · ${formatBreadthAge(ibdLatest.latest_data_days_old)}` : ""}
-              {ibdDistribution?.data_source ? ` · Source ${ibdDistribution.data_source}` : ""}
-            </p>
-          </article>
-
-          <article className="metric-card">
-            <div className="metric-card-head">
-              <h3>{rsiDivergence?.ticker ?? "SPY"} RSI Top</h3>
-              <span className={`accent-mark accent-${rsiSignalAccent(rsiLatest?.state)}`} />
-            </div>
-            <p className="card-meta">Daily bearish RSI divergence top using Charles Edwards style pivot logic.</p>
-            <div className="metric-value">
-              {rsiLatest?.label ?? "No Signal"} <span>{rsiSignalSubLabel(rsiLatest)}</span>
-            </div>
-            <p className="card-meta">
-              {rsiLatest
-                ? `Signal ${rsiLatest.signal_date} · ${rsiLatest.bars_since_signal} bars ago · RSI ${rsiLatest.signal_rsi.toFixed(2)} vs prev ${rsiLatest.previous_signal_rsi.toFixed(2)}`
-                : "No recent daily bearish RSI divergence top."}
-            </p>
-            <p className="card-meta">
-              {rsiLatest
-                ? `Top ${formatPrice(rsiLatest.signal_price)} vs prev ${formatPrice(rsiLatest.previous_signal_price)} · Now ${formatPrice(rsiLatest.current_close)} · ${formatPercentSigned(rsiLatest.distance_from_signal_pct)} from top`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {rsiLatest
-                ? `Current RSI ${rsiLatest.current_rsi.toFixed(2)} · Daily 21EMA ${formatPrice(rsiLatest.current_ema21)}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {rsiLatest
-                ? `E = lift after enough closes below daily 21EMA · R = lift after RSI resets below ${rsiLatest.reset_rsi_threshold}`
-                : "E = lift after enough closes below daily 21EMA · R = lift after RSI reset below 45"}
-            </p>
-            <p className="card-meta">{rsiLiftDetail(rsiLatest)}</p>
-            <p className="card-meta">{rsiLatest?.explanation ?? ""}</p>
-            <p className="card-meta">
-              {rsiDivergence?.data_source ? `Source ${rsiDivergence.data_source}` : ""}
-            </p>
-          </article>
-
-          <article className={`metric-card${optionsLatest?.plots ? " metric-card-wide" : ""}`}>
-            <div className="metric-card-head">
-              <h3>{optionsPositioning?.ticker ?? "SPX"} Options Positioning</h3>
-              <span className={`accent-mark accent-${optionsLatest?.gex_regime === "negative" ? "down" : "up"}`} />
-            </div>
-            <p className="card-meta">
-              {optionsLatest?.plots
-                ? "Admin-refreshed SPX gamma exposure cache. Dashboard reads stored plot artifacts only."
-                : "CBOE-delayed close snapshot loaded from persisted DB summary, not live-fetched on dashboard load."}
-            </p>
-            <div className="metric-value">
-              {optionsLatest?.gex_label ?? "Unavailable"} <span>{optionsLatest ? `Flip ${formatPrice(optionsLatest.gamma_flip)}` : "No options snapshot"}</span>
-            </div>
-            <p className="card-meta">
-              {optionsLatest
-                ? `Net GEX ${formatCompactNumber(optionsLatest.net_gex)} · Spot ${formatPrice(optionsLatest.spot)} · ${formatFlipDistance(optionsLatest.distance_to_flip_pct)}`
-                : "No GEX data available."}
-            </p>
-            <p className="card-meta">
-              {optionsLatest
-                ? `Call wall ${formatPrice(optionsLatest.call_wall)} · Put wall ${formatPrice(optionsLatest.put_wall)} · ATM pin ${formatPrice(optionsLatest.atm_pin_strike)}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {optionsLatest
-                ? `Tracked strikes ${optionsLatest.strike_count ?? "--"} · Put/Call OI ${formatRatio(optionsLatest.put_call_oi_ratio)}`
-                : ""}
-            </p>
-            <p className="card-meta">
-              {optionsLatest
-                ? `Next expiry ${optionsLatest.next_expiry || "--"} · Next monthly ${optionsLatest.next_monthly_expiry || "--"}`
-                : ""}
-            </p>
-            <p className="card-meta">{optionsLatest?.summary ?? ""}</p>
-            <p className="card-meta">{optionsLatest?.methodology ?? ""}</p>
-            {optionsLatest?.plots ? (
-              <div className="gex-admin-plot-grid">
-                <div className="gex-admin-plot" dangerouslySetInnerHTML={{ __html: optionsLatest.plots.absolute }} />
-                <div className="gex-admin-plot" dangerouslySetInnerHTML={{ __html: optionsLatest.plots.by_option_type }} />
-                <div className="gex-admin-plot gex-admin-plot-wide" dangerouslySetInnerHTML={{ __html: optionsLatest.plots.profile }} />
+            <div className="dashboard-exposure-label">{normalizeDisplayLabel(exposureLatest?.recommendation ?? "No posture artifact")}</div>
+            <div className="dashboard-split-row">
+              <div>
+                <span className="dashboard-inline-label">Bias</span>
+                <strong>{normalizeDisplayLabel(exposureLatest?.bias ?? "--")}</strong>
               </div>
-            ) : null}
-            <p className="card-meta">
-              {optionsLatest ? `As of ${optionsLatest.as_of}` : "Waiting for market data."}
-              {optionsPositioning?.data_source ? ` · Source ${optionsPositioning.data_source}` : ""}
-            </p>
+              <div>
+                <span className="dashboard-inline-label">Participation</span>
+                <strong>{normalizeDisplayLabel(exposureLatest?.participation ?? "--")}</strong>
+              </div>
+              <div>
+                <span className="dashboard-inline-label">Confidence</span>
+                <strong>{normalizeDisplayLabel(exposureLatest?.confidence ?? "--")}</strong>
+              </div>
+            </div>
+            <div className="dashboard-kpi-grid">
+              <KpiStat label="Composite" value={formatBreadthScore(exposureLatest?.composite_score)} accent="up" />
+              <KpiStat label="Breadth" value={formatBreadthScore(exposureLatest?.breadth_score)} accent="neutral" />
+              <KpiStat label="Uptrend" value={formatBreadthScore(exposureLatest?.uptrend_score)} accent="neutral" />
+              <KpiStat label="Top Risk" value={formatBreadthScore(exposureLatest?.top_risk_score)} accent="down" />
+            </div>
+            <div className="dashboard-footer-note">{exposureLatest?.rationale ?? "Run Exposure Coach to surface recommended risk ceiling."}</div>
           </article>
 
-          {optionsLatest?.plots?.v2 ? (
-            <article className="metric-card metric-card-wide">
-              <div className="metric-card-head">
-                <h3>{optionsPositioning?.ticker ?? "SPX"} GEX Plot Chart V2</h3>
-                <span className={`accent-mark accent-${optionsLatest.gex_regime === "negative" ? "down" : "up"}`} />
+          <article className="dashboard-tile dashboard-span-5">
+            <TileHeader
+              title="Breadth & Participation"
+              meta={breadthLatest?.data_date ? `Data ${breadthLatest.data_date}` : "Composite cache"}
+              accent={breadthAccent(breadthLatest?.zone_color ?? uptrendLatest?.zone_color)}
+            />
+            <div className="dashboard-dual-metric">
+              <MetricBand
+                label={breadthScore?.ticker ?? "S&P 500 Breadth"}
+                value={formatCompositeScoreValue(breadthLatest?.composite_score)}
+                secondary={breadthLatest?.zone ?? "No breadth artifact"}
+                percent={breadthLatest?.composite_score}
+                accent={breadthAccent(breadthLatest?.zone_color)}
+                detail={
+                  breadthLatest
+                    ? `${breadthLatest.exposure_guidance ?? "--"} · ${formatBreadthTrend(breadthLatest.trend_direction, breadthLatest.trend_delta, breadthLatest.trend_observations)}`
+                    : "Run breadth analyzer and persist its JSON artifact to surface this card."
+                }
+              />
+              <MetricBand
+                label={uptrendScore?.ticker ?? "Monty Uptrend Ratio"}
+                value={formatCompositeScoreValue(uptrendLatest?.composite_score)}
+                secondary={uptrendLatest?.zone_detail ?? uptrendLatest?.zone ?? "No uptrend artifact"}
+                percent={uptrendLatest?.composite_score}
+                accent={breadthAccent(uptrendLatest?.zone_color)}
+                detail={
+                  uptrendLatest
+                    ? `${formatPercentValue(uptrendLatest.ratio_pct)} · ${formatUptrendTrend(uptrendLatest.trend_direction, uptrendLatest.slope_smoothed, uptrendLatest.acceleration_label)}`
+                    : "Run uptrend analyzer and persist its JSON artifact to surface this card."
+                }
+              />
+            </div>
+            <div className="dashboard-meta-columns">
+              <div>
+                <span className="dashboard-inline-label">Breadth</span>
+                <div className="dashboard-meta-copy">
+                  {breadthLatest
+                    ? `Strongest ${breadthLatest.strongest_label ?? "--"} (${formatBreadthScore(breadthLatest.strongest_score)}) · Weakest ${breadthLatest.weakest_label ?? "--"} (${formatBreadthScore(breadthLatest.weakest_score)})`
+                    : "No breadth artifact yet."}
+                </div>
               </div>
-              <p className="card-meta">Explainer-style net GEX by strike with gamma flip, call wall, and put wall.</p>
-              <div className="gex-v2-card" dangerouslySetInnerHTML={{ __html: optionsLatest.plots.v2 }} />
+              <div>
+                <span className="dashboard-inline-label">Uptrend</span>
+                <div className="dashboard-meta-copy">
+                  {uptrendLatest
+                    ? `Sectors ${formatUptrendSectorBreadth(uptrendLatest.sector_uptrend_count, uptrendLatest.sector_total)} · Cyclical minus defensive ${formatPercentSigned(uptrendLatest.cyclical_minus_defensive_pct)}`
+                    : "No uptrend artifact yet."}
+                </div>
+              </div>
+            </div>
+            <div className="dashboard-footer-note">
+              {breadthLatest?.guidance ?? uptrendLatest?.guidance ?? "Participation guidance appears here when the cached composites are present."}
+            </div>
+          </article>
+
+          <article className="dashboard-tile dashboard-span-3">
+            <TileHeader
+              title="IBD Distribution Count"
+              meta={ibdLatest?.as_of ? `Window 25D · ${ibdLatest.as_of}` : "Cluster monitor"}
+              accent={ibdRiskAccent(ibdLatest?.overall_risk_level)}
+            />
+            <div className="dashboard-count-grid">
+              <CountBox label="SPY Days" value={formatCountBox(ibdLatest?.spy_d25_count)} accent="neutral" />
+              <CountBox label="QQQ Days" value={formatCountBox(ibdLatest?.qqq_d25_count)} accent={ibdRiskAccent(ibdLatest?.overall_risk_level)} />
+            </div>
+            <div className={`dashboard-banner accent-${ibdRiskAccent(ibdLatest?.overall_risk_level)}`}>
+              {ibdLatest?.recommended_action ?? "Run IBD Distribution Day Monitor to surface cluster risk."}
+            </div>
+            <div className="dashboard-meta-list">
+              <div>{ibdLatest ? `Primary ${ibdLatest.primary_signal_symbol ?? "--"} · Today DD ${formatBoolLabel(ibdLatest.primary_is_distribution_day_today)}` : ""}</div>
+              <div>{ibdLatest ? `Exposure ${formatPercentInt(ibdLatest.current_exposure_pct)} -> ${formatPercentInt(ibdLatest.target_exposure_pct)} · Trail ${formatPercentInt(ibdLatest.trailing_stop_pct)}` : ""}</div>
+            </div>
+          </article>
+
+          <article className="dashboard-tile dashboard-span-4">
+            <TileHeader
+              title="Theme Detector"
+              meta={themeLatest ? `${themeLatest.total_themes ?? 0} themes` : "RRG leadership"}
+              accent={themeAccent(themeLatest?.bullish_count, themeLatest?.bearish_count)}
+            />
+            <div className="dashboard-theme-stack">
+              <ThemeRow label={themeLatest?.top_bullish_name ?? "No bullish leader"} value={formatThemeHeat(themeLatest?.top_bullish_heat)} accent="up" />
+              <ThemeRow label={themeLatest?.top_theme_names[1] ?? themeLatest?.top_theme_names[0] ?? "No secondary leader"} value={themeLatest?.top_bullish_stage ?? "--"} accent="neutral" />
+              <ThemeRow label={themeLatest?.top_bearish_name ?? "No bearish laggard"} value={formatThemeHeat(themeLatest?.top_bearish_heat)} accent="down" />
+            </div>
+            <div className="dashboard-meta-list">
+              <div>{themeLatest ? `${themeLatest.bullish_count ?? 0} bullish · ${themeLatest.bearish_count ?? 0} bearish · Uptrend sectors ${themeLatest.uptrend_sectors ?? "--"}` : "Run Theme Detector to surface thematic market summary."}</div>
+              <div>{themeLatest?.top_theme_names.length ? `Top stack ${themeLatest.top_theme_names.join(" · ")}` : ""}</div>
+            </div>
+          </article>
+
+          <article className="dashboard-tile dashboard-span-8">
+            <TileHeader
+              title="Dealer Gamma Exposure (GEX) Matrix"
+              meta={optionsLatest ? `${optionsLatest.source_symbol} · ${optionsLatest.as_of}` : "Persisted close snapshot"}
+              accent={optionsLatest?.gex_regime === "negative" ? "down" : "up"}
+            />
+            <div className="dashboard-gex-layout">
+              <div className="dashboard-gex-plot">
+                {gexPlot ? (
+                  <div dangerouslySetInnerHTML={{ __html: gexPlot }} />
+                ) : (
+                  <div className="dashboard-empty-panel">
+                    CBOE-delayed close snapshot loaded from persisted DB summary, not live-fetched on dashboard load.
+                  </div>
+                )}
+              </div>
+              <div className="dashboard-gex-stats">
+                <KpiStat label="Net GEX" value={formatCompactNumber(optionsLatest?.net_gex)} accent={optionsLatest?.gex_regime === "negative" ? "down" : "up"} />
+                <KpiStat label="Flip Level" value={formatPrice(optionsLatest?.gamma_flip)} accent="neutral" />
+                <KpiStat label="Call Wall" value={formatPrice(optionsLatest?.call_wall)} accent="up" />
+                <KpiStat label="Put Wall" value={formatPrice(optionsLatest?.put_wall)} accent="down" />
+                <KpiStat label="Spot" value={formatPrice(optionsLatest?.spot)} accent="neutral" />
+                <KpiStat label="ATM Pin" value={formatPrice(optionsLatest?.atm_pin_strike)} accent="neutral" />
+              </div>
+            </div>
+            <div className="dashboard-footer-note">
+              {optionsLatest?.summary ?? "No GEX data available."}
+              {optionsLatest?.methodology ? ` ${optionsLatest.methodology}` : ""}
+            </div>
+          </article>
+
+          <div className="dashboard-span-4 dashboard-stack">
+            <article className="dashboard-tile dashboard-compact-tile">
+              <TileHeader
+                title="Tactical RSI (14D)"
+                meta={rsiLatest?.signal_date ? `Signal ${rsiLatest.signal_date}` : "No active warning"}
+                accent={rsiSignalAccent(rsiLatest?.state)}
+              />
+              <div className="dashboard-inline-metric">
+                <span className="dashboard-inline-number">{rsiLatest?.current_rsi?.toFixed(2) ?? "--"}</span>
+                <div className="dashboard-inline-meter">
+                  <div className="dashboard-inline-meter-track" />
+                  <div
+                    className={`dashboard-inline-meter-fill accent-${rsiSignalAccent(rsiLatest?.state)}`}
+                    style={{ width: `${clampPercent(rsiLatest?.current_rsi)}` }}
+                  />
+                </div>
+              </div>
+              <div className="dashboard-footer-note">
+                {rsiLatest?.label ?? "No Signal"} · {rsiSignalSubLabel(rsiLatest)}
+              </div>
+              <div className="dashboard-meta-copy">{rsiLiftDetail(rsiLatest) || rsiLatest?.explanation || "Daily bearish RSI divergence top using Charles Edwards style pivot logic."}</div>
             </article>
-          ) : null}
 
-          <article className="metric-card">
-            <div className="metric-card-head">
-              <h3>{spyExtension?.ticker ?? "SPY"} Extension</h3>
-              <span className={`accent-mark accent-${spyLatest?.state === "extreme" ? "down" : spyLatest?.state === "warning" ? "neutral" : "up"}`} />
+            <article className="dashboard-tile dashboard-compact-tile">
+              <TileHeader
+                title="TD9 Sequential Count"
+                meta={td9Latest?.signal_date ? `Signal ${td9Latest.signal_date}` : "No active exhaustion"}
+                accent={td9Latest ? "down" : "up"}
+              />
+              <div className={`dashboard-sequential-value accent-${td9Latest ? "down" : "up"}`}>{td9Latest?.setup_count ? `${td9Latest.setup_count} SELL` : "NO SIGNAL"}</div>
+              <div className="dashboard-footer-note">{td9Latest?.label ?? "Bearish TD Sequential setup on daily bars."}</div>
+              <div className="dashboard-step-track">
+                {Array.from({ length: 9 }).map((_, index) => (
+                  <span key={index} className={`dashboard-step${td9Latest && index < td9Latest.setup_count ? " is-active" : ""}`} />
+                ))}
+              </div>
+            </article>
+          </div>
+
+          <article className="dashboard-tile dashboard-span-4">
+            <TileHeader
+              title="SPY Extension Analysis"
+              meta={spyLatest?.time ? `As of ${spyLatest.time}` : "10W trend"}
+              accent={spyLatest?.state === "extreme" ? "down" : spyLatest?.state === "warning" ? "neutral" : "up"}
+            />
+            <MetricBand
+              label={`${spyExtension?.ticker ?? "SPY"} vs ${spyExtension?.label ?? "10W SMA"}`}
+              value={spyLatest ? `${spyLatest.extension_pct.toFixed(2)}%` : "--"}
+              secondary={formatSpyExtensionState(spyLatest?.state)}
+              percent={spyLatest?.extension_pct != null ? (spyLatest.extension_pct / (spyExtension?.extreme_pct ?? 15)) * 100 : null}
+              accent={spyLatest?.state === "extreme" ? "down" : spyLatest?.state === "warning" ? "neutral" : "up"}
+              detail={
+                spyLatest
+                  ? `Close ${formatPrice(spyLatest.close)} · MA ${formatPrice(spyLatest.moving_average)} · Dist ${formatPrice(spyLatest.distance)}`
+                  : "No SPY extension data available."
+              }
+            />
+            <div className="dashboard-meta-list">
+              <div>{spyExtension ? `Warning ${spyExtension.warning_pct.toFixed(1)}% · Extreme ${spyExtension.extreme_pct.toFixed(1)}%` : ""}</div>
             </div>
-            <p className="card-meta">{spyExtension?.label ?? "10W SMA"} stretch from weekly trend.</p>
-            <div className="metric-value">
-              {spyLatest ? `${spyLatest.extension_pct.toFixed(2)}%` : "--"} <span>{formatSpyExtensionState(spyLatest?.state)}</span>
-            </div>
-            <p className="card-meta">
-              {spyLatest
-                ? `Dist ${formatPrice(spyLatest.distance)} · Close ${formatPrice(spyLatest.close)} · MA ${formatPrice(spyLatest.moving_average)}`
-                : "No SPY extension data available."}
-            </p>
-            <p className="card-meta">
-              {spyLatest ? `As of ${spyLatest.time}` : "Waiting for market data."}
-              {spyExtension?.data_source ? ` · Source ${spyExtension.data_source}` : ""}
-            </p>
           </article>
 
-          <article className="metric-card">
-            <div className="metric-card-head">
-              <h3>{bearishTd9?.ticker ?? "SPY"} TD9</h3>
-              <span className={`accent-mark accent-${td9Latest ? "down" : "up"}`} />
+          <article className="dashboard-tile dashboard-span-4">
+            <TileHeader
+              title="System Snapshot"
+              meta={overview?.latest_sync_at ? `Synced ${formatDateTimeCompact(overview.latest_sync_at)}` : "Artifact-driven"}
+              accent={systemStatus.databaseAccent}
+            />
+            <div className="dashboard-system-grid">
+              <MiniStat label="Database" value={systemStatus.databaseStatus} />
+              <MiniStat label="Artifacts" value={systemStatus.artifactStatus} />
+              <MiniStat label="Runs" value={overview?.screen_run_count != null ? String(overview.screen_run_count) : "--"} />
+              <MiniStat label="Sync" value={overview?.latest_sync_at ? formatDateTimeCompact(overview.latest_sync_at) : "--"} />
             </div>
-            <p className="card-meta">Bearish TD Sequential setup on daily bars.</p>
-            <div className="metric-value">
-              {td9Latest?.label ?? "No Signal"} <span>{td9SignalSubLabel(td9Latest)}</span>
+            <div className="dashboard-module-list">
+              {strategyCards.length > 0 ? (
+                strategyCards.map((card) => (
+                  <span key={card.id} className="dashboard-module-chip">
+                    {card.label}
+                  </span>
+                ))
+              ) : (
+                <span className="dashboard-module-chip">No strategy cards</span>
+              )}
             </div>
-            <p className="card-meta">
-              {td9Latest
-                ? `Signal ${td9Latest.signal_date} · Setup ${td9Latest.setup_count}/9 · Close ${formatPrice(td9Latest.signal_close)}`
-                : "No active bearish TD9 on latest SPY daily bar."}
-            </p>
-            <p className="card-meta">
-              {td9Latest
-                ? `Compare close[4] ${formatPrice(td9Latest.comparison_close)} · Stretch ${formatPercentSigned(td9Latest.distance_from_compare_pct)}`
-                : ""}
-            </p>
-            <p className="card-meta">{td9Latest?.explanation ?? ""}</p>
-            <p className="card-meta">
-              {bearishTd9?.data_source ? `Source ${bearishTd9.data_source}` : ""}
-            </p>
+            <div className="dashboard-footer-note">Dashboard remains DB/artifact first. When a snapshot is missing, modules degrade to cached truth or explicit unavailable state.</div>
+          </article>
+
+          <article className="dashboard-tile dashboard-span-4">
+            <TileHeader
+              title="Recent Watchlists"
+              meta={recentWatchlists.length ? `${recentWatchlists.length} latest artifacts` : "No recent artifacts"}
+              accent="neutral"
+            />
+            <div className="dashboard-watchlist-table">
+              {recentWatchlists.length > 0 ? (
+                recentWatchlists.slice(0, 6).map((item) => <WatchlistTableRow key={item.path} item={item} />)
+              ) : (
+                <div className="dashboard-empty-panel">No recent watchlists available.</div>
+              )}
+            </div>
           </article>
         </div>
-      </Panel>
+      </section>
     </div>
   );
+}
+
+function TileHeader({
+  title,
+  meta,
+  accent,
+}: {
+  title: string;
+  meta: string;
+  accent: "up" | "neutral" | "down";
+}) {
+  return (
+    <div className="dashboard-tile-head">
+      <span className="dashboard-tile-title">{title}</span>
+      <span className={`dashboard-tile-meta accent-${accent}`}>{meta}</span>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="dashboard-mini-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function KpiStat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: "up" | "neutral" | "down";
+}) {
+  return (
+    <div className={`dashboard-kpi-card accent-${accent}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function CountBox({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: "up" | "neutral" | "down";
+}) {
+  return (
+    <div className={`dashboard-count-box accent-${accent}`}>
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function StatusTile({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: "up" | "neutral" | "down";
+}) {
+  return (
+    <div className={`dashboard-status-tile accent-${accent}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ThemeRow({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: "up" | "neutral" | "down";
+}) {
+  return (
+    <div className={`dashboard-theme-row accent-${accent}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function MetricBand({
+  label,
+  value,
+  secondary,
+  percent,
+  accent,
+  detail,
+}: {
+  label: string;
+  value: string;
+  secondary: string;
+  percent: number | null | undefined;
+  accent: "up" | "neutral" | "down";
+  detail: string;
+}) {
+  return (
+    <div className="dashboard-band">
+      <div className="dashboard-band-head">
+        <span>{label}</span>
+        <strong>{value}</strong>
+      </div>
+      <div className="dashboard-band-track">
+        <div className={`dashboard-band-fill accent-${accent}`} style={{ width: `${clampPercent(percent)}` }} />
+      </div>
+      <div className="dashboard-band-foot">
+        <span>{secondary}</span>
+        <span>{detail}</span>
+      </div>
+    </div>
+  );
+}
+
+function WatchlistTableRow({ item }: { item: WatchlistRow }) {
+  return (
+    <div className="dashboard-watchlist-row">
+      <div>
+        <strong>{item.name}</strong>
+        <span>{item.group_label}</span>
+      </div>
+      <div>
+        <strong>{item.sort_date ?? "--"}</strong>
+        <span>{formatDateTimeCompact(item.captured_at)}</span>
+      </div>
+    </div>
+  );
+}
+
+function buildSystemStatus(overview: DashboardResponse["overview"] | null) {
+  const databaseStatus = overview?.database_configured ? "CONNECTED" : "OFFLINE";
+  const artifactStatus = overview?.artifacts_dir ? "REACHABLE" : "UNKNOWN";
+  return {
+    databaseStatus,
+    artifactStatus,
+    databaseAccent: overview?.database_configured ? ("up" as const) : ("down" as const),
+    artifactAccent: overview?.artifacts_dir ? ("up" as const) : ("neutral" as const),
+    latestSyncLabel: overview?.latest_sync_at ? formatDateTimeCompact(overview.latest_sync_at) : "PENDING",
+  };
 }
 
 function formatSpyExtensionState(state: "normal" | "warning" | "extreme" | null | undefined) {
@@ -449,6 +561,10 @@ function formatBreadthScore(value: number | null | undefined) {
   return value == null ? "--" : `${value.toFixed(0)}/100`;
 }
 
+function formatCompositeScoreValue(value: number | null | undefined) {
+  return value == null ? "--" : `${value.toFixed(1)}/100`;
+}
+
 function formatBreadthTrend(direction: string | null | undefined, delta: number | null | undefined, observations: number) {
   if (!direction) {
     return "Unavailable";
@@ -464,19 +580,8 @@ function formatBreadthAge(daysOld: number | null | undefined) {
   return `${daysOld} day${daysOld === 1 ? "" : "s"} old`;
 }
 
-function formatBreadthComponentCoverage(available: number | null | undefined, total: number | null | undefined) {
-  if (available == null || total == null) {
-    return "";
-  }
-  return ` (${available}/${total})`;
-}
-
 function formatPercentValue(value: number | null | undefined) {
   return value == null ? "--" : `${value.toFixed(1)}%`;
-}
-
-function formatPercentile(value: number | null | undefined) {
-  return value == null ? "--" : `${value.toFixed(1)}th pct`;
 }
 
 function formatUptrendTrend(
@@ -499,14 +604,6 @@ function formatUptrendSectorBreadth(upCount: number | null | undefined, total: n
   return `${upCount}/${total}`;
 }
 
-function formatUptrendWarnings(labels: string[] | null | undefined, warningPenalty: number | null | undefined) {
-  if (!labels || labels.length === 0) {
-    return "";
-  }
-  const penaltyLabel = warningPenalty == null || warningPenalty === 0 ? "" : ` · Penalty ${warningPenalty}`;
-  return `Warnings ${labels.join(", ")}${penaltyLabel}`;
-}
-
 function formatThemeHeat(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) {
     return "--";
@@ -518,26 +615,12 @@ function themeAccent(bullishCount: number | null | undefined, bearishCount: numb
   const bulls = bullishCount ?? 0;
   const bears = bearishCount ?? 0;
   if (bulls > bears) {
-    return "bull";
+    return "up";
   }
   if (bears > bulls) {
-    return "bear";
+    return "down";
   }
   return "neutral";
-}
-
-function formatExposureInputs(provided: string[] | null | undefined, missing: string[] | null | undefined) {
-  const providedLabel = provided && provided.length > 0 ? provided.join(", ") : "--";
-  const missingLabel = missing && missing.length > 0 ? missing.join(", ") : "none";
-  return `Provided ${providedLabel} · Missing ${missingLabel}`;
-}
-
-function formatIbdCluster(
-  d5: number | null | undefined,
-  d15: number | null | undefined,
-  d25: number | null | undefined,
-) {
-  return `${d5 ?? "--"}/${d15 ?? "--"}/${d25 ?? "--"}`;
 }
 
 function formatBoolLabel(value: boolean | null | undefined) {
@@ -549,13 +632,6 @@ function formatBoolLabel(value: boolean | null | undefined) {
 
 function formatPercentInt(value: number | null | undefined) {
   return value == null ? "--" : `${value}%`;
-}
-
-function formatAuditFlags(flags: string[] | null | undefined) {
-  if (!flags || flags.length === 0) {
-    return "Audit clean";
-  }
-  return `Audit ${flags.join(", ")}`;
 }
 
 function exposureAccent(recommendation: string | null | undefined) {
@@ -607,21 +683,6 @@ function formatCompactNumber(value: number | null | undefined) {
     return `${value < 0 ? "-" : ""}$${(absValue / 1_000).toFixed(2)}K`;
   }
   return `${value < 0 ? "-" : ""}$${absValue.toFixed(2)}`;
-}
-
-function formatFlipDistance(value: number | null | undefined) {
-  if (value == null) {
-    return "Flip dist --";
-  }
-  const side = value >= 0 ? "Above flip" : "Below flip";
-  return `${side} ${formatPercentSigned(value)}`;
-}
-
-function formatRatio(value: number | null | undefined) {
-  if (value == null) {
-    return "--";
-  }
-  return `${value.toFixed(2)}x`;
 }
 
 function regimeAccent(regime: MarketRegime | null | undefined) {
@@ -699,10 +760,10 @@ function rsiLiftDetail(latest: DashboardResponse["market_health"]["rsi_divergenc
     return "";
   }
   if (latest.lift_reason === "below_ema21") {
-    return `E active: top warning lifted because price spent enough time below daily 21EMA.`;
+    return "E active: warning lifted after enough closes below daily 21EMA.";
   }
   if (latest.lift_reason === "rsi_reset") {
-    return `R active: top warning lifted because RSI reset below ${latest.reset_rsi_threshold}.`;
+    return `R active: warning lifted because RSI reset below ${latest.reset_rsi_threshold}.`;
   }
   if (latest.lift_reason === "expired") {
     return "Signal expired: warning aged out of active window.";
@@ -711,51 +772,119 @@ function rsiLiftDetail(latest: DashboardResponse["market_health"]["rsi_divergenc
     return "I logic active: price and RSI both pushed above the old top, so divergence failed.";
   }
   if (latest.state === "fresh_top_warning" || latest.state === "active_top_warning") {
-    return "No lift yet: warning still active until E or R clears it, or breakout invalidates it.";
+    return "No lift yet: warning remains active until E or R clears it, or breakout invalidates it.";
   }
   return "";
 }
 
-function td9SignalSubLabel(latest: DashboardResponse["market_health"]["bearish_td9"]["latest"] | null | undefined) {
-  if (!latest) {
-    return "Normal";
+function normalizeDisplayLabel(value: string) {
+  return value.replace(/_/g, " ");
+}
+
+function formatExposureRange(exposureCeilingPct: number | null | undefined) {
+  if (exposureCeilingPct == null) {
+    return "--";
   }
-  return "Exhaustion watch";
+  if (exposureCeilingPct >= 100) {
+    return "75-100%";
+  }
+  if (exposureCeilingPct >= 75) {
+    return "50-75%";
+  }
+  if (exposureCeilingPct >= 50) {
+    return "25-50%";
+  }
+  return `0-${exposureCeilingPct}%`;
+}
+
+function operationalPosture(regime: MarketRegime) {
+  if (regime === "perfect_convergence_bull") {
+    return "ACTIVE";
+  }
+  if (regime === "healthy_chaos") {
+    return "SELECTIVE";
+  }
+  if (regime === "bear_market_rally") {
+    return "CAUTION";
+  }
+  return "DEFENSIVE";
+}
+
+function operationalGuidance(regime: MarketRegime) {
+  if (regime === "perfect_convergence_bull") {
+    return "Aggressive buying permitted when setups confirm.";
+  }
+  if (regime === "healthy_chaos") {
+    return "Controlled dip buying only while macro structure stays intact.";
+  }
+  if (regime === "bear_market_rally") {
+    return "Treat strength as tactical, not structural.";
+  }
+  return "Defense first. Cash and risk reduction take priority.";
+}
+
+function clampPercent(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, value));
+}
+
+function formatDateTimeCompact(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatCountBox(value: number | null | undefined) {
+  return value == null ? "--" : String(value);
 }
 
 const MARKET_MATRIX_CELLS: Array<{
   regime: MarketRegime;
-  axis: string;
+  label: string;
   title: string;
-  copy: string;
+  activeValue: string;
+  inactiveValue: string;
   tone: "up" | "neutral" | "down";
 }> = [
   {
     regime: "perfect_convergence_bull",
-    axis: "Above weekly 21EMA + above daily 21EMA",
-    title: "Perfect Convergence (Bull Market)",
-    copy: "Trend your friend. Ride wave, hold, or add with discipline.",
+    label: "Accumulation",
+    title: "Above weekly 21EMA + above daily 21EMA",
+    activeValue: "RUN",
+    inactiveValue: "WAIT",
+    tone: "up",
+  },
+  {
+    regime: "healthy_chaos",
+    label: "Constructive Pullback",
+    title: "Above weekly 21EMA + below daily 21EMA",
+    activeValue: "BUY DIP",
+    inactiveValue: "WAIT",
     tone: "up",
   },
   {
     regime: "bear_market_rally",
-    axis: "Below weekly 21EMA + above daily 21EMA",
-    title: "Bear Market Rally",
-    copy: "Short-term euphoria inside structural downtrend. Bull-trap risk high.",
+    label: "Bear Rally",
+    title: "Below weekly 21EMA + above daily 21EMA",
+    activeValue: "TRAP",
+    inactiveValue: "VOID",
     tone: "neutral",
   },
   {
-    regime: "healthy_chaos",
-    axis: "Above weekly 21EMA + below daily 21EMA",
-    title: "Healthy Chaos",
-    copy: "Short-term pain inside macro uptrend. Look for controlled buy-the-dip entries.",
-    tone: "up",
-  },
-  {
     regime: "perfect_convergence_bear",
-    axis: "Below weekly 21EMA + below daily 21EMA",
-    title: "Perfect Convergence (Bear Market)",
-    copy: "Maximum chaos. Defense first, cash king until structure improves.",
+    label: "Markdown",
+    title: "Below weekly 21EMA + below daily 21EMA",
+    activeValue: "DEFEND",
+    inactiveValue: "VOID",
     tone: "down",
   },
 ];

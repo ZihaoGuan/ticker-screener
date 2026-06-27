@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { NavLink } from "react-router-dom";
+import { AdminSubnav } from "../components/AdminSubnav";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
@@ -65,21 +65,10 @@ export function AdminDiscordPage() {
 
   return (
     <div className="page-grid">
-      <section className="panel screeners-subnav-panel">
-        <div className="screeners-subnav-copy">
-          <span className="eyebrow">Admin</span>
-          <h1>Discord Notifications</h1>
-          <p className="panel-copy">Control scanner completion alerts for ad hoc and scheduled jobs. Empty fields keep notifications off.</p>
-        </div>
-        <div className="screeners-subnav-links" role="tablist" aria-label="Admin sections">
-          <NavLink to="/admin" end className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}>
-            Admin Overview
-          </NavLink>
-          <NavLink to="/admin/discord-notifications" className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}>
-            Discord Alerts
-          </NavLink>
-        </div>
-      </section>
+      <AdminSubnav
+        title="Discord Notifications"
+        description="Control scanner completion alerts for ad hoc and scheduled jobs. Empty fields keep notifications off."
+      />
 
       <Panel title="Discord Webhook">
         {isLoading ? <LoadingBlock label="Loading Discord notification settings…" /> : null}
