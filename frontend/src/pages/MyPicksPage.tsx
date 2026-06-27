@@ -16,6 +16,7 @@ const EMPTY_CONTEXT: MyPicksContextResponse = {
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
 type MyPicksViewMode = "list" | "charts";
+type MyPicksSortKey = "added_at" | "ticker";
 
 export function MyPicksPage() {
   const [context, setContext] = useState<MyPicksContextResponse>(EMPTY_CONTEXT);
@@ -26,6 +27,7 @@ export function MyPicksPage() {
   const [notes, setNotes] = useState("");
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(false);
+  const [sortBy, setSortBy] = useState<MyPicksSortKey>("added_at");
   const [sortDirection, setSortDirection] = useState<"desc" | "asc">("desc");
   const [viewMode, setViewMode] = useState<MyPicksViewMode>("list");
   const [currentPage, setCurrentPage] = useState(1);
@@ -67,8 +69,15 @@ export function MyPicksPage() {
         .toLowerCase()
         .includes(query);
     });
-    return [...rows].sort((left, right) => compareAdded(left.added_at, right.added_at, sortDirection) || left.ticker.localeCompare(right.ticker));
-  }, [context.rows, search, sortDirection]);
+    return [...rows].sort((left, right) => {
+      if (sortBy === "ticker") {
+        const tickerCompare =
+          sortDirection === "asc" ? left.ticker.localeCompare(right.ticker) : right.ticker.localeCompare(left.ticker);
+        return tickerCompare || compareAdded(left.added_at, right.added_at, "desc");
+      }
+      return compareAdded(left.added_at, right.added_at, sortDirection) || left.ticker.localeCompare(right.ticker);
+    });
+  }, [context.rows, search, sortBy, sortDirection]);
 
   const groupedRows = useMemo(() => {
     const groups = new Map<string, MyPickRow[]>();
@@ -81,7 +90,7 @@ export function MyPicksPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [groupByDate, search, sortDirection, viewMode]);
+  }, [groupByDate, search, sortBy, sortDirection, viewMode]);
 
   const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE : LIST_PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
@@ -229,7 +238,7 @@ export function MyPicksPage() {
           </div>
           <div className="earnings-metric">
             <span className="eyebrow">Sort</span>
-            <strong>{sortDirection === "desc" ? "Newest first" : "Oldest first"}</strong>
+            <strong>{sortBy === "ticker" ? (sortDirection === "asc" ? "Ticker A-Z" : "Ticker Z-A") : sortDirection === "desc" ? "Newest first" : "Oldest first"}</strong>
           </div>
           <div className="earnings-metric">
             <span className="eyebrow">View</span>
@@ -271,10 +280,26 @@ export function MyPicksPage() {
             </select>
           </label>
           <label className="field">
+            <span>Sort By</span>
+            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as MyPicksSortKey)}>
+              <option value="added_at">Added time</option>
+              <option value="ticker">Ticker name</option>
+            </select>
+          </label>
+          <label className="field">
             <span>Order</span>
             <select value={sortDirection} onChange={(event) => setSortDirection(event.target.value as "desc" | "asc")}>
-              <option value="desc">Newest first</option>
-              <option value="asc">Oldest first</option>
+              {sortBy === "ticker" ? (
+                <>
+                  <option value="asc">A to Z</option>
+                  <option value="desc">Z to A</option>
+                </>
+              ) : (
+                <>
+                  <option value="desc">Newest first</option>
+                  <option value="asc">Oldest first</option>
+                </>
+              )}
             </select>
           </label>
           <label className="field">
