@@ -740,6 +740,96 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(attach_market_mock.call_args.args[1], ["PLTR"])
         self.assertEqual(attach_ratings_mock.call_args.args[1], ["PLTR"])
 
+    def test_get_scanner_top_hits_payload_prefers_persisted_snapshot(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        run_date = dt.date(2026, 6, 12)
+        persisted_run = {
+            "id": 901,
+            "strategy_id": "scanner_top_hits_snapshot",
+            "run_date": run_date,
+            "result_summary_json": {
+                "generated_at": "2026-06-13T00:40:00Z",
+                "reference_now_new_york": "2026-06-12T20:40:00-04:00",
+                "target_trading_date": "2026-06-12",
+                "cutoff_time_label": "20:30 America/New_York",
+                "latest_update_at": "2026-06-13T00:38:00Z",
+                "latest_signal_date": "2026-06-12",
+                "manual_override_active": False,
+                "manual_override_target_date": "",
+                "manual_override_requested_at": "",
+                "total_live_scanners": 3,
+                "total_unique_tickers": 5,
+                "overlapping_ticker_count": 1,
+            },
+        }
+        persisted_detail = {
+            **persisted_run,
+            "hits": [
+                {
+                    "ticker": "PLTR",
+                    "hit_payload_json": {
+                        "ticker": "PLTR",
+                        "company": "Palantir",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "scanner_count": 2,
+                        "scanner_labels": ["RS New High Before Price", "Fearzone"],
+                        "scanners": [],
+                    },
+                }
+            ],
+        }
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()), patch(
+            "src.webapp.services.watchlist_service.load_universe",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch.object(
+            service.screener_history_service,
+            "is_configured",
+            return_value=True,
+        ), patch.object(
+            service.screener_history_service,
+            "list_runs",
+            return_value=[persisted_run],
+        ) as list_runs_mock, patch.object(
+            service.screener_history_service,
+            "get_run",
+            return_value=persisted_detail,
+        ) as get_run_mock, patch.object(
+            service,
+            "_select_scanner_top_hit_live_cards",
+        ) as live_cards_mock:
+            payload = service.get_scanner_top_hits_payload(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc),
+            )
+
+        self.assertEqual(payload["rows"][0]["ticker"], "PLTR")
+        self.assertEqual(payload["total_unique_tickers"], 5)
+        list_runs_mock.assert_called_once()
+        get_run_mock.assert_called_once_with(901, include_hits=True, hit_limit=5000)
+        live_cards_mock.assert_not_called()
+
+    def test_force_scanner_board_refresh_persists_top_hit_snapshot(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        with patch.object(
+            service,
+            "persist_scanner_top_hits_snapshot",
+            return_value=None,
+        ) as persist_mock:
+            payload = service.force_scanner_board_refresh(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc),
+                requested_by="admin@example.com",
+            )
+
+        self.assertEqual(payload["target_trading_date"], "2026-06-12")
+        persist_mock.assert_called_once()
+
     def test_get_chart_payload_snaps_to_latest_available_trading_day(self) -> None:
         frame = pd.DataFrame(
             {

@@ -45,6 +45,7 @@ from ...config import load_app_config
 from ..repositories.insider_repository import InsiderRepository
 from ..repositories.watchlist_repository import WatchlistRepository
 from .insider_fetcher import fetch_insider_trades_window
+from .screener_history_service import ScreenerHistoryService
 
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ _scanner_top_hits_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {
 _scanner_top_hits_cache_lock = threading.Lock()
 _sector_momentum_cache: dict[tuple[str, str, str, str], tuple[float, dict[str, dict[str, Any]]]] = {}
 _sector_momentum_cache_lock = threading.Lock()
+_SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID = "scanner_top_hits_snapshot"
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
         "id": "weekly_rs_new_high",
@@ -365,6 +367,11 @@ class WatchlistService:
         self.benchmark_ticker = str(benchmark_ticker or "SPY").strip().upper() or "SPY"
         self._excluded_tickers: set[str] | None = None
         self._scanner_board_override_path = self.repository.artifacts_dir / "status" / "scanner_board_override.json"
+        self.screener_history_service = ScreenerHistoryService(
+            database_url=self.database_url or "",
+            artifacts_dir=artifacts_dir,
+            repository=self.repository.history_repository,
+        )
 
     def list_recent(self, *, include_deprecated: bool = True) -> list[dict[str, Any]]:
         return self.repository.list_recent_watchlists(limit=50, include_deprecated=include_deprecated)
@@ -456,7 +463,12 @@ class WatchlistService:
         }
         self._scanner_board_override_path.parent.mkdir(parents=True, exist_ok=True)
         self._scanner_board_override_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        return self.get_scanner_board(now=reference_now)
+        board_payload = self.get_scanner_board(now=reference_now)
+        try:
+            self.persist_scanner_top_hits_snapshot(now=reference_now, board_payload=board_payload)
+        except Exception as exc:
+            logger.warning("Scanner top hits snapshot persistence failed during manual refresh: %s", exc)
+        return board_payload
 
     def _load_scanner_board_override(self) -> dict[str, Any]:
         if not self._scanner_board_override_path.exists():
@@ -476,6 +488,157 @@ class WatchlistService:
         cached_payload = _read_scanner_top_hits_cache(cache_key)
         if cached_payload is not None:
             return cached_payload
+        persisted_payload = self._load_persisted_scanner_top_hits_payload(board_payload=board_payload)
+        if persisted_payload is not None:
+            _write_scanner_top_hits_cache(cache_key, persisted_payload)
+            return persisted_payload
+        payload = self._build_scanner_top_hits_payload_live(board_payload=board_payload, rrg_service=rrg_service)
+        if self.screener_history_service.is_configured():
+            try:
+                self.persist_scanner_top_hits_snapshot(
+                    now=now,
+                    board_payload=board_payload,
+                    rrg_service=rrg_service,
+                    precomputed_payload=payload,
+                )
+            except Exception as exc:
+                logger.warning("Scanner top hits snapshot persistence failed during live rebuild: %s", exc)
+        _write_scanner_top_hits_cache(cache_key, payload)
+        return payload
+
+    def persist_scanner_top_hits_snapshot(
+        self,
+        *,
+        now: dt.datetime | None = None,
+        board_payload: dict[str, Any] | None = None,
+        rrg_service: Any | None = None,
+        precomputed_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if not self.screener_history_service.is_configured():
+            return precomputed_payload
+        resolved_board_payload = board_payload or self.get_scanner_board(now=now)
+        payload = precomputed_payload or self._build_scanner_top_hits_payload_live(
+            board_payload=resolved_board_payload,
+            rrg_service=rrg_service,
+        )
+        target_trading_date_text = str(resolved_board_payload.get("target_trading_date") or "").strip()
+        if not target_trading_date_text:
+            return payload
+        run_date = dt.date.fromisoformat(target_trading_date_text)
+        summary_payload = {
+            "generated_at": payload.get("generated_at"),
+            "reference_now_new_york": payload.get("reference_now_new_york"),
+            "target_trading_date": payload.get("target_trading_date"),
+            "cutoff_time_label": payload.get("cutoff_time_label"),
+            "latest_update_at": payload.get("latest_update_at"),
+            "latest_signal_date": payload.get("latest_signal_date"),
+            "manual_override_active": bool(payload.get("manual_override_active")),
+            "manual_override_target_date": payload.get("manual_override_target_date"),
+            "manual_override_requested_at": payload.get("manual_override_requested_at"),
+            "total_live_scanners": int(payload.get("total_live_scanners") or 0),
+            "total_unique_tickers": int(payload.get("total_unique_tickers") or 0),
+            "overlapping_ticker_count": int(payload.get("overlapping_ticker_count") or 0),
+        }
+        config_json = {
+            "kind": "scanner_top_hits_snapshot",
+            "benchmark_ticker": self.benchmark_ticker,
+        }
+        scope_json = {
+            "target_trading_date": target_trading_date_text,
+            "manual_override_target_date": str(resolved_board_payload.get("manual_override_target_date") or ""),
+        }
+        hit_rows = []
+        for index, row in enumerate(payload.get("rows", []), start=1):
+            if not isinstance(row, dict):
+                continue
+            ticker = normalize_ticker_symbol(str(row.get("ticker") or ""))
+            if not ticker:
+                continue
+            hit_rows.append(
+                {
+                    "strategy_id": _SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID,
+                    "signal_date": run_date,
+                    "ticker": ticker,
+                    "passed": True,
+                    "rank": index,
+                    "metrics_json": {
+                        "scanner_count": int(row.get("scanner_count") or 0),
+                    },
+                    "reasons_json": list(row.get("scanner_labels") or []),
+                    "hit_payload_json": dict(row),
+                }
+            )
+        self.screener_history_service.persist_snapshot_run(
+            strategy_id=_SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID,
+            run_date=run_date,
+            summary_payload=summary_payload,
+            hit_rows=hit_rows,
+            config_json=config_json,
+            scope_json=scope_json,
+            market_data_mode="derived",
+            source_kind="scanner-top-hits",
+            notes="Scanner top hits snapshot",
+        )
+        return payload
+
+    def _load_persisted_scanner_top_hits_payload(self, *, board_payload: dict[str, Any]) -> dict[str, Any] | None:
+        if not self.screener_history_service.is_configured():
+            return None
+        target_trading_date_text = str(board_payload.get("target_trading_date") or "").strip()
+        if not target_trading_date_text:
+            return None
+        try:
+            run_date = dt.date.fromisoformat(target_trading_date_text)
+        except ValueError:
+            return None
+        rows = self.screener_history_service.list_runs(
+            strategy_id=_SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID,
+            start_date=run_date,
+            end_date=run_date,
+            limit=5,
+        )
+        if not rows:
+            return None
+        manual_override_target_date = str(board_payload.get("manual_override_target_date") or "")
+        for row in rows:
+            run_id = int(row.get("id") or 0)
+            if run_id <= 0:
+                continue
+            payload = self.screener_history_service.get_run(run_id, include_hits=True, hit_limit=5000)
+            if not isinstance(payload, dict):
+                continue
+            summary_payload = payload.get("result_summary_json")
+            if not isinstance(summary_payload, dict):
+                continue
+            if str(summary_payload.get("manual_override_target_date") or "") != manual_override_target_date:
+                continue
+            hit_rows = payload.get("hits") if isinstance(payload.get("hits"), list) else []
+            rows_payload = []
+            for hit in hit_rows:
+                if not isinstance(hit, dict):
+                    continue
+                row_payload = hit.get("hit_payload_json")
+                if isinstance(row_payload, dict):
+                    rows_payload.append(copy.deepcopy(row_payload))
+            return {
+                "generated_at": str(summary_payload.get("generated_at") or ""),
+                "reference_now_new_york": str(summary_payload.get("reference_now_new_york") or ""),
+                "target_trading_date": str(summary_payload.get("target_trading_date") or target_trading_date_text),
+                "cutoff_time_label": str(summary_payload.get("cutoff_time_label") or "20:30 America/New_York"),
+                "latest_update_at": str(summary_payload.get("latest_update_at") or ""),
+                "latest_signal_date": str(summary_payload.get("latest_signal_date") or ""),
+                "manual_override_active": bool(summary_payload.get("manual_override_active")),
+                "manual_override_target_date": str(summary_payload.get("manual_override_target_date") or ""),
+                "manual_override_requested_at": str(summary_payload.get("manual_override_requested_at") or ""),
+                "cards": copy.deepcopy(board_payload.get("cards") or []),
+                "total_live_scanners": int(summary_payload.get("total_live_scanners") or 0),
+                "total_unique_tickers": int(summary_payload.get("total_unique_tickers") or 0),
+                "overlapping_ticker_count": int(summary_payload.get("overlapping_ticker_count") or 0),
+                "rows": rows_payload,
+            }
+        return None
+
+    def _build_scanner_top_hits_payload_live(self, *, board_payload: dict[str, Any], rrg_service: Any | None = None) -> dict[str, Any]:
         live_cards = self._select_scanner_top_hit_live_cards(board_payload)
         aggregated: dict[str, dict[str, Any]] = {}
 
@@ -557,7 +720,6 @@ class WatchlistService:
             "overlapping_ticker_count": overlapping_count,
             "rows": rows,
         }
-        _write_scanner_top_hits_cache(cache_key, payload)
         return payload
 
     def get_weekly_watchlist_board(self, stem: str | None = None) -> dict[str, Any]:
