@@ -129,6 +129,8 @@ export function RatingsPage() {
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
+    let ignore = false;
+    const indicatorNeeded = mode !== "technical-indicator";
     setIsLoading(true);
     setNotice("");
     const primaryRequest =
@@ -137,12 +139,17 @@ export function RatingsPage() {
         : mode === "technical-indicator"
           ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildTechnicalIndicatorRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
           : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector));
-    const technicalIndicatorRequest = fetchJson<TopTechnicalIndicatorRatingsResponse>(
-      buildTechnicalIndicatorRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector),
-    );
+    const technicalIndicatorRequest = indicatorNeeded
+      ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildTechnicalIndicatorRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
+      : Promise.resolve<TopTechnicalIndicatorRatingsResponse | null>(null);
     void Promise.all([primaryRequest, technicalIndicatorRequest])
       .then(([response, indicatorResponse]) => {
-        setTechnicalIndicatorPayload(indicatorResponse);
+        if (ignore) {
+          return;
+        }
+        if (indicatorResponse) {
+          setTechnicalIndicatorPayload(indicatorResponse);
+        }
         if (mode === "technical") {
           setTechnicalPayload(response as TopTechnicalRatingsResponse);
         } else if (mode === "technical-indicator") {
@@ -152,6 +159,9 @@ export function RatingsPage() {
         }
       })
       .catch((error) => {
+        if (ignore) {
+          return;
+        }
         if (mode === "technical") {
           setTechnicalPayload(null);
         } else if (mode === "technical-indicator") {
@@ -161,7 +171,14 @@ export function RatingsPage() {
         }
         setNotice(error instanceof Error ? error.message : `Failed to load ${mode} ratings.`);
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        if (!ignore) {
+          setIsLoading(false);
+        }
+      });
+    return () => {
+      ignore = true;
+    };
   }, [mode, requestedDate, requestedLimit, requestedSector, requestedStatus]);
 
   const technicalIndicatorMap = useMemo(() => {

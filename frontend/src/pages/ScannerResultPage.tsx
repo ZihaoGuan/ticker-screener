@@ -83,19 +83,11 @@ export function ScannerResultPage() {
       setIsLoading(true);
       setNotice("");
       try {
-        const [boardPayload, fundamentalRows, technicalRows, technicalIndicatorRows] = await Promise.all([
-          fetchJson<ScannerBoardResponse>("/api/scanner-board"),
-          fetchJson<TopRatingsResponse>(`/api/ratings/top?limit=${MAX_RATINGS_ROWS}`),
-          fetchJson<TopTechnicalRatingsResponse>(`/api/ratings/technical/top?limit=${MAX_RATINGS_ROWS}`),
-          fetchJson<TopTechnicalIndicatorRatingsResponse>(`/api/ratings/technical-indicator/top?limit=${MAX_RATINGS_ROWS}`),
-        ]);
+        const boardPayload = await fetchJson<ScannerBoardResponse>("/api/scanner-board");
         if (ignore) {
           return;
         }
         setBoard(boardPayload);
-        setFundamentalPayload(fundamentalRows);
-        setTechnicalPayload(technicalRows);
-        setTechnicalIndicatorPayload(technicalIndicatorRows);
 
         const selectedCard =
           boardPayload.cards.find((item) => item.id === scannerId) ??
@@ -139,6 +131,36 @@ export function ScannerResultPage() {
       ignore = true;
     };
   }, [scannerId]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    void Promise.all([
+      fetchJson<TopRatingsResponse>(`/api/ratings/top?limit=${MAX_RATINGS_ROWS}`),
+      fetchJson<TopTechnicalRatingsResponse>(`/api/ratings/technical/top?limit=${MAX_RATINGS_ROWS}`),
+      fetchJson<TopTechnicalIndicatorRatingsResponse>(`/api/ratings/technical-indicator/top?limit=${MAX_RATINGS_ROWS}`),
+    ])
+      .then(([fundamentalRows, technicalRows, technicalIndicatorRows]) => {
+        if (ignore) {
+          return;
+        }
+        setFundamentalPayload(fundamentalRows);
+        setTechnicalPayload(technicalRows);
+        setTechnicalIndicatorPayload(technicalIndicatorRows);
+      })
+      .catch(() => {
+        if (ignore) {
+          return;
+        }
+        setFundamentalPayload(null);
+        setTechnicalPayload(null);
+        setTechnicalIndicatorPayload(null);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const fundamentalMap = useMemo(() => {
     return new Map((fundamentalPayload?.rows ?? []).map((row) => [row.ticker.toUpperCase(), row] satisfies [string, TopRatingEntry]));

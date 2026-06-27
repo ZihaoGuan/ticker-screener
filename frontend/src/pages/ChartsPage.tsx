@@ -36,6 +36,10 @@ const EXCLUSION_REASON_OPTIONS = [
   "No longer want in scans",
 ] as const;
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 export function ChartsPage() {
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -105,12 +109,17 @@ export function ChartsPage() {
     }
     setIsLoading(true);
     setNotice("");
+    let ignore = false;
+    const controller = new AbortController();
     const query = new URLSearchParams({ period: "18mo" });
     if (requestedDate) {
       query.set("asOfDate", requestedDate);
     }
-    void fetchJson<WatchlistChartResponse>(`/api/charts/${requestedTicker}?${query.toString()}`)
+    void fetchJson<WatchlistChartResponse>(`/api/charts/${requestedTicker}?${query.toString()}`, { signal: controller.signal })
       .then((response) => {
+        if (ignore) {
+          return;
+        }
         setPayload(response);
         if (!requestedDate && response.resolved_as_of_date) {
           setDateInput(response.resolved_as_of_date);
@@ -120,11 +129,22 @@ export function ChartsPage() {
         }
       })
       .catch((error) => {
+        if (ignore || isAbortError(error)) {
+          return;
+        }
         setPayload(null);
         setOverlayPayload(null);
         setNotice(error instanceof Error ? error.message : "Failed to load chart.");
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        if (!ignore) {
+          setIsLoading(false);
+        }
+      });
+    return () => {
+      ignore = true;
+      controller.abort();
+    };
   }, [refreshNonce, requestedDate, requestedTicker]);
 
   useEffect(() => {
@@ -132,10 +152,24 @@ export function ChartsPage() {
       setOverlayPayload(null);
       return;
     }
+    let ignore = false;
+    const controller = new AbortController();
     const query = new URLSearchParams({ period: "18mo", asOfDate: payload.resolved_as_of_date, includeSetupMarkers: "true" });
-    void fetchJson<ChartOverlaysResponse>(`/api/chart-overlays/${requestedTicker}?${query.toString()}`)
-      .then((response) => setOverlayPayload(response))
-      .catch(() => setOverlayPayload(null));
+    void fetchJson<ChartOverlaysResponse>(`/api/chart-overlays/${requestedTicker}?${query.toString()}`, { signal: controller.signal })
+      .then((response) => {
+        if (!ignore) {
+          setOverlayPayload(response);
+        }
+      })
+      .catch((error) => {
+        if (!ignore && !isAbortError(error)) {
+          setOverlayPayload(null);
+        }
+      });
+    return () => {
+      ignore = true;
+      controller.abort();
+    };
   }, [payload?.resolved_as_of_date, refreshNonce, requestedTicker]);
 
   useEffect(() => {
@@ -147,18 +181,34 @@ export function ChartsPage() {
     setGexPayload(null);
     setIsGexLoading(true);
     setGexNotice("");
-    void fetchJson<ChartGexResponse>(`/api/chart-gex/${requestedTicker}`)
+    let ignore = false;
+    const controller = new AbortController();
+    void fetchJson<ChartGexResponse>(`/api/chart-gex/${requestedTicker}`, { signal: controller.signal })
       .then((response) => {
+        if (ignore) {
+          return;
+        }
         setGexPayload(response);
         if (!response.available && response.error) {
           setGexNotice(response.error);
         }
       })
       .catch((error) => {
+        if (ignore || isAbortError(error)) {
+          return;
+        }
         setGexPayload(null);
         setGexNotice(error instanceof Error ? error.message : "Failed to load GEX.");
       })
-      .finally(() => setIsGexLoading(false));
+      .finally(() => {
+        if (!ignore) {
+          setIsGexLoading(false);
+        }
+      });
+    return () => {
+      ignore = true;
+      controller.abort();
+    };
   }, [refreshNonce, requestedTicker]);
 
   useEffect(() => {
@@ -169,19 +219,36 @@ export function ChartsPage() {
     }
     setIsInsiderLoading(true);
     setInsiderNotice("");
+    let ignore = false;
+    const controller = new AbortController();
     const query = new URLSearchParams({ lookbackDays: "14" });
     if (payload?.resolved_as_of_date) {
       query.set("asOfDate", payload.resolved_as_of_date);
     } else if (requestedDate) {
       query.set("asOfDate", requestedDate);
     }
-    void fetchJson<ChartInsiderResponse>(`/api/chart-insider/${requestedTicker}?${query.toString()}`)
-      .then((response) => setInsiderPayload(response))
+    void fetchJson<ChartInsiderResponse>(`/api/chart-insider/${requestedTicker}?${query.toString()}`, { signal: controller.signal })
+      .then((response) => {
+        if (!ignore) {
+          setInsiderPayload(response);
+        }
+      })
       .catch((error) => {
+        if (ignore || isAbortError(error)) {
+          return;
+        }
         setInsiderPayload(null);
         setInsiderNotice(error instanceof Error ? error.message : "Failed to load insider trades.");
       })
-      .finally(() => setIsInsiderLoading(false));
+      .finally(() => {
+        if (!ignore) {
+          setIsInsiderLoading(false);
+        }
+      });
+    return () => {
+      ignore = true;
+      controller.abort();
+    };
   }, [payload?.resolved_as_of_date, refreshNonce, requestedDate, requestedTicker]);
 
   useEffect(() => {
@@ -191,10 +258,28 @@ export function ChartsPage() {
       return;
     }
     setIsTickerListLoading(true);
-    void fetchJson<AdminTickerListStatusResponse>(`/api/admin/ticker-lists/${requestedTicker}`)
-      .then(setTickerListStatus)
-      .catch(() => setTickerListStatus(null))
-      .finally(() => setIsTickerListLoading(false));
+    let ignore = false;
+    const controller = new AbortController();
+    void fetchJson<AdminTickerListStatusResponse>(`/api/admin/ticker-lists/${requestedTicker}`, { signal: controller.signal })
+      .then((response) => {
+        if (!ignore) {
+          setTickerListStatus(response);
+        }
+      })
+      .catch((error) => {
+        if (!ignore && !isAbortError(error)) {
+          setTickerListStatus(null);
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setIsTickerListLoading(false);
+        }
+      });
+    return () => {
+      ignore = true;
+      controller.abort();
+    };
   }, [auth, requestedTicker, refreshNonce]);
 
   useEffect(() => {
@@ -205,8 +290,13 @@ export function ChartsPage() {
     }
     setIsFundamentalsLoading(true);
     setFundamentalsNotice("");
-    void fetchJson<ChartFundamentalsResponse>(`/api/chart-fundamentals/${requestedTicker}?earningsLimit=4`)
+    let ignore = false;
+    const controller = new AbortController();
+    void fetchJson<ChartFundamentalsResponse>(`/api/chart-fundamentals/${requestedTicker}?earningsLimit=4`, { signal: controller.signal })
       .then((response) => {
+        if (ignore) {
+          return;
+        }
         setFundamentalsPayload(response);
         const earningsStatus = response.diagnostics.earnings.status;
         const holdersStatus = response.diagnostics.holders.status;
@@ -217,10 +307,21 @@ export function ChartsPage() {
         }
       })
       .catch((error) => {
+        if (ignore || isAbortError(error)) {
+          return;
+        }
         setFundamentalsPayload(null);
         setFundamentalsNotice(error instanceof Error ? error.message : "Failed to load chart fundamentals.");
       })
-      .finally(() => setIsFundamentalsLoading(false));
+      .finally(() => {
+        if (!ignore) {
+          setIsFundamentalsLoading(false);
+        }
+      });
+    return () => {
+      ignore = true;
+      controller.abort();
+    };
   }, [refreshNonce, requestedTicker]);
 
   const chartPayload = useMemo<WatchlistChartResponse | null>(() => {
