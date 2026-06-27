@@ -477,7 +477,6 @@ class WatchlistService:
         if cached_payload is not None:
             return cached_payload
         live_cards = self._select_scanner_top_hit_live_cards(board_payload)
-        sector_momentum_map = self._load_sector_momentum_map(rrg_service)
         aggregated: dict[str, dict[str, Any]] = {}
 
         for card in live_cards:
@@ -524,13 +523,23 @@ class WatchlistService:
                 if scanner_meta["id"] and not any(str(item.get("id") or "") == scanner_meta["id"] for item in scanners):
                     scanners.append(dict(scanner_meta))
 
-        tickers = sorted(aggregated.keys())
-        self._attach_latest_market_snapshots(aggregated, tickers)
-        self._attach_latest_rating_snapshots(aggregated, tickers)
-        rows = []
-        for ticker in tickers:
-            row = aggregated[ticker]
+        total_unique_tickers = len(aggregated)
+        for row in aggregated.values():
             row["scanner_count"] = len(row["scanners"])
+
+        top_hit_tickers = sorted(
+            ticker
+            for ticker, row in aggregated.items()
+            if int(row.get("scanner_count") or 0) >= 2
+        )
+        if top_hit_tickers:
+            self._attach_latest_market_snapshots(aggregated, top_hit_tickers)
+            self._attach_latest_rating_snapshots(aggregated, top_hit_tickers)
+        sector_momentum_map = self._load_sector_momentum_map(rrg_service) if top_hit_tickers else {}
+
+        rows = []
+        for ticker in top_hit_tickers:
+            row = aggregated[ticker]
             sector_key = _coalesce_text(row.get("sector"))
             if sector_key:
                 row["sector_momentum"] = copy.deepcopy(sector_momentum_map.get(sector_key) or None)
@@ -540,14 +549,13 @@ class WatchlistService:
             rows.append(row)
 
         rows.sort(key=lambda item: (-int(item.get("scanner_count") or 0), str(item.get("ticker") or "")))
-        top_hit_rows = [item for item in rows if int(item.get("scanner_count") or 0) >= 2]
-        overlapping_count = len(top_hit_rows)
+        overlapping_count = len(rows)
         payload = {
             **board_payload,
             "total_live_scanners": len(live_cards),
-            "total_unique_tickers": len(rows),
+            "total_unique_tickers": total_unique_tickers,
             "overlapping_ticker_count": overlapping_count,
-            "rows": top_hit_rows,
+            "rows": rows,
         }
         _write_scanner_top_hits_cache(cache_key, payload)
         return payload

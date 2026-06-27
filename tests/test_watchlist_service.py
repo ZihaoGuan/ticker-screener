@@ -674,6 +674,72 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(fake_rrg.calls, 1)
         self.assertEqual(first_payload["rows"], second_payload["rows"])
 
+    def test_get_scanner_top_hits_payload_only_enriches_overlapping_tickers(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        watchlists_dir = Path(self.temp_dir.name) / "watchlists"
+        (watchlists_dir / "rs_new_high_before_price_2026-06-12.json").write_text(
+            json.dumps(
+                [
+                    {"ticker": "PLTR", "company_name": "Palantir", "sector": "Information Technology"},
+                    {"ticker": "CRWD", "company_name": "CrowdStrike", "sector": "Information Technology"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (watchlists_dir / "fearzone_2026-06-12.json").write_text(
+            json.dumps(
+                [
+                    {"ticker": "PLTR", "company_name": "Palantir", "sector": "Information Technology"},
+                    {"ticker": "TSLA", "company_name": "Tesla", "sector": "Consumer Discretionary"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        import os
+
+        os.utime(
+            watchlists_dir / "rs_new_high_before_price_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+        os.utime(
+            watchlists_dir / "fearzone_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()), patch(
+            "src.webapp.services.watchlist_service.load_universe",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch.object(
+            service,
+            "_attach_latest_market_snapshots",
+        ) as attach_market_mock, patch.object(
+            service,
+            "_attach_latest_rating_snapshots",
+        ) as attach_ratings_mock, patch.object(
+            service,
+            "_load_sector_momentum_map",
+            return_value={},
+        ) as load_sector_mock:
+            payload = service.get_scanner_top_hits_payload(
+                rrg_service=object(),
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc),
+            )
+
+        self.assertEqual(payload["total_unique_tickers"], 3)
+        self.assertEqual(payload["overlapping_ticker_count"], 1)
+        self.assertEqual([row["ticker"] for row in payload["rows"]], ["PLTR"])
+        attach_market_mock.assert_called_once()
+        attach_ratings_mock.assert_called_once()
+        load_sector_mock.assert_called_once()
+        self.assertEqual(attach_market_mock.call_args.args[1], ["PLTR"])
+        self.assertEqual(attach_ratings_mock.call_args.args[1], ["PLTR"])
+
     def test_get_chart_payload_snaps_to_latest_available_trading_day(self) -> None:
         frame = pd.DataFrame(
             {
