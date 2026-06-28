@@ -243,6 +243,8 @@ export function ScannerTopHitsPage() {
                     <th>{renderSortButton("Change", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>1Y %</th>
                     <th>YTD %</th>
+                    <th>CAN V2</th>
+                    <th>VCP</th>
                     <th>{renderSortButton("RS", "rs", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>1D</th>
@@ -304,6 +306,8 @@ export function ScannerTopHitsPage() {
                       <td data-label="Change">{renderChange(row.change_pct)}</td>
                       <td data-label="1Y %">{renderChange(row.perf_year_pct)}</td>
                       <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
+                      <td data-label="CAN V2">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
+                      <td data-label="VCP">{formatVcpScore(row.vcp_score, row.vcp_rating)}</td>
                       <td data-label="RS">{formatRating(row.rs_rating)}</td>
                       <td data-label="TA">{formatRating(row.ta_rating)}</td>
                       <td data-label="1D">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1d"])}</td>
@@ -461,6 +465,24 @@ function formatPrice(value: number | null) {
 
 function formatRating(value: number | null) {
   return value == null ? "--" : value.toFixed(1);
+}
+
+function formatCanslimScore(score: number | null | undefined, maxScore: number | null | undefined) {
+  if (score == null || Number.isNaN(score)) {
+    return "--";
+  }
+  if (maxScore == null || Number.isNaN(maxScore)) {
+    return `${Math.round(score)}`;
+  }
+  return `${Math.round(score)}/${Math.round(maxScore)}`;
+}
+
+function formatVcpScore(score: number | null | undefined, rating: string | null | undefined) {
+  if (score == null || Number.isNaN(score)) {
+    return "--";
+  }
+  const base = score.toFixed(1);
+  return rating ? `${base} ${rating}` : base;
 }
 
 function formatCompactNumber(value: number | null | undefined) {

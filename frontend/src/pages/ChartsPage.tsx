@@ -522,6 +522,28 @@ export function ChartsPage() {
           { label: "TT RS", value: trendTemplate ? trendTemplate.rs_rating.toFixed(1) : "-" },
           { label: "VCS", value: formatScore(vcs?.score) },
           {
+            label: "CAN V2",
+            value:
+              fundamentalsPayload?.canslim_v2_score != null
+                ? `${Math.round(fundamentalsPayload.canslim_v2_score)}/${Math.round(fundamentalsPayload.canslim_v2_max_score ?? 14)}`
+                : "-",
+            className:
+              fundamentalsPayload?.canslim_v2_score != null
+                ? `scanner-score-pill ${toneForCanslimScore(fundamentalsPayload.canslim_v2_score, fundamentalsPayload.canslim_v2_max_score ?? 14)}`
+                : undefined,
+          },
+          {
+            label: "VCP Score",
+            value:
+              fundamentalsPayload?.vcp_score != null
+                ? `${fundamentalsPayload.vcp_score.toFixed(1)}${fundamentalsPayload.vcp_rating ? ` ${fundamentalsPayload.vcp_rating}` : ""}`
+                : "-",
+            className:
+              fundamentalsPayload?.vcp_score != null
+                ? `scanner-score-pill ${toneForCanslimScore(fundamentalsPayload.vcp_score, 100)}`
+                : undefined,
+          },
+          {
             label: "VCS Stage",
             value: vcs?.stage_label ?? "-",
             className: vcs ? `status-pill ${vcsStageClass(vcs.stage)}` : undefined,
@@ -586,6 +608,10 @@ export function ChartsPage() {
       fundamentalsPayload?.holders_float_held_by_institutions_pct,
       fundamentalsPayload?.implied_move?.percent_move,
       fundamentalsPayload?.revenue_yoy_pct,
+      fundamentalsPayload?.canslim_v2_max_score,
+      fundamentalsPayload?.canslim_v2_score,
+      fundamentalsPayload?.vcp_rating,
+      fundamentalsPayload?.vcp_score,
       hasTrimWarning,
       latestMarketExtension,
       marketExtensionLabel,

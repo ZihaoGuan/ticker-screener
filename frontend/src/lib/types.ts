@@ -240,6 +240,8 @@ export type ScannerTopHitRow = {
   canslim_score?: number | null;
   canslim_max_score?: number | null;
   canslim_rank?: number | null;
+  vcp_score?: number | null;
+  vcp_rating?: string | null;
   fa_current_rank?: number | null;
   technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
   scanner_count: number;
@@ -997,6 +999,14 @@ export type ChartFundamentalsResponse = {
     insufficient_baseline_metrics: string[];
   } | null;
   technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
+  canslim_v2_score?: number | null;
+  canslim_v2_max_score?: number | null;
+  canslim_v2_rank?: number | null;
+  vcp_score?: number | null;
+  vcp_rating?: string | null;
+  vcp_execution_state?: string | null;
+  vcp_pattern_type?: string | null;
+  vcp_signal_date?: string | null;
   canslim_snapshot?: {
     ticker: string;
     sector: string | null;
@@ -1769,6 +1779,11 @@ export type MyPickRow = {
   technical_band: string | null;
   technical_status: string | null;
   technical_indicator_ratings: Record<string, TechnicalIndicatorRatingCell>;
+  canslim_score: number | null;
+  canslim_max_score: number | null;
+  canslim_rank: number | null;
+  vcp_score: number | null;
+  vcp_rating: string | null;
   als_score: number | null;
   recent_signal_count: number;
   latest_signal_date: string | null;

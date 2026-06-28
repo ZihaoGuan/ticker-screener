@@ -491,6 +491,14 @@ class WatchlistServiceTests(unittest.TestCase):
                 "CRWD": {"overall_rating": 90.0, "leadership_score": 92.0, "sector": "Information Technology", "industry": "Software"},
                 "TSLA": {"overall_rating": 68.0, "leadership_score": 71.0, "sector": "Consumer Discretionary", "industry": "Auto Manufacturers"},
             },
+        ), patch.object(
+            service,
+            "_load_latest_stored_canslim_score_map",
+            return_value={"PLTR": {"canslim_score": 11, "canslim_max_score": 14, "canslim_rank": 2}},
+        ), patch.object(
+            service,
+            "_load_latest_stored_vcp_score_map",
+            return_value={"PLTR": {"vcp_score": 84.5, "vcp_rating": "Strong VCP"}},
         ):
             payload = service.get_scanner_top_hits_payload(
                 rrg_service=_FakeRrgService(),
@@ -510,6 +518,10 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["ta_rating"], 95.0)
         self.assertEqual(pltr["fa_rating"], 91.0)
         self.assertEqual(pltr["fa_current_rank"], 7)
+        self.assertEqual(pltr["canslim_score"], 11)
+        self.assertEqual(pltr["canslim_max_score"], 14)
+        self.assertEqual(pltr["vcp_score"], 84.5)
+        self.assertEqual(pltr["vcp_rating"], "Strong VCP")
         self.assertEqual(pltr["sector_momentum"]["quadrant"], "Leading")
         self.assertEqual(pltr["sector_momentum"]["etf_ticker"], "XLK")
 
@@ -1979,6 +1991,14 @@ class WatchlistServiceTests(unittest.TestCase):
         with patch(
             "src.webapp.services.watchlist_service.RatingsRepository.load_latest_chart_fundamentals_cache_entry",
             return_value=cached_entry,
+        ), patch.object(
+            service,
+            "_load_latest_stored_canslim_score_map",
+            return_value={"NVDA": {"canslim_score": 12, "canslim_max_score": 14, "canslim_rank": 5}},
+        ), patch.object(
+            service,
+            "_load_latest_stored_vcp_score_map",
+            return_value={"NVDA": {"vcp_score": 86.5, "vcp_rating": "Strong VCP", "vcp_execution_state": "Pre-breakout", "vcp_pattern_type": "Textbook VCP", "vcp_signal_date": "2026-06-15"}},
         ), patch(
             "src.webapp.services.watchlist_service._load_yahoo_earnings_and_holders_playwright",
         ) as scrape_patch, patch(
@@ -1988,6 +2008,10 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["holders_float_held_by_institutions_pct"], 79.25)
         self.assertEqual(payload["implied_move"]["percent_move"], 7.8)
+        self.assertEqual(payload["canslim_v2_score"], 12)
+        self.assertEqual(payload["canslim_v2_max_score"], 14)
+        self.assertEqual(payload["vcp_score"], 86.5)
+        self.assertEqual(payload["vcp_rating"], "Strong VCP")
         self.assertEqual(payload["diagnostics"]["earnings"]["status"], "ok")
         scrape_patch.assert_not_called()
         implied_patch.assert_not_called()

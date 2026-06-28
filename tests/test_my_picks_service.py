@@ -98,6 +98,27 @@ class _FakeRatingsRepository:
         }
 
 
+class _FakeWatchlistRepository:
+    def load_latest_stored_canslim_score_map(self, tickers: list[str]):
+        return {
+            ticker: {
+                "canslim_score": 11,
+                "canslim_max_score": 14,
+                "canslim_rank": 3,
+            }
+            for ticker in tickers
+        }
+
+    def load_latest_stored_vcp_score_map(self, tickers: list[str]):
+        return {
+            ticker: {
+                "vcp_score": 84.5,
+                "vcp_rating": "Strong VCP",
+            }
+            for ticker in tickers
+        }
+
+
 def _build_price_frame_map(*tickers: str):
     import pandas as pd
 
@@ -116,6 +137,7 @@ class MyPicksServiceTests(unittest.TestCase):
         self.repo = _FakeMyPicksRepository()
         self.service = MyPicksService(repository=self.repo)
         self.service.ratings_repository = _FakeRatingsRepository()
+        self.service.watchlist_repository = _FakeWatchlistRepository()
 
     def test_create_pick_enriches_rating_and_signal_context(self) -> None:
         with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("MSFT")):
@@ -126,6 +148,10 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(row["fundamental_rating"], 8.7)
         self.assertEqual(row["technical_rating"], 8.2)
         self.assertEqual(row["leadership_score"], 91.0)
+        self.assertEqual(row["canslim_score"], 11)
+        self.assertEqual(row["canslim_max_score"], 14)
+        self.assertEqual(row["vcp_score"], 84.5)
+        self.assertEqual(row["vcp_rating"], "Strong VCP")
         self.assertEqual(row["recent_signal_count"], 2)
         self.assertEqual(row["technical_indicator_ratings"]["1d"]["rating_label"], "Strong")
         self.assertAlmostEqual(row["change_1d_pct"], 10.0)
@@ -144,6 +170,8 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["ticker"], "NVDA")
         self.assertEqual(payload["rows"][1]["ticker"], "AAPL")
         self.assertEqual(payload["available_added_dates"], ["2026-06-23"])
+        self.assertEqual(payload["rows"][0]["canslim_score"], 11)
+        self.assertEqual(payload["rows"][0]["vcp_score"], 84.5)
         self.assertAlmostEqual(payload["rows"][0]["change_1d_pct"], 10.0)
         self.assertAlmostEqual(payload["rows"][0]["change_since_added_pct"], 10.0)
         self.assertTrue(payload["rows"][0]["ema9_tested_since_added"])

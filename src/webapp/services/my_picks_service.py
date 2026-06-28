@@ -7,6 +7,8 @@ from src.market_data_access import load_many_ticker_windows_for_range
 from src.ratings.repository import RatingsRepository
 from src.ticker_filters import normalize_ticker_symbol
 from src.trendline_snapshots import load_latest_trendline_snapshot_map
+from src.webapp.config import load_webapp_config
+from src.webapp.repositories.watchlist_repository import WatchlistRepository
 from src.webapp.repositories.my_picks_repository import MyPicksRepository
 
 
@@ -15,6 +17,7 @@ class MyPicksService:
         self.repository = repository or MyPicksRepository(database_url=database_url)
         self.database_url = self.repository.database_url
         self.ratings_repository = RatingsRepository(self.database_url)
+        self.watchlist_repository = WatchlistRepository(artifacts_dir=load_webapp_config().artifacts_dir, database_url=self.database_url)
 
     def get_context(self) -> dict[str, Any]:
         picks = [self._serialize_pick(row) for row in self.repository.list_picks()]
@@ -65,11 +68,15 @@ class MyPicksService:
         fundamental_map = self.ratings_repository.load_latest_rating_snapshots_for_tickers(tickers)
         technical_map = self.ratings_repository.load_latest_technical_rating_snapshots_for_tickers(tickers, allow_older_as_of_date=True)
         technical_indicator_map = self.ratings_repository.load_latest_technical_indicator_ratings_for_tickers(tickers)
+        canslim_map = self.watchlist_repository.load_latest_stored_canslim_score_map(tickers)
+        vcp_map = self.watchlist_repository.load_latest_stored_vcp_score_map(tickers)
         for row in rows:
             ticker = str(row.get("ticker") or "").upper()
             fundamental = fundamental_map.get(ticker) or {}
             technical = technical_map.get(ticker) or {}
             indicators = technical_indicator_map.get(ticker) or {}
+            canslim = canslim_map.get(ticker) or {}
+            vcp = vcp_map.get(ticker) or {}
             fa_rating = _safe_float(fundamental.get("overall_rating"))
             ta_rating = _safe_float(technical.get("overall_rating"))
             leadership_score = _safe_float(technical.get("leadership_score"))
@@ -86,6 +93,11 @@ class MyPicksService:
             row["technical_band"] = str(technical.get("rating_band") or "") or None
             row["technical_status"] = str(technical.get("technical_status") or "") or None
             row["technical_indicator_ratings"] = indicators
+            row["canslim_score"] = _safe_int(canslim.get("canslim_score"))
+            row["canslim_max_score"] = _safe_int(canslim.get("canslim_max_score"))
+            row["canslim_rank"] = _safe_int(canslim.get("canslim_rank"))
+            row["vcp_score"] = _safe_float(vcp.get("vcp_score"))
+            row["vcp_rating"] = str(vcp.get("vcp_rating") or "") or None
             row["als_score"] = _average_present([fa_rating, ta_rating, leadership_score])
 
     def _attach_signal_context(self, rows: list[dict[str, Any]]) -> None:
@@ -193,6 +205,11 @@ class MyPicksService:
             "technical_band": None,
             "technical_status": None,
             "technical_indicator_ratings": {},
+            "canslim_score": None,
+            "canslim_max_score": None,
+            "canslim_rank": None,
+            "vcp_score": None,
+            "vcp_rating": None,
             "als_score": None,
             "recent_signal_count": 0,
             "latest_signal_date": None,

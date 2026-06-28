@@ -368,6 +368,8 @@ export function MyPicksPage() {
                     <span className={`scanner-score-pill ${toneForScore(row.fundamental_rating, 100)}`}>FA {formatScoreInteger(row.fundamental_rating)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.technical_rating, 10)}`}>TA {formatScore(row.technical_rating)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.leadership_score, 100)}`}>RS {formatScoreInteger(row.leadership_score)}</span>
+                    <span className={`scanner-score-pill ${toneForScore(row.canslim_score, row.canslim_max_score ?? 14)}`}>CAN V2 {formatScoreFraction(row.canslim_score, row.canslim_max_score)}</span>
+                    <span className={`scanner-score-pill ${toneForScore(row.vcp_score, 100)}`}>VCP {formatScore(row.vcp_score)}</span>
                   </div>
                   <div className="scanner-chart-card-body">
                     {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
@@ -454,6 +456,8 @@ function PicksTable({
             <th>FA</th>
             <th>TA</th>
             <th>RS Rating</th>
+            <th>CAN V2</th>
+            <th>VCP</th>
             <th>1D</th>
             <th>1W</th>
             <th>Signals</th>
@@ -488,6 +492,8 @@ function PicksTable({
               <td data-label="FA">{formatScore(row.fundamental_rating)}</td>
               <td data-label="TA">{formatScore(row.technical_rating)}</td>
               <td data-label="RS Rating">{formatScore(row.leadership_score)}</td>
+              <td data-label="CAN V2">{formatScoreFraction(row.canslim_score, row.canslim_max_score)}</td>
+              <td data-label="VCP">{formatScoreWithLabel(row.vcp_score, row.vcp_rating)}</td>
               <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? "-"}</td>
               <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? "-"}</td>
               <td data-label="Signals">
@@ -527,6 +533,24 @@ function formatScoreInteger(value: number | null | undefined) {
     return "--";
   }
   return Math.round(value).toString();
+}
+
+function formatScoreFraction(value: number | null | undefined, maxValue: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  if (maxValue == null || Number.isNaN(maxValue)) {
+    return Math.round(value).toString();
+  }
+  return `${Math.round(value)}/${Math.round(maxValue)}`;
+}
+
+function formatScoreWithLabel(value: number | null | undefined, label: string | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  const score = value.toFixed(1);
+  return label ? `${score} ${label}` : score;
 }
 
 function formatPrice(value: number | null | undefined) {

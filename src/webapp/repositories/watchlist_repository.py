@@ -48,6 +48,75 @@ class WatchlistRepository:
         metadata = self._build_watchlist_index().get(stem)
         return dict(metadata) if isinstance(metadata, dict) else None
 
+    def load_latest_stored_canslim_score_map(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
+        normalized_tickers = {
+            str(ticker or "").strip().upper()
+            for ticker in tickers
+            if str(ticker or "").strip()
+        }
+        if not normalized_tickers:
+            return {}
+        resolved: dict[str, dict[str, Any]] = {}
+        for metadata in self.list_recent_watchlists(limit=400, include_deprecated=False):
+            strategy_id = _strategy_id_for_metadata(metadata)
+            if strategy_id not in {"canslim", "canslim_v2"}:
+                continue
+            stem = str(metadata.get("stem") or "").strip()
+            if not stem:
+                continue
+            for item in self.load_watchlist(stem):
+                ticker = str(item.get("ticker") or "").strip().upper()
+                if ticker not in normalized_tickers or ticker in resolved:
+                    continue
+                score = _coerce_optional_int(item.get("score"))
+                max_score = _coerce_optional_int(item.get("max_score"))
+                rank = _coerce_optional_int(item.get("rank"))
+                if score is None or max_score is None:
+                    continue
+                resolved[ticker] = {
+                    "canslim_score": score,
+                    "canslim_max_score": max_score,
+                    "canslim_rank": rank,
+                }
+            if len(resolved) >= len(normalized_tickers):
+                break
+        return resolved
+
+    def load_latest_stored_vcp_score_map(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
+        normalized_tickers = {
+            str(ticker or "").strip().upper()
+            for ticker in tickers
+            if str(ticker or "").strip()
+        }
+        if not normalized_tickers:
+            return {}
+        resolved: dict[str, dict[str, Any]] = {}
+        for metadata in self.list_recent_watchlists(limit=400, include_deprecated=False):
+            if _strategy_id_for_metadata(metadata) != "vcp_scored":
+                continue
+            stem = str(metadata.get("stem") or "").strip()
+            if not stem:
+                continue
+            for item in self.load_watchlist(stem):
+                ticker = str(item.get("ticker") or "").strip().upper()
+                if ticker not in normalized_tickers or ticker in resolved:
+                    continue
+                score = _coerce_optional_float(item.get("vcp_score"))
+                if score is None:
+                    score = _coerce_optional_float(item.get("score"))
+                if score is None:
+                    continue
+                resolved[ticker] = {
+                    "vcp_score": score,
+                    "vcp_rating": str(item.get("score_label") or "").strip() or None,
+                    "vcp_execution_state": str(item.get("execution_state") or "").strip() or None,
+                    "vcp_pattern_type": str(item.get("pattern_type") or "").strip() or None,
+                    "vcp_signal_date": str(item.get("event_date") or "").strip() or None,
+                }
+            if len(resolved) >= len(normalized_tickers):
+                break
+        return resolved
+
     def _build_watchlist_index(self) -> dict[str, dict[str, Any]]:
         with self._watchlist_index_cache_lock:
             cached_entry = self._watchlist_index_cache
@@ -212,6 +281,32 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         if lower.startswith(prefix):
             return group_key, group_label
     return "other", "Other"
+
+
+def _strategy_id_for_metadata(metadata: dict[str, Any]) -> str:
+    explicit_strategy_id = str(metadata.get("strategy_id") or "").strip()
+    if explicit_strategy_id:
+        return explicit_strategy_id
+    stem = str(metadata.get("stem") or "").strip()
+    return strategy_id_from_legacy_stem(stem)
+
+
+def _coerce_optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_optional_float(value: object) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _first_date_in_stem(stem: str) -> str | None:
