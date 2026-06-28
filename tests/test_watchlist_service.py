@@ -115,6 +115,19 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["entries"][0]["canslim_max_score"], 14)
         self.assertEqual(payload["entries"][0]["canslim_rank"], 1)
 
+    def test_get_watchlist_detail_normalizes_non_finite_numbers(self) -> None:
+        path = Path(self.temp_dir.name) / "watchlists" / "fundamental_quality_2026-06-28.json"
+        path.write_text(
+            '[{"ticker":"PLTR","revenue_3y_cagr_pct":NaN,"diluted_eps_1y_growth_pct":231.09,"nested":{"gross_margin_pct":NaN}}]',
+            encoding="utf-8",
+        )
+
+        payload = self.service.get_watchlist_detail("fundamental_quality_2026-06-28")
+
+        self.assertIsNone(payload["entries"][0]["revenue_3y_cagr_pct"])
+        self.assertEqual(payload["entries"][0]["diluted_eps_1y_growth_pct"], 231.09)
+        self.assertIsNone((payload["entries"][0].get("nested") or {}).get("gross_margin_pct"))
+
     def test_list_recent_can_hide_deprecated_legacy_watchlists(self) -> None:
         self._write_watchlist(
             "fearzone_2026-06-18",

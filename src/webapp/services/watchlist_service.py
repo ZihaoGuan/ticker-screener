@@ -5,6 +5,7 @@ import datetime as dt
 import html
 from io import StringIO
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -787,7 +788,8 @@ class WatchlistService:
             for entry in entries:
                 entry["is_new"] = False
         new_ticker_count = sum(1 for entry in entries if bool(entry.get("is_new")))
-        return {
+        return _normalize_json_payload(
+            {
             "stem": stem,
             "strategy_id": current_strategy_id,
             "has_previous_scan": has_previous_scan,
@@ -797,7 +799,8 @@ class WatchlistService:
             "entries": entries,
             "is_deprecated": bool(metadata.get("is_deprecated")) if isinstance(metadata, dict) else False,
             "deprecation_reason": str(metadata.get("deprecation_reason") or "") if isinstance(metadata, dict) else "",
-        }
+            }
+        )
 
     def get_chart_payload(
         self,
@@ -2969,6 +2972,16 @@ def _normalize_html_text(value: str) -> str:
     stripped = re.sub(r"<[^>]+>", " ", value or "")
     stripped = html.unescape(stripped)
     return re.sub(r"\s+", " ", stripped).strip()
+
+
+def _normalize_json_payload(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): _normalize_json_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_json_payload(item) for item in value]
+    return value
 
 
 def _coerce_optional_float(value: object) -> float | None:
