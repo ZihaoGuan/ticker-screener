@@ -416,6 +416,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("earnings_growth", "earnings_growth"),
     ("canslim_v2", "canslim_v2"),
     ("canslim", "canslim"),
+    ("fundamental_quality", "fundamental_quality"),
     ("venu_scanner", "venu_scanner"),
     ("inside_dryup_v2", "inside_dryup_v2"),
     ("wyckoff_buy_signal", "wyckoff_buy_signal"),

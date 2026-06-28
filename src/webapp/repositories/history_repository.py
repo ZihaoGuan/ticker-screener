@@ -2,10 +2,25 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 from src.market_data_access import resolve_database_url
+
+
+def _normalize_json_value(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): _normalize_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_json_value(item) for item in value]
+    return value
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(_normalize_json_value(value), allow_nan=False)
 
 
 class HistoryRepository:
@@ -67,7 +82,7 @@ class HistoryRepository:
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (parent_job_run_id, job_type, job_name, status, trigger_source, json.dumps(request_payload)))
+                cursor.execute(sql, (parent_job_run_id, job_type, job_name, status, trigger_source, _json_dumps(request_payload)))
                 row = cursor.fetchone()
             connection.commit()
         return int(row[0]) if row else None
@@ -100,7 +115,7 @@ class HistoryRepository:
                     sql,
                     (
                         status,
-                        json.dumps(result_payload) if result_payload is not None else None,
+                        _json_dumps(result_payload) if result_payload is not None else None,
                         artifact_path,
                         finished_at,
                         job_run_id,
@@ -136,7 +151,7 @@ class HistoryRepository:
                     sql,
                     (
                         status,
-                        json.dumps(result_payload_patch or {}),
+                        _json_dumps(result_payload_patch or {}),
                         artifact_path,
                         finished_at,
                         job_run_id,
@@ -251,7 +266,7 @@ class HistoryRepository:
                         clean_name,
                         current_job_run_id,
                         str(status or "idle"),
-                        json.dumps(metadata or {}),
+                        _json_dumps(metadata or {}),
                     ),
                 )
             connection.commit()
@@ -326,7 +341,7 @@ class HistoryRepository:
                     sql,
                     (
                         worker_name,
-                        json.dumps(
+                        _json_dumps(
                             {
                                 "worker_name": worker_name,
                                 "message": f"Claimed by worker {worker_name}.",
@@ -368,7 +383,7 @@ class HistoryRepository:
         }
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (threshold_seconds, json.dumps(patch)))
+                cursor.execute(sql, (threshold_seconds, _json_dumps(patch)))
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
             connection.commit()
         return rows
@@ -403,7 +418,7 @@ class HistoryRepository:
         }
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (json.dumps(patch),))
+                cursor.execute(sql, (_json_dumps(patch),))
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
             connection.commit()
         return rows[0] if rows else None
@@ -429,7 +444,7 @@ class HistoryRepository:
                 cursor.execute(
                     sql,
                     (
-                        json.dumps(
+                        _json_dumps(
                             {
                                 "cancel_requested": True,
                                 "message": "Cancellation requested.",
@@ -530,15 +545,15 @@ class HistoryRepository:
                         strategy_id,
                         run_date,
                         job_run_id,
-                        json.dumps(config_json),
+                        _json_dumps(config_json),
                         config_hash,
-                        json.dumps(scope_json),
+                        _json_dumps(scope_json),
                         scope_hash,
                         market_data_mode,
                         source_kind,
                         hit_count,
                         failure_count,
-                        json.dumps(result_summary_json),
+                        _json_dumps(result_summary_json),
                         raw_artifact_path,
                         watchlist_artifact_path,
                         report_artifact_path,
@@ -576,9 +591,9 @@ class HistoryRepository:
                             row["ticker"],
                             bool(row.get("passed")),
                             row.get("rank"),
-                            json.dumps(row.get("metrics_json") or {}),
-                            json.dumps(row.get("reasons_json") or []),
-                            json.dumps(row.get("hit_payload_json") or {}),
+                            _json_dumps(row.get("metrics_json") or {}),
+                            _json_dumps(row.get("reasons_json") or []),
+                            _json_dumps(row.get("hit_payload_json") or {}),
                         ),
                     )
             connection.commit()
@@ -910,12 +925,12 @@ class HistoryRepository:
                     (
                         run_date,
                         strategy_set_key,
-                        json.dumps(strategy_ids),
+                        _json_dumps(strategy_ids),
                         market_data_mode,
                         candidate_threshold,
                         source_job_run_id,
                         artifact_path,
-                        json.dumps(summary_json),
+                        _json_dumps(summary_json),
                     ),
                 )
                 row = cursor.fetchone()
@@ -946,8 +961,8 @@ class HistoryRepository:
                             row["run_date"],
                             row["ticker"],
                             row["signal_count"],
-                            json.dumps(row.get("contributing_strategies_json") or []),
-                            json.dumps(row.get("metadata_json") or {}),
+                            _json_dumps(row.get("contributing_strategies_json") or []),
+                            _json_dumps(row.get("metadata_json") or {}),
                         ),
                     )
             connection.commit()
@@ -1085,15 +1100,15 @@ class HistoryRepository:
                     (
                         strategy_id,
                         strategy_set_key,
-                        json.dumps(strategy_ids),
+                        _json_dumps(strategy_ids),
                         start_date,
                         end_date,
-                        json.dumps(parameters),
-                        json.dumps(summary),
+                        _json_dumps(parameters),
+                        _json_dumps(summary),
                         html_report_path,
                         json_report_path,
                         job_run_id,
-                        json.dumps(hold_periods),
+                        _json_dumps(hold_periods),
                         threshold,
                         artifact_path,
                     ),
@@ -1134,11 +1149,11 @@ class HistoryRepository:
                             row["signal_date"],
                             row["ticker"],
                             row["signal_count"],
-                            json.dumps(row.get("contributing_strategies_json") or []),
+                            _json_dumps(row.get("contributing_strategies_json") or []),
                             row["entry_date"],
                             row["entry_price"],
-                            json.dumps(row.get("hold_results_json") or {}),
-                            json.dumps(row.get("metadata_json") or {}),
+                            _json_dumps(row.get("hold_results_json") or {}),
+                            _json_dumps(row.get("metadata_json") or {}),
                         ),
                     )
             connection.commit()

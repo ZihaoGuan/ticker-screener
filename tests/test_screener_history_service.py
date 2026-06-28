@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import math
 import tempfile
 import unittest
 
+from src.webapp.repositories.history_repository import _json_dumps
 from src.webapp.services.screener_history_service import ScreenerHistoryService
 
 
@@ -110,6 +113,19 @@ class ScreenerHistoryServiceTests(unittest.TestCase):
         assert self.repository.screen_run_payload is not None
         self.assertEqual(self.repository.screen_run_payload["failure_count"], 1)
         self.assertEqual((self.repository.screen_run_payload["result_summary_json"] or {})["failed_tickers"], 1)
+
+    def test_json_dumps_normalizes_non_finite_numbers(self) -> None:
+        payload = {
+            "revenue_3y_cagr_pct": math.nan,
+            "metrics": [15.0, math.inf, -math.inf],
+            "nested": {"gross_margin_pct": math.nan},
+        }
+
+        decoded = json.loads(_json_dumps(payload))
+
+        self.assertIsNone(decoded["revenue_3y_cagr_pct"])
+        self.assertEqual(decoded["metrics"], [15.0, None, None])
+        self.assertIsNone(decoded["nested"]["gross_margin_pct"])
 
     def test_soft_delete_uses_default_reason(self) -> None:
         deleted = self.service.soft_delete(42, reason="")
