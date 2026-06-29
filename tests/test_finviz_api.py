@@ -30,17 +30,28 @@ class FinvizApiParserTests(unittest.TestCase):
                 "Gross Marg": "74.15%",
                 "ROA": "82.97%",
                 "ROE": "114.29%",
+                "ROIC": "91.11%",
                 "Inst Own": "42.50%",
                 "Inst Trans": "6.20%",
                 "Insider Own": "3.10%",
                 "Insider Trans": "-1.40%",
                 "Shs Float": "2.41B",
                 "Shs Outstand": "2.46B",
+                "Current Ratio": "2.50",
+                "Quick Ratio": "2.10",
+                "Debt/Eq": "0.25",
+                "LT Debt/Eq": "0.20",
+                "EPS next Q": "2.08",
                 "EPS this Y": "87.17%",
                 "EPS growth next Y": "39.83%",
                 "EPS next 5Y": "45.51%",
                 "Sales Q/Q": "85.23%",
+                "Sales Y/Y TTM": "70.68%",
                 "EPS Q/Q": "213.42%",
+                "EPS Y/Y TTM": "109.57%",
+                "EPS/Sales Surpr.": "6.52% 3.43%",
+                "Recom": "1.57",
+                "Target Price": "138.00",
                 "Perf Month": "-9.14%",
                 "Perf Quart": "13.84%",
                 "Perf Half Y": "11.65%",
@@ -59,12 +70,24 @@ class FinvizApiParserTests(unittest.TestCase):
         self.assertEqual(snapshot.gross_margin_pct, 74.15)
         self.assertEqual(snapshot.perf_quarter_pct, 13.84)
         self.assertEqual(snapshot.volatility_month_pct, 3.58)
+        self.assertEqual(snapshot.roic_pct, 91.11)
         self.assertEqual(snapshot.institutional_ownership_pct, 42.5)
         self.assertEqual(snapshot.institutional_transactions_pct, 6.2)
         self.assertEqual(snapshot.insider_ownership_pct, 3.1)
         self.assertEqual(snapshot.insider_transactions_pct, -1.4)
         self.assertEqual(snapshot.shares_float, 2_410_000_000.0)
         self.assertEqual(snapshot.shares_outstanding, 2_460_000_000.0)
+        self.assertEqual(snapshot.current_ratio, 2.5)
+        self.assertEqual(snapshot.quick_ratio, 2.1)
+        self.assertEqual(snapshot.debt_to_equity, 0.25)
+        self.assertEqual(snapshot.lt_debt_to_equity, 0.2)
+        self.assertEqual(snapshot.eps_next_q, 2.08)
+        self.assertEqual(snapshot.sales_yoy_ttm_pct, 70.68)
+        self.assertEqual(snapshot.eps_yoy_ttm_pct, 109.57)
+        self.assertEqual(snapshot.eps_surprise_pct, 6.52)
+        self.assertEqual(snapshot.sales_surprise_pct, 3.43)
+        self.assertEqual(snapshot.analyst_recommendation, 1.57)
+        self.assertEqual(snapshot.target_price, 138.0)
         self.assertFalse(snapshot_needs_fallback(snapshot))
 
     def test_missing_required_metric_does_not_trigger_fallback_when_classification_exists(self) -> None:

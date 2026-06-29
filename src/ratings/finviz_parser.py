@@ -27,6 +27,17 @@ def _coerce_number(value: str | None) -> float | None:
         return None
 
 
+def _parse_eps_sales_surprise(value: str | None) -> tuple[float | None, float | None]:
+    text = str(value or "").strip()
+    if not text:
+        return None, None
+    parts = [part for part in re.split(r"\s+", text) if part]
+    if len(parts) >= 2:
+        return _coerce_number(parts[0]), _coerce_number(parts[1])
+    number = _coerce_number(text)
+    return number, None
+
+
 def _parse_volatility(value: str | None) -> tuple[float | None, float | None]:
     text = str(value or "").strip()
     if not text:
@@ -92,6 +103,11 @@ def parse_finviz_probe(
                 snapshot.volatility_week_pct = week_value
             if month_value is not None:
                 snapshot.volatility_month_pct = month_value
+            continue
+        if label == "EPS/Sales Surpr.":
+            eps_surprise, sales_surprise = _parse_eps_sales_surprise(raw_value)
+            snapshot.eps_surprise_pct = eps_surprise
+            snapshot.sales_surprise_pct = sales_surprise
             continue
         field_name = METRIC_LABEL_TO_FIELD.get(label)
         if not field_name:

@@ -76,17 +76,29 @@ CREATE TABLE IF NOT EXISTS ticker_fundamentals_snapshots (
   gross_margin_pct NUMERIC(18,6),
   roa_pct NUMERIC(18,6),
   roe_pct NUMERIC(18,6),
+  roic_pct NUMERIC(18,6),
   institutional_ownership_pct NUMERIC(18,6),
   institutional_transactions_pct NUMERIC(18,6),
   insider_ownership_pct NUMERIC(18,6),
   insider_transactions_pct NUMERIC(18,6),
   shares_float NUMERIC(24,6),
   shares_outstanding NUMERIC(24,6),
+  current_ratio NUMERIC(18,6),
+  quick_ratio NUMERIC(18,6),
+  debt_to_equity NUMERIC(18,6),
+  lt_debt_to_equity NUMERIC(18,6),
+  eps_next_q NUMERIC(18,6),
   eps_this_y_pct NUMERIC(18,6),
   eps_next_y_pct NUMERIC(18,6),
   eps_next_5y_pct NUMERIC(18,6),
   sales_qq_pct NUMERIC(18,6),
+  sales_yoy_ttm_pct NUMERIC(18,6),
   eps_qq_pct NUMERIC(18,6),
+  eps_yoy_ttm_pct NUMERIC(18,6),
+  eps_surprise_pct NUMERIC(18,6),
+  sales_surprise_pct NUMERIC(18,6),
+  analyst_recommendation NUMERIC(18,6),
+  target_price NUMERIC(18,6),
   perf_month_pct NUMERIC(18,6),
   perf_quarter_pct NUMERIC(18,6),
   perf_half_pct NUMERIC(18,6),
@@ -126,6 +138,42 @@ ALTER TABLE ticker_fundamentals_snapshots
 
 ALTER TABLE ticker_fundamentals_snapshots
   ADD COLUMN IF NOT EXISTS shares_outstanding NUMERIC(24,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS target_price NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS analyst_recommendation NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS sales_surprise_pct NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS eps_surprise_pct NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS eps_yoy_ttm_pct NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS sales_yoy_ttm_pct NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS eps_next_q NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS lt_debt_to_equity NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS debt_to_equity NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS quick_ratio NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS current_ratio NUMERIC(18,6);
+
+ALTER TABLE ticker_fundamentals_snapshots
+  ADD COLUMN IF NOT EXISTS roic_pct NUMERIC(18,6);
 
 CREATE TABLE IF NOT EXISTS ticker_chart_fundamentals_cache (
   ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),

@@ -76,6 +76,17 @@ def _has_minimum_classification_inputs(snapshot: FundamentalsSnapshot) -> bool:
     return bool(snapshot.sector) and bool(snapshot.industry)
 
 
+def _parse_eps_sales_surprise(raw_value: object) -> tuple[float | None, float | None]:
+    text = str(raw_value or "").strip()
+    if not text:
+        return None, None
+    parts = [part for part in text.split() if part]
+    if len(parts) >= 2:
+        return _coerce_number(parts[0]), _coerce_number(parts[1])
+    value = _coerce_number(text)
+    return value, None
+
+
 def parse_finviz_stock_data(
     stock_data: dict[str, Any],
     *,
@@ -102,6 +113,10 @@ def parse_finviz_stock_data(
         parsed_value = _coerce_number(str(raw_value))
         if parsed_value is not None:
             setattr(snapshot, field_name, parsed_value)
+
+    eps_sales_surprise = stock_data.get("EPS/Sales Surpr.")
+    if eps_sales_surprise is not None:
+        snapshot.eps_surprise_pct, snapshot.sales_surprise_pct = _parse_eps_sales_surprise(eps_sales_surprise)
 
     growth_next_y = stock_data.get("EPS growth next Y")
     if growth_next_y is not None:
