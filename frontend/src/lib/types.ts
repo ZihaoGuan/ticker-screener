@@ -867,6 +867,23 @@ export type WatchlistChartResponse = {
     recent_vcp_signal_low?: number | null;
     recent_vcp_signal_close?: number | null;
   } | null;
+  danger_signals?: {
+    as_of_date: string | null;
+    active_count: number;
+    highest_severity: "warning" | "risk" | "high" | string | null;
+    signals: Array<{
+      key: string;
+      label: string;
+      category: "early" | "mid" | "late" | string;
+      severity: "warning" | "risk" | "high" | string;
+      summary: string;
+      details: string;
+      metrics: Array<{
+        label: string;
+        value: string;
+      }>;
+    }>;
+  };
 };
 
 export type ChartOverlaysResponse = Pick<
@@ -884,6 +901,7 @@ export type ChartOverlaysResponse = Pick<
   | "weekly_rs_rating"
   | "rs_markers"
   | "setup_markers"
+  | "danger_signals"
   | "fearzone_panel"
   | "trend_template"
   | "vcs"

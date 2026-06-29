@@ -388,6 +388,9 @@ export function ChartsPage() {
     () => buildSellIntoStrengthMarkers(chartData, chartPayload?.ma50 ?? []),
     [chartData, chartPayload?.ma50],
   );
+  const dangerSignals = chartPayload?.danger_signals?.signals ?? [];
+  const dangerSignalCount = chartPayload?.danger_signals?.active_count ?? 0;
+  const highestDangerSeverity = chartPayload?.danger_signals?.highest_severity ?? null;
   const wyckoffMarkers = useMemo(
     () =>
       (overlayPayload?.setup_markers ?? [])
@@ -579,6 +582,11 @@ export function ChartsPage() {
           { label: "ATR14", value: formatPrice(atr14) },
           { label: "ATR x 50MA", value: formatAtrMultiple(atrMultipleFrom50Ma) },
           {
+            label: "Danger",
+            value: dangerSignalCount > 0 ? `${dangerSignalCount} active` : "0 active",
+            className: dangerSignalCount > 0 ? `status-pill ${dangerSignalSeverityClass(highestDangerSeverity)}` : undefined,
+          },
+          {
             label: "Trim Warn",
             value: hasTrimWarning ? ">= 3x ATR" : "Normal",
             className: hasTrimWarning ? "atr-badge is-warning" : undefined,
@@ -613,6 +621,8 @@ export function ChartsPage() {
       fundamentalsPayload?.vcp_rating,
       fundamentalsPayload?.vcp_score,
       hasTrimWarning,
+      dangerSignalCount,
+      highestDangerSeverity,
       latestMarketExtension,
       marketExtensionLabel,
       latestFundamentalRank,
@@ -1435,6 +1445,47 @@ export function ChartsPage() {
         ) : null}
       </Panel>
 
+      <Panel title="Danger Signals" aside={<span className="eyebrow">Latest bar snapshot, Mindwheel-inspired</span>}>
+        {!requestedTicker ? <p className="panel-copy">Load ticker to inspect active danger signals on latest bar.</p> : null}
+        {requestedTicker && isLoading ? <LoadingBlock label="Refreshing danger signals..." compact /> : null}
+        {requestedTicker && !isLoading ? (
+          <>
+            <p className="panel-copy">
+              Active on {chartPayload?.danger_signals?.as_of_date ?? chartPayload?.resolved_as_of_date ?? "latest bar"}: {dangerSignalCount}
+              {dangerSignalCount > 0 && highestDangerSeverity ? ` | Highest severity ${dangerSignalSeverityLabel(highestDangerSeverity)}` : ""}
+            </p>
+            {dangerSignalCount === 0 ? (
+              <p className="panel-copy">No active danger signals from current implemented rule set on latest bar.</p>
+            ) : (
+              <div className="list-grid">
+                {dangerSignals.map((signal) => (
+                  <div key={signal.key} className="chart-card danger-signal-card">
+                    <div className="danger-signal-head">
+                      <div>
+                        <div className="chart-rs-header">{dangerSignalCategoryLabel(signal.category)}</div>
+                        <strong>{signal.label}</strong>
+                      </div>
+                      <span className={`status-pill ${dangerSignalSeverityClass(signal.severity)}`}>{dangerSignalSeverityLabel(signal.severity)}</span>
+                    </div>
+                    <p className="panel-copy">{signal.summary}</p>
+                    <p className="panel-copy">{signal.details}</p>
+                    {signal.metrics.length > 0 ? (
+                      <div className="danger-signal-metrics">
+                        {signal.metrics.map((metric) => (
+                          <span key={`${signal.key}-${metric.label}`} className="chart-pill chart-pill-setup">
+                            {metric.label} {metric.value}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : null}
+      </Panel>
+
       {isAdmin && signalGuideGroups.length > 0 ? (
         <Panel title="Signal Logic" aside={<span className="eyebrow">Admin only</span>}>
           <div className="list-grid">
@@ -1490,6 +1541,36 @@ function vcsStageClass(stage: "critical" | "setup" | "base"): string {
     return "status-queued";
   }
   return "status-unknown";
+}
+
+function dangerSignalSeverityClass(severity: string | null | undefined): string {
+  if (severity === "high") {
+    return "status-critical";
+  }
+  if (severity === "risk") {
+    return "status-risk";
+  }
+  return "status-caution";
+}
+
+function dangerSignalSeverityLabel(severity: string | null | undefined): string {
+  if (severity === "high") {
+    return "High";
+  }
+  if (severity === "risk") {
+    return "Risk";
+  }
+  return "Warning";
+}
+
+function dangerSignalCategoryLabel(category: string | null | undefined): string {
+  if (category === "late") {
+    return "Late Trade";
+  }
+  if (category === "mid") {
+    return "Mid Trade";
+  }
+  return "Early Warning";
 }
 
 function vcsChartPillClass(stage: "critical" | "setup" | "base"): string {

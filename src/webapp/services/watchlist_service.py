@@ -1069,6 +1069,11 @@ class WatchlistService:
             if benchmark_frame is not None and not benchmark_frame.empty
             else None
         )
+        danger_signals = _compute_danger_signals_snapshot(
+            frame=frame,
+            benchmark_frame=benchmark_frame,
+            market_extension=market_extension,
+        )
 
         rs_points: list[dict[str, Any]] = []
         daily_rs_rating_points: list[dict[str, Any]] = []
@@ -1119,6 +1124,7 @@ class WatchlistService:
             "weekly_rs_rating": weekly_rs_rating_points,
             "rs_markers": rs_markers,
             "setup_markers": setup_markers,
+            "danger_signals": danger_signals,
             "fearzone_panel": fearzone_panel,
             "trend_template": trend_template_snapshot.to_dict() if trend_template_snapshot is not None else None,
             "vcs": vcs_snapshot.to_dict() if vcs_snapshot is not None else None,
@@ -2089,6 +2095,7 @@ def _empty_chart_payload(
         "weekly_rs_rating": [],
         "rs_markers": [],
         "setup_markers": [],
+        "danger_signals": {"as_of_date": resolved_as_of_date.isoformat() if resolved_as_of_date else None, "active_count": 0, "highest_severity": None, "signals": []},
         "fearzone_panel": {"rows": [], "signals": []},
         "trend_template": None,
         "vcs": None,
@@ -2119,6 +2126,7 @@ def _empty_chart_overlay_payload(
         "weekly_rs_rating": [],
         "rs_markers": [],
         "setup_markers": [],
+        "danger_signals": {"as_of_date": resolved_as_of_date.isoformat() if resolved_as_of_date else None, "active_count": 0, "highest_severity": None, "signals": []},
         "fearzone_panel": {"rows": [], "signals": []},
         "trend_template": None,
         "vcs": None,
@@ -3311,6 +3319,301 @@ def _compute_market_extension_overlay(frame: pd.DataFrame, *, visible_dates: set
         "line": line,
         "signals": signals,
         "latest": latest,
+    }
+
+
+def _compute_danger_signals_snapshot(
+    *,
+    frame: pd.DataFrame,
+    benchmark_frame: pd.DataFrame | None,
+    market_extension: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if frame.empty:
+        return {"as_of_date": None, "active_count": 0, "highest_severity": None, "signals": []}
+
+    bars = frame.copy().sort_index()
+    for column in ("Open", "High", "Low", "Close", "Volume"):
+        if column not in bars.columns:
+            return {"as_of_date": None, "active_count": 0, "highest_severity": None, "signals": []}
+        bars[column] = pd.to_numeric(bars[column], errors="coerce")
+
+    bars = bars.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+    if bars.empty:
+        return {"as_of_date": None, "active_count": 0, "highest_severity": None, "signals": []}
+
+    bars["ema8"] = bars["Close"].ewm(span=8, adjust=False).mean()
+    bars["ema21"] = bars["Close"].ewm(span=21, adjust=False).mean()
+    bars["ma50"] = bars["Close"].rolling(50).mean()
+    bars["ma200"] = bars["Close"].rolling(200).mean()
+
+    lowest_low = bars["Low"].rolling(21).min()
+    highest_high = bars["High"].rolling(21).max()
+    stoch_range = highest_high - lowest_low
+    raw_k = pd.Series(
+        np.where(stoch_range > 0, (bars["Close"] - lowest_low) * 100.0 / stoch_range, np.nan),
+        index=bars.index,
+    )
+    fast_k = raw_k.rolling(4).mean()
+    slow_k = fast_k.rolling(4).mean()
+
+    last = bars.iloc[-1]
+    as_of_date = pd.Timestamp(bars.index[-1]).date().isoformat()
+    signals: list[dict[str, Any]] = []
+
+    def add_signal(
+        *,
+        active: bool,
+        key: str,
+        label: str,
+        category: str,
+        severity: str,
+        summary: str,
+        details: str,
+        metrics: list[tuple[str, str]],
+    ) -> None:
+        if not active:
+            return
+        signals.append(
+            {
+                "key": key,
+                "label": label,
+                "category": category,
+                "severity": severity,
+                "summary": summary,
+                "details": details,
+                "metrics": [{"label": metric_label, "value": metric_value} for metric_label, metric_value in metrics if metric_value],
+            }
+        )
+
+    day_range = float(last["High"] - last["Low"])
+    dcr_pct = ((float(last["Close"]) - float(last["Low"])) / day_range) * 100.0 if day_range > 0 else None
+    last_volume = float(last["Volume"])
+    trailing_volume = bars["Volume"].tail(5)
+    heavy_volume_5 = len(trailing_volume) >= 5 and bool(last_volume >= float(trailing_volume.max()))
+    add_signal(
+        active=dcr_pct is not None and dcr_pct <= 30.0,
+        key="price_closes_near_low",
+        label="Price Closes Near Low",
+        category="early",
+        severity="warning",
+        summary="Close finished in bottom 30% of daily range.",
+        details="Matches Trading Mindwheel daily closing-range warning.",
+        metrics=[("DCR", f"{dcr_pct:.1f}%") if dcr_pct is not None else ("", "")],
+    )
+    add_signal(
+        active=dcr_pct is not None and dcr_pct <= 30.0 and heavy_volume_5,
+        key="price_closes_near_low_heavy_volume",
+        label="Price Closes Near Low on Heavy Volume",
+        category="early",
+        severity="risk",
+        summary="Weak close landed near low on heaviest volume of last 5 bars.",
+        details="Pressure more dangerous when close near low happens with short-term volume expansion.",
+        metrics=[
+            ("DCR", f"{dcr_pct:.1f}%") if dcr_pct is not None else ("", ""),
+            ("Volume", f"{int(last_volume):,}"),
+        ],
+    )
+
+    ma_checks = [
+        ("EMA 8", bars["ema8"].iloc[-1]),
+        ("EMA 21", bars["ema21"].iloc[-1]),
+        ("SMA 50", bars["ma50"].iloc[-1]),
+        ("SMA 200", bars["ma200"].iloc[-1]),
+    ]
+    below_ma_labels = [label for label, value in ma_checks if pd.notna(value) and float(last["Close"]) < float(value)]
+    add_signal(
+        active=len(below_ma_labels) > 0,
+        key="price_closes_below_moving_average",
+        label="Price Closes Below Moving Average",
+        category="early",
+        severity="risk",
+        summary="Close slipped below one or more key moving averages.",
+        details="Current webapp version checks EMA 8, EMA 21, SMA 50, and SMA 200.",
+        metrics=[("Below", ", ".join(below_ma_labels))],
+    )
+
+    swing_low = bars["Low"].shift(1).rolling(6).min().iloc[-1]
+    add_signal(
+        active=pd.notna(swing_low) and float(last["Close"]) < float(swing_low),
+        key="price_closes_below_swing_low",
+        label="Price Closes Below Swing Low",
+        category="early",
+        severity="risk",
+        summary="Close broke below recent 6-bar swing low.",
+        details="Uses previous-bar lookback so today must break prior support, not current-bar low.",
+        metrics=[("Swing Low", f"${float(swing_low):.2f}") if pd.notna(swing_low) else ("", "")],
+    )
+
+    lower_lows = len(bars) >= 4 and bool(
+        bars["Low"].iloc[-1] < bars["Low"].iloc[-2] < bars["Low"].iloc[-3] < bars["Low"].iloc[-4]
+    )
+    add_signal(
+        active=lower_lows,
+        key="three_consecutive_days_lower_lows",
+        label="3 Consecutive Days of Lower Lows",
+        category="early",
+        severity="risk",
+        summary="Three straight sessions printed lower lows.",
+        details="Simple sequence check from latest four bars.",
+        metrics=[],
+    )
+
+    close_below_prev_lows = len(bars) >= 4 and bool(
+        float(last["Close"]) < float(bars["Low"].iloc[-2])
+        and float(last["Close"]) < float(bars["Low"].iloc[-3])
+        and float(last["Close"]) < float(bars["Low"].iloc[-4])
+    )
+    add_signal(
+        active=close_below_prev_lows,
+        key="close_lower_than_3_previous_lows",
+        label="Close Lower than 3 Previous Lows",
+        category="early",
+        severity="risk",
+        summary="Close finished under low of each prior three sessions.",
+        details="Another sharp character-deterioration rule from script.",
+        metrics=[],
+    )
+
+    stoch_bearish = len(fast_k.dropna()) > 0 and len(slow_k.dropna()) > 0 and bool(fast_k.iloc[-1] < slow_k.iloc[-1])
+    add_signal(
+        active=stoch_bearish,
+        key="fast_stochastic_below_slow_stochastic",
+        label="Fast Stochastic Below Slow Stochastic",
+        category="mid",
+        severity="warning",
+        summary="Fast stochastic sits below slow stochastic.",
+        details="Uses 21,4,4 full-stochastic approximation like attached script.",
+        metrics=[
+            ("Fast %K", f"{float(fast_k.iloc[-1]):.1f}") if pd.notna(fast_k.iloc[-1]) else ("", ""),
+            ("Slow %D", f"{float(slow_k.iloc[-1]):.1f}") if pd.notna(slow_k.iloc[-1]) else ("", ""),
+        ],
+    )
+
+    stoch_curving_down = len(fast_k) >= 3 and len(slow_k) >= 3 and all(
+        pd.notna(value)
+        for value in [fast_k.iloc[-1], fast_k.iloc[-2], fast_k.iloc[-3], slow_k.iloc[-1], slow_k.iloc[-2], slow_k.iloc[-3]]
+    ) and bool(
+        float(slow_k.iloc[-1]) < float(slow_k.iloc[-2]) < float(slow_k.iloc[-3])
+        and float(fast_k.iloc[-1]) < float(fast_k.iloc[-2]) < float(fast_k.iloc[-3])
+    )
+    add_signal(
+        active=stoch_curving_down,
+        key="fast_slow_stochastic_curved_down",
+        label="Fast & Slow Stochastic Curved Down",
+        category="mid",
+        severity="warning",
+        summary="Both stochastic lines fell for two straight bars.",
+        details="Momentum cooling even if price breakdown still looks early.",
+        metrics=[],
+    )
+
+    rs_line: pd.Series | None = None
+    if benchmark_frame is not None and not benchmark_frame.empty and "Close" in benchmark_frame.columns:
+        benchmark_close = pd.to_numeric(benchmark_frame["Close"], errors="coerce").dropna()
+        if not benchmark_close.empty:
+            rs_line = _compute_rs_line(bars["Close"], benchmark_close)
+    rs_curving_down = rs_line is not None and len(rs_line.dropna()) >= 3 and bool(
+        float(rs_line.dropna().iloc[-1]) < float(rs_line.dropna().iloc[-2]) < float(rs_line.dropna().iloc[-3])
+    )
+    add_signal(
+        active=rs_curving_down,
+        key="rs_starts_curving_down",
+        label="RS Starts Curving Down",
+        category="mid",
+        severity="warning",
+        summary="Relative-strength line fell for two straight bars.",
+        details="Shows leadership cooling even before a larger price failure.",
+        metrics=[],
+    )
+
+    rs_underperforms_price = False
+    if rs_line is not None and not rs_line.empty:
+        rs_63_high = rs_line.rolling(63, min_periods=1).max().iloc[-1]
+        price_63_high = bars["High"].rolling(63, min_periods=1).max().iloc[-1]
+        rs_underperforms_price = bool(
+            pd.notna(rs_63_high)
+            and pd.notna(price_63_high)
+            and float(last["High"]) >= float(price_63_high) - 1e-12
+            and float(rs_line.iloc[-1]) < float(rs_63_high) - 1e-12
+        )
+    add_signal(
+        active=rs_underperforms_price,
+        key="rs_underperforms_price",
+        label="RS Underperforms Price",
+        category="mid",
+        severity="risk",
+        summary="Price pushed to a fresh short-term high without RS confirmation.",
+        details="Current check compares today high and RS line versus trailing 63-bar highs.",
+        metrics=[],
+    )
+
+    downward_ma_labels = []
+    for label, series in [("EMA 8", bars["ema8"]), ("EMA 21", bars["ema21"]), ("SMA 50", bars["ma50"]), ("SMA 200", bars["ma200"])]:
+        if len(series) < 3 or any(pd.isna(series.iloc[-offset]) for offset in (1, 2, 3)):
+            continue
+        if float(series.iloc[-1]) < float(series.iloc[-2]) < float(series.iloc[-3]):
+            downward_ma_labels.append(label)
+    add_signal(
+        active=len(downward_ma_labels) > 0,
+        key="moving_averages_begin_to_slope_downward",
+        label="Moving Averages Begin to Slope Downward",
+        category="late",
+        severity="risk",
+        summary="One or more key averages turned lower for two straight bars.",
+        details="This is later-stage deterioration versus simple intraday weakness.",
+        metrics=[("Averages", ", ".join(downward_ma_labels))],
+    )
+
+    prev_close = float(bars["Close"].iloc[-2]) if len(bars) >= 2 else None
+    ma200_value = bars["ma200"].iloc[-1]
+    gap_up_pct = ((float(last["Open"]) - prev_close) / prev_close) * 100.0 if prev_close and prev_close > 0 else None
+    dist_200_pct = ((float(last["Close"]) / float(ma200_value)) - 1.0) * 100.0 if pd.notna(ma200_value) and float(ma200_value) > 0 else None
+    add_signal(
+        active=gap_up_pct is not None and gap_up_pct >= 5.0 and dist_200_pct is not None and dist_200_pct >= 125.0,
+        key="exhaustion_gap",
+        label="Exhaustion Gap",
+        category="late",
+        severity="high",
+        summary="Gap-up bar is severely extended above 200-day average.",
+        details="Mapped from attached script exhaustion-gap rule.",
+        metrics=[
+            ("Gap", f"{gap_up_pct:.1f}%") if gap_up_pct is not None else ("", ""),
+            ("Vs 200SMA", f"{dist_200_pct:.1f}%") if dist_200_pct is not None else ("", ""),
+        ],
+    )
+
+    latest_market_extension = market_extension.get("latest") if isinstance(market_extension, dict) else None
+    if isinstance(latest_market_extension, dict):
+        state = str(latest_market_extension.get("state") or "").strip()
+        extension_pct = latest_market_extension.get("extension_pct")
+        add_signal(
+            active=state in {"warning", "extreme"},
+            key="price_hits_overextension_zone",
+            label="Price Hits Overextension Zone",
+            category="late",
+            severity="high" if state == "extreme" else "risk",
+            summary="Price is stretched versus 10-week moving average.",
+            details="Local webapp rule, added because extension often aligns with late-trade danger.",
+            metrics=[("10W Ext", f"{float(extension_pct):.1f}%") if extension_pct is not None else ("", "")],
+        )
+
+    severity_rank = {"warning": 1, "risk": 2, "high": 3}
+    category_rank = {"early": 1, "mid": 2, "late": 3}
+    signals.sort(
+        key=lambda item: (
+            -severity_rank.get(str(item.get("severity")), 0),
+            category_rank.get(str(item.get("category")), 99),
+            str(item.get("label") or ""),
+        )
+    )
+    highest_severity = None
+    if signals:
+        highest_severity = max(signals, key=lambda item: severity_rank.get(str(item.get("severity")), 0)).get("severity")
+    return {
+        "as_of_date": as_of_date,
+        "active_count": len(signals),
+        "highest_severity": highest_severity,
+        "signals": signals,
     }
 
 

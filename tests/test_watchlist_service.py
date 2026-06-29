@@ -1759,6 +1759,55 @@ class WatchlistServiceTests(unittest.TestCase):
         wyckoff_patch.assert_called_once()
         self.assertEqual([marker["kind"] for marker in payload["setup_markers"]], ["ftd_sweep_breakout", "wyckoff_buy_signal"])
 
+    def test_get_chart_overlays_payload_includes_danger_signals_snapshot(self) -> None:
+        index = pd.date_range(start="2026-01-05", periods=80, freq="B")
+        close_values = [100.0 + (idx * 0.9) for idx in range(76)] + [169.0, 164.0, 160.0, 157.2]
+        open_values = [value - 0.8 for value in close_values[:-4]] + [169.4, 165.2, 161.8, 161.0]
+        high_values = [value + 1.6 for value in close_values[:-4]] + [170.2, 165.6, 162.0, 162.0]
+        low_values = [value - 1.6 for value in close_values[:-4]] + [168.0, 163.0, 159.0, 157.0]
+        volume_values = [1_200_000.0 for _ in range(76)] + [1_500_000.0, 1_900_000.0, 2_300_000.0, 3_200_000.0]
+        frame = pd.DataFrame(
+            {
+                "Open": open_values,
+                "High": high_values,
+                "Low": low_values,
+                "Close": close_values,
+                "Volume": volume_values,
+            },
+            index=index,
+        )
+        benchmark_frame = pd.DataFrame(
+            {
+                "Open": [100.0 + (idx * 0.35) for idx in range(len(index))],
+                "High": [101.0 + (idx * 0.35) for idx in range(len(index))],
+                "Low": [99.0 + (idx * 0.35) for idx in range(len(index))],
+                "Close": [100.0 + (idx * 0.35) for idx in range(len(index))],
+                "Volume": [2_000_000.0 for _ in range(len(index))],
+            },
+            index=index,
+        )
+
+        def fake_download(*, tickers: str, **_: object):
+            if tickers == "NVDA":
+                return frame.copy()
+            if tickers == "SPY":
+                return benchmark_frame.copy()
+            return pd.DataFrame()
+
+        with patch("src.webapp.services.watchlist_service.yf.download", side_effect=fake_download):
+            payload = self.service.get_chart_overlays_payload("NVDA", as_of_date=dt.date(2026, 4, 24))
+
+        snapshot = payload["danger_signals"]
+        self.assertEqual(snapshot["as_of_date"], "2026-04-24")
+        self.assertGreaterEqual(snapshot["active_count"], 6)
+        labels = {item["label"] for item in snapshot["signals"]}
+        self.assertIn("Price Closes Near Low on Heavy Volume", labels)
+        self.assertIn("Price Closes Below Moving Average", labels)
+        self.assertIn("Price Closes Below Swing Low", labels)
+        self.assertIn("3 Consecutive Days of Lower Lows", labels)
+        self.assertIn("Close Lower than 3 Previous Lows", labels)
+        self.assertIn("RS Starts Curving Down", labels)
+
     def test_get_chart_overlays_payload_computes_heavy_overlays(self) -> None:
         service = WatchlistService(
             artifacts_dir=Path(self.temp_dir.name),

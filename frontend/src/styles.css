@@ -1337,6 +1337,21 @@ a {
   color: #d4d4d8;
 }
 
+.status-caution {
+  background: rgba(59, 130, 246, 0.14);
+  color: #93c5fd;
+}
+
+.status-risk {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+}
+
+.status-critical {
+  background: rgba(244, 63, 94, 0.14);
+  color: #fda4af;
+}
+
 .run-progress-panel {
   display: grid;
   gap: 12px;
@@ -2847,6 +2862,32 @@ a {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
+}
+
+.danger-signal-card {
+  background: linear-gradient(180deg, rgba(17, 17, 20, 0.96), rgba(24, 24, 27, 0.92));
+  border: 1px solid rgba(63, 63, 70, 0.9);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.danger-signal-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.danger-signal-head strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.danger-signal-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .chart-pill {
