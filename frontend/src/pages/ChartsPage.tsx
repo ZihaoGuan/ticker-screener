@@ -26,6 +26,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   wyckoffSignals: true,
   wyckoffHoldSignals: true,
   flexSr: false,
+  channelLines: false,
 };
 const CHART_CACHE_PREFIX = "chart-screen-cache-v6";
 const EXCLUSION_REASON_OPTIONS = [
@@ -459,6 +460,7 @@ export function ChartsPage() {
     { key: "wyckoffSignals", label: "Wyckoff signals" },
     { key: "wyckoffHoldSignals", label: "Wyckoff hold" },
     { key: "flexSr", label: "Flex SR (exp)" },
+    { key: "channelLines", label: "Channel lines" },
   ];
   const canManageExclusions = auth.hasCapability("manage_exclusions");
   const canSyncHistory = auth.hasCapability("sync_history");
@@ -2170,3 +2172,4 @@ function buildSignalGuideGroups({
 
   return groups;
 }
+

@@ -24,6 +24,7 @@ export type ChartVisibility = {
   wyckoffSignals: boolean;
   wyckoffHoldSignals: boolean;
   flexSr: boolean;
+  channelLines: boolean;
 };
 
 type PriceChartProps = {
@@ -76,6 +77,23 @@ type FlexibleSrCurve = {
 type FlexibleSrOverlay = {
   resistance: FlexibleSrCurve | null;
   support: FlexibleSrCurve | null;
+};
+
+type ChannelLinePoint = {
+  time: string;
+  value: number;
+};
+
+type PriceChannel = {
+  direction: "up" | "down";
+  origin: ChannelLinePoint[];
+  midline: ChannelLinePoint[];
+  boundary: ChannelLinePoint[];
+};
+
+type PriceChannelOverlay = {
+  up: PriceChannel | null;
+  down: PriceChannel | null;
 };
 
 type FibLevel = {
@@ -152,6 +170,7 @@ export function PriceChart({
     wyckoffSignals: true,
     wyckoffHoldSignals: true,
     flexSr: false,
+    channelLines: false,
   };
 
   const ma50 = useMemo(() => (overlays?.ma50?.length ? overlays.ma50 : buildMovingAverage(candles, 50)), [candles, overlays?.ma50]);
@@ -185,6 +204,7 @@ export function PriceChart({
   const highTightFlagBox = useMemo(() => detectHighTightFlagBox(candles, annotations, resolvedExtraAnnotations), [candles, annotations, resolvedExtraAnnotations]);
   const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, resolvedExtraAnnotations), [annotations, resolvedExtraAnnotations]);
   const flexibleSrOverlay = useMemo(() => (options.flexSr ? buildFlexibleSrOverlay(candles) : null), [candles, options.flexSr]);
+  const channelOverlay = useMemo(() => (options.channelLines ? buildPriceChannelOverlay(candles) : null), [candles, options.channelLines]);
   const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
     const point = param.point;
     const normalizedTime = normalizeCrosshairTime(param.time);
@@ -391,6 +411,54 @@ export function PriceChart({
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     });
+    const upChannelOriginSeries = priceChart.addLineSeries({
+      color: "rgba(34, 197, 94, 0.95)",
+      lineWidth: 2,
+      lineStyle: LineStyle.Solid,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const upChannelMidlineSeries = priceChart.addLineSeries({
+      color: "rgba(34, 197, 94, 0.72)",
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const upChannelBoundarySeries = priceChart.addLineSeries({
+      color: "rgba(34, 197, 94, 0.95)",
+      lineWidth: 2,
+      lineStyle: LineStyle.Solid,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const downChannelOriginSeries = priceChart.addLineSeries({
+      color: "rgba(248, 113, 113, 0.95)",
+      lineWidth: 2,
+      lineStyle: LineStyle.Solid,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const downChannelMidlineSeries = priceChart.addLineSeries({
+      color: "rgba(248, 113, 113, 0.72)",
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const downChannelBoundarySeries = priceChart.addLineSeries({
+      color: "rgba(248, 113, 113, 0.95)",
+      lineWidth: 2,
+      lineStyle: LineStyle.Solid,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
 
     candleSeries.setData(
       candles.map((item) => ({
@@ -432,6 +500,12 @@ export function PriceChart({
     flexResistanceProjectionSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.projection ?? [] : []);
     flexSupportSeries.setData(options.flexSr ? flexibleSrOverlay?.support?.backfit ?? [] : []);
     flexSupportProjectionSeries.setData(options.flexSr ? flexibleSrOverlay?.support?.projection ?? [] : []);
+    upChannelOriginSeries.setData(options.channelLines ? channelOverlay?.up?.origin ?? [] : []);
+    upChannelMidlineSeries.setData(options.channelLines ? channelOverlay?.up?.midline ?? [] : []);
+    upChannelBoundarySeries.setData(options.channelLines ? channelOverlay?.up?.boundary ?? [] : []);
+    downChannelOriginSeries.setData(options.channelLines ? channelOverlay?.down?.origin ?? [] : []);
+    downChannelMidlineSeries.setData(options.channelLines ? channelOverlay?.down?.midline ?? [] : []);
+    downChannelBoundarySeries.setData(options.channelLines ? channelOverlay?.down?.boundary ?? [] : []);
     if (candles.length > 0) {
       const startTime = candles[0].time;
       const endTime = candles[candles.length - 1].time;
@@ -735,6 +809,8 @@ export function PriceChart({
     weeklyEma8,
     options.flexSr,
     flexibleSrOverlay,
+    options.channelLines,
+    channelOverlay,
     showFibPane,
   ]);
 
@@ -1220,6 +1296,138 @@ function buildFlexibleSrOverlay(candles: CandlePoint[]): FlexibleSrOverlay {
   };
 }
 
+function buildPriceChannelOverlay(candles: CandlePoint[]): PriceChannelOverlay {
+  if (candles.length < 40) {
+    return { up: null, down: null };
+  }
+
+  const pivotHighs = detectPivotAnchors(candles, "high");
+  const pivotLows = detectPivotAnchors(candles, "low");
+
+  return {
+    up: buildDirectionalPriceChannel(candles, pivotLows, pivotHighs, "up"),
+    down: buildDirectionalPriceChannel(candles, pivotHighs, pivotLows, "down"),
+  };
+}
+
+function buildDirectionalPriceChannel(
+  candles: CandlePoint[],
+  baseAnchors: SrAnchor[],
+  oppositeAnchors: SrAnchor[],
+  direction: "up" | "down",
+): PriceChannel | null {
+  if (baseAnchors.length < 2 || oppositeAnchors.length < 1) {
+    return null;
+  }
+
+  const recentRange = averageRecentRange(candles, 20);
+  const projectionBars = Math.min(30, Math.max(12, Math.floor(candles.length * 0.08)));
+
+  for (let index = baseAnchors.length - 1; index >= 1; index -= 1) {
+    const start = baseAnchors[index - 1];
+    const end = baseAnchors[index];
+    const span = end.index - start.index;
+    if (span < 12) {
+      continue;
+    }
+    if (direction === "up" && end.value <= start.value) {
+      continue;
+    }
+    if (direction === "down" && end.value >= start.value) {
+      continue;
+    }
+
+    const slope = (end.value - start.value) / span;
+    let offset = direction === "up" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+    let touchCount = 0;
+
+    for (const anchor of oppositeAnchors) {
+      if (anchor.index < start.index || anchor.index <= end.index - 4) {
+        continue;
+      }
+      const baseline = start.value + (slope * (anchor.index - start.index));
+      const diff = anchor.value - baseline;
+      if (!Number.isFinite(diff)) {
+        continue;
+      }
+      if (direction === "up") {
+        if (diff > offset) {
+          offset = diff;
+        }
+        if (diff > recentRange * 0.2) {
+          touchCount += 1;
+        }
+      } else {
+        if (diff < offset) {
+          offset = diff;
+        }
+        if (diff < -recentRange * 0.2) {
+          touchCount += 1;
+        }
+      }
+    }
+
+    if (!Number.isFinite(offset) || touchCount < 1) {
+      continue;
+    }
+    if (direction === "up" && offset <= recentRange * 0.35) {
+      continue;
+    }
+    if (direction === "down" && offset >= -recentRange * 0.35) {
+      continue;
+    }
+
+    const lineEndIndex = candles.length - 1 + projectionBars;
+    return {
+      direction,
+      origin: buildChannelLineSeries(candles, start.index, lineEndIndex, start.value, slope, 0),
+      midline: buildChannelLineSeries(candles, start.index, lineEndIndex, start.value, slope, offset / 2),
+      boundary: buildChannelLineSeries(candles, start.index, lineEndIndex, start.value, slope, offset),
+    };
+  }
+
+  return null;
+}
+
+function buildChannelLineSeries(
+  candles: CandlePoint[],
+  startIndex: number,
+  endIndex: number,
+  startValue: number,
+  slope: number,
+  offset: number,
+): ChannelLinePoint[] {
+  const points: ChannelLinePoint[] = [];
+  const lastKnownTime = candles[candles.length - 1]?.time ?? null;
+  if (!lastKnownTime) {
+    return points;
+  }
+
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const inRangeTime = candles[index]?.time;
+    const projectedTime = index > candles.length - 1 ? addBusinessDays(lastKnownTime, index - (candles.length - 1)) : null;
+    const time = inRangeTime ?? projectedTime;
+    if (!time) {
+      continue;
+    }
+    points.push({
+      time,
+      value: Number((startValue + (slope * (index - startIndex)) + offset).toFixed(4)),
+    });
+  }
+
+  return points;
+}
+
+function averageRecentRange(candles: CandlePoint[], window: number): number {
+  const slice = candles.slice(-window);
+  if (slice.length === 0) {
+    return 0;
+  }
+  const total = slice.reduce((sum, candle) => sum + Math.max(0.0001, candle.high - candle.low), 0);
+  return total / slice.length;
+}
+
 function buildStructuralFibOverlay(candles: CandlePoint[]): StructuralFibOverlay | null {
   if (candles.length < 60) {
     return null;
@@ -1640,3 +1848,4 @@ function addBusinessDays(baseDate: string, offset: number) {
   }
   return parsed.toISOString().slice(0, 10);
 }
+
