@@ -48,7 +48,7 @@ class MyPicksRepository:
         if connection is None:
             return []
         sql = """
-            SELECT id, ticker, notes, created_by_user_id, created_at
+            SELECT id, ticker, notes, checklist_json, created_by_user_id, created_at
             FROM my_picks
             ORDER BY created_at DESC, id DESC
         """
@@ -62,19 +62,20 @@ class MyPicksRepository:
         *,
         ticker: str,
         notes: str = "",
+        checklist: dict[str, bool] | None = None,
         created_by_user_id: int | None = None,
     ) -> dict[str, Any] | None:
         connection = self._connect()
         if connection is None:
             return None
         sql = """
-            INSERT INTO my_picks (ticker, notes, created_by_user_id)
-            VALUES (%s, %s, %s)
-            RETURNING id, ticker, notes, created_by_user_id, created_at
+            INSERT INTO my_picks (ticker, notes, checklist_json, created_by_user_id)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, ticker, notes, checklist_json, created_by_user_id, created_at
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (ticker, notes, created_by_user_id))
+                cursor.execute(sql, (ticker, notes, checklist or {}, created_by_user_id))
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
             connection.commit()
         return rows[0] if rows else None
@@ -90,6 +91,23 @@ class MyPicksRepository:
                 deleted = cursor.rowcount > 0
             connection.commit()
         return deleted
+
+    def update_pick_checklist(self, pick_id: int, checklist: dict[str, bool]) -> dict[str, Any] | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            UPDATE my_picks
+            SET checklist_json = %s
+            WHERE id = %s
+            RETURNING id, ticker, notes, checklist_json, created_by_user_id, created_at
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (checklist, pick_id))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows[0] if rows else None
 
     def list_recent_signal_summary(self, tickers: list[str], *, lookback_days: int = 45) -> dict[str, dict[str, Any]]:
         connection = self._connect()

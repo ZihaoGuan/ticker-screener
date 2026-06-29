@@ -5,13 +5,15 @@ import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { CandlePoint, MyPickRow, MyPicksContextResponse, WatchlistChartResponse } from "../lib/types";
+import type { CandlePoint, FundamentalChecklistItem, MyPickRow, MyPicksContextResponse, WatchlistChartResponse } from "../lib/types";
 
 const EMPTY_CONTEXT: MyPicksContextResponse = {
   database_configured: false,
   total_count: 0,
   rows: [],
   available_added_dates: [],
+  fundamental_checklist: [],
+  fundamental_summary: [],
 };
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
@@ -34,6 +36,7 @@ export function MyPicksPage() {
   const [chartPayloads, setChartPayloads] = useState<Record<string, WatchlistChartResponse | null | undefined>>({});
   const [chartErrors, setChartErrors] = useState<Record<string, string>>({});
   const [chartLoadingTickers, setChartLoadingTickers] = useState<Record<string, boolean>>({});
+  const [checklistSaving, setChecklistSaving] = useState<Record<string, boolean>>({});
 
   const loadPicks = () => {
     setIsLoading(true);
@@ -196,6 +199,31 @@ export function MyPicksPage() {
     }
   };
 
+
+  const handleChecklistToggle = async (row: MyPickRow, item: FundamentalChecklistItem, checked: boolean) => {
+    const savingKey = `${row.id}:${item.key}`;
+    setChecklistSaving((current) => ({ ...current, [savingKey]: true }));
+    setNotice("");
+    try {
+      const payload = await fetchJson<{ ok: boolean; pick: MyPickRow }>(`/api/admin/my-picks/${row.id}/checklist`, {
+        method: "POST",
+        body: JSON.stringify({ key: item.key, checked }),
+      });
+      setContext((current) => ({
+        ...current,
+        rows: current.rows.map((entry) => (entry.id === row.id ? payload.pick : entry)),
+      }));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to update checklist item.");
+    } finally {
+      setChecklistSaving((current) => {
+        const next = { ...current };
+        delete next[savingKey];
+        return next;
+      });
+    }
+  };
+
   const handleDelete = async (row: MyPickRow) => {
     if (!window.confirm(`Delete ${row.ticker} from My Picks?`)) {
       return;
@@ -319,6 +347,40 @@ export function MyPicksPage() {
         {!context.database_configured ? <p className="panel-copy earnings-console-note">Database is not configured for My Picks storage.</p> : null}
       </section>
 
+
+      <section className="panel earnings-filter-console">
+        <div className="panel-head earnings-calendar-head">
+          <div>
+            <h2>Fundamental Checklist</h2>
+            <span className="eyebrow">Manual admin review guide</span>
+          </div>
+        </div>
+        <p className="panel-copy">Use this checklist to manually confirm whether each ticker matches the transcript's fundamental-analysis process before you keep sizing it up technically.</p>
+        <div className="detail-subsection">
+          {context.fundamental_summary.map((item) => (
+            <p key={item} className="panel-copy">- {item}</p>
+          ))}
+        </div>
+        <div className="data-table-responsive">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Checklist Item</th>
+                <th>Instruction</th>
+              </tr>
+            </thead>
+            <tbody>
+              {context.fundamental_checklist.map((item) => (
+                <tr key={item.key}>
+                  <td>{item.label}</td>
+                  <td>{item.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="panel earnings-calendar-panel">
         <div className="panel-head earnings-calendar-head">
           <div>
@@ -396,7 +458,7 @@ export function MyPicksPage() {
           </div>
         ) : null}
         {viewMode === "list" && !groupByDate && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
-        {viewMode === "list" && !groupByDate && filteredRows.length > 0 ? <PicksTable rows={pagedRows} onDelete={handleDelete} isSaving={isSaving} /> : null}
+        {viewMode === "list" && !groupByDate && filteredRows.length > 0 ? <PicksTable rows={pagedRows} checklistItems={context.fundamental_checklist} checklistSaving={checklistSaving} onToggleChecklist={handleChecklistToggle} onDelete={handleDelete} isSaving={isSaving} /> : null}
         {viewMode === "list" && groupByDate && groupedRows.length === 0 ? <p className="panel-copy">No grouped picks match current filter.</p> : null}
         {viewMode === "list" && groupByDate
           ? groupedPagedRows.map((group) => (
@@ -407,7 +469,7 @@ export function MyPicksPage() {
                     <span className="eyebrow">{formatCount(group.rows.length)} names</span>
                   </div>
                 </div>
-                <PicksTable rows={group.rows} onDelete={handleDelete} isSaving={isSaving} />
+                <PicksTable rows={group.rows} checklistItems={context.fundamental_checklist} checklistSaving={checklistSaving} onToggleChecklist={handleChecklistToggle} onDelete={handleDelete} isSaving={isSaving} />
               </div>
             ))
           : null}
@@ -427,10 +489,16 @@ export function MyPicksPage() {
 
 function PicksTable({
   rows,
+  checklistItems,
+  checklistSaving,
+  onToggleChecklist,
   onDelete,
   isSaving,
 }: {
   rows: MyPickRow[];
+  checklistItems: FundamentalChecklistItem[];
+  checklistSaving: Record<string, boolean>;
+  onToggleChecklist: (row: MyPickRow, item: FundamentalChecklistItem, checked: boolean) => void;
   onDelete: (row: MyPickRow) => void;
   isSaving: boolean;
 }) {
@@ -463,6 +531,9 @@ function PicksTable({
             <th>Signals</th>
             <th>Latest Signal</th>
             <th>Notes</th>
+            {checklistItems.map((item) => (
+              <th key={item.key} title={item.description}>{item.short_label}</th>
+            ))}
             <th>Action</th>
           </tr>
         </thead>
@@ -502,6 +573,20 @@ function PicksTable({
               </td>
               <td data-label="Latest Signal">{formatLocalDate(row.latest_signal_date)}</td>
               <td data-label="Notes">{row.notes || "-"}</td>
+              {checklistItems.map((item) => {
+                const savingKey = `${row.id}:${item.key}`;
+                return (
+                  <td key={item.key} data-label={item.label}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(row.checklist?.[item.key])}
+                      disabled={isSaving || Boolean(checklistSaving[savingKey])}
+                      title={item.description}
+                      onChange={(event) => void onToggleChecklist(row, item, event.target.checked)}
+                    />
+                  </td>
+                );
+              })}
               <td data-label="Action">
                 <button className="table-action-button" type="button" disabled={isSaving} onClick={() => void onDelete(row)}>
                   Delete

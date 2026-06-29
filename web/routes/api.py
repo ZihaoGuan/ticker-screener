@@ -1698,6 +1698,38 @@ def admin_create_my_pick(
     return JSONResponse({"ok": True, "pick": pick})
 
 
+@router.post("/admin/my-picks/{pick_id}/checklist", response_class=JSONResponse)
+def admin_update_my_pick_checklist(
+    request: Request,
+    pick_id: int,
+    payload: dict[str, object] | None = Body(default=None),
+    service: MyPicksService = Depends(get_my_picks_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        pick = service.update_pick_checklist_item(
+            pick_id=pick_id,
+            key=str(request_payload.get("key") or ""),
+            checked=bool(request_payload.get("checked")),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="my_pick.checklist.update",
+        resource_type="my_pick",
+        resource_id=str(pick_id),
+        resource_label=str(pick.get("ticker") or pick_id),
+        message=f"Updated checklist for My Pick {pick.get('ticker') or pick_id}.",
+        metadata={"pick_id": pick_id, "key": str(request_payload.get("key") or ""), "checked": bool(request_payload.get("checked"))},
+    )
+    return JSONResponse({"ok": True, "pick": pick})
+
+
 @router.post("/admin/my-picks/{pick_id}/delete", response_class=JSONResponse)
 def admin_delete_my_pick(
     request: Request,

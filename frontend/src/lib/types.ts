@@ -1755,10 +1755,18 @@ export type PortfolioRefreshResponse = {
   }>;
 };
 
+export type FundamentalChecklistItem = {
+  key: string;
+  label: string;
+  short_label: string;
+  description: string;
+};
+
 export type MyPickRow = {
   id: number;
   ticker: string;
   notes: string;
+  checklist: Record<string, boolean>;
   created_by_user_id: number | null;
   added_at: string | null;
   added_date: string | null;
@@ -1804,6 +1812,8 @@ export type MyPicksContextResponse = {
   total_count: number;
   rows: MyPickRow[];
   available_added_dates: string[];
+  fundamental_checklist: FundamentalChecklistItem[];
+  fundamental_summary: string[];
 };
 
 export type RrgUniverse = "sector" | "industry" | "theme";

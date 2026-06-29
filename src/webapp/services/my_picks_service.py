@@ -12,6 +12,66 @@ from src.webapp.repositories.watchlist_repository import WatchlistRepository
 from src.webapp.repositories.my_picks_repository import MyPicksRepository
 
 
+FUNDAMENTAL_CHECKLIST: tuple[dict[str, str], ...] = (
+    {
+        "key": "revenue_growth",
+        "label": "Revenue Growth",
+        "short_label": "Rev",
+        "description": "Revenue growth is strong, ideally 20% to 30%+ and not flattening or declining.",
+    },
+    {
+        "key": "eps_growth",
+        "label": "EPS Growth",
+        "short_label": "EPS",
+        "description": "EPS growth is strong and still improving year over year.",
+    },
+    {
+        "key": "eps_inflection",
+        "label": "EPS Inflection",
+        "short_label": "EPS Turn",
+        "description": "EPS is turning from negative to positive, or showing a major profitability inflection.",
+    },
+    {
+        "key": "margins_profitability",
+        "label": "Margins / Profitability",
+        "short_label": "Margin",
+        "description": "Margins and profitability look healthy or are improving.",
+    },
+    {
+        "key": "cashflow_net_income",
+        "label": "FCF / Net Income",
+        "short_label": "FCF",
+        "description": "Free cash flow and net income are positive or trending in the right direction.",
+    },
+    {
+        "key": "debt_equity",
+        "label": "Debt / Equity",
+        "short_label": "D/E",
+        "description": "Debt to equity looks reasonable and balance-sheet risk is acceptable.",
+    },
+    {
+        "key": "estimates_guidance",
+        "label": "Estimates / Guidance",
+        "short_label": "Guide",
+        "description": "Forward estimates, earnings beats, and guidance support the growth story.",
+    },
+    {
+        "key": "technical_confirmation",
+        "label": "Technical Confirmation",
+        "short_label": "TA",
+        "description": "Chart shows confirmation such as a constructive base, cup, or breakout setup.",
+    },
+    {
+        "key": "avoid_decliners",
+        "label": "Avoid Declining Names",
+        "short_label": "No Decline",
+        "description": "Revenue and EPS are not in a flat or declining trend.",
+    },
+)
+
+_CHECKLIST_KEYS = {item["key"] for item in FUNDAMENTAL_CHECKLIST}
+
+
 class MyPicksService:
     def __init__(self, *, repository: MyPicksRepository | None = None, database_url: str = "") -> None:
         self.repository = repository or MyPicksRepository(database_url=database_url)
@@ -30,6 +90,15 @@ class MyPicksService:
             "total_count": len(picks),
             "rows": picks,
             "available_added_dates": list(dict.fromkeys([str(row.get("added_date") or "") for row in picks if row.get("added_date")])),
+            "fundamental_checklist": list(FUNDAMENTAL_CHECKLIST),
+            "fundamental_summary": [
+                "Prioritize stocks with strong revenue growth, usually 20% to 30%+ and ideally accelerating.",
+                "EPS growth matters most; pay extra attention when EPS flips from negative to positive.",
+                "Check margins, profitability, free cash flow, net income, and debt/equity before trusting the story.",
+                "Use forward estimates, earnings beats, and guidance to confirm growth is likely to continue.",
+                "Avoid companies with flat or declining revenue and EPS, even if the brand is well known.",
+                "Only keep names that also have technical confirmation such as a strong base or breakout setup.",
+            ],
         }
 
     def create_pick(
@@ -45,6 +114,7 @@ class MyPicksService:
         created = self.repository.create_pick(
             ticker=normalized_ticker,
             notes=str(notes or "").strip(),
+            checklist=self._empty_checklist(),
             created_by_user_id=actor_user_id,
         )
         if created is None:
@@ -60,6 +130,27 @@ class MyPicksService:
         self._require_configured()
         if not self.repository.delete_pick(int(pick_id)):
             raise ValueError("Pick not found.")
+
+    def update_pick_checklist_item(self, *, pick_id: int, key: str, checked: bool) -> dict[str, Any]:
+        self._require_configured()
+        normalized_key = str(key or "").strip()
+        if normalized_key not in _CHECKLIST_KEYS:
+            raise ValueError("Unknown checklist item.")
+        rows = [self._serialize_pick(row) for row in self.repository.list_picks()]
+        target = next((row for row in rows if int(row.get("id") or 0) == int(pick_id)), None)
+        if target is None:
+            raise ValueError("Pick not found.")
+        checklist = dict(target.get("checklist") or {})
+        checklist[normalized_key] = bool(checked)
+        updated = self.repository.update_pick_checklist(int(pick_id), checklist)
+        if updated is None:
+            raise ValueError("Pick not found.")
+        row = self._serialize_pick(updated)
+        self._attach_rating_context([row])
+        self._attach_signal_context([row])
+        self._attach_trendline_context([row])
+        self._attach_price_change_context([row])
+        return row
 
     def _attach_rating_context(self, rows: list[dict[str, Any]]) -> None:
         tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
@@ -185,6 +276,7 @@ class MyPicksService:
             "id": int(row.get("id") or 0),
             "ticker": str(row.get("ticker") or "").upper(),
             "notes": str(row.get("notes") or ""),
+            "checklist": self._normalize_checklist(row.get("checklist_json")),
             "created_by_user_id": _safe_int(row.get("created_by_user_id")),
             "added_at": added_at,
             "added_date": added_date,
@@ -227,6 +319,13 @@ class MyPicksService:
         if not normalized:
             raise ValueError("Ticker is required.")
         return normalized
+
+    def _normalize_checklist(self, value: object) -> dict[str, bool]:
+        raw = value if isinstance(value, dict) else {}
+        return {key: bool(raw.get(key)) for key in _CHECKLIST_KEYS}
+
+    def _empty_checklist(self) -> dict[str, bool]:
+        return {key: False for key in _CHECKLIST_KEYS}
 
     def _require_configured(self) -> None:
         if not self.repository.is_configured():
