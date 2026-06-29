@@ -42,7 +42,14 @@ export function MyPicksPage() {
     setIsLoading(true);
     void fetchJson<MyPicksContextResponse>("/api/admin/my-picks")
       .then((payload) => {
-        setContext(payload);
+        setContext({
+          ...EMPTY_CONTEXT,
+          ...payload,
+          rows: Array.isArray(payload.rows) ? payload.rows : [],
+          available_added_dates: Array.isArray(payload.available_added_dates) ? payload.available_added_dates : [],
+          fundamental_checklist: Array.isArray(payload.fundamental_checklist) ? payload.fundamental_checklist : [],
+          fundamental_summary: Array.isArray(payload.fundamental_summary) ? payload.fundamental_summary : [],
+        });
       })
       .catch((error) => {
         setContext(EMPTY_CONTEXT);
@@ -357,7 +364,7 @@ export function MyPicksPage() {
         </div>
         <p className="panel-copy">Use this checklist to manually confirm whether each ticker matches the transcript's fundamental-analysis process before you keep sizing it up technically.</p>
         <div className="detail-subsection">
-          {context.fundamental_summary.map((item) => (
+          {(context.fundamental_summary ?? []).map((item) => (
             <p key={item} className="panel-copy">- {item}</p>
           ))}
         </div>
@@ -370,7 +377,7 @@ export function MyPicksPage() {
               </tr>
             </thead>
             <tbody>
-              {context.fundamental_checklist.map((item) => (
+              {(context.fundamental_checklist ?? []).map((item) => (
                 <tr key={item.key}>
                   <td>{item.label}</td>
                   <td>{item.description}</td>
@@ -458,7 +465,7 @@ export function MyPicksPage() {
           </div>
         ) : null}
         {viewMode === "list" && !groupByDate && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
-        {viewMode === "list" && !groupByDate && filteredRows.length > 0 ? <PicksTable rows={pagedRows} checklistItems={context.fundamental_checklist} checklistSaving={checklistSaving} onToggleChecklist={handleChecklistToggle} onDelete={handleDelete} isSaving={isSaving} /> : null}
+        {viewMode === "list" && !groupByDate && filteredRows.length > 0 ? <PicksTable rows={pagedRows} checklistItems={context.fundamental_checklist ?? []} checklistSaving={checklistSaving} onToggleChecklist={handleChecklistToggle} onDelete={handleDelete} isSaving={isSaving} /> : null}
         {viewMode === "list" && groupByDate && groupedRows.length === 0 ? <p className="panel-copy">No grouped picks match current filter.</p> : null}
         {viewMode === "list" && groupByDate
           ? groupedPagedRows.map((group) => (
@@ -469,7 +476,7 @@ export function MyPicksPage() {
                     <span className="eyebrow">{formatCount(group.rows.length)} names</span>
                   </div>
                 </div>
-                <PicksTable rows={group.rows} checklistItems={context.fundamental_checklist} checklistSaving={checklistSaving} onToggleChecklist={handleChecklistToggle} onDelete={handleDelete} isSaving={isSaving} />
+                <PicksTable rows={group.rows} checklistItems={context.fundamental_checklist ?? []} checklistSaving={checklistSaving} onToggleChecklist={handleChecklistToggle} onDelete={handleDelete} isSaving={isSaving} />
               </div>
             ))
           : null}
