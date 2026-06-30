@@ -4574,7 +4574,11 @@ a {
   }
 
   .scanner-idea-card {
-    min-height: 420px;
+    min-height: 360px;
+  }
+
+  .scanner-card-art {
+    min-height: 124px;
   }
 }
 
@@ -4583,12 +4587,12 @@ a {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .scanner-board-grid .scanner-idea-card:nth-child(6n + 1) {
-    grid-column: span 2;
+  .scanner-idea-card {
+    min-height: 380px;
   }
 
-  .scanner-board-grid .scanner-idea-card:nth-child(6n + 1) .scanner-card-art {
-    min-height: 170px;
+  .scanner-card-art {
+    min-height: 132px;
   }
 }
 

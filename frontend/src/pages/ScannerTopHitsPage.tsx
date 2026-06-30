@@ -10,6 +10,7 @@ import type { MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "rs" | "ta" | "fa";
 type SortDirection = "asc" | "desc";
 const PAGE_SIZE = 50;
+const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "sean_breakout", "venu_scanner"]);
 
 export function ScannerTopHitsPage() {
   const auth = useAuth();
@@ -20,6 +21,9 @@ export function ScannerTopHitsPage() {
   const [search, setSearch] = useState("");
   const [sectorFilter, setSectorFilter] = useState("all");
   const [eliteOnly, setEliteOnly] = useState(false);
+  const [hasLeadershipScannerOnly, setHasLeadershipScannerOnly] = useState(false);
+  const [hasFundamentalQualityOnly, setHasFundamentalQualityOnly] = useState(false);
+  const [leaderRsOnly, setLeaderRsOnly] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>("hits");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [currentPage, setCurrentPage] = useState(1);
@@ -73,15 +77,24 @@ export function ScannerTopHitsPage() {
     if (eliteOnly) {
       nextRows = nextRows.filter(isElitePick);
     }
+    if (hasLeadershipScannerOnly) {
+      nextRows = nextRows.filter(hasLeadershipScannerSignal);
+    }
+    if (hasFundamentalQualityOnly) {
+      nextRows = nextRows.filter(hasFundamentalQualitySignal);
+    }
+    if (leaderRsOnly) {
+      nextRows = nextRows.filter(hasLeaderRsRating);
+    }
     return [...nextRows].sort((left, right) => compareRows(left, right, sortBy, sortDirection, {
       sectorLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeSectorKey(item.sector)) : new Map<string, string>(),
       industryLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeIndustryKey(item.industry)) : new Map<string, string>(),
     }));
-  }, [eliteOnly, rows, search, sectorFilter, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, rows, search, sectorFilter, sortBy, sortDirection]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [eliteOnly, search, sectorFilter, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, search, sectorFilter, sortBy, sortDirection]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const normalizedPage = Math.min(currentPage, totalPages);
@@ -199,6 +212,30 @@ export function ScannerTopHitsPage() {
             <span>Only show elite candidates</span>
           </span>
           <span className="panel-copy">1D + 1W Strong Buy, and FA rank top 200 when present.</span>
+        </label>
+        <label className="scanner-result-filter panel">
+          <span>Scanner Mix</span>
+          <span className="scanner-result-check">
+            <input type="checkbox" checked={hasLeadershipScannerOnly} onChange={(event) => setHasLeadershipScannerOnly(event.target.checked)} />
+            <span>Has Trend Template, Sean BO, or Venu Scan</span>
+          </span>
+          <span className="panel-copy">Focus on names confirmed by your leadership-style scanners.</span>
+        </label>
+        <label className="scanner-result-filter panel">
+          <span>Fundamental Quality</span>
+          <span className="scanner-result-check">
+            <input type="checkbox" checked={hasFundamentalQualityOnly} onChange={(event) => setHasFundamentalQualityOnly(event.target.checked)} />
+            <span>Has Fundamental Quality</span>
+          </span>
+          <span className="panel-copy">Keep only names that also appear on the Fundamental Quality board.</span>
+        </label>
+        <label className="scanner-result-filter panel">
+          <span>RS Leader</span>
+          <span className="scanner-result-check">
+            <input type="checkbox" checked={leaderRsOnly} onChange={(event) => setLeaderRsOnly(event.target.checked)} />
+            <span>RS rating 90 or higher</span>
+          </span>
+          <span className="panel-copy">Using 90+ instead of 85 to better isolate true leaders.</span>
         </label>
         <div className="scanner-result-filter panel scanner-result-filter-actions">
           <span>Board Snapshot</span>
@@ -500,8 +537,24 @@ function isElitePick(row: ScannerTopHitRow) {
   return dailyLabel === "strong buy" && weeklyLabel === "strong buy" && faRankOk;
 }
 
+function hasLeadershipScannerSignal(row: ScannerTopHitRow) {
+  return row.scanners.some((scanner) => LEADERSHIP_SCANNER_IDS.has(normalizeScannerId(scanner.id)));
+}
+
+function hasFundamentalQualitySignal(row: ScannerTopHitRow) {
+  return row.scanners.some((scanner) => normalizeScannerId(scanner.id) === "fundamental_quality");
+}
+
+function hasLeaderRsRating(row: ScannerTopHitRow) {
+  return row.rs_rating != null && row.rs_rating >= 90;
+}
+
 function normalizeIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {
   return String(value?.rating_label || "").trim().toLowerCase();
+}
+
+function normalizeScannerId(value: string | null | undefined) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function normalizeIndustryKey(industry: string | null | undefined) {
