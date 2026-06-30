@@ -1293,7 +1293,7 @@ class WatchlistService:
         if not stem:
             return None
         entries = self.repository.load_watchlist(stem)
-        payload = self._extract_stored_canslim_hit(entries, ticker)
+        payload = self._normalize_canslim_snapshot(self._extract_stored_canslim_hit(entries, ticker))
         if payload is not None and self._is_complete_canslim_snapshot(payload):
             return payload
 
@@ -1313,7 +1313,7 @@ class WatchlistService:
         hits = raw_payload.get("hits") if isinstance(raw_payload, dict) else None
         if not isinstance(hits, list):
             return payload if self._is_complete_canslim_snapshot(payload or {}) else None
-        raw_hit = self._extract_stored_canslim_hit(hits, ticker)
+        raw_hit = self._normalize_canslim_snapshot(self._extract_stored_canslim_hit(hits, ticker))
         if raw_hit is not None:
             return raw_hit
         return payload if self._is_complete_canslim_snapshot(payload or {}) else None
@@ -1328,8 +1328,33 @@ class WatchlistService:
             return dict(item)
         return None
 
+    def _normalize_canslim_snapshot(self, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(payload, dict):
+            return None
+        normalized = dict(payload)
+        letter_scores = normalized.get("letter_scores")
+        if isinstance(letter_scores, dict):
+            raw_passes = normalized.get("letter_passes")
+            normalized_passes: dict[str, bool] = {}
+            if isinstance(raw_passes, dict):
+                normalized_passes.update({str(key): bool(value) for key, value in raw_passes.items()})
+            for key, value in letter_scores.items():
+                if key in normalized_passes:
+                    continue
+                normalized_passes[str(key)] = bool(value)
+            normalized["letter_passes"] = normalized_passes
+        if not isinstance(normalized.get("leader_flags"), list):
+            normalized["leader_flags"] = []
+        return normalized
+
     def _is_complete_canslim_snapshot(self, payload: dict[str, Any]) -> bool:
-        return isinstance(payload.get("letter_scores"), dict) and isinstance(payload.get("metrics"), dict) and isinstance(payload.get("reasons"), list)
+        return (
+            isinstance(payload.get("letter_scores"), dict)
+            and isinstance(payload.get("letter_passes"), dict)
+            and isinstance(payload.get("metrics"), dict)
+            and isinstance(payload.get("reasons"), list)
+            and isinstance(payload.get("leader_flags"), list)
+        )
 
     def _load_latest_stored_canslim_score_map(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
         return self.repository.load_latest_stored_canslim_score_map(tickers)

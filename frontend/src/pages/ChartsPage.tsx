@@ -1104,7 +1104,7 @@ export function ChartsPage() {
               {" · "}
               As Of: {formatLocalDate(canslimSnapshot.as_of_date)}
               {" · "}
-              Market: {canslimSnapshot.letter_passes.M ? "constructive" : "weak"}
+              Market: {canslimSnapshot.letter_passes?.M ? "constructive" : "weak"}
             </p>
             <div className="button-row" style={{ alignItems: "center", flexWrap: "wrap" }}>
               <span className={`scanner-score-pill ${toneForCanslimScore(canslimSnapshot.score, canslimSnapshot.max_score)}`}>
