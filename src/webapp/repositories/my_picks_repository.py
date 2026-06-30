@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 from typing import Any
 
@@ -70,12 +71,12 @@ class MyPicksRepository:
             return None
         sql = """
             INSERT INTO my_picks (ticker, notes, checklist_json, created_by_user_id)
-            VALUES (%s, %s, %s, %s)
+            VALUES (%s, %s, %s::jsonb, %s)
             RETURNING id, ticker, notes, checklist_json, created_by_user_id, created_at
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (ticker, notes, checklist or {}, created_by_user_id))
+                cursor.execute(sql, (ticker, notes, json.dumps(checklist or {}), created_by_user_id))
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
             connection.commit()
         return rows[0] if rows else None
@@ -98,13 +99,13 @@ class MyPicksRepository:
             return None
         sql = """
             UPDATE my_picks
-            SET checklist_json = %s
+            SET checklist_json = %s::jsonb
             WHERE id = %s
             RETURNING id, ticker, notes, checklist_json, created_by_user_id, created_at
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (checklist, pick_id))
+                cursor.execute(sql, (json.dumps(checklist), pick_id))
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
             connection.commit()
         return rows[0] if rows else None
