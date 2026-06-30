@@ -47,6 +47,23 @@ def _safe_float(value: object) -> float | None:
         return None
 
 
+def _normalize_eps_surprise_pct(
+    actual: float | None,
+    estimate: float | None,
+    provider_value: float | None,
+) -> float | None:
+    if actual is not None and estimate not in (None, 0):
+        try:
+            return ((float(actual) - float(estimate)) / abs(float(estimate))) * 100.0
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+    if provider_value is None:
+        return None
+    if abs(float(provider_value)) <= 2.0:
+        return float(provider_value) * 100.0
+    return float(provider_value)
+
+
 def _parse_date(value: object) -> dt.date | None:
     if not value:
         return None
@@ -236,7 +253,11 @@ class YFinanceEarningsClient:
                 reported_release_date = index_value.date()
             eps_actual = _safe_float(row.get("epsActual"))
             eps_estimate = _safe_float(row.get("epsEstimate"))
-            eps_surprise_pct = _safe_float(row.get("surprisePercent"))
+            eps_surprise_pct = _normalize_eps_surprise_pct(
+                eps_actual,
+                eps_estimate,
+                _safe_float(row.get("surprisePercent")),
+            )
 
         try:
             earnings_dates = stock.get_earnings_dates(limit=1)
@@ -354,7 +375,11 @@ def _build_fmp_annotation(
     eps_estimate = _safe_float(_value_from(calendar_row or {}, "epsEstimated", "epsEstimate", "estimatedEps"))
     revenue_actual = _safe_float(_value_from(calendar_row or {}, "revenue", "revenueActual", "actualRevenue"))
     revenue_estimate = _safe_float(_value_from(calendar_row or {}, "revenueEstimated", "revenueEstimate", "estimatedRevenue"))
-    eps_surprise_pct = _safe_float(_value_from(calendar_row or {}, "epsSurprisePercent", "epsSurprise", "surprisePercent"))
+    eps_surprise_pct = _normalize_eps_surprise_pct(
+        eps_actual,
+        eps_estimate,
+        _safe_float(_value_from(calendar_row or {}, "epsSurprisePercent", "epsSurprise", "surprisePercent")),
+    )
     revenue_surprise_pct = _safe_float(_value_from(calendar_row or {}, "revenueSurprisePercent", "revenueSurprise"))
 
     release_date = reported_release_date
@@ -419,7 +444,11 @@ def _build_ainvest_annotation(
         reported_release_date = _parse_date(latest.get("release_date"))
         eps_actual = _safe_float(latest.get("eps_actual"))
         eps_estimate = _safe_float(latest.get("eps_forecast"))
-        eps_surprise_pct = _safe_float(latest.get("eps_surprise"))
+        eps_surprise_pct = _normalize_eps_surprise_pct(
+            eps_actual,
+            eps_estimate,
+            _safe_float(latest.get("eps_surprise")),
+        )
         revenue_actual = _safe_float(latest.get("revenue_actual"))
         revenue_estimate = _safe_float(latest.get("revenue_forecast"))
         revenue_surprise_pct = _safe_float(latest.get("revenue_surprise"))
@@ -432,7 +461,11 @@ def _build_ainvest_annotation(
         release_date = upcoming_release_date
         eps_actual = _safe_float(upcoming.get("eps_actual"))
         eps_estimate = _safe_float(upcoming.get("eps_forecast"))
-        eps_surprise_pct = _safe_float(upcoming.get("eps_surprise"))
+        eps_surprise_pct = _normalize_eps_surprise_pct(
+            eps_actual,
+            eps_estimate,
+            _safe_float(upcoming.get("eps_surprise")),
+        )
         revenue_actual = _safe_float(upcoming.get("revenue_actual"))
         revenue_estimate = _safe_float(upcoming.get("revenue_forecast"))
         revenue_surprise_pct = _safe_float(upcoming.get("revenue_surprise"))

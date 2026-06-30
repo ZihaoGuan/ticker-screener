@@ -9,6 +9,8 @@ from .config import AppConfig
 from .base_detection_screen import find_active_base_detection_hit
 from .cup_detection_screen import find_active_cup_detection_hit
 from .double_bottom_detection_screen import find_active_double_bottom_detection_hit
+from .earnings_gap_screen import run_earnings_gap_screen
+from .elite_rs_screen import run_elite_rs_screen
 from .ema21_pullback_buy_screen import find_recent_ema21_pullback_buy_hit
 from .cup_handle_screen import run_cup_handle_screen
 from .fearzone_zeiierman_screen import find_recent_fearzone_zeiierman_hit
@@ -810,6 +812,121 @@ def _run_trend_template(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult
     )
 
 
+def _run_elite_rs_hv1(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    result = run_elite_rs_screen(config, [_ticker_from_bundle(bundle)], profile="hv1", as_of_date=bundle.as_of_date)
+    hits = list(getattr(result, "hits", []))
+    failures = list(getattr(result, "failed_tickers", []))
+    if failures:
+        return ScreenerEvaluationResult(passed=False, error=str(failures[0].get("error") or "unknown screener failure"))
+    if not hits:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hits[0].to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "rs_rating": payload["rs_rating"],
+            "volume_signal_kind": payload["volume_signal_kind"],
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_elite_rs_recent_peg(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    result = run_elite_rs_screen(config, [_ticker_from_bundle(bundle)], profile="recent-peg", as_of_date=bundle.as_of_date)
+    hits = list(getattr(result, "hits", []))
+    failures = list(getattr(result, "failed_tickers", []))
+    if failures:
+        return ScreenerEvaluationResult(passed=False, error=str(failures[0].get("error") or "unknown screener failure"))
+    if not hits:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hits[0].to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "rs_rating": payload["rs_rating"],
+            "peg_date": payload["peg_date"],
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_pine_peg(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    result = run_earnings_gap_screen(config, [_ticker_from_bundle(bundle)], profile="peg", as_of_date=bundle.as_of_date)
+    hits = list(getattr(result, "hits", []))
+    failures = list(getattr(result, "failed_tickers", []))
+    if failures:
+        return ScreenerEvaluationResult(passed=False, error=str(failures[0].get("error") or "unknown screener failure"))
+    if not hits:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hits[0].to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "close_gap_pct": payload["close_gap_pct"],
+            "volume_ratio": payload["volume_ratio"],
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_monster_gap(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    result = run_earnings_gap_screen(config, [_ticker_from_bundle(bundle)], profile="monster-gap", as_of_date=bundle.as_of_date)
+    hits = list(getattr(result, "hits", []))
+    failures = list(getattr(result, "failed_tickers", []))
+    if failures:
+        return ScreenerEvaluationResult(passed=False, error=str(failures[0].get("error") or "unknown screener failure"))
+    if not hits:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hits[0].to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "close_gap_pct": payload["close_gap_pct"],
+            "volume_ratio": payload["volume_ratio"],
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_monster_peg(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    result = run_earnings_gap_screen(config, [_ticker_from_bundle(bundle)], profile="monster-peg", as_of_date=bundle.as_of_date)
+    hits = list(getattr(result, "hits", []))
+    failures = list(getattr(result, "failed_tickers", []))
+    if failures:
+        return ScreenerEvaluationResult(passed=False, error=str(failures[0].get("error") or "unknown screener failure"))
+    if not hits:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hits[0].to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "close_gap_pct": payload["close_gap_pct"],
+            "earnings_release_date": payload.get("earnings_release_date"),
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_market_correction_resilience(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     if bundle.benchmark_bars is None:
@@ -992,6 +1109,41 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=5000,
             warmup_trading_days=5,
             evaluator=_run_hve,
+        ),
+        "elite_rs_hv1": ScreenerSpec(
+            id="elite_rs_hv1",
+            required_inputs=("metadata",),
+            lookback_trading_days=5000,
+            warmup_trading_days=20,
+            evaluator=_run_elite_rs_hv1,
+        ),
+        "elite_rs_recent_peg": ScreenerSpec(
+            id="elite_rs_recent_peg",
+            required_inputs=("metadata",),
+            lookback_trading_days=5000,
+            warmup_trading_days=20,
+            evaluator=_run_elite_rs_recent_peg,
+        ),
+        "pine_peg": ScreenerSpec(
+            id="pine_peg",
+            required_inputs=("metadata",),
+            lookback_trading_days=5000,
+            warmup_trading_days=50,
+            evaluator=_run_pine_peg,
+        ),
+        "monster_gap": ScreenerSpec(
+            id="monster_gap",
+            required_inputs=("metadata",),
+            lookback_trading_days=5000,
+            warmup_trading_days=50,
+            evaluator=_run_monster_gap,
+        ),
+        "monster_peg": ScreenerSpec(
+            id="monster_peg",
+            required_inputs=("metadata",),
+            lookback_trading_days=5000,
+            warmup_trading_days=50,
+            evaluator=_run_monster_peg,
         ),
         "inside_dryup": ScreenerSpec(
             id="inside_dryup",
