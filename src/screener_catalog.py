@@ -42,6 +42,7 @@ from .vcp_scored_screen import VCP_SCORED_HISTORY_DAYS, score_vcp_hit
 from .td_sequential_screen import find_recent_td_sequential_hit
 from .three_weeks_tight_screen import find_three_weeks_tight_hit
 from .trend_template_screen import run_trend_template_screen
+from .market_correction_resilience_screen import evaluate_market_correction_resilience, evaluate_market_correction_state
 from .universe import UniverseTicker
 from .vcp_screen import run_vcp_screen
 from .vcs_screen import find_recent_vcs_hit
@@ -809,6 +810,50 @@ def _run_trend_template(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult
     )
 
 
+def _run_market_correction_resilience(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    if bundle.benchmark_bars is None:
+        return ScreenerEvaluationResult(passed=False, error="missing benchmark bars for market correction resilience")
+    market_state = evaluate_market_correction_state(bundle.benchmark_bars, config)
+    if market_state is None:
+        return ScreenerEvaluationResult(passed=False, error=f"unable to evaluate {config.benchmark_ticker.upper()} correction state")
+    if not market_state.market_in_correction:
+        return ScreenerEvaluationResult(
+            passed=False,
+            metrics={
+                "ticker": bundle.ticker,
+                "benchmark_drawdown_pct": market_state.drawdown_from_high_pct,
+                "market_gate_active": False,
+            },
+            reasons=tuple(market_state.reasons),
+        )
+    snapshot = evaluate_market_correction_resilience(bundle.bars, config)
+    if snapshot is None or not snapshot.matched:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker, "market_gate_active": True})
+    metadata = dict(bundle.metadata or {})
+    payload = {
+        "ticker": bundle.ticker,
+        "sector": metadata.get("sector"),
+        "industry": metadata.get("industry"),
+        "exchange": metadata.get("exchange"),
+        "signal_date": bundle.as_of_date.isoformat(),
+        "benchmark_ticker": market_state.benchmark_ticker,
+        "benchmark_drawdown_pct": market_state.drawdown_from_high_pct,
+        **snapshot.to_dict(),
+    }
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "rs_rating": payload["rs_rating"],
+            "benchmark_drawdown_pct": payload["benchmark_drawdown_pct"],
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_stockbee_momentum_burst(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     hit = find_recent_stockbee_momentum_burst_hit(
         bundle.bars,
@@ -1203,6 +1248,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=320,
             warmup_trading_days=20,
             evaluator=_run_trend_template,
+        ),
+        "market_correction_resilience": ScreenerSpec(
+            id="market_correction_resilience",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=max(int(config.market_correction_benchmark_history_days), 320),
+            warmup_trading_days=20,
+            evaluator=_run_market_correction_resilience,
         ),
         "stockbee_momentum_burst": ScreenerSpec(
             id="stockbee_momentum_burst",

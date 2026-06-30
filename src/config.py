@@ -142,6 +142,14 @@ class AppConfig:
     cup_handle_volume_average_days: int = 50
     cup_handle_enable_bullish: bool = True
     cup_handle_enable_bearish: bool = False
+    market_correction_benchmark_drawdown_pct: float = 5.0
+    market_correction_benchmark_ma_short_period: int = 21
+    market_correction_benchmark_ma_medium_period: int = 50
+    market_correction_benchmark_history_days: int = 1260
+    market_correction_stock_ema_short_period: int = 21
+    market_correction_stock_ema_weekly_period: int = 40
+    market_correction_stock_max_distance_from_52wk_high_pct: float = 10.0
+    market_correction_stock_min_rs_rating: float = 90.0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
