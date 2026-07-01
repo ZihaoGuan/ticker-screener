@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import datetime as dt
+from numbers import Real
 from typing import Sequence
 
 from .ratings.repository import RatingsRepository
@@ -51,6 +52,17 @@ class IndustryGroupRsRankScreenResult:
         }
 
 
+def _coerce_real(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, Real):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def run_industry_group_rs_rank_screen(*, database_url: str, as_of_date: dt.date | None = None, tickers: Sequence[str] | None = None, minimum_rank: float = 90.0) -> IndustryGroupRsRankScreenResult:
     repository = RatingsRepository(database_url)
     target_tickers = [str(item or "").strip().upper() for item in (tickers or []) if str(item or "").strip()]
@@ -64,10 +76,10 @@ def run_industry_group_rs_rank_screen(*, database_url: str, as_of_date: dt.date 
         snapshot = snapshots.get(ticker) or {}
         if snapshot:
             snapshot_count += 1
-        rank = snapshot.get("industry_group_rs_rank")
-        if isinstance(rank, (int, float)):
+        rank = _coerce_real(snapshot.get("industry_group_rs_rank"))
+        if rank is not None:
             ranked_snapshot_count += 1
-        if not isinstance(rank, (int, float)) or float(rank) <= float(minimum_rank):
+        if rank is None or rank <= float(minimum_rank):
             continue
         hits.append(IndustryGroupRsRankHit(
             ticker=ticker,
@@ -75,7 +87,7 @@ def run_industry_group_rs_rank_screen(*, database_url: str, as_of_date: dt.date 
             sector=snapshot.get("sector"),
             industry=snapshot.get("industry"),
             industry_group=snapshot.get("industry_group"),
-            industry_group_rs_rank=round(float(rank), 1),
+            industry_group_rs_rank=round(rank, 1),
             industry_group_member_count=int(snapshot["industry_group_member_count"]) if snapshot.get("industry_group_member_count") is not None else None,
             daily_rs_rating=float(snapshot["daily_rs_rating"]) if snapshot.get("daily_rs_rating") is not None else None,
             weekly_rs_rating=float(snapshot["weekly_rs_rating"]) if snapshot.get("weekly_rs_rating") is not None else None,
@@ -83,7 +95,7 @@ def run_industry_group_rs_rank_screen(*, database_url: str, as_of_date: dt.date 
             technical_rating=float(snapshot["overall_rating"]) if snapshot.get("overall_rating") is not None else None,
             rating_band=snapshot.get("rating_band"),
             reasons=[
-                f"Industry-group RS {float(rank):.1f}",
+                f"Industry-group RS {rank:.1f}",
                 f"Daily RS {float(snapshot['daily_rs_rating']):.1f}" if snapshot.get("daily_rs_rating") is not None else "Daily RS unavailable",
                 f"Leadership {float(snapshot['leadership_score']):.1f}" if snapshot.get("leadership_score") is not None else "Leadership unavailable",
             ],
