@@ -366,6 +366,7 @@ export function ChartsPage() {
   const earningsRows = fundamentalsPayload?.earnings_eps_history ?? [];
   const latestFundamentalsSnapshot = fundamentalsPayload?.fundamentals_snapshot ?? null;
   const latestRatingSnapshot = fundamentalsPayload?.rating_snapshot ?? null;
+  const latestTechnicalSnapshot = fundamentalsPayload?.technical_snapshot ?? null;
   const latestFundamentalRank = fundamentalsPayload?.fundamental_rank ?? null;
   const latestRatingDiagnostics = fundamentalsPayload?.rating_diagnostics ?? null;
   const technicalIndicatorRatings = fundamentalsPayload?.technical_indicator_ratings ?? {};

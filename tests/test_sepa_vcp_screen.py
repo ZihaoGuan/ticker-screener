@@ -76,7 +76,7 @@ class SepaVcpScreenTests(unittest.TestCase):
 
         self.assertIsNotNone(hit)
         assert hit is not None
-        self.assertEqual(hit.signal_kind, "recent_vcp_squeeze")
+        self.assertEqual(hit.signal_kind, "sepa_trend_template")
         self.assertEqual(hit.tpr_status, "PASSED")
         self.assertEqual(hit.buy_risk_status, "Low Risk")
         self.assertGreater(hit.rpr_score, 80.0)
@@ -85,3 +85,4 @@ class SepaVcpScreenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

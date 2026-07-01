@@ -41,6 +41,9 @@ type ScannerRow = {
   perfYtdPct: number | null;
   canslimScore: number | null;
   canslimMaxScore: number | null;
+  accelScore: number | null;
+  accelLabel: string;
+  indRsScore: number | null;
   arsScore: number | null;
   alsScore: number | null;
   technicalIndicator1d: string;
@@ -289,7 +292,7 @@ export function ScannerResultPage() {
       return;
     }
     const lines = [
-      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "1Y %", "YTD %", "TA", "1D", "1W", "FA", "CANSLIM", "ARS", "ALS Score", "Setup", "Summary"].join(","),
+      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "1Y %", "YTD %", "TA", "1D", "1W", "FA", "CANSLIM", "Accel", "Ind RS", "ARS", "ALS Score", "Setup", "Summary"].join(","),
       ...filteredRows.map((row) =>
         [
           row.ticker,
@@ -513,6 +516,8 @@ export function ScannerResultPage() {
                       <th>1W</th>
                       <th>{renderSortHeader("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                       <th>CANSLIM</th>
+                      <th>Accel</th>
+                      <th>Ind RS</th>
                       <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                       <th>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     </tr>
@@ -613,6 +618,9 @@ function buildScannerRow(
   const directTechnicalOverall = typeof entry.ta_rating === "number" ? entry.ta_rating : null;
   const directFundamentalOverall = typeof entry.fa_rating === "number" ? entry.fa_rating : null;
   const directLeadershipOverall = typeof entry.rs_rating === "number" ? entry.rs_rating : null;
+  const directAccelerationScore = typeof entry.growth_acceleration_score === "number" ? entry.growth_acceleration_score : typeof entry.acceleration_score === "number" ? entry.acceleration_score : null;
+  const directAccelerationLabel = typeof entry.growth_acceleration_label === "string" ? entry.growth_acceleration_label : typeof entry.acceleration_label === "string" ? entry.acceleration_label : "";
+  const directIndustryGroupRs = typeof entry.industry_group_rs_rank === "number" ? entry.industry_group_rs_rank : null;
   const technicalOverall = directTechnicalOverall ?? technical?.overall_rating ?? null;
   const fundamentalOverall = directFundamentalOverall ?? fundamental?.overall_rating ?? null;
   const leadershipOverall = directLeadershipOverall ?? technical?.leadership_score ?? null;
@@ -633,6 +641,9 @@ function buildScannerRow(
     perfYtdPct: directPerfYtd ?? fundamental?.perf_ytd_pct ?? null,
     canslimScore: directCanslimScore,
     canslimMaxScore: directCanslimMaxScore,
+    accelScore: directAccelerationScore,
+    accelLabel: directAccelerationLabel,
+    indRsScore: directIndustryGroupRs ?? technical?.industry_group_rs_rank ?? null,
     taScore: technicalOverall != null ? technicalOverall / 10 : null,
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,
@@ -783,6 +794,13 @@ function formatCanslimScore(score: number | null, maxScore: number | null) {
     return "--";
   }
   return `${score}/${maxScore ?? 14}`;
+}
+
+function formatAccelerationScore(score: number | null, label: string) {
+  if (score == null) {
+    return "--";
+  }
+  return label ? `${Math.round(score)} ${label}` : `${Math.round(score)}`;
 }
 
 function toneForScore(value: number | null, max: number) {

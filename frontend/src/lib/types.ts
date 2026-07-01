@@ -237,6 +237,14 @@ export type ScannerTopHitRow = {
   rs_rating: number | null;
   ta_rating: number | null;
   fa_rating: number | null;
+  daily_rs_rating?: number | null;
+  weekly_rs_rating?: number | null;
+  industry_group?: string | null;
+  industry_group_rs_rank?: number | null;
+  industry_group_member_count?: number | null;
+  growth_acceleration_score?: number | null;
+  growth_acceleration_label?: string | null;
+  growth_acceleration_pass_count?: number | null;
   canslim_score?: number | null;
   canslim_max_score?: number | null;
   canslim_rank?: number | null;
@@ -1016,6 +1024,22 @@ export type ChartFundamentalsResponse = {
     missing_metric_names: string[];
     insufficient_baseline_metrics: string[];
   } | null;
+  technical_snapshot?: {
+    as_of_date: string;
+    sector?: string | null;
+    industry?: string | null;
+    overall_rating: number | null;
+    daily_rs_rating?: number | null;
+    weekly_rs_rating?: number | null;
+    leadership_score?: number | null;
+    industry_group?: string | null;
+    industry_group_rs_rank?: number | null;
+    industry_group_member_count?: number | null;
+    rating_band?: string | null;
+    technical_status?: string | null;
+    technical_status_reason?: string | null;
+    flags?: string[];
+  } | null;
   technical_indicator_ratings?: Record<string, TechnicalIndicatorRatingCell>;
   canslim_v2_score?: number | null;
   canslim_v2_max_score?: number | null;
@@ -1025,6 +1049,10 @@ export type ChartFundamentalsResponse = {
   vcp_execution_state?: string | null;
   vcp_pattern_type?: string | null;
   vcp_signal_date?: string | null;
+  growth_acceleration_score?: number | null;
+  growth_acceleration_label?: string | null;
+  growth_acceleration_pass_count?: number | null;
+  growth_acceleration_signal_date?: string | null;
   canslim_snapshot?: {
     ticker: string;
     sector: string | null;
@@ -1128,8 +1156,13 @@ export type TopTechnicalRatingEntry = {
   trend_regime_score: number | null;
   dma_speed_score: number | null;
   divergence_health_score: number | null;
+  daily_rs_rating?: number | null;
+  weekly_rs_rating?: number | null;
   leadership_score: number | null;
   structure_volume_score: number | null;
+  industry_group?: string | null;
+  industry_group_rs_rank?: number | null;
+  industry_group_member_count?: number | null;
   rating_band: string | null;
   technical_status: string | null;
   technical_status_reason: string | null;

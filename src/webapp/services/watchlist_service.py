@@ -228,6 +228,24 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "minervini_growth_acceleration",
+        "strategy_id": "minervini_growth_acceleration",
+        "label": "Minervini Growth Accel",
+        "description": "Names passing annual and quarterly EPS plus revenue growth-and-acceleration checks in one combined Minervini-style growth screen.",
+        "timeframe": "Daily",
+        "accent": "lime",
+        "bias_group": "bullish",
+    },
+    {
+        "id": "industry_group_rs_rank",
+        "strategy_id": "industry_group_rs_rank",
+        "label": "Industry Group RS Rank",
+        "description": "Daily technical leaders with persisted industry-group RS rank above 90 on the 0-99 scale.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+        "bias_group": "bullish",
+    },
+    {
         "id": "venu_scanner",
         "strategy_id": "venu_scanner",
         "label": "Venu Scanner",
@@ -830,6 +848,7 @@ class WatchlistService:
             )
         ) if previous_meta else set()
         entries = self._enrich_entries(self._filter_excluded_entries(self.repository.load_watchlist(stem)))
+        self._attach_entry_latest_rating_snapshots(entries)
         self._attach_entry_technical_indicator_ratings(entries)
         has_previous_scan = previous_meta is not None
         if has_previous_scan:
@@ -1188,6 +1207,9 @@ class WatchlistService:
         stored_canslim_score = canslim_score_map.get(normalized_ticker) or {}
         vcp_score_map = self._load_latest_stored_vcp_score_map([normalized_ticker])
         stored_vcp_score = vcp_score_map.get(normalized_ticker) or {}
+        growth_acceleration_map = self._load_latest_stored_growth_acceleration_map([normalized_ticker])
+        stored_growth_acceleration = growth_acceleration_map.get(normalized_ticker) or {}
+        technical_snapshot = ratings_repository.load_latest_technical_rating_snapshots_for_tickers([normalized_ticker], allow_older_as_of_date=True).get(normalized_ticker, {}) if ratings_repository else {}
 
         canslim_snapshot = self._load_latest_stored_canslim_snapshot(normalized_ticker)
         if canslim_snapshot is None and ratings_repository and ratings_bundle:
@@ -1303,6 +1325,7 @@ class WatchlistService:
             "rating_snapshot": ratings_bundle.get("rating_snapshot") if ratings_bundle else None,
             "fundamental_rank": ratings_bundle.get("fundamental_rank") if ratings_bundle else None,
             "rating_diagnostics": ratings_bundle.get("rating_diagnostics") if ratings_bundle else None,
+            "technical_snapshot": technical_snapshot,
             "technical_indicator_ratings": technical_indicator_ratings,
             "canslim_v2_score": stored_canslim_score.get("canslim_score"),
             "canslim_v2_max_score": stored_canslim_score.get("canslim_max_score"),
@@ -1312,6 +1335,10 @@ class WatchlistService:
             "vcp_execution_state": stored_vcp_score.get("vcp_execution_state"),
             "vcp_pattern_type": stored_vcp_score.get("vcp_pattern_type"),
             "vcp_signal_date": stored_vcp_score.get("vcp_signal_date"),
+            "growth_acceleration_score": stored_growth_acceleration.get("growth_acceleration_score"),
+            "growth_acceleration_label": stored_growth_acceleration.get("growth_acceleration_label"),
+            "growth_acceleration_pass_count": stored_growth_acceleration.get("growth_acceleration_pass_count"),
+            "growth_acceleration_signal_date": stored_growth_acceleration.get("growth_acceleration_signal_date"),
             "canslim_snapshot": canslim_snapshot,
             "diagnostics": {
                 "earnings": browser_diagnostics["earnings"],
@@ -1406,6 +1433,9 @@ class WatchlistService:
 
     def _load_latest_stored_vcp_score_map(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
         return self.repository.load_latest_stored_vcp_score_map(tickers)
+
+    def _load_latest_stored_growth_acceleration_map(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
+        return self.repository.load_latest_stored_growth_acceleration_map(tickers)
 
     def get_top_ratings_payload(
         self,
@@ -1782,6 +1812,13 @@ class WatchlistService:
         if vcp_score is None:
             vcp_score = _coerce_optional_float(entry.get("vcp_score"))
         vcp_rating = _coalesce_text(bucket.get("vcp_rating"), entry.get("vcp_rating"), entry.get("score_label"))
+        industry_group_rs_rank = bucket.get("industry_group_rs_rank")
+        if industry_group_rs_rank is None:
+            industry_group_rs_rank = _coerce_optional_float(entry.get("industry_group_rs_rank"))
+        growth_acceleration_score = bucket.get("growth_acceleration_score")
+        if growth_acceleration_score is None:
+            growth_acceleration_score = _coerce_optional_float(entry.get("growth_acceleration_score") or entry.get("acceleration_score"))
+        growth_acceleration_label = _coalesce_text(bucket.get("growth_acceleration_label"), entry.get("growth_acceleration_label"), entry.get("acceleration_label"))
         technical_indicator_ratings = bucket.get("technical_indicator_ratings")
         if not isinstance(technical_indicator_ratings, dict) or not technical_indicator_ratings:
             raw_indicator_ratings = entry.get("technical_indicator_ratings")
@@ -1803,6 +1840,9 @@ class WatchlistService:
         bucket["canslim_max_score"] = canslim_max_score
         bucket["vcp_score"] = vcp_score
         bucket["vcp_rating"] = vcp_rating
+        bucket["industry_group_rs_rank"] = industry_group_rs_rank
+        bucket["growth_acceleration_score"] = growth_acceleration_score
+        bucket["growth_acceleration_label"] = growth_acceleration_label
         bucket["technical_indicator_ratings"] = technical_indicator_ratings
 
     def _select_scanner_top_hit_live_cards(self, board_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1900,6 +1940,7 @@ class WatchlistService:
         technical_indicator_map = repository.load_latest_technical_indicator_ratings_for_tickers(tickers)
         canslim_map = self._load_latest_stored_canslim_score_map(tickers)
         vcp_map = self._load_latest_stored_vcp_score_map(tickers)
+        growth_acceleration_map = self._load_latest_stored_growth_acceleration_map(tickers)
         for ticker in tickers:
             row = rows_by_ticker.get(ticker)
             if row is None:
@@ -1909,6 +1950,7 @@ class WatchlistService:
             technical_indicator = technical_indicator_map.get(ticker) or {}
             canslim = canslim_map.get(ticker) or {}
             vcp = vcp_map.get(ticker) or {}
+            growth_acceleration = growth_acceleration_map.get(ticker) or {}
             if not row.get("sector"):
                 row["sector"] = _coalesce_text(row.get("sector"), fundamental.get("sector"), technical.get("sector"))
             row["perf_year_pct"] = _coerce_optional_float(fundamental.get("perf_year_pct"))
@@ -1917,11 +1959,20 @@ class WatchlistService:
             row["fa_current_rank"] = _coerce_optional_int(fundamental.get("current_rank"))
             row["ta_rating"] = _coerce_optional_float(technical.get("overall_rating"))
             row["rs_rating"] = _coerce_optional_float(technical.get("leadership_score"))
+            row["daily_rs_rating"] = _coerce_optional_float(technical.get("daily_rs_rating"))
+            row["weekly_rs_rating"] = _coerce_optional_float(technical.get("weekly_rs_rating"))
+            row["industry_group"] = _coalesce_text(technical.get("industry_group"))
+            row["industry_group_rs_rank"] = _coerce_optional_float(technical.get("industry_group_rs_rank"))
+            row["industry_group_member_count"] = _coerce_optional_int(technical.get("industry_group_member_count"))
             row["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))
             row["canslim_max_score"] = _coerce_optional_int(canslim.get("canslim_max_score"))
             row["canslim_rank"] = _coerce_optional_int(canslim.get("canslim_rank"))
             row["vcp_score"] = _coerce_optional_float(vcp.get("vcp_score"))
             row["vcp_rating"] = _coalesce_text(vcp.get("vcp_rating"))
+            row["growth_acceleration_score"] = _coerce_optional_float(growth_acceleration.get("growth_acceleration_score"))
+            row["growth_acceleration_label"] = _coalesce_text(growth_acceleration.get("growth_acceleration_label"))
+            row["growth_acceleration_pass_count"] = _coerce_optional_int(growth_acceleration.get("growth_acceleration_pass_count"))
+            row["growth_acceleration_signal_date"] = _coalesce_text(growth_acceleration.get("growth_acceleration_signal_date"))
             row["technical_indicator_ratings"] = technical_indicator
 
     def _attach_top_rows_latest_scanner_hit_counts(
@@ -1973,6 +2024,7 @@ class WatchlistService:
         technical_map = repository.load_latest_technical_rating_snapshots_for_tickers(tickers)
         canslim_map = self._load_latest_stored_canslim_score_map(tickers)
         vcp_map = self._load_latest_stored_vcp_score_map(tickers)
+        growth_acceleration_map = self._load_latest_stored_growth_acceleration_map(tickers)
         for entry in entries:
             ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
             if not ticker:
@@ -1981,16 +2033,26 @@ class WatchlistService:
             technical = technical_map.get(ticker) or {}
             canslim = canslim_map.get(ticker) or {}
             vcp = vcp_map.get(ticker) or {}
+            growth_acceleration = growth_acceleration_map.get(ticker) or {}
             entry["perf_year_pct"] = _coerce_optional_float(fundamental.get("perf_year_pct"))
             entry["perf_ytd_pct"] = _coerce_optional_float(fundamental.get("perf_ytd_pct"))
             entry["fa_rating"] = _coerce_optional_float(fundamental.get("overall_rating"))
             entry["ta_rating"] = _coerce_optional_float(technical.get("overall_rating"))
             entry["rs_rating"] = _coerce_optional_float(technical.get("leadership_score"))
+            entry["daily_rs_rating"] = _coerce_optional_float(technical.get("daily_rs_rating"))
+            entry["weekly_rs_rating"] = _coerce_optional_float(technical.get("weekly_rs_rating"))
+            entry["industry_group"] = _coalesce_text(technical.get("industry_group"))
+            entry["industry_group_rs_rank"] = _coerce_optional_float(technical.get("industry_group_rs_rank"))
+            entry["industry_group_member_count"] = _coerce_optional_int(technical.get("industry_group_member_count"))
             entry["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))
             entry["canslim_max_score"] = _coerce_optional_int(canslim.get("canslim_max_score"))
             entry["canslim_rank"] = _coerce_optional_int(canslim.get("canslim_rank"))
             entry["vcp_score"] = _coerce_optional_float(vcp.get("vcp_score"))
             entry["vcp_rating"] = _coalesce_text(vcp.get("vcp_rating"))
+            entry["growth_acceleration_score"] = _coerce_optional_float(growth_acceleration.get("growth_acceleration_score"))
+            entry["growth_acceleration_label"] = _coalesce_text(growth_acceleration.get("growth_acceleration_label"))
+            entry["growth_acceleration_pass_count"] = _coerce_optional_int(growth_acceleration.get("growth_acceleration_pass_count"))
+            entry["growth_acceleration_signal_date"] = _coalesce_text(growth_acceleration.get("growth_acceleration_signal_date"))
 
     def _attach_top_rows_canslim_scores(self, rows: list[dict[str, Any]]) -> None:
         if not rows:

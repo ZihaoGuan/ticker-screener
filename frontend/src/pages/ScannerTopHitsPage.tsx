@@ -345,6 +345,8 @@ export function ScannerTopHitsPage() {
                       <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
                       <td data-label="CAN V2">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
                       <td data-label="VCP">{formatVcpScore(row.vcp_score, row.vcp_rating)}</td>
+                      <td data-label="Accel">{formatAccelerationScore(row.growth_acceleration_score, row.growth_acceleration_label)}</td>
+                      <td data-label="Ind RS">{formatRating(row.industry_group_rs_rank ?? null)}</td>
                       <td data-label="RS">{formatRating(row.rs_rating)}</td>
                       <td data-label="TA">{formatRating(row.ta_rating)}</td>
                       <td data-label="1D">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1d"])}</td>
@@ -524,6 +526,14 @@ function formatVcpScore(score: number | null | undefined, rating: string | null 
 
 function formatCompactNumber(value: number | null | undefined) {
   return value == null ? "--" : value.toFixed(1);
+}
+
+function formatAccelerationScore(score: number | null | undefined, label: string | null | undefined) {
+  if (score == null || Number.isNaN(score)) {
+    return "--";
+  }
+  const base = score.toFixed(0);
+  return label ? `${base} ${label}` : base;
 }
 
 function formatTechnicalIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {

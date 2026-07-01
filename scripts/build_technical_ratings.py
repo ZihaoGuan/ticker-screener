@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_app_config, today_label
-from src.market_data_access import load_many_ticker_windows
+from src.market_data_access import load_many_ticker_windows, load_ticker_metadata_map
 from src.ratings.calculator import build_technical_rating
 from src.ratings.models import TechnicalSnapshotInput
 from src.ratings.repository import RatingsRepository
@@ -119,6 +119,42 @@ def _compute_weighted_rs_score(stock: pd.Series, benchmark: pd.Series) -> pd.Ser
 def _compute_rs_rating_series(stock_close: pd.Series, benchmark_close: pd.Series) -> pd.Series:
     score_series = _compute_weighted_rs_score(stock_close, benchmark_close)
     return score_series.apply(_approximate_rs_rating).dropna().astype(float)
+
+
+def _normalize_industry_group(value: object) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _assign_industry_group_rs_ranks(
+    ratings: list,
+    metadata_map: dict[str, dict[str, object]],
+) -> None:
+    grouped: dict[str, list] = {}
+    for rating in ratings:
+        industry_group = _normalize_industry_group((metadata_map.get(rating.ticker.upper()) or {}).get("industry"))
+        rating.industry_group = industry_group
+        rating.industry_group_rs_rank = None
+        rating.industry_group_member_count = None
+        if industry_group is None or rating.daily_rs_rating is None:
+            continue
+        grouped.setdefault(industry_group, []).append(rating)
+
+    for industry_group, group_ratings in grouped.items():
+        ordered = sorted(
+            group_ratings,
+            key=lambda item: (-(float(item.daily_rs_rating or 0.0)), item.ticker),
+        )
+        member_count = len(ordered)
+        for index, rating in enumerate(ordered):
+            rating.industry_group = industry_group
+            rating.industry_group_member_count = member_count
+            if member_count <= 1:
+                rating.industry_group_rs_rank = 99.0
+                continue
+            percentile = ((member_count - index - 1) / (member_count - 1)) * 99.0
+            rating.industry_group_rs_rank = round(percentile, 1)
+
 
 
 def _build_technical_snapshot_input(
@@ -236,6 +272,7 @@ def main() -> int:
         320,
         database_url=database_url,
     )
+    metadata_map = load_ticker_metadata_map(target_tickers, database_url=database_url)
     benchmark_frame = frame_map.get(benchmark_ticker)
     if benchmark_frame is None or benchmark_frame.empty:
         raise RuntimeError(f"No benchmark daily_bars coverage found for {benchmark_ticker} on or before {as_of_date.isoformat()}.")
@@ -250,6 +287,8 @@ def main() -> int:
         if rating.technical_status == "ok":
             ok_count += 1
         print(f"[{index}/{total}] technical_rating {ticker} status={rating.technical_status}", flush=True)
+
+    _assign_industry_group_rs_ranks(ratings, metadata_map)
 
     count = repository.replace_technical_rating_snapshots(
         as_of_date,

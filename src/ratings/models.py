@@ -159,8 +159,13 @@ class TechnicalRatingSnapshot:
     trend_regime_score: float | None = None
     dma_speed_score: float | None = None
     divergence_health_score: float | None = None
+    daily_rs_rating: float | None = None
+    weekly_rs_rating: float | None = None
     leadership_score: float | None = None
     structure_volume_score: float | None = None
+    industry_group: str | None = None
+    industry_group_rs_rank: float | None = None
+    industry_group_member_count: int | None = None
     overall_rating: float | None = None
     rating_band: str | None = None
     technical_status: str = "ok"

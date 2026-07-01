@@ -18,7 +18,7 @@ HIGH_LOW_LOOKBACK_DAYS = 260
 MA200_UPTREND_LOOKBACK_DAYS = 22
 PRICE_HISTORY_DAYS = 320
 VOLUME_LOOKBACK_DAYS = 20
-MIN_DISTANCE_FROM_52W_LOW_PCT = 25.0
+MIN_DISTANCE_FROM_52W_LOW_PCT = 30.0
 MAX_DISTANCE_FROM_52W_HIGH_PCT = 25.0
 MIN_RS_RATING = 70.0
 RS_LOOKBACK_3M_DAYS = 13
@@ -199,7 +199,7 @@ def evaluate_trend_template(frame: pd.DataFrame) -> TrendTemplateSnapshot | None
         "ma200_trending_up_22d": ma200 > ma200_lookback,
         "ma50_above_ma150_and_ma200": ma50 > ma150 and ma50 > ma200,
         "price_above_ma50": current_price > ma50,
-        "price_25pct_above_52w_low": distance_from_52wk_low_pct >= MIN_DISTANCE_FROM_52W_LOW_PCT,
+        "price_30pct_above_52w_low": distance_from_52wk_low_pct >= MIN_DISTANCE_FROM_52W_LOW_PCT,
         "price_within_25pct_of_52w_high": distance_from_52wk_high_pct <= MAX_DISTANCE_FROM_52W_HIGH_PCT,
         "rs_rating_above_70": rs_rating > MIN_RS_RATING,
     }
@@ -359,3 +359,5 @@ def run_trend_template_screen(
         failed_tickers=failures,
         hits=hits,
     )
+
+

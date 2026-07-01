@@ -117,6 +117,40 @@ class WatchlistRepository:
                 break
         return resolved
 
+    def load_latest_stored_growth_acceleration_map(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
+        normalized_tickers = {
+            str(ticker or "").strip().upper()
+            for ticker in tickers
+            if str(ticker or "").strip()
+        }
+        if not normalized_tickers:
+            return {}
+        resolved: dict[str, dict[str, Any]] = {}
+        for metadata in self.list_recent_watchlists(limit=400, include_deprecated=False):
+            if _strategy_id_for_metadata(metadata) != "minervini_growth_acceleration":
+                continue
+            stem = str(metadata.get("stem") or "").strip()
+            if not stem:
+                continue
+            for item in self.load_watchlist(stem):
+                ticker = str(item.get("ticker") or "").strip().upper()
+                if ticker not in normalized_tickers or ticker in resolved:
+                    continue
+                score = _coerce_optional_float(item.get("growth_acceleration_score"))
+                if score is None:
+                    score = _coerce_optional_float(item.get("acceleration_score"))
+                if score is None:
+                    continue
+                resolved[ticker] = {
+                    "growth_acceleration_score": score,
+                    "growth_acceleration_label": str(item.get("growth_acceleration_label") or item.get("acceleration_label") or "").strip() or None,
+                    "growth_acceleration_pass_count": _coerce_optional_int(item.get("screen_pass_count")),
+                    "growth_acceleration_signal_date": str(item.get("signal_date") or item.get("event_date") or "").strip() or None,
+                }
+            if len(resolved) >= len(normalized_tickers):
+                break
+        return resolved
+
     def _build_watchlist_index(self) -> dict[str, dict[str, Any]]:
         with self._watchlist_index_cache_lock:
             cached_entry = self._watchlist_index_cache
@@ -277,6 +311,8 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("earnings_trade_analyzer", "earnings_trade_analyzer", "Earnings Trade Analyzer"),
         ("pead_screener", "pead_screener", "PEAD Screener"),
         ("canslim", "canslim", "CANSLIM"),
+        ("minervini_growth_acceleration", "minervini_growth_acceleration", "Minervini Growth Acceleration"),
+        ("industry_group_rs_rank", "industry_group_rs_rank", "Industry Group RS Rank"),
         ("peg", "peg", "PEG"),
         ("rs", "rs", "RS"),
     )

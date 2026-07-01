@@ -246,8 +246,13 @@ CREATE TABLE IF NOT EXISTS ticker_technical_rating_snapshots (
   trend_regime_score NUMERIC(18,6),
   dma_speed_score NUMERIC(18,6),
   divergence_health_score NUMERIC(18,6),
+  daily_rs_rating NUMERIC(18,6),
+  weekly_rs_rating NUMERIC(18,6),
   leadership_score NUMERIC(18,6),
   structure_volume_score NUMERIC(18,6),
+  industry_group TEXT,
+  industry_group_rs_rank NUMERIC(18,6),
+  industry_group_member_count INTEGER,
   overall_rating NUMERIC(18,6),
   rating_band TEXT,
   technical_status TEXT NOT NULL,
@@ -263,6 +268,13 @@ CREATE INDEX IF NOT EXISTS idx_ticker_technical_rating_snapshots_date_status
 
 CREATE INDEX IF NOT EXISTS idx_ticker_technical_rating_snapshots_date_overall
   ON ticker_technical_rating_snapshots(as_of_date, overall_rating DESC);
+
+ALTER TABLE ticker_technical_rating_snapshots
+  ADD COLUMN IF NOT EXISTS daily_rs_rating NUMERIC(18,6),
+  ADD COLUMN IF NOT EXISTS weekly_rs_rating NUMERIC(18,6),
+  ADD COLUMN IF NOT EXISTS industry_group TEXT,
+  ADD COLUMN IF NOT EXISTS industry_group_rs_rank NUMERIC(18,6),
+  ADD COLUMN IF NOT EXISTS industry_group_member_count INTEGER;
 
 CREATE TABLE IF NOT EXISTS ticker_technical_indicator_rating_snapshots (
   ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),

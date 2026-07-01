@@ -48,7 +48,7 @@ class TrendTemplateScreenTests(unittest.TestCase):
         self.assertEqual(result.hits[0].ticker, "NVDA")
         self.assertEqual(result.hits[0].criteria_passed, result.hits[0].criteria_total)
         self.assertLessEqual(result.hits[0].distance_from_52wk_high_pct, 25.0)
-        self.assertGreaterEqual(result.hits[0].distance_from_52wk_low_pct, 25.0)
+        self.assertGreaterEqual(result.hits[0].distance_from_52wk_low_pct, 30.0)
         self.assertGreater(result.hits[0].rs_rating, 70.0)
         load_cookstock.assert_not_called()
 
@@ -68,9 +68,9 @@ class TrendTemplateScreenTests(unittest.TestCase):
 
         self.assertEqual(result.passed_tickers, 0)
 
-    def test_evaluate_trend_template_uses_25pct_above_52_week_low_threshold(self) -> None:
+    def test_evaluate_trend_template_uses_30pct_above_52_week_low_threshold(self) -> None:
         index = pd.date_range("2025-01-02", periods=320, freq="B")
-        close_values = [183.0 + (idx * 0.15) for idx in range(300)]
+        close_values = [182.0 + (idx * 0.15) for idx in range(300)]
         close_values.extend([236.0, 238.0, 237.0, 239.0, 238.5, 240.0, 239.5, 241.0, 240.5, 242.0, 241.5, 243.0, 242.5, 244.0, 243.5, 245.0, 244.5, 246.0, 245.5, 247.0])
         frame = pd.DataFrame(
             {
@@ -87,9 +87,9 @@ class TrendTemplateScreenTests(unittest.TestCase):
         snapshot = evaluate_trend_template(frame)
 
         assert snapshot is not None
-        self.assertGreaterEqual(snapshot.distance_from_52wk_low_pct, 25.0)
-        self.assertLess(snapshot.distance_from_52wk_low_pct, 30.0)
-        self.assertTrue(snapshot.criteria["price_25pct_above_52w_low"])
+        self.assertGreaterEqual(snapshot.distance_from_52wk_low_pct, 30.0)
+        self.assertLess(snapshot.distance_from_52wk_low_pct, 35.0)
+        self.assertTrue(snapshot.criteria["price_30pct_above_52w_low"])
         self.assertFalse(snapshot.criteria["rs_rating_above_70"])
 
     def test_run_trend_template_screen_requires_rs_above_70(self) -> None:
@@ -113,3 +113,6 @@ class TrendTemplateScreenTests(unittest.TestCase):
             result = run_trend_template_screen(AppConfig(), [ticker], as_of_date=as_of_date)
 
         self.assertEqual(result.passed_tickers, 0)
+
+
+
