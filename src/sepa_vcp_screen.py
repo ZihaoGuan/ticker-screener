@@ -23,7 +23,7 @@ SEPA_RPR_12M_LENGTH = 252
 SEPA_VCP_LOOKBACK = 15
 SEPA_VCP_THRESHOLD_PCT = 6.0
 SEPA_SIGNAL_LOOKBACK_BARS = 15
-SEPA_HISTORY_DAYS = 320
+SEPA_HISTORY_DAYS = 420
 
 
 @dataclass(frozen=True)
@@ -115,6 +115,36 @@ class SepaVcpScreenResult:
             "failed_tickers": self.failed_tickers,
             "hits": [item.to_dict() for item in self.hits],
         }
+
+
+def _evaluate_sepa_snapshot(
+    snapshot: SepaDashboardSnapshot | None,
+    *,
+    bars: pd.DataFrame,
+    benchmark_bars: pd.DataFrame | None = None,
+) -> list[str]:
+    reasons: list[str] = []
+    if bars.empty:
+        reasons.append("missing_bars")
+        return reasons
+    if snapshot is None:
+        min_required = max(SEPA_MA200_LENGTH + SEPA_MA200_SLOPE_LOOKBACK, SEPA_RPR_12M_LENGTH + 1, SEPA_52W_LOOKBACK)
+        if len(bars) < min_required:
+            reasons.append(f"insufficient_history_{len(bars)}lt{min_required}")
+        elif benchmark_bars is None or benchmark_bars.empty:
+            reasons.append("missing_benchmark_bars")
+        else:
+            reasons.append("snapshot_build_failed")
+        return reasons
+    if not snapshot.tpr_pass:
+        reasons.append("tpr_failed")
+    if float(snapshot.rpr_score) <= 80.0:
+        reasons.append(f"rpr_{snapshot.rpr_score:.1f}_le_80")
+    if not snapshot.pressure_buying:
+        reasons.append("pressure_not_buying")
+    if str(snapshot.buy_risk_status) not in {"Low Risk", "Caution"}:
+        reasons.append(f"buy_risk_{snapshot.buy_risk_status.lower().replace(' ', '_')}")
+    return reasons
 
 
 def _normalize_price_frame(frame: pd.DataFrame, *, include_volume: bool = True) -> pd.DataFrame:
@@ -317,15 +347,8 @@ def find_recent_sepa_vcp_hit(
         recent_signal_lookback_bars=recent_signal_lookback_bars,
     )
     bars = _normalize_price_frame(frame)
-    if snapshot is None or bars.empty:
-        return None
-    if not snapshot.tpr_pass:
-        return None
-    if float(snapshot.rpr_score) <= 80.0:
-        return None
-    if not snapshot.pressure_buying:
-        return None
-    if str(snapshot.buy_risk_status) != "Low Risk":
+    reject_reasons = _evaluate_sepa_snapshot(snapshot, bars=bars, benchmark_bars=_normalize_price_frame(benchmark_frame, include_volume=False))
+    if reject_reasons:
         return None
 
     latest_row = bars.iloc[-1]
@@ -423,6 +446,12 @@ def run_sepa_vcp_screen(
                         historyLookbackDays=SEPA_HISTORY_DAYS,
                     )
                     frame = _build_price_frame(financials)
+                    snapshot = build_sepa_dashboard_snapshot(
+                        frame,
+                        benchmark_frame,
+                        benchmark_ticker=config.benchmark_ticker,
+                    )
+                    reject_reasons = _evaluate_sepa_snapshot(snapshot, bars=_normalize_price_frame(frame), benchmark_bars=_normalize_price_frame(benchmark_frame, include_volume=False))
                     hit = find_recent_sepa_vcp_hit(
                         frame,
                         benchmark_frame,
@@ -430,7 +459,8 @@ def run_sepa_vcp_screen(
                         benchmark_ticker=config.benchmark_ticker,
                     )
                     if hit is None:
-                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no SEPA trend template pass | passed={len(hits)}")
+                        reason_text = ", ".join(reject_reasons) if reject_reasons else "no_match"
+                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: {reason_text} | passed={len(hits)}")
                         continue
                     hits.append(hit)
                     print(
