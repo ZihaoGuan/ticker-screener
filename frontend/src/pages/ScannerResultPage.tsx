@@ -70,6 +70,7 @@ export function ScannerResultPage() {
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [sectorFilter, setSectorFilter] = useState("all");
+  const [industryFilter, setIndustryFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("als");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [viewMode, setViewMode] = useState<ScannerViewMode>("list");
@@ -187,11 +188,19 @@ export function ScannerResultPage() {
     return Array.from(new Set(rows.map((row) => row.sector).filter((sector) => sector && sector !== "Unknown sector"))).sort();
   }, [rows]);
 
+  const industries = useMemo(() => {
+    const sourceRows = sectorFilter === "all" ? rows : rows.filter((row) => row.sector === sectorFilter);
+    return Array.from(new Set(sourceRows.map((row) => row.industry).filter((industry) => industry && industry !== "Unknown industry"))).sort();
+  }, [rows, sectorFilter]);
+
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     let nextRows = rows;
     if (sectorFilter !== "all") {
       nextRows = nextRows.filter((row) => row.sector === sectorFilter);
+    }
+    if (industryFilter !== "all") {
+      nextRows = nextRows.filter((row) => row.industry === industryFilter);
     }
     if (query) {
       nextRows = nextRows.filter((row) =>
@@ -199,11 +208,17 @@ export function ScannerResultPage() {
       );
     }
     return [...nextRows].sort((left, right) => compareScannerRows(left, right, sortBy, sortDirection));
-  }, [rows, search, sectorFilter, sortBy, sortDirection]);
+  }, [rows, search, sectorFilter, industryFilter, sortBy, sortDirection]);
+
+  useEffect(() => {
+    if (industryFilter !== "all" && !industries.includes(industryFilter)) {
+      setIndustryFilter("all");
+    }
+  }, [industries, industryFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [scannerId, search, sectorFilter, sortBy, sortDirection, viewMode, chartColumns]);
+  }, [scannerId, search, sectorFilter, industryFilter, sortBy, sortDirection, viewMode, chartColumns]);
 
   const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE_BY_COLUMN[chartColumns] : LIST_PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
@@ -308,6 +323,8 @@ export function ScannerResultPage() {
           csvValue(row.technicalIndicator1w),
           row.faScore == null ? "" : row.faScore.toFixed(1),
           formatCanslimScore(row.canslimScore, row.canslimMaxScore),
+          formatAccelerationScore(row.accelScore, row.accelLabel),
+          row.indRsScore == null ? "" : Math.round(row.indRsScore).toString(),
           row.arsScore == null ? "" : Math.round(row.arsScore).toString(),
           row.alsScore == null ? "" : Math.round(row.alsScore).toString(),
           csvValue(row.setupLabel),
@@ -371,7 +388,7 @@ export function ScannerResultPage() {
       <section className="scanner-result-filter-grid">
         <label className="scanner-result-filter panel">
           <span className="eyebrow">Search</span>
-          <input type="text" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find ticker, company, sector" />
+          <input type="text" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find ticker, company, sector, industry" />
         </label>
         <label className="scanner-result-filter panel">
           <span className="eyebrow">Sector</span>
@@ -380,6 +397,17 @@ export function ScannerResultPage() {
             {sectors.map((sector) => (
               <option key={sector} value={sector}>
                 {sector}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="scanner-result-filter panel">
+          <span className="eyebrow">Industry</span>
+          <select value={industryFilter} onChange={(event) => setIndustryFilter(event.target.value)}>
+            <option value="all">All industries</option>
+            {industries.map((industry) => (
+              <option key={industry} value={industry}>
+                {industry}
               </option>
             ))}
           </select>
@@ -558,6 +586,8 @@ export function ScannerResultPage() {
                           <span className={`scanner-score-pill ${toneForScore(row.faScore, 10)}`}>{formatTenPointScore(row.faScore)}</span>
                         </td>
                         <td data-label="CANSLIM">{formatCanslimScore(row.canslimScore, row.canslimMaxScore)}</td>
+                        <td data-label="Accel">{formatAccelerationScore(row.accelScore, row.accelLabel)}</td>
+                        <td data-label="Ind RS">{formatPercentScore(row.indRsScore)}</td>
                         <td data-label="ARS">{formatPercentScore(row.arsScore)}</td>
                         <td data-label="ALS Score" className="scanner-result-als-cell">
                           {formatIntegerScore(row.alsScore)}

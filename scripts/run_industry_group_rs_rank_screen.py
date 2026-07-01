@@ -37,6 +37,33 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _print_hits(result: object, *, limit: int = 25) -> None:
+    hits = list(getattr(result, "hits", []) or [])
+    print(
+        f"Industry-group RS rank screen: {getattr(result, 'passed_tickers', 0)} hits from "
+        f"{getattr(result, 'ranked_snapshot_count', 0)} ranked snapshots "
+        f"({getattr(result, 'snapshot_count', 0)} snapshots loaded, "
+        f"{getattr(result, 'total_tickers', 0)} tickers evaluated, threshold > {getattr(result, 'minimum_rank', 0):.1f})."
+    )
+    if not hits:
+        print("No tickers passed the industry-group RS rank threshold.")
+        if getattr(result, 'snapshot_count', 0) == 0:
+            print("No technical rating snapshots were loaded. Run scripts/build_technical_ratings.py first, or confirm the DB/date selection.")
+        elif getattr(result, 'ranked_snapshot_count', 0) == 0:
+            print("Snapshots loaded, but none have industry_group_rs_rank persisted yet. Rebuild technical ratings after the industry-group rank changes.")
+        return
+    print("Top hits:")
+    for hit in hits[: max(1, int(limit))]:
+        daily_rs = f"{hit.daily_rs_rating:.1f}" if hit.daily_rs_rating is not None else "n/a"
+        print(
+            f"- {hit.ticker}: ind-rs={hit.industry_group_rs_rank:.1f}, daily-rs={daily_rs}, "
+            f"group={hit.industry_group or hit.industry or 'n/a'}"
+        )
+    remaining = len(hits) - max(1, int(limit))
+    if remaining > 0:
+        print(f"... and {remaining} more hit(s) written to the artifact files.")
+
+
 def main() -> int:
     args = parse_args()
     database_url = resolve_database_url(args.database_url)
@@ -67,12 +94,15 @@ def main() -> int:
         "minimum_rank": float(args.minimum_rank),
         "source": "technical-rating-snapshots",
         "total_tickers": result.total_tickers,
+        "snapshot_count": result.snapshot_count,
+        "ranked_snapshot_count": result.ranked_snapshot_count,
         "passed_tickers": result.passed_tickers,
         "failed_tickers": result.failed_tickers,
         "raw_results_file": str(raw_path),
         "watchlist_file": str(watchlist_path),
     })
 
+    _print_hits(result, limit=min(25, len(watchlist) or 25))
     print(f"Wrote raw results to {raw_path}")
     print(f"Wrote watchlist to {watchlist_path}")
     print(f"Wrote run summary to {summary_path}")

@@ -31,6 +31,8 @@ class IndustryGroupRsRankHit:
 class IndustryGroupRsRankScreenResult:
     run_date: str
     total_tickers: int
+    snapshot_count: int
+    ranked_snapshot_count: int
     passed_tickers: int
     minimum_rank: float
     failed_tickers: list[dict[str, str]]
@@ -40,6 +42,8 @@ class IndustryGroupRsRankScreenResult:
         return {
             "run_date": self.run_date,
             "total_tickers": self.total_tickers,
+            "snapshot_count": self.snapshot_count,
+            "ranked_snapshot_count": self.ranked_snapshot_count,
             "passed_tickers": self.passed_tickers,
             "minimum_rank": self.minimum_rank,
             "failed_tickers": list(self.failed_tickers),
@@ -53,10 +57,16 @@ def run_industry_group_rs_rank_screen(*, database_url: str, as_of_date: dt.date 
     if not target_tickers:
         target_tickers = repository.list_active_tickers()
     snapshots = repository.load_latest_technical_rating_snapshots_for_tickers(target_tickers, as_of_date=as_of_date, allow_older_as_of_date=True)
+    snapshot_count = 0
+    ranked_snapshot_count = 0
     hits: list[IndustryGroupRsRankHit] = []
     for ticker in target_tickers:
         snapshot = snapshots.get(ticker) or {}
+        if snapshot:
+            snapshot_count += 1
         rank = snapshot.get("industry_group_rs_rank")
+        if isinstance(rank, (int, float)):
+            ranked_snapshot_count += 1
         if not isinstance(rank, (int, float)) or float(rank) <= float(minimum_rank):
             continue
         hits.append(IndustryGroupRsRankHit(
@@ -82,6 +92,8 @@ def run_industry_group_rs_rank_screen(*, database_url: str, as_of_date: dt.date 
     return IndustryGroupRsRankScreenResult(
         run_date=(as_of_date or dt.date.today()).isoformat(),
         total_tickers=len(target_tickers),
+        snapshot_count=snapshot_count,
+        ranked_snapshot_count=ranked_snapshot_count,
         passed_tickers=len(hits),
         minimum_rank=float(minimum_rank),
         failed_tickers=[],
