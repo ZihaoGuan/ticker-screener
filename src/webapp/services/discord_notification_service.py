@@ -19,6 +19,7 @@ _SCANNER_ROUTE_CONFIG: tuple[tuple[str, str], ...] = (
     ("wyckoff_buy_signal", "wyckoff_buy_signal"),
     ("wyckoff_sell_signal", "wyckoff_sell_signal"),
     ("sepa_vcp", "sepa_vcp"),
+    ("vcp_v3", "vcp_v3"),
     ("weekly_tight_close", "weekly_tight_close"),
     ("weinstein_stage2_early", "weinstein_stage2_early"),
     ("ema21_pullback_buy", "ema21_pullback_buy"),

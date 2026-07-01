@@ -20,9 +20,9 @@ SEPA_RPR_3M_LENGTH = 63
 SEPA_RPR_6M_LENGTH = 126
 SEPA_RPR_9M_LENGTH = 189
 SEPA_RPR_12M_LENGTH = 252
-SEPA_VCP_LOOKBACK = 10
-SEPA_VCP_THRESHOLD_PCT = 4.0
-SEPA_SIGNAL_LOOKBACK_BARS = 10
+SEPA_VCP_LOOKBACK = 15
+SEPA_VCP_THRESHOLD_PCT = 6.0
+SEPA_SIGNAL_LOOKBACK_BARS = 15
 SEPA_HISTORY_DAYS = 320
 
 
@@ -316,16 +316,26 @@ def find_recent_sepa_vcp_hit(
         benchmark_ticker=benchmark_ticker,
         recent_signal_lookback_bars=recent_signal_lookback_bars,
     )
-    if snapshot is None or not snapshot.recent_vcp_signal or snapshot.recent_vcp_signal_date is None:
+    bars = _normalize_price_frame(frame)
+    if snapshot is None or bars.empty:
+        return None
+    if not snapshot.tpr_pass:
+        return None
+    if float(snapshot.rpr_score) <= 80.0:
+        return None
+    if not snapshot.pressure_buying:
+        return None
+    if str(snapshot.buy_risk_status) != "Low Risk":
         return None
 
+    latest_row = bars.iloc[-1]
     reasons = [
-        f"5D VCP squeeze hit within last {recent_signal_lookback_bars} bars",
-        f"TPR {snapshot.tpr_status}",
+        "Minervini trend template passed",
+        "RPR above 80",
+        "Buying pressure confirmed",
         f"Buy risk {snapshot.buy_risk_status} ({snapshot.buy_risk_distance_pct:.1f}% from 50D)",
-        f"Pressure {snapshot.pressure_status}",
         f"RPR {snapshot.rpr_score:.1f} ({snapshot.rpr_status})",
-        f"Latest 5D range {snapshot.vcp_range_pct:.2f}%",
+        f"Latest squeeze status {snapshot.vcp_status} ({snapshot.vcp_range_pct:.2f}% range)",
     ]
 
     return SepaVcpHit(
@@ -333,14 +343,14 @@ def find_recent_sepa_vcp_hit(
         sector=ticker.sector,
         industry=ticker.industry,
         exchange=ticker.exchange,
-        signal_date=snapshot.recent_vcp_signal_date,
+        signal_date=snapshot.snapshot_date,
         benchmark_ticker=benchmark_ticker,
-        signal_kind="recent_vcp_squeeze",
+        signal_kind="sepa_trend_template",
         current_price=float(snapshot.latest_close),
-        high_price=float(snapshot.recent_vcp_signal_high or 0.0),
-        low_price=float(snapshot.recent_vcp_signal_low or 0.0),
-        trigger_price=float(snapshot.recent_vcp_signal_high or 0.0),
-        stop_price=float(snapshot.recent_vcp_signal_low or 0.0),
+        high_price=float(latest_row["High"]),
+        low_price=float(latest_row["Low"]),
+        trigger_price=float(snapshot.latest_close),
+        stop_price=float(snapshot.ma50),
         tpr_pass=snapshot.tpr_pass,
         tpr_status=snapshot.tpr_status,
         buy_risk_status=snapshot.buy_risk_status,
@@ -376,7 +386,7 @@ def run_sepa_vcp_screen(
     run_date = as_of_date or dt.date.today()
 
     print(
-        "starting SEPA VCP screen: "
+        "starting SEPA screen: "
         f"total={total_tickers}, recent_window={SEPA_SIGNAL_LOOKBACK_BARS}, vcp_lookback={SEPA_VCP_LOOKBACK}"
     )
 
@@ -420,18 +430,18 @@ def run_sepa_vcp_screen(
                         benchmark_ticker=config.benchmark_ticker,
                     )
                     if hit is None:
-                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no recent SEPA VCP squeeze | passed={len(hits)}")
+                        print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: no SEPA trend template pass | passed={len(hits)}")
                         continue
                     hits.append(hit)
                     print(
-                        f"[{position}/{total_tickers}] {ticker.symbol} passed SEPA VCP "
+                        f"[{position}/{total_tickers}] {ticker.symbol} passed SEPA "
                         f"{hit.signal_date} RPR {hit.rpr_score:.1f} {hit.buy_risk_status} | passed={len(hits)}"
                     )
                 except Exception as exc:
                     failures.append({"ticker": ticker.symbol, "error": str(exc)})
                     print(f"[{position}/{total_tickers}] {ticker.symbol} failed: {exc}")
 
-    print(f"finished SEPA VCP screen: passed={len(hits)}, failed={len(failures)}, total={total_tickers}")
+    print(f"finished SEPA screen: passed={len(hits)}, failed={len(failures)}, total={total_tickers}")
     return SepaVcpScreenResult(
         run_date=run_date.isoformat(),
         benchmark_ticker=config.benchmark_ticker,

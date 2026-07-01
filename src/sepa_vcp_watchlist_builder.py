@@ -7,11 +7,11 @@ def build_sepa_vcp_watchlist(hits: list[SepaVcpHit]) -> list[dict[str, object]]:
     watchlist: list[dict[str, object]] = []
     for hit in hits:
         summary = (
-            f"Recent 5D squeeze on {hit.signal_date}. "
+            f"SEPA trend-template pass on {hit.signal_date}. "
             f"TPR {hit.tpr_status}, {hit.buy_risk_status}, {hit.pressure_status}, RPR {hit.rpr_score:.1f}."
         )
         badges = [
-            "SEPA VCP",
+            "SEPA",
             f"TPR {hit.tpr_status}",
             hit.buy_risk_status,
             hit.pressure_status,
@@ -25,19 +25,19 @@ def build_sepa_vcp_watchlist(hits: list[SepaVcpHit]) -> list[dict[str, object]]:
                 "sector": hit.sector,
                 "industry": hit.industry,
                 "exchange": hit.exchange,
-                "setup_label": "SEPA VCP",
+                "setup_label": "SEPA",
                 "summary": summary,
                 "master_note": ". ".join(hit.reasons),
                 "event_date": hit.signal_date,
-                "event_label": "5D squeeze",
-                "trigger_label": "Squeeze high",
+                "event_label": "SEPA pass",
+                "trigger_label": "Reference price",
                 "trigger_price": round(hit.trigger_price, 4),
-                "entry_style": "sepa_vcp_squeeze",
+                "entry_style": "sepa_trend",
                 "entry_price": round(hit.trigger_price, 4),
-                "entry_label": "Break above squeeze high",
+                "entry_label": "Watch for constructive entry",
                 "entry_timeframe": "daily",
                 "stop_price": round(hit.stop_price, 4),
-                "stop_label": "Squeeze low",
+                "stop_label": "50D moving average",
                 "stop_timeframe": "daily",
                 "current_price": round(hit.current_price, 4),
                 "signal_kind": hit.signal_kind,

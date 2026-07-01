@@ -141,6 +141,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "vcp_v3",
+        "strategy_id": "vcp_v3",
+        "label": "VCP v3",
+        "description": "Swing-based VCP scanner split between pre-breakout coils and fresh breakouts, with contraction quality, dry-up, RS, and risk-reward context.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+        "bias_group": "bullish",
+    },
+    {
         "id": "sean_gap_up",
         "strategy_id": "sean_gap_up",
         "label": "Sean Gap Up",
@@ -271,8 +280,8 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
         "id": "sepa_vcp",
         "strategy_id": "sepa_vcp",
-        "label": "SEPA VCP",
-        "description": "Recent 5D squeeze names with Minervini trend, risk, pressure, and RS dashboard context persisted together.",
+        "label": "SEPA",
+        "description": "SEPA names passing the Minervini trend template with risk, pressure, and RS dashboard context persisted together.",
         "timeframe": "Daily",
         "accent": "cyan",
     },

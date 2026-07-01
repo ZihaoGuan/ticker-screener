@@ -51,6 +51,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("vcp_scored_{date_label}.json",),
         "legacy_summary_templates": ("vcp_scored_run_summary_{date_label}.json",),
     },
+    "vcp_v3": {
+        "stem_template": "vcp_v3_{date_label}",
+        "legacy_watchlist_templates": ("vcp_v3_{date_label}.json",),
+        "legacy_raw_templates": ("vcp_v3_{date_label}.json",),
+        "legacy_summary_templates": ("vcp_v3_run_summary_{date_label}.json",),
+    },
     "cup_handle": {
         "stem_template": "cup_handle_{date_label}",
         "legacy_watchlist_templates": ("cup_handle_{date_label}.json",),
@@ -476,6 +482,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("vcs_setup_stage", "vcs_setup_stage"),
     ("vcs_critical_tightness", "vcs_critical_tightness"),
     ("vcp_scored", "vcp_scored"),
+    ("vcp_v3", "vcp_v3"),
     ("vcp", "vcp"),
 )
 
