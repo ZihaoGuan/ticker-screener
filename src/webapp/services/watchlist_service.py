@@ -263,6 +263,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "finviz_target_price_50",
+        "strategy_id": "finviz_target_price_50",
+        "label": "Finviz Target +50%",
+        "description": "Live Finviz scan for names where analyst target price is at least 50% above current price.",
+        "timeframe": "Daily",
+        "accent": "lime",
+        "bias_group": "bullish",
+    },
+    {
         "id": "finviz_pattern_horizontal",
         "strategy_id": "finviz_pattern_horizontal",
         "label": "Finviz Horizontal S/R",

@@ -1796,6 +1796,19 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="leaders",
         ),
+        "finviz_target_price_50": RunAction(
+            "finviz_target_price_50",
+            "Run Finviz Target Price +50%",
+            "scripts/run_finviz_target_price_scanner.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+                _as_of_date_field,
+            ),
+            bias_group="bullish",
+            bullish_subgroup="leaders",
+        ),
         "finviz_pattern_scanner": RunAction(
             "finviz_pattern_scanner",
             "Run Finviz Pattern Scanner",

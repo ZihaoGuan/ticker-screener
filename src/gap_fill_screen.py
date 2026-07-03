@@ -103,11 +103,14 @@ def _scan_open_overhead_gap(
             for item in price_data[idx + 1:]
             if item.get("high") is not None
         ]
-        if future_highs and max(future_highs) >= previous_low:
+        max_future_high = max(future_highs) if future_highs else None
+        if max_future_high is not None and max_future_high >= previous_low:
             continue
         if current_price >= previous_low:
             continue
-        gap_bottom = gap_high
+        # Treat the tradable gap entry as the remaining unfilled zone after any
+        # later rallies partially reclaim the original overhead gap.
+        gap_bottom = max(gap_high, max_future_high or gap_high)
         gap_top = previous_low
         distance_to_gap_bottom_pct = (gap_bottom - current_price) / current_price
         distance_to_gap_top_pct = (gap_top - current_price) / current_price

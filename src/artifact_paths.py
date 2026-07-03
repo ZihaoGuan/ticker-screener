@@ -384,6 +384,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("venu_scanner_{date_label}.json",),
         "legacy_summary_templates": ("venu_scanner_run_summary_{date_label}.json",),
     },
+    "finviz_target_price_50": {
+        "stem_template": "finviz_target_price_50_{date_label}",
+        "legacy_watchlist_templates": ("finviz_target_price_50_{date_label}.json",),
+        "legacy_raw_templates": ("finviz_target_price_50_{date_label}.json",),
+        "legacy_summary_templates": ("finviz_target_price_50_run_summary_{date_label}.json",),
+    },
     "earnings_weekly_criteria": {
         "stem_template": "earnings_weekly_criteria_{date_label}",
         "legacy_watchlist_templates": ("earnings_weekly_criteria_{date_label}.json",),
@@ -470,6 +476,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("minervini_growth_acceleration", "minervini_growth_acceleration"),
     ("industry_group_rs_rank", "industry_group_rs_rank"),
     ("venu_scanner", "venu_scanner"),
+    ("finviz_target_price_50", "finviz_target_price_50"),
     ("inside_dryup_v2", "inside_dryup_v2"),
     ("wyckoff_buy_signal", "wyckoff_buy_signal"),
     ("wyckoff_sell_signal", "wyckoff_sell_signal"),
