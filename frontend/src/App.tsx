@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, type ComponentType } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
@@ -6,30 +6,67 @@ import { RoleRoute } from "./auth/RoleRoute";
 import { useAuth } from "./auth/AuthContext";
 import { LoadingBlock } from "./components/LoadingBlock";
 
-const DashboardPage = lazy(() => import("./pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
-const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
-const GuidePage = lazy(() => import("./pages/GuidePage").then((module) => ({ default: module.GuidePage })));
-const ChartsPage = lazy(() => import("./pages/ChartsPage").then((module) => ({ default: module.ChartsPage })));
-const EarningsPage = lazy(() => import("./pages/EarningsPage").then((module) => ({ default: module.EarningsPage })));
-const ScannerBoardPage = lazy(() => import("./pages/ScannerBoardPage").then((module) => ({ default: module.ScannerBoardPage })));
-const ScannerTopHitsPage = lazy(() => import("./pages/ScannerTopHitsPage").then((module) => ({ default: module.ScannerTopHitsPage })));
-const ScannerResultPage = lazy(() => import("./pages/ScannerResultPage").then((module) => ({ default: module.ScannerResultPage })));
-const RatingsPage = lazy(() => import("./pages/RatingsPage").then((module) => ({ default: module.RatingsPage })));
-const RunsPage = lazy(() => import("./pages/RunsPage").then((module) => ({ default: module.RunsPage })));
-const WarmupPage = lazy(() => import("./pages/WarmupPage").then((module) => ({ default: module.WarmupPage })));
-const BacktestsPage = lazy(() => import("./pages/BacktestsPage").then((module) => ({ default: module.BacktestsPage })));
-const WeeklyWatchlistPage = lazy(() => import("./pages/WeeklyWatchlistPage").then((module) => ({ default: module.WeeklyWatchlistPage })));
-const WatchlistsPage = lazy(() => import("./pages/WatchlistsPage").then((module) => ({ default: module.WatchlistsPage })));
-const PairTradesPage = lazy(() => import("./pages/PairTradesPage").then((module) => ({ default: module.PairTradesPage })));
-const RrgPage = lazy(() => import("./pages/RrgPage").then((module) => ({ default: module.RrgPage })));
-const OverlapPage = lazy(() => import("./pages/OverlapPage").then((module) => ({ default: module.OverlapPage })));
-const MyPicksPage = lazy(() => import("./pages/MyPicksPage").then((module) => ({ default: module.MyPicksPage })));
-const PortfolioPage = lazy(() => import("./pages/PortfolioPage").then((module) => ({ default: module.PortfolioPage })));
-const AdminPage = lazy(() => import("./pages/AdminPage").then((module) => ({ default: module.AdminPage })));
-const AdminMissingSectorsPage = lazy(() => import("./pages/AdminMissingSectorsPage").then((module) => ({ default: module.AdminMissingSectorsPage })));
-const AdminMissingFinvizTickersPage = lazy(() => import("./pages/AdminMissingFinvizTickersPage").then((module) => ({ default: module.AdminMissingFinvizTickersPage })));
-const AdminTickerRatingsHealthPage = lazy(() => import("./pages/AdminTickerRatingsHealthPage").then((module) => ({ default: module.AdminTickerRatingsHealthPage })));
-const AdminDiscordPage = lazy(() => import("./pages/AdminDiscordPage").then((module) => ({ default: module.AdminDiscordPage })));
+const CHUNK_RELOAD_STORAGE_KEY = "ticker-screener:chunk-reload-attempted";
+
+function shouldRetryDynamicImport(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    message.includes("Failed to fetch dynamically imported module") ||
+    message.includes("Importing a module script failed") ||
+    message.includes("Unable to preload CSS")
+  );
+}
+
+function lazyPage<TModule extends Record<string, unknown>, TKey extends keyof TModule>(
+  loader: () => Promise<TModule>,
+  exportName: TKey,
+) {
+  return lazy(async () => {
+    try {
+      const module = await loader();
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(CHUNK_RELOAD_STORAGE_KEY);
+      }
+      return { default: module[exportName] as ComponentType<any> };
+    } catch (error) {
+      if (typeof window !== "undefined" && shouldRetryDynamicImport(error)) {
+        const alreadyRetried = window.sessionStorage.getItem(CHUNK_RELOAD_STORAGE_KEY);
+        if (!alreadyRetried) {
+          window.sessionStorage.setItem(CHUNK_RELOAD_STORAGE_KEY, "1");
+          window.location.reload();
+          await new Promise<never>(() => {});
+        }
+        window.sessionStorage.removeItem(CHUNK_RELOAD_STORAGE_KEY);
+      }
+      throw error;
+    }
+  });
+}
+
+const DashboardPage = lazyPage(() => import("./pages/DashboardPage"), "DashboardPage");
+const LoginPage = lazyPage(() => import("./pages/LoginPage"), "LoginPage");
+const GuidePage = lazyPage(() => import("./pages/GuidePage"), "GuidePage");
+const ChartsPage = lazyPage(() => import("./pages/ChartsPage"), "ChartsPage");
+const EarningsPage = lazyPage(() => import("./pages/EarningsPage"), "EarningsPage");
+const ScannerBoardPage = lazyPage(() => import("./pages/ScannerBoardPage"), "ScannerBoardPage");
+const ScannerTopHitsPage = lazyPage(() => import("./pages/ScannerTopHitsPage"), "ScannerTopHitsPage");
+const ScannerResultPage = lazyPage(() => import("./pages/ScannerResultPage"), "ScannerResultPage");
+const RatingsPage = lazyPage(() => import("./pages/RatingsPage"), "RatingsPage");
+const RunsPage = lazyPage(() => import("./pages/RunsPage"), "RunsPage");
+const WarmupPage = lazyPage(() => import("./pages/WarmupPage"), "WarmupPage");
+const BacktestsPage = lazyPage(() => import("./pages/BacktestsPage"), "BacktestsPage");
+const WeeklyWatchlistPage = lazyPage(() => import("./pages/WeeklyWatchlistPage"), "WeeklyWatchlistPage");
+const WatchlistsPage = lazyPage(() => import("./pages/WatchlistsPage"), "WatchlistsPage");
+const PairTradesPage = lazyPage(() => import("./pages/PairTradesPage"), "PairTradesPage");
+const RrgPage = lazyPage(() => import("./pages/RrgPage"), "RrgPage");
+const OverlapPage = lazyPage(() => import("./pages/OverlapPage"), "OverlapPage");
+const MyPicksPage = lazyPage(() => import("./pages/MyPicksPage"), "MyPicksPage");
+const PortfolioPage = lazyPage(() => import("./pages/PortfolioPage"), "PortfolioPage");
+const AdminPage = lazyPage(() => import("./pages/AdminPage"), "AdminPage");
+const AdminMissingSectorsPage = lazyPage(() => import("./pages/AdminMissingSectorsPage"), "AdminMissingSectorsPage");
+const AdminMissingFinvizTickersPage = lazyPage(() => import("./pages/AdminMissingFinvizTickersPage"), "AdminMissingFinvizTickersPage");
+const AdminTickerRatingsHealthPage = lazyPage(() => import("./pages/AdminTickerRatingsHealthPage"), "AdminTickerRatingsHealthPage");
+const AdminDiscordPage = lazyPage(() => import("./pages/AdminDiscordPage"), "AdminDiscordPage");
 
 export default function App() {
   const auth = useAuth();

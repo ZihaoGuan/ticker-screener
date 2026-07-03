@@ -1,6 +1,7 @@
 {$APP_FQDN} {
     @api path /api/*
     @health path /healthz
+    @assets path /assets/* /favicon.svg
 
     handle @api {
         reverse_proxy web:8000
@@ -10,8 +11,15 @@
         reverse_proxy web:8000
     }
 
+    handle @assets {
+        root * /srv/frontend
+        header Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+
     handle {
         root * /srv/frontend
+        header Cache-Control "no-store"
         try_files {path} /index.html
         file_server
     }
