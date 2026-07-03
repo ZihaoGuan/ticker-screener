@@ -134,6 +134,11 @@ PIPELINES = (
         "filename": "vcp_v3_{date}.json",
     },
     {
+        "id": "vcp_spec",
+        "label": "VCP Spec",
+        "filename": "vcp_spec_{date}.json",
+    },
+    {
         "id": "rti",
         "label": "Range Tightness Index",
         "filename": "rti_{date}.json",
@@ -225,6 +230,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "leif_high_tight_flag": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sepa_vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcp_v3": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "vcp_spec": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "rti": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sean_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcs_setup_stage": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

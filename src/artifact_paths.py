@@ -315,6 +315,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("stockbee_momentum_burst_{date_label}.json",),
         "legacy_summary_templates": ("stockbee_momentum_burst_run_summary_{date_label}.json",),
     },
+    "vcp_spec": {
+        "stem_template": "vcp_spec_{date_label}",
+        "legacy_watchlist_templates": ("vcp_spec_{date_label}.json",),
+        "legacy_raw_templates": ("vcp_spec_{date_label}.json",),
+        "legacy_summary_templates": ("vcp_spec_run_summary_{date_label}.json",),
+    },
     "eight_week_100_runup": {
         "stem_template": "eight_week_100_runup_{date_label}",
         "legacy_watchlist_templates": (
@@ -449,6 +455,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("trend_template", "trend_template"),
     ("market_correction_resilience", "market_correction_resilience"),
     ("stockbee_momentum_burst", "stockbee_momentum_burst"),
+    ("vcp_spec", "vcp_spec"),
     ("pre_earnings_ma_stack", "pre_earnings_ma_stack"),
     ("pre_earnings_focus", "pre_earnings_focus"),
     ("earnings_weekly_criteria", "earnings_weekly_criteria"),

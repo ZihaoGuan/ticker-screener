@@ -40,6 +40,7 @@ from .stockbee_momentum_burst_screen import (
     STOCKBEE_MOMENTUM_BURST_HISTORY_DAYS,
     find_recent_stockbee_momentum_burst_hit,
 )
+from .vcp_spec_screen import VCP_SPEC_HISTORY_DAYS, find_recent_vcp_spec_hit
 from .vcp_scored_screen import VCP_SCORED_HISTORY_DAYS, score_vcp_hit
 from .vcp_v3_screen import VCP_V3_HISTORY_DAYS, find_vcp_v3_hit
 from .td_sequential_screen import find_recent_td_sequential_hit
@@ -994,6 +995,29 @@ def _run_stockbee_momentum_burst(bundle: ScreenerInputBundle) -> ScreenerEvaluat
     )
 
 
+def _run_vcp_spec(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_vcp_spec_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        benchmark_ticker=str(bundle.extras["config"].benchmark_ticker),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "category": payload["category"],
+            "contractions_count": payload["contractions_count"],
+            "prior_uptrend_pct": payload["prior_uptrend_pct"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_vcp_scored(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     result = run_vcp_screen(config, [_ticker_from_bundle(bundle)], as_of_date=bundle.as_of_date)
@@ -1105,6 +1129,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=max(max_vcp_days, VCP_V3_HISTORY_DAYS),
             warmup_trading_days=40,
             evaluator=_run_vcp_v3,
+        ),
+        "vcp_spec": ScreenerSpec(
+            id="vcp_spec",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=max(max_vcp_days, VCP_SPEC_HISTORY_DAYS),
+            warmup_trading_days=40,
+            evaluator=_run_vcp_spec,
         ),
         "canslim_v2": ScreenerSpec(
             id="canslim_v2",

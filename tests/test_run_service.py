@@ -321,6 +321,13 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["stockbee_momentum_burst"]["label"], "Run Stockbee Momentum Burst")
         self.assertIn("scripts/run_stockbee_momentum_burst_screen.py", actions["stockbee_momentum_burst"]["command"])
 
+    def test_list_actions_includes_vcp_spec(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("vcp_spec", actions)
+        self.assertEqual(actions["vcp_spec"]["label"], "Run VCP Spec")
+        self.assertIn("scripts/run_vcp_spec_screen.py", actions["vcp_spec"]["command"])
+
     def test_list_actions_includes_market_breadth(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 

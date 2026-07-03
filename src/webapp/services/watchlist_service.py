@@ -150,6 +150,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "vcp_spec",
+        "strategy_id": "vcp_spec",
+        "label": "VCP Spec",
+        "description": "Strict geometric VCP scan adapted from the attached spec: Stage 2 trend, prior uptrend, shrinking contractions, declining volume, and pivot proximity.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+        "bias_group": "bullish",
+    },
+    {
         "id": "sean_gap_up",
         "strategy_id": "sean_gap_up",
         "label": "Sean Gap Up",
