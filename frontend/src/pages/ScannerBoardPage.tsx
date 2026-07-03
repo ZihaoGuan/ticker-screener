@@ -16,6 +16,19 @@ const CARD_ART: Record<string, string> = {
   gap_fill: "M24 116 L88 114 L142 112 L182 76 L228 76 L276 48",
   canslim: "M24 120 L74 112 L122 98 L166 78 L208 60 L246 46 L276 34",
   fundamental_quality: "M24 118 L76 108 L122 92 L164 74 L206 62 L246 44 L276 28",
+  finviz_pattern_horizontal: "M24 88 L88 88 L144 88 L200 88 L276 88",
+  finviz_pattern_horizontal2: "M24 82 L88 82 L144 82 L200 82 L276 82",
+  finviz_pattern_tlsupport: "M24 118 L76 106 L124 92 L172 78 L224 62 L276 48",
+  finviz_pattern_tlsupport2: "M24 122 L76 108 L124 90 L172 72 L224 56 L276 40",
+  finviz_pattern_wedgedown: "M24 112 L72 100 L118 88 L162 76 L204 62 L246 48 L276 36",
+  finviz_pattern_wedgedown2: "M24 118 L74 102 L120 84 L164 68 L208 54 L246 42 L276 30",
+  finviz_pattern_wedgeresistance: "M24 114 L78 102 L126 90 L170 74 L212 58 L248 46 L276 34",
+  finviz_pattern_wedgeresistance2: "M24 118 L78 104 L126 88 L172 70 L216 54 L250 40 L276 28",
+  finviz_pattern_channelup: "M24 118 L74 102 L122 88 L168 74 L214 58 L250 42 L276 30",
+  finviz_pattern_channelup2: "M24 122 L76 104 L124 86 L170 68 L216 52 L252 38 L276 24",
+  finviz_pattern_doublebottom: "M24 74 L76 108 L128 60 L176 106 L228 68 L276 46",
+  finviz_pattern_multiplebottom: "M24 82 L64 106 L104 70 L146 104 L188 74 L230 98 L276 52",
+  finviz_pattern_headandshouldersinv: "M24 108 L68 88 L110 118 L156 74 L200 102 L244 62 L276 44",
   inside_dryup_v2: "M24 74 L92 74 L140 74 L188 76 L234 78 L276 80",
   wyckoff_buy_signal: "M24 118 L72 120 L118 108 L152 126 L190 94 L228 84 L276 52",
   wyckoff_sell_signal: "M24 48 L76 44 L118 58 L162 54 L208 82 L246 104 L276 118",
@@ -99,7 +112,7 @@ export function ScannerBoardPage() {
         <div className="scanner-board-console-row">
           <div>
             <span className="eyebrow">Board logic</span>
-            <p className="panel-copy">Weekly RS New High, Weekly RS New High Before Price, Daily RS New High, RS New High Before Price, Sean Gap Up, Gap Fill, CANSLIM High Score, CANSLIM V2, Fundamental Quality, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Cup Detection, 8 Week Run Up (Doubler), Three Weeks Tight, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Fearzone, Venu Scanner, and TD9 Bullish.</p>
+            <p className="panel-copy">Weekly RS New High, Weekly RS New High Before Price, Daily RS New High, RS New High Before Price, Sean Gap Up, Gap Fill, CANSLIM High Score, CANSLIM V2, Fundamental Quality, Venu Scanner, bullish Finviz pattern cards, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Cup Detection, 8 Week Run Up (Doubler), Three Weeks Tight, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Fearzone, and TD9 Bullish.</p>
           </div>
           <div>
             <span className="eyebrow">Navigation</span>

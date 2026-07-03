@@ -250,6 +250,44 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["venu_scanner"]["label"], "Run Venu Scanner")
         self.assertIn("scripts/run_venu_scanner.py", actions["venu_scanner"]["command"])
 
+    def test_list_actions_includes_finviz_pattern_scanner(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("finviz_pattern_scanner", actions)
+        self.assertEqual(actions["finviz_pattern_scanner"]["label"], "Run Finviz Pattern Scanner")
+        self.assertIn("scripts/run_finviz_pattern_scanner.py", actions["finviz_pattern_scanner"]["command"])
+        pattern_field = next(field for field in actions["finviz_pattern_scanner"]["fields"] if field["id"] == "pattern")
+        self.assertEqual(pattern_field["options"][0], {"value": "horizontal", "label": "Horizontal S/R"})
+        self.assertEqual(pattern_field["options"][-1], {"value": "headandshouldersinv", "label": "Head & Shoulders Inverse"})
+
+    def test_build_command_supports_finviz_pattern_scanner(self) -> None:
+        command = self.service.build_command(
+            "finviz_pattern_scanner",
+            {
+                "pattern": "doublebottom",
+                "limit": "25",
+                "tickers": "AAPL NVDA",
+                "date_label": "2026-07-03",
+            },
+        )
+
+        self.assertEqual(
+            command,
+            [
+                run_service_module.sys.executable,
+                "scripts/run_finviz_pattern_scanner.py",
+                "--limit",
+                "25",
+                "--tickers",
+                "AAPL",
+                "NVDA",
+                "--date-label",
+                "2026-07-03",
+                "--pattern",
+                "doublebottom",
+            ],
+        )
+
     def test_list_actions_includes_vcp_scored(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 

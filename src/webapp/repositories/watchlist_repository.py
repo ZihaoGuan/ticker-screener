@@ -194,6 +194,16 @@ class WatchlistRepository:
             return
         group_key, group_label = _group_for_stem(stem)
         captured_at = dt.datetime.fromtimestamp(stat.st_mtime, tz=dt.timezone.utc).replace(microsecond=0)
+        strategy_id = ""
+        if layout == "dated":
+            summary_path = path.parent / "run_summary.json"
+            if summary_path.exists():
+                try:
+                    summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    summary_payload = {}
+                if isinstance(summary_payload, dict):
+                    strategy_id = str(summary_payload.get("strategy_id") or "").strip()
         index[stem] = {
             "name": f"{stem}.json",
             "stem": stem,
@@ -205,6 +215,7 @@ class WatchlistRepository:
             "layout": layout,
             "is_deprecated": layout == "legacy",
             "deprecation_reason": _deprecation_reason_for_layout(layout),
+            "strategy_id": strategy_id,
         }
 
     def _upsert_db_entry(self, index: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:

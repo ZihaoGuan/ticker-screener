@@ -16,6 +16,7 @@ from typing import Any
 
 from src.artifact_paths import watchlist_stem_from_path
 from src.config import load_app_config
+from src.finviz_pattern_scanner import FINVIZ_PATTERN_OPTIONS
 from src.market_data_access import db_frame_has_recent_coverage, load_many_ticker_windows
 from src.screener_catalog import build_screener_catalog
 from src.universe_filters import build_filter_option_catalog
@@ -297,6 +298,13 @@ class RunService:
     _exclude_industries_field = RunField("exclude_industries", "Exclude Industries", "multiselect")
     _include_themes_field = RunField("include_themes", "Only Themes", "multiselect")
     _exclude_themes_field = RunField("exclude_themes", "Exclude Themes", "multiselect")
+    _finviz_pattern_field = RunField(
+        "pattern",
+        "Pattern",
+        "select",
+        help_text="Choose the exact Finviz chart pattern filter to run.",
+        options=FINVIZ_PATTERN_OPTIONS,
+    )
     _actions = {
         "screener_history_batch": RunAction(
             "screener_history_batch",
@@ -1768,6 +1776,19 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="leaders",
         ),
+        "finviz_pattern_scanner": RunAction(
+            "finviz_pattern_scanner",
+            "Run Finviz Pattern Scanner",
+            "scripts/run_finviz_pattern_scanner.py",
+            fields=(
+                _finviz_pattern_field,
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
+            ),
+            bias_group="bullish",
+            bullish_subgroup="leaders",
+        ),
         "legacy_peg": RunAction(
             "legacy_peg",
             "Run Legacy PEG",
@@ -2319,6 +2340,8 @@ class RunService:
             command.extend(["--signal-cache-policy", str(normalized_options["signal_cache_policy"])])
         if normalized_options.get("market_data_mode"):
             command.extend(["--market-data-mode", str(normalized_options["market_data_mode"])])
+        if normalized_options.get("pattern"):
+            command.extend(["--pattern", str(normalized_options["pattern"])])
         if action_id in {"screener_history_batch", "signal_warm_batch"} and normalized_options.get("market_data_source"):
             command.extend(["--market-data-source", str(normalized_options["market_data_source"])])
         if action_id in {"screener_history_batch", "signal_warm_batch", "overlap_backtest_v1"} and normalized_options.get("job_run_id") is not None:
@@ -2347,6 +2370,10 @@ class RunService:
                 if limit <= 0 or limit > 10000:
                     raise ValueError("Limit must be between 1 and 10000.")
                 normalized["limit"] = limit
+
+        raw_pattern = str(options.get("pattern") or "").strip()
+        if raw_pattern:
+            normalized["pattern"] = raw_pattern
 
         raw_tickers = options.get("tickers")
         if isinstance(raw_tickers, str) and raw_tickers.strip():

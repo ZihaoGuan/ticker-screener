@@ -1107,6 +1107,55 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["venu_scanner"]["entry_count"], 2)
         self.assertEqual(cards["venu_scanner"]["preview_tickers"], ["PLTR", "APP"])
 
+    def test_get_scanner_board_includes_bullish_finviz_pattern_cards(self) -> None:
+        dated_dir = Path(self.temp_dir.name) / "screeners" / "2026-06-12" / "finviz_pattern_doublebottom"
+        dated_dir.mkdir(parents=True, exist_ok=True)
+        (dated_dir / "watchlist.json").write_text(
+            json.dumps([{"ticker": "PLTR"}, {"ticker": "APP"}]),
+            encoding="utf-8",
+        )
+        (dated_dir / "run_summary.json").write_text(
+            json.dumps(
+                {
+                    "strategy_id": "finviz_pattern_doublebottom",
+                    "date_label": "2026-06-12",
+                    "watchlist_file": str(dated_dir / "watchlist.json"),
+                    "raw_results_file": str(dated_dir / "raw_results.json"),
+                }
+            ),
+            encoding="utf-8",
+        )
+        timestamp = dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc).timestamp()
+        import os
+
+        os.utime(dated_dir / "watchlist.json", (timestamp, timestamp))
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        expected_card_ids = {
+            "finviz_pattern_horizontal",
+            "finviz_pattern_horizontal2",
+            "finviz_pattern_tlsupport",
+            "finviz_pattern_tlsupport2",
+            "finviz_pattern_wedgedown",
+            "finviz_pattern_wedgedown2",
+            "finviz_pattern_wedgeresistance",
+            "finviz_pattern_wedgeresistance2",
+            "finviz_pattern_channelup",
+            "finviz_pattern_channelup2",
+            "finviz_pattern_doublebottom",
+            "finviz_pattern_multiplebottom",
+            "finviz_pattern_headandshouldersinv",
+        }
+
+        self.assertTrue(expected_card_ids.issubset(cards.keys()))
+        self.assertTrue(cards["finviz_pattern_doublebottom"]["available"])
+        self.assertEqual(cards["finviz_pattern_doublebottom"]["entry_count"], 2)
+        self.assertEqual(cards["finviz_pattern_doublebottom"]["preview_tickers"], ["PLTR", "APP"])
+
     def test_get_scanner_board_includes_fundamental_quality_card(self) -> None:
         self._write_watchlist(
             "fundamental_quality_2026-06-12",
