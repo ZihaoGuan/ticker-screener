@@ -40,6 +40,11 @@ class _FakeHistoryRepository:
         self.screen_run_payload = dict(kwargs)
         return 17
 
+    def upsert_screen_run_and_replace_hits(self, **kwargs: object) -> int:
+        self.screen_run_payload = dict(kwargs)
+        self.hit_rows = list(kwargs.get("rows") or [])
+        return 17
+
     def replace_screen_run_hits(self, screen_run_id: int | None, rows: list[dict[str, object]]) -> None:
         self.hit_rows = rows
 

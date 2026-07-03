@@ -43,7 +43,6 @@ type ScannerRow = {
   canslimMaxScore: number | null;
   accelScore: number | null;
   accelLabel: string;
-  indRsScore: number | null;
   arsScore: number | null;
   alsScore: number | null;
   technicalIndicator1d: string;
@@ -307,7 +306,7 @@ export function ScannerResultPage() {
       return;
     }
     const lines = [
-      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "1Y %", "YTD %", "TA", "1D", "1W", "FA", "CANSLIM", "Accel", "Ind RS", "ARS", "ALS Score", "Setup", "Summary"].join(","),
+      ["Ticker", "Company", "Sector", "Industry", "Day Volume", "Change %", "1Y %", "YTD %", "TA", "1D", "1W", "FA", "CANSLIM", "Accel", "ARS", "ALS Score", "Setup", "Summary"].join(","),
       ...filteredRows.map((row) =>
         [
           row.ticker,
@@ -324,7 +323,6 @@ export function ScannerResultPage() {
           row.faScore == null ? "" : row.faScore.toFixed(1),
           formatCanslimScore(row.canslimScore, row.canslimMaxScore),
           formatAccelerationScore(row.accelScore, row.accelLabel),
-          row.indRsScore == null ? "" : Math.round(row.indRsScore).toString(),
           row.arsScore == null ? "" : Math.round(row.arsScore).toString(),
           row.alsScore == null ? "" : Math.round(row.alsScore).toString(),
           csvValue(row.setupLabel),
@@ -545,7 +543,6 @@ export function ScannerResultPage() {
                       <th>{renderSortHeader("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                       <th>CANSLIM</th>
                       <th>Accel</th>
-                      <th>Ind RS</th>
                       <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                       <th>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     </tr>
@@ -587,7 +584,6 @@ export function ScannerResultPage() {
                         </td>
                         <td data-label="CANSLIM">{formatCanslimScore(row.canslimScore, row.canslimMaxScore)}</td>
                         <td data-label="Accel">{formatAccelerationScore(row.accelScore, row.accelLabel)}</td>
-                        <td data-label="Ind RS">{formatPercentScore(row.indRsScore)}</td>
                         <td data-label="ARS">{formatPercentScore(row.arsScore)}</td>
                         <td data-label="ALS Score" className="scanner-result-als-cell">
                           {formatIntegerScore(row.alsScore)}
@@ -650,7 +646,6 @@ function buildScannerRow(
   const directLeadershipOverall = typeof entry.rs_rating === "number" ? entry.rs_rating : null;
   const directAccelerationScore = typeof entry.growth_acceleration_score === "number" ? entry.growth_acceleration_score : typeof entry.acceleration_score === "number" ? entry.acceleration_score : null;
   const directAccelerationLabel = typeof entry.growth_acceleration_label === "string" ? entry.growth_acceleration_label : typeof entry.acceleration_label === "string" ? entry.acceleration_label : "";
-  const directIndustryGroupRs = typeof entry.industry_group_rs_rank === "number" ? entry.industry_group_rs_rank : null;
   const technicalOverall = directTechnicalOverall ?? technical?.overall_rating ?? null;
   const fundamentalOverall = directFundamentalOverall ?? fundamental?.overall_rating ?? null;
   const leadershipOverall = directLeadershipOverall ?? technical?.leadership_score ?? null;
@@ -673,7 +668,6 @@ function buildScannerRow(
     canslimMaxScore: directCanslimMaxScore,
     accelScore: directAccelerationScore,
     accelLabel: directAccelerationLabel,
-    indRsScore: directIndustryGroupRs ?? technical?.industry_group_rs_rank ?? null,
     taScore: technicalOverall != null ? technicalOverall / 10 : null,
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,

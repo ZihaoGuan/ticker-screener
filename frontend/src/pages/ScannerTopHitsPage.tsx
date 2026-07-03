@@ -346,7 +346,6 @@ export function ScannerTopHitsPage() {
                       <td data-label="CAN V2">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
                       <td data-label="VCP">{formatVcpScore(row.vcp_score, row.vcp_rating)}</td>
                       <td data-label="Accel">{formatAccelerationScore(row.growth_acceleration_score, row.growth_acceleration_label)}</td>
-                      <td data-label="Ind RS">{formatRating(row.industry_group_rs_rank ?? null)}</td>
                       <td data-label="RS">{formatRating(row.rs_rating)}</td>
                       <td data-label="TA">{formatRating(row.ta_rating)}</td>
                       <td data-label="1D">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1d"])}</td>

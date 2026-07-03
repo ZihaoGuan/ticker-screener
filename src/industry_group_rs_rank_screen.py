@@ -3,9 +3,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import datetime as dt
 from numbers import Real
+import re
 from typing import Sequence
 
 from .ratings.repository import RatingsRepository
+
+
+_PERCENT_LABEL_RE = re.compile(r"^\(?-?\d+(?:\.\d+)?%\)?$")
+_MARKET_TIME_LABEL_RE = re.compile(r"^\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)\s+[A-Z]{2,4}$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,21 @@ def _coerce_real(value: object) -> float | None:
         return None
 
 
+def _normalize_label(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _is_valid_industry_group_label(value: object) -> bool:
+    label = _normalize_label(value)
+    if not label or label == "(blank)":
+        return False
+    if _PERCENT_LABEL_RE.fullmatch(label):
+        return False
+    if _MARKET_TIME_LABEL_RE.fullmatch(label):
+        return False
+    return True
+
+
 def run_industry_group_rs_rank_screen(*, database_url: str, as_of_date: dt.date | None = None, tickers: Sequence[str] | None = None, minimum_rank: float = 90.0) -> IndustryGroupRsRankScreenResult:
     repository = RatingsRepository(database_url)
     target_tickers = [str(item or "").strip().upper() for item in (tickers or []) if str(item or "").strip()]
@@ -76,9 +96,12 @@ def run_industry_group_rs_rank_screen(*, database_url: str, as_of_date: dt.date 
         snapshot = snapshots.get(ticker) or {}
         if snapshot:
             snapshot_count += 1
+        industry_group = snapshot.get("industry_group")
         rank = _coerce_real(snapshot.get("industry_group_rs_rank"))
         if rank is not None:
             ranked_snapshot_count += 1
+        if not _is_valid_industry_group_label(industry_group):
+            continue
         if rank is None or rank <= float(minimum_rank):
             continue
         hits.append(IndustryGroupRsRankHit(
@@ -86,7 +109,7 @@ def run_industry_group_rs_rank_screen(*, database_url: str, as_of_date: dt.date 
             signal_date=str(snapshot.get("as_of_date") or (as_of_date.isoformat() if as_of_date else "")),
             sector=snapshot.get("sector"),
             industry=snapshot.get("industry"),
-            industry_group=snapshot.get("industry_group"),
+            industry_group=industry_group,
             industry_group_rs_rank=round(rank, 1),
             industry_group_member_count=int(snapshot["industry_group_member_count"]) if snapshot.get("industry_group_member_count") is not None else None,
             daily_rs_rating=float(snapshot["daily_rs_rating"]) if snapshot.get("daily_rs_rating") is not None else None,

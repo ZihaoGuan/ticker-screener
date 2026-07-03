@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import math
 from pathlib import Path
+from time import sleep
 from typing import Any
 
 from src.market_data_access import resolve_database_url
@@ -25,6 +26,9 @@ def _json_dumps(value: Any) -> str:
 
 class HistoryRepository:
     DEFAULT_REMOTE_WORKER_STALE_SECONDS = 90
+    _SCHEMA_ADVISORY_LOCK_KEY = 8_146_237
+    _DEADLOCK_RETRY_ATTEMPTS = 3
+    _DEADLOCK_RETRY_SLEEP_SECONDS = 0.2
 
     def __init__(self, database_url: str = "", artifacts_dir: Path | None = None) -> None:
         self.database_url = resolve_database_url(database_url)
@@ -44,8 +48,13 @@ class HistoryRepository:
         schema_path = Path(__file__).resolve().parents[3] / "sql" / "postgres_app_schema.sql"
         with psycopg.connect(self.database_url) as connection:
             with connection.cursor() as cursor:
-                cursor.execute(schema_path.read_text(encoding="utf-8"))
-            connection.commit()
+                cursor.execute("SELECT pg_advisory_lock(%s)", (self._SCHEMA_ADVISORY_LOCK_KEY,))
+                try:
+                    cursor.execute(schema_path.read_text(encoding="utf-8"))
+                    connection.commit()
+                finally:
+                    cursor.execute("SELECT pg_advisory_unlock(%s)", (self._SCHEMA_ADVISORY_LOCK_KEY,))
+                    connection.commit()
         self._schema_ready = True
 
     def _connect(self):
@@ -564,6 +573,131 @@ class HistoryRepository:
             connection.commit()
         return int(row[0]) if row else None
 
+    def upsert_screen_run_and_replace_hits(
+        self,
+        *,
+        strategy_id: str,
+        run_date: dt.date,
+        job_run_id: int | None,
+        config_json: dict[str, Any],
+        config_hash: str,
+        scope_json: dict[str, Any],
+        scope_hash: str,
+        market_data_mode: str,
+        source_kind: str,
+        hit_count: int,
+        failure_count: int,
+        result_summary_json: dict[str, Any],
+        raw_artifact_path: str,
+        watchlist_artifact_path: str,
+        report_artifact_path: str = "",
+        notes: str = "",
+        rows: list[dict[str, Any]] | None = None,
+    ) -> int | None:
+        connection = self._connect()
+        if connection is None:
+            return None
+        upsert_sql = """
+            INSERT INTO screen_runs (
+                strategy_id,
+                run_date,
+                job_run_id,
+                config_json,
+                config_hash,
+                scope_json,
+                scope_hash,
+                market_data_mode,
+                source_kind,
+                hit_count,
+                failure_count,
+                result_summary_json,
+                raw_artifact_path,
+                watchlist_artifact_path,
+                report_artifact_path,
+                notes
+            )
+            VALUES (
+                %s, %s, %s, %s::jsonb, %s, %s::jsonb, %s, %s, %s,
+                %s, %s, %s::jsonb, %s, %s, %s, %s
+            )
+            ON CONFLICT (strategy_id, run_date, config_hash, scope_hash)
+            DO UPDATE SET
+                job_run_id = EXCLUDED.job_run_id,
+                market_data_mode = EXCLUDED.market_data_mode,
+                source_kind = EXCLUDED.source_kind,
+                hit_count = EXCLUDED.hit_count,
+                failure_count = EXCLUDED.failure_count,
+                result_summary_json = EXCLUDED.result_summary_json,
+                raw_artifact_path = EXCLUDED.raw_artifact_path,
+                watchlist_artifact_path = EXCLUDED.watchlist_artifact_path,
+                report_artifact_path = EXCLUDED.report_artifact_path,
+                notes = EXCLUDED.notes,
+                deleted_at = NULL,
+                deleted_reason = NULL
+            RETURNING id
+        """
+        delete_sql = "DELETE FROM screen_run_hits WHERE screen_run_id = %s"
+        insert_sql = """
+            INSERT INTO screen_run_hits (
+                screen_run_id, strategy_id, signal_date, ticker, passed, rank,
+                metrics_json, reasons_json, hit_payload_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
+        """
+        normalized_rows = rows or []
+        for attempt in range(1, self._DEADLOCK_RETRY_ATTEMPTS + 1):
+            try:
+                with connection:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            upsert_sql,
+                            (
+                                strategy_id,
+                                run_date,
+                                job_run_id,
+                                _json_dumps(config_json),
+                                config_hash,
+                                _json_dumps(scope_json),
+                                scope_hash,
+                                market_data_mode,
+                                source_kind,
+                                hit_count,
+                                failure_count,
+                                _json_dumps(result_summary_json),
+                                raw_artifact_path,
+                                watchlist_artifact_path,
+                                report_artifact_path,
+                                notes,
+                            ),
+                        )
+                        row = cursor.fetchone()
+                        screen_run_id = int(row[0]) if row else None
+                        if screen_run_id is not None:
+                            cursor.execute(delete_sql, (screen_run_id,))
+                            for hit_row in normalized_rows:
+                                cursor.execute(
+                                    insert_sql,
+                                    (
+                                        screen_run_id,
+                                        hit_row["strategy_id"],
+                                        hit_row["signal_date"],
+                                        hit_row["ticker"],
+                                        bool(hit_row.get("passed")),
+                                        hit_row.get("rank"),
+                                        _json_dumps(hit_row.get("metrics_json") or {}),
+                                        _json_dumps(hit_row.get("reasons_json") or []),
+                                        _json_dumps(hit_row.get("hit_payload_json") or {}),
+                                    ),
+                                )
+                    connection.commit()
+                return screen_run_id
+            except Exception as exc:
+                if not self._is_retryable_deadlock(exc) or attempt >= self._DEADLOCK_RETRY_ATTEMPTS:
+                    raise
+                connection.rollback()
+                sleep(self._DEADLOCK_RETRY_SLEEP_SECONDS * attempt)
+        return None
+
     def replace_screen_run_hits(self, screen_run_id: int | None, rows: list[dict[str, Any]]) -> None:
         if screen_run_id is None:
             return
@@ -597,6 +731,13 @@ class HistoryRepository:
                         ),
                     )
             connection.commit()
+
+    def _is_retryable_deadlock(self, exc: Exception) -> bool:
+        try:
+            import psycopg
+        except ImportError:
+            return False
+        return isinstance(exc, psycopg.errors.DeadlockDetected)
 
     def list_screen_runs(
         self,

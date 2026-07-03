@@ -174,7 +174,8 @@ class ScreenerHistoryService:
             "failed_tickers": failed_ticker_count,
         }
         source_kind = str(summary_payload.get("source") or ("manual-tickers" if scope_json["tickers"] else "exchange-universe"))
-        screen_run_id = self.repository.upsert_screen_run(
+        rows = self._build_hit_rows(strategy_id=strategy_id, signal_date=signal_date, raw_payload=raw_payload)
+        return self.repository.upsert_screen_run_and_replace_hits(
             strategy_id=strategy_id,
             run_date=signal_date,
             job_run_id=job_run_id,
@@ -189,10 +190,8 @@ class ScreenerHistoryService:
             result_summary_json=result_summary,
             raw_artifact_path=str(summary_payload.get("raw_results_file") or ""),
             watchlist_artifact_path=str(summary_payload.get("watchlist_file") or ""),
+            rows=rows,
         )
-        rows = self._build_hit_rows(strategy_id=strategy_id, signal_date=signal_date, raw_payload=raw_payload)
-        self.repository.replace_screen_run_hits(screen_run_id, rows)
-        return screen_run_id
 
     def persist_metric_snapshot_run(
         self,
@@ -216,7 +215,7 @@ class ScreenerHistoryService:
         result_summary = dict(summary_payload)
         result_summary.setdefault("date_label", signal_date.isoformat())
         result_summary.setdefault("as_of_date", signal_date.isoformat())
-        screen_run_id = self.repository.upsert_screen_run(
+        return self.repository.upsert_screen_run_and_replace_hits(
             strategy_id=strategy_id,
             run_date=signal_date,
             job_run_id=job_run_id,
@@ -232,9 +231,8 @@ class ScreenerHistoryService:
             raw_artifact_path=raw_artifact_path,
             watchlist_artifact_path=watchlist_artifact_path,
             notes="Market metric snapshot",
+            rows=[],
         )
-        self.repository.replace_screen_run_hits(screen_run_id, [])
-        return screen_run_id
 
     def persist_snapshot_run(
         self,
@@ -252,7 +250,7 @@ class ScreenerHistoryService:
     ) -> int | None:
         resolved_config_json = dict(config_json or {})
         resolved_scope_json = dict(scope_json or {})
-        screen_run_id = self.repository.upsert_screen_run(
+        return self.repository.upsert_screen_run_and_replace_hits(
             strategy_id=strategy_id,
             run_date=run_date,
             job_run_id=job_run_id,
@@ -268,9 +266,8 @@ class ScreenerHistoryService:
             raw_artifact_path="",
             watchlist_artifact_path="",
             notes=notes,
+            rows=hit_rows,
         )
-        self.repository.replace_screen_run_hits(screen_run_id, hit_rows)
-        return screen_run_id
 
     def _coerce_failure_count(self, raw_value: Any) -> int:
         if isinstance(raw_value, list):
