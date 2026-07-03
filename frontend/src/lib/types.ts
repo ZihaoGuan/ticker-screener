@@ -1854,6 +1854,8 @@ export type MyPickRow = {
   latest_close: number | null;
   daily_ema9: number | null;
   daily_ema21: number | null;
+  daily_sma50: number | null;
+  price_above_sma50: boolean | null;
   distance_to_ema9_pct: number | null;
   distance_to_ema21_pct: number | null;
 };

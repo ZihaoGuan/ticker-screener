@@ -216,10 +216,13 @@ class MyPicksService:
             close = _safe_float(snapshot.get("close"))
             daily_ema9 = _safe_float(snapshot.get("daily_ema9"))
             daily_ema21 = _safe_float(snapshot.get("daily_ema21"))
+            daily_sma50 = _safe_float(snapshot.get("daily_sma50"))
             row["trendline_as_of_date"] = _to_iso_date(snapshot.get("trade_date"))
             row["latest_close"] = close
             row["daily_ema9"] = daily_ema9
             row["daily_ema21"] = daily_ema21
+            row["daily_sma50"] = daily_sma50
+            row["price_above_sma50"] = close is not None and daily_sma50 is not None and close > daily_sma50
             row["distance_to_ema9_pct"] = _percent_distance(close, daily_ema9)
             row["distance_to_ema21_pct"] = _percent_distance(close, daily_ema21)
 
@@ -310,6 +313,8 @@ class MyPicksService:
             "latest_close": None,
             "daily_ema9": None,
             "daily_ema21": None,
+            "daily_sma50": None,
+            "price_above_sma50": None,
             "distance_to_ema9_pct": None,
             "distance_to_ema21_pct": None,
         }

@@ -132,6 +132,19 @@ def _build_price_frame_map(*tickers: str):
     return {ticker: frame.copy() for ticker in tickers}
 
 
+def _build_trendline_snapshot_map(*tickers: str):
+    return {
+        ticker: {
+            "trade_date": "2026-06-24",
+            "close": 110.0,
+            "daily_ema9": 105.0,
+            "daily_ema21": 102.0,
+            "daily_sma50": 104.0,
+        }
+        for ticker in tickers
+    }
+
+
 class MyPicksServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.repo = _FakeMyPicksRepository()
@@ -140,7 +153,10 @@ class MyPicksServiceTests(unittest.TestCase):
         self.service.watchlist_repository = _FakeWatchlistRepository()
 
     def test_create_pick_enriches_rating_and_signal_context(self) -> None:
-        with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("MSFT")):
+        with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("MSFT")), patch(
+            "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
+            return_value=_build_trendline_snapshot_map("MSFT"),
+        ):
             row = self.service.create_pick(ticker="msft", notes="leader", actor_user_id=7)
 
         self.assertEqual(row["ticker"], "MSFT")
@@ -154,6 +170,8 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(row["vcp_rating"], "Strong VCP")
         self.assertEqual(row["recent_signal_count"], 2)
         self.assertEqual(row["technical_indicator_ratings"]["1d"]["rating_label"], "Strong")
+        self.assertEqual(row["daily_sma50"], 104.0)
+        self.assertTrue(row["price_above_sma50"])
         self.assertAlmostEqual(row["change_1d_pct"], 10.0)
         self.assertAlmostEqual(row["change_since_added_pct"], 10.0)
         self.assertTrue(row["ema9_tested_since_added"])
@@ -163,7 +181,10 @@ class MyPicksServiceTests(unittest.TestCase):
         self.service.create_pick(ticker="AAPL")
         self.service.create_pick(ticker="NVDA")
 
-        with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("AAPL", "NVDA")):
+        with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("AAPL", "NVDA")), patch(
+            "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
+            return_value=_build_trendline_snapshot_map("AAPL", "NVDA"),
+        ):
             payload = self.service.get_context()
 
         self.assertEqual(payload["total_count"], 2)
@@ -174,6 +195,8 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["vcp_score"], 84.5)
         self.assertAlmostEqual(payload["rows"][0]["change_1d_pct"], 10.0)
         self.assertAlmostEqual(payload["rows"][0]["change_since_added_pct"], 10.0)
+        self.assertEqual(payload["rows"][0]["daily_sma50"], 104.0)
+        self.assertTrue(payload["rows"][0]["price_above_sma50"])
         self.assertTrue(payload["rows"][0]["ema9_tested_since_added"])
         self.assertTrue(payload["rows"][0]["ema21_tested_since_added"])
 

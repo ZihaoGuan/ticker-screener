@@ -53,7 +53,7 @@ class AppConfig:
     ftd_sweep_min_avg_volume: int = 500_000
     ftd_sweep_min_avg_dollar_volume: float = 15_000_000.0
     gap_fill_history_days: int = 365
-    gap_fill_lookback_days: int = 180
+    gap_fill_lookback_days: int = 252
     gap_fill_min_gap_pct: float = 0.03
     gap_fill_min_avg_volume: int = 1_000_000
     gap_fill_min_avg_dollar_volume: float = 20_000_000.0

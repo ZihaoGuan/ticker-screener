@@ -523,6 +523,7 @@ function PicksTable({
             <th>Since Add %</th>
             <th>EMA9 Test</th>
             <th>EMA21 Test</th>
+            <th>Above 50 SMA</th>
             <th>EMA9</th>
             <th>vs EMA9</th>
             <th>EMA21</th>
@@ -558,6 +559,7 @@ function PicksTable({
               <td data-label="Since Add %">{renderChange(row.change_since_added_pct)}</td>
               <td data-label="EMA9 Test">{renderTestFlag(row.ema9_tested_since_added)}</td>
               <td data-label="EMA21 Test">{renderTestFlag(row.ema21_tested_since_added)}</td>
+              <td data-label="Above 50 SMA">{renderAboveSmaFlag(row.price_above_sma50)}</td>
               <td data-label="EMA9">{formatPrice(row.daily_ema9)}</td>
               <td data-label="vs EMA9">
                 <span className={toneForPercent(row.distance_to_ema9_pct)}>{formatSignedPercent(row.distance_to_ema9_pct)}</span>
@@ -678,6 +680,13 @@ function renderTestFlag(value: boolean | null | undefined) {
     return <span className="ticker-change neutral">--</span>;
   }
   return <span className={`ticker-change ${value ? "down" : "up"}`}>{value ? "Tested" : "No"}</span>;
+}
+
+function renderAboveSmaFlag(value: boolean | null | undefined) {
+  if (value == null) {
+    return <span className="ticker-change neutral">--</span>;
+  }
+  return <span className={`ticker-change ${value ? "up" : "down"}`}>{value ? "Above" : "Below"}</span>;
 }
 
 function toneForPercent(value: number | null | undefined) {
