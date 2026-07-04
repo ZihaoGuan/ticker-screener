@@ -2298,6 +2298,7 @@ class RunService:
             raise ValueError(f"Unknown run action: {action_id}")
 
         normalized_options = dict(options or {}) if normalized else self._normalize_options(action, options or {})
+        supported_field_ids = {field.field_id for field in action.fields}
         command = [sys.executable, action.script_path]
         command.extend(action.extra_args)
         if action.supports_limit and normalized_options.get("limit") is not None:
@@ -2400,14 +2401,20 @@ class RunService:
             command.extend(["--market-data-source", str(normalized_options["market_data_source"])])
         if action_id in {"screener_history_batch", "signal_warm_batch", "overlap_backtest_v1"} and normalized_options.get("job_run_id") is not None:
             command.extend(["--job-run-id", str(normalized_options["job_run_id"])])
-        if normalized_options.get("filter_precedence"):
+        if "filter_precedence" in supported_field_ids and normalized_options.get("filter_precedence"):
             command.extend(["--filter-precedence", str(normalized_options["filter_precedence"])])
-        self._append_multi_args(command, "--include-sectors", normalized_options.get("include_sectors"))
-        self._append_multi_args(command, "--exclude-sectors", normalized_options.get("exclude_sectors"))
-        self._append_multi_args(command, "--include-industries", normalized_options.get("include_industries"))
-        self._append_multi_args(command, "--exclude-industries", normalized_options.get("exclude_industries"))
-        self._append_multi_args(command, "--include-themes", normalized_options.get("include_themes"))
-        self._append_multi_args(command, "--exclude-themes", normalized_options.get("exclude_themes"))
+        if "include_sectors" in supported_field_ids:
+            self._append_multi_args(command, "--include-sectors", normalized_options.get("include_sectors"))
+        if "exclude_sectors" in supported_field_ids:
+            self._append_multi_args(command, "--exclude-sectors", normalized_options.get("exclude_sectors"))
+        if "include_industries" in supported_field_ids:
+            self._append_multi_args(command, "--include-industries", normalized_options.get("include_industries"))
+        if "exclude_industries" in supported_field_ids:
+            self._append_multi_args(command, "--exclude-industries", normalized_options.get("exclude_industries"))
+        if "include_themes" in supported_field_ids:
+            self._append_multi_args(command, "--include-themes", normalized_options.get("include_themes"))
+        if "exclude_themes" in supported_field_ids:
+            self._append_multi_args(command, "--exclude-themes", normalized_options.get("exclude_themes"))
         return command
 
     def _normalize_options(self, action: RunAction, options: dict[str, Any]) -> dict[str, Any]:

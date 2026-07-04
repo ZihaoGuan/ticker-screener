@@ -49,6 +49,12 @@ def parse_args() -> argparse.Namespace:
         help="FMP API call budget for this run (default: 400)",
     )
     parser.add_argument(
+        "--price-provider",
+        choices=("auto", "fmp", "yfinance"),
+        default="auto",
+        help="Price history provider for analyzer input (default: auto)",
+    )
+    parser.add_argument(
         "--apply-entry-filter",
         action="store_true",
         help="Apply analyzer entry-quality filter after scoring",
@@ -68,6 +74,71 @@ def _write_json(path: Path, payload: object) -> None:
 
 def _event_lookup(events: list[Any]) -> dict[str, Any]:
     return {event.ticker.upper(): event for event in events}
+
+
+def _load_yfinance():
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise RuntimeError("yfinance is not installed.") from exc
+    return yf
+
+
+def _normalize_yfinance_history(history: Any) -> list[dict[str, Any]]:
+    if history is None or getattr(history, "empty", True):
+        return []
+    frame = history.copy()
+    if getattr(frame, "columns", None) is not None and hasattr(frame.columns, "nlevels") and frame.columns.nlevels > 1:
+        frame.columns = frame.columns.get_level_values(0)
+    frame = frame.rename(columns=str)
+    required = {"Open", "High", "Low", "Close", "Volume"}
+    if not required.issubset(set(frame.columns)):
+        return []
+    frame = frame.loc[:, ["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["High", "Low", "Close", "Volume"])
+    if frame.empty:
+        return []
+    normalized: list[dict[str, Any]] = []
+    for index, row in frame.sort_index(ascending=False).iterrows():
+        trade_date = index.date().isoformat() if hasattr(index, "date") else str(index)[:10]
+        normalized.append(
+            {
+                "date": trade_date,
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(row["Volume"]),
+            }
+        )
+    return normalized
+
+
+def _fetch_yfinance_daily_prices(
+    symbol: str,
+    *,
+    run_date: dt.date,
+    days: int,
+) -> list[dict[str, Any]]:
+    yf = _load_yfinance()
+    start_date = run_date - dt.timedelta(days=max(days * 2, 365))
+    history = yf.download(
+        tickers=symbol,
+        start=start_date.isoformat(),
+        end=(run_date + dt.timedelta(days=1)).isoformat(),
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+    )
+    normalized = _normalize_yfinance_history(history)
+    return normalized[:days] if days > 0 else normalized
+
+
+def _resolve_price_provider(args: argparse.Namespace) -> str:
+    provider = str(getattr(args, "price_provider", "auto") or "auto").strip().lower()
+    if provider == "auto":
+        return "fmp" if ((args.api_key or os.getenv("FMP_API_KEY") or "").strip()) else "yfinance"
+    return provider
 
 
 def _build_watchlist_entry(hit: dict[str, Any]) -> dict[str, object]:
@@ -155,82 +226,102 @@ def main() -> int:
         print("No T+1-eligible earnings events for selected week.", file=sys.stderr)
         return 0
 
-    client = FMPClient(api_key=args.api_key, max_api_calls=args.max_api_calls)
-    earnings_rows = client.get_earnings_calendar(week_start.isoformat(), run_date.isoformat()) or []
+    price_provider = _resolve_price_provider(args)
+    client: FMPClient | None = None
+    if price_provider == "fmp":
+        client = FMPClient(api_key=args.api_key, max_api_calls=args.max_api_calls)
+    else:
+        try:
+            _load_yfinance()
+        except RuntimeError as exc:
+            raise SystemExit(
+                "Earnings trade analyzer price history unavailable: no FMP API key and yfinance is not installed."
+            ) from exc
+
     eligible_symbols = set(eligible_lookup.keys())
     earnings_by_symbol: dict[str, dict[str, Any]] = {}
-    for row in earnings_rows:
-        symbol = str(row.get("symbol") or "").strip().upper()
-        if not symbol or symbol not in eligible_symbols or symbol in earnings_by_symbol:
-            continue
-        earnings_by_symbol[symbol] = row
+    profiles: dict[str, dict[str, Any]] = {}
+    if client is not None:
+        earnings_rows = client.get_earnings_calendar(week_start.isoformat(), run_date.isoformat()) or []
+        for row in earnings_rows:
+            symbol = str(row.get("symbol") or "").strip().upper()
+            if not symbol or symbol not in eligible_symbols or symbol in earnings_by_symbol:
+                continue
+            earnings_by_symbol[symbol] = row
+        profiles = client.get_company_profiles(sorted(eligible_symbols)) if eligible_symbols else {}
 
-    profiles = client.get_company_profiles(sorted(eligible_symbols)) if eligible_symbols else {}
     failures: list[dict[str, object]] = []
     candidates: list[dict[str, Any]] = []
     for symbol in sorted(eligible_symbols):
         event = eligible_lookup[symbol]
-        earning = earnings_by_symbol.get(symbol)
+        earning = earnings_by_symbol.get(symbol) if client is not None else None
         profile = profiles.get(symbol) if isinstance(profiles, dict) else None
-        if not isinstance(earning, dict):
-            failures.append(
-                {
-                    "ticker": symbol,
-                    "symbol": symbol,
-                    "error": "earnings_row_missing",
-                    "earnings_date": event.event_date.isoformat(),
-                    "eligible_on": event.eligible_on.isoformat(),
-                }
-            )
-            continue
-        if not isinstance(profile, dict):
-            failures.append(
-                {
-                    "ticker": symbol,
-                    "symbol": symbol,
-                    "error": "company_profile_missing",
-                    "earnings_date": event.event_date.isoformat(),
-                    "eligible_on": event.eligible_on.isoformat(),
-                }
-            )
-            continue
-        market_cap = float(profile.get("mktCap") or 0)
-        exchange = str(profile.get("exchangeShortName") or "")
-        if market_cap < float(args.min_market_cap):
-            failures.append(
-                {
-                    "ticker": symbol,
-                    "symbol": symbol,
-                    "error": "market_cap_below_min",
-                    "market_cap": market_cap,
-                    "earnings_date": event.event_date.isoformat(),
-                    "eligible_on": event.eligible_on.isoformat(),
-                }
-            )
-            continue
-        if exchange not in FMPClient.US_EXCHANGES:
-            failures.append(
-                {
-                    "ticker": symbol,
-                    "symbol": symbol,
-                    "error": "non_us_exchange",
-                    "exchange": exchange,
-                    "earnings_date": event.event_date.isoformat(),
-                    "eligible_on": event.eligible_on.isoformat(),
-                }
-            )
-            continue
+        market_cap: float | None = None
+        exchange = str((profile or {}).get("exchangeShortName") or event.exchange or "")
+        company_name = str((profile or {}).get("companyName") or symbol)
+        earnings_date = str((earning or {}).get("date") or event.event_date.isoformat())
+        earnings_timing = normalize_timing((earning or {}).get("time") or event.session)
+        price = (profile or {}).get("price", 0)
+
+        if client is not None:
+            if not isinstance(earning, dict):
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "error": "earnings_row_missing",
+                        "earnings_date": event.event_date.isoformat(),
+                        "eligible_on": event.eligible_on.isoformat(),
+                    }
+                )
+                continue
+            if not isinstance(profile, dict):
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "error": "company_profile_missing",
+                        "earnings_date": event.event_date.isoformat(),
+                        "eligible_on": event.eligible_on.isoformat(),
+                    }
+                )
+                continue
+            market_cap = float(profile.get("mktCap") or 0)
+            if market_cap < float(args.min_market_cap):
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "error": "market_cap_below_min",
+                        "market_cap": market_cap,
+                        "earnings_date": event.event_date.isoformat(),
+                        "eligible_on": event.eligible_on.isoformat(),
+                    }
+                )
+                continue
+            if exchange not in FMPClient.US_EXCHANGES:
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "error": "non_us_exchange",
+                        "exchange": exchange,
+                        "earnings_date": event.event_date.isoformat(),
+                        "eligible_on": event.eligible_on.isoformat(),
+                    }
+                )
+                continue
         candidates.append(
             {
                 "symbol": symbol,
-                "company_name": profile.get("companyName", symbol),
-                "earnings_date": str(earning.get("date") or event.event_date.isoformat()),
-                "earnings_timing": normalize_timing(earning.get("time")),
+                "company_name": company_name,
+                "earnings_date": earnings_date,
+                "earnings_timing": earnings_timing,
                 "market_cap": market_cap,
-                "sector": profile.get("sector") or event.sector or "N/A",
-                "industry": profile.get("industry") or "N/A",
+                "sector": (profile.get("sector") if isinstance(profile, dict) else None) or event.sector or "N/A",
+                "industry": (profile.get("industry") if isinstance(profile, dict) else None) or "N/A",
                 "exchange": exchange or event.exchange,
-                "price": profile.get("price", 0),
+                "price": price,
                 "earnings_summary": event.summary,
                 "eligible_on": event.eligible_on.isoformat(),
             }
@@ -241,19 +332,35 @@ def main() -> int:
     for index, candidate in enumerate(candidates, start=1):
         symbol = candidate["symbol"]
         print(f"[{index}/{len(candidates)}] analyzing {symbol}", file=sys.stderr)
-        try:
-            daily_prices = client.get_historical_prices(symbol, days=250)
-        except ApiCallBudgetExceeded:
-            failures.append(
-                {
-                    "ticker": symbol,
-                    "symbol": symbol,
-                    "error": "api_budget_exceeded",
-                    "earnings_date": candidate["earnings_date"],
-                    "eligible_on": candidate["eligible_on"],
-                }
-            )
-            break
+        if client is not None:
+            try:
+                daily_prices = client.get_historical_prices(symbol, days=250)
+            except ApiCallBudgetExceeded:
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "error": "api_budget_exceeded",
+                        "earnings_date": candidate["earnings_date"],
+                        "eligible_on": candidate["eligible_on"],
+                    }
+                )
+                break
+        else:
+            try:
+                daily_prices = _fetch_yfinance_daily_prices(symbol, run_date=run_date, days=250)
+            except Exception as exc:
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "error": "yfinance_history_failed",
+                        "message": str(exc),
+                        "earnings_date": candidate["earnings_date"],
+                        "eligible_on": candidate["eligible_on"],
+                    }
+                )
+                continue
         if not daily_prices or len(daily_prices) < 50:
             failures.append(
                 {
@@ -357,8 +464,9 @@ def main() -> int:
             "apply_entry_filter": bool(args.apply_entry_filter),
             "min_market_cap": float(args.min_market_cap),
             "min_gap": float(args.min_gap),
-            "api_calls_made": client.api_calls_made,
-            "max_api_calls": client.max_api_calls,
+            "price_provider": price_provider,
+            "api_calls_made": client.api_calls_made if client is not None else 0,
+            "max_api_calls": client.max_api_calls if client is not None else 0,
             "unfiltered_result_count": len(unfiltered_results),
         },
     }

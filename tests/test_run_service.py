@@ -779,6 +779,34 @@ class RunServiceTests(unittest.TestCase):
         overwrite_index = command.index("--overwrite-policy")
         self.assertEqual(command[overwrite_index + 1], "skip-existing")
 
+    def test_build_technical_ratings_ignores_stale_unsupported_filter_args(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "build_technical_ratings",
+            options={
+                "as_of_date": "2026-06-27",
+                "include_sectors": ["Technology"],
+                "filter_precedence": "exclude",
+                "exclude_sectors": ["Healthcare"],
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        self.assertIn("scripts/build_technical_ratings.py", command)
+        self.assertIn("--include-sectors", command)
+        self.assertIn("Technology", command)
+        self.assertNotIn("--filter-precedence", command)
+        self.assertNotIn("--exclude-sectors", command)
+
     def test_launch_chart_fundamentals_cache_sync_includes_focused_options(self) -> None:
         captured: dict[str, object] = {}
 

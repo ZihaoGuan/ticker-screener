@@ -1881,33 +1881,35 @@ class RatingsRepository:
                     ),
                     ranked AS (
                       SELECT
-                        *,
-                        ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
+                        filtered.*,
+                        ROW_NUMBER() OVER (
+                          ORDER BY filtered.overall_rating DESC NULLS LAST, filtered.ticker ASC
+                        ) AS current_rank
                       FROM filtered
                     )
                     SELECT
-                      ticker,
-                      as_of_date,
-                      sector,
-                      industry,
-                      overall_rating,
-                      trend_regime_score,
-                      dma_speed_score,
-                      divergence_health_score,
-                      daily_rs_rating,
-                      weekly_rs_rating,
-                      leadership_score,
-                      structure_volume_score,
-                      industry_group,
-                      industry_group_rs_rank,
-                      industry_group_member_count,
-                      rating_band,
-                      technical_status,
-                      technical_status_reason,
-                      flags,
-                      current_rank
+                      ranked.ticker,
+                      ranked.as_of_date,
+                      ranked.sector,
+                      ranked.industry,
+                      ranked.overall_rating,
+                      ranked.trend_regime_score,
+                      ranked.dma_speed_score,
+                      ranked.divergence_health_score,
+                      ranked.daily_rs_rating,
+                      ranked.weekly_rs_rating,
+                      ranked.leadership_score,
+                      ranked.structure_volume_score,
+                      ranked.industry_group,
+                      ranked.industry_group_rs_rank,
+                      ranked.industry_group_member_count,
+                      ranked.rating_band,
+                      ranked.technical_status,
+                      ranked.technical_status_reason,
+                      ranked.flags,
+                      ranked.current_rank
                     FROM ranked
-                    ORDER BY current_rank ASC
+                    ORDER BY ranked.current_rank ASC
                     LIMIT %s
                     """,
                     (target_date, normalized_status, normalized_status, normalized_sector, normalized_sector, normalized_limit),
@@ -1930,11 +1932,13 @@ class RatingsRepository:
                         ),
                         ranked AS (
                           SELECT
-                            ticker,
-                            ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS previous_rank
+                            filtered.ticker,
+                            ROW_NUMBER() OVER (
+                              ORDER BY filtered.overall_rating DESC NULLS LAST, filtered.ticker ASC
+                            ) AS previous_rank
                           FROM filtered
                         )
-                        SELECT ticker, previous_rank
+                        SELECT ranked.ticker, ranked.previous_rank
                         FROM ranked
                         """,
                         (previous_date, normalized_status, normalized_status, normalized_sector, normalized_sector),
