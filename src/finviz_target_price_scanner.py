@@ -81,24 +81,37 @@ def _normalize_hit(row: dict[str, Any], *, minimum_upside_ratio: float) -> dict[
 
 
 def _build_screener_rows(screener_cls: type[Any]) -> tuple[list[dict[str, Any]], str]:
-    overview = screener_cls(
-        filters=list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS),
-        table="Overview",
-        order="ticker",
-        request_method="async",
-    )
-    overview_rows = [dict(row) for row in overview]
-    if overview_rows and "Target Price" in overview_rows[0]:
-        return overview_rows, "overview"
+    filters = list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS)
 
-    custom = screener_cls(
-        filters=list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS),
-        table="Custom",
-        custom=list(_CUSTOM_TABLE_COLUMNS),
-        order="ticker",
-        request_method="async",
-    )
-    return [dict(row) for row in custom], "custom"
+    def _fetch_rows(*, table: str, request_method: str, custom: list[str] | None = None) -> list[dict[str, Any]]:
+        screener = screener_cls(
+            filters=filters,
+            table=table,
+            custom=custom,
+            order="ticker",
+            request_method=request_method,
+        )
+        return [dict(row) for row in screener]
+
+    last_error: Exception | None = None
+    for request_method in ("async", "sync"):
+        try:
+            overview_rows = _fetch_rows(table="Overview", request_method=request_method)
+        except Exception as exc:
+            last_error = exc
+            continue
+        if overview_rows and "Target Price" in overview_rows[0]:
+            return overview_rows, f"overview:{request_method}"
+        try:
+            custom_rows = _fetch_rows(table="Custom", request_method=request_method, custom=list(_CUSTOM_TABLE_COLUMNS))
+        except Exception as exc:
+            last_error = exc
+            continue
+        return custom_rows, f"custom:{request_method}"
+
+    if last_error is not None:
+        raise last_error
+    return [], "overview:sync"
 
 
 def run_finviz_target_price_scanner(

@@ -522,6 +522,7 @@ function PicksTable({
             <th>Since Add %</th>
             <th>EMA9 Test</th>
             <th>EMA21 Test</th>
+            <th>Retest 50 SMA</th>
             <th>Above 50 SMA</th>
             <th>EMA9</th>
             <th>vs EMA9</th>
@@ -557,6 +558,7 @@ function PicksTable({
               <td data-label="Since Add %">{renderChange(row.change_since_added_pct)}</td>
               <td data-label="EMA9 Test">{renderTestFlag(row.ema9_tested_since_added)}</td>
               <td data-label="EMA21 Test">{renderTestFlag(row.ema21_tested_since_added)}</td>
+              <td data-label="Retest 50 SMA">{renderTestFlag(row.sma50_tested_since_added)}</td>
               <td data-label="Above 50 SMA">{renderAboveSmaFlag(row.price_above_sma50)}</td>
               <td data-label="EMA9">{formatPrice(row.daily_ema9)}</td>
               <td data-label="vs EMA9">

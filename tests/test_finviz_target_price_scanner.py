@@ -40,6 +40,20 @@ class _FakeScreener(list):
         return list(self)
 
 
+class _AsyncFailingFakeScreener(_FakeScreener):
+    def __init__(self, *, tickers=None, filters=None, table: str, order: str, custom=None, request_method=None) -> None:
+        if request_method == "async":
+            raise RuntimeError("async fetch failed")
+        super().__init__(
+            tickers=tickers,
+            filters=filters,
+            table=table,
+            order=order,
+            custom=custom,
+            request_method=request_method,
+        )
+
+
 class FinvizTargetPriceScannerTests(unittest.TestCase):
     def test_run_scanner_filters_by_target_price_upside_and_limit(self) -> None:
         with patch("src.finviz_target_price_scanner._load_finviz_screener", return_value=_FakeScreener):
@@ -49,7 +63,7 @@ class FinvizTargetPriceScannerTests(unittest.TestCase):
         self.assertEqual(payload["filters"], list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS))
         self.assertEqual(payload["minimum_upside_ratio"], TARGET_PRICE_UPSIDE_RATIO)
         self.assertEqual(payload["scan_mode"], "filters")
-        self.assertEqual(payload["row_source"], "custom")
+        self.assertEqual(payload["row_source"], "custom:async")
         self.assertEqual(payload["requested_tickers"], ["NVDA", "PLTR", "APP"])
         self.assertEqual(payload["returned_candidates"], 1)
         self.assertEqual(payload["hits"][0]["ticker"], "NVDA")
@@ -61,7 +75,16 @@ class FinvizTargetPriceScannerTests(unittest.TestCase):
             payload = run_finviz_target_price_scanner()
 
         self.assertEqual(payload["scan_mode"], "filters")
-        self.assertEqual(payload["row_source"], "custom")
+        self.assertEqual(payload["row_source"], "custom:async")
+        self.assertEqual(payload["total_candidates"], 3)
+        self.assertEqual([hit["ticker"] for hit in payload["hits"]], ["NVDA", "APP"])
+
+    def test_run_scanner_falls_back_to_sync_when_async_fetch_fails(self) -> None:
+        with patch("src.finviz_target_price_scanner._load_finviz_screener", return_value=_AsyncFailingFakeScreener):
+            payload = run_finviz_target_price_scanner()
+
+        self.assertEqual(payload["scan_mode"], "filters")
+        self.assertEqual(payload["row_source"], "custom:sync")
         self.assertEqual(payload["total_candidates"], 3)
         self.assertEqual([hit["ticker"] for hit in payload["hits"]], ["NVDA", "APP"])
 

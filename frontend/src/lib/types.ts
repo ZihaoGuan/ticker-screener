@@ -1830,6 +1830,7 @@ export type MyPickRow = {
   change_since_added_pct: number | null;
   ema9_tested_since_added: boolean | null;
   ema21_tested_since_added: boolean | null;
+  sma50_tested_since_added: boolean | null;
   fundamental_rating: number | null;
   fundamental_rank: number | null;
   fundamental_status: string | null;

@@ -123,12 +123,15 @@ class _FakeWatchlistRepository:
 def _build_price_frame_map(*tickers: str):
     import pandas as pd
 
+    index = pd.bdate_range(end="2026-06-24", periods=60)
+    close = [100.0] * 58 + [100.0, 110.0]
+    low = [99.0] * 58 + [99.5, 100.0]
     frame = pd.DataFrame(
         {
-            "Low": [99.0, 100.0],
-            "Close": [100.0, 110.0],
+            "Low": low,
+            "Close": close,
         },
-        index=pd.to_datetime(["2026-06-23", "2026-06-24"]),
+        index=index,
     )
     return {ticker: frame.copy() for ticker in tickers}
 
@@ -183,6 +186,7 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertAlmostEqual(row["change_since_added_pct"], 10.0)
         self.assertTrue(row["ema9_tested_since_added"])
         self.assertTrue(row["ema21_tested_since_added"])
+        self.assertTrue(row["sma50_tested_since_added"])
 
     def test_get_context_sorts_newest_first(self) -> None:
         self.service.create_pick(ticker="AAPL")
@@ -211,6 +215,7 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertTrue(payload["rows"][0]["price_above_sma50"])
         self.assertTrue(payload["rows"][0]["ema9_tested_since_added"])
         self.assertTrue(payload["rows"][0]["ema21_tested_since_added"])
+        self.assertTrue(payload["rows"][0]["sma50_tested_since_added"])
 
     def test_delete_pick_requires_existing_id(self) -> None:
         row = self.service.create_pick(ticker="PLTR")

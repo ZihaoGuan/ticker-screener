@@ -14,6 +14,7 @@ from src.webapp.repositories.watchlist_repository import WatchlistRepository
 from src.webapp.repositories.my_picks_repository import MyPicksRepository
 
 
+_SMA50_LOOKBACK_DAYS = 60
 FUNDAMENTAL_CHECKLIST: tuple[dict[str, str], ...] = (
     {
         "key": "revenue_growth",
@@ -240,7 +241,7 @@ class MyPicksService:
             tickers,
             start_date=min(baseline_dates),
             end_date=today,
-            trading_days_needed=30,
+            trading_days_needed=_SMA50_LOOKBACK_DAYS,
             database_url=self.database_url,
         )
         for row in rows:
@@ -250,6 +251,7 @@ class MyPicksService:
             row["change_since_added_pct"] = None
             row["ema9_tested_since_added"] = None
             row["ema21_tested_since_added"] = None
+            row["sma50_tested_since_added"] = None
             if frame is None or frame.empty or "Close" not in frame:
                 continue
             close_series = frame["Close"].dropna()
@@ -271,6 +273,7 @@ class MyPicksService:
             row["change_since_added_pct"] = _percent_change(latest_close, added_baseline)
             row["ema9_tested_since_added"] = _was_ema_tested_since_date(frame, added_date, 9)
             row["ema21_tested_since_added"] = _was_ema_tested_since_date(frame, added_date, 21)
+            row["sma50_tested_since_added"] = _was_sma_tested_since_date(frame, added_date, 50)
 
     def _attach_trend_template_context(self, rows: list[dict[str, Any]]) -> None:
         tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
@@ -320,6 +323,7 @@ class MyPicksService:
             "change_since_added_pct": None,
             "ema9_tested_since_added": None,
             "ema21_tested_since_added": None,
+            "sma50_tested_since_added": None,
             "fundamental_rating": None,
             "fundamental_rank": None,
             "fundamental_status": None,
@@ -442,11 +446,33 @@ def _close_on_or_after(frame: Any, target_date: dt.date) -> float | None:
 
 
 def _was_ema_tested_since_date(frame: Any, target_date: dt.date | None, length: int) -> bool | None:
-    if target_date is None or frame is None or frame.empty or "Close" not in frame:
+    return _was_average_tested_since_date(frame, target_date, average_series=_build_ema_series(frame, length))
+
+
+def _was_sma_tested_since_date(frame: Any, target_date: dt.date | None, length: int) -> bool | None:
+    return _was_average_tested_since_date(frame, target_date, average_series=_build_sma_series(frame, length))
+
+
+def _build_ema_series(frame: Any, length: int):
+    if frame is None or frame.empty or "Close" not in frame:
         return None
     try:
-        ema_series = frame["Close"].ewm(span=length, adjust=False).mean()
+        return frame["Close"].ewm(span=length, adjust=False).mean()
     except Exception:
+        return None
+
+
+def _build_sma_series(frame: Any, length: int):
+    if frame is None or frame.empty or "Close" not in frame:
+        return None
+    try:
+        return frame["Close"].rolling(window=length, min_periods=length).mean()
+    except Exception:
+        return None
+
+
+def _was_average_tested_since_date(frame: Any, target_date: dt.date | None, *, average_series: Any) -> bool | None:
+    if target_date is None or frame is None or frame.empty or "Close" not in frame or average_series is None:
         return None
     probe_series = frame["Low"] if "Low" in frame else frame["Close"]
     if probe_series is None:
@@ -454,9 +480,9 @@ def _was_ema_tested_since_date(frame: Any, target_date: dt.date | None, length: 
     history = frame.loc[frame.index.date >= target_date].copy()
     if history.empty:
         return None
-    history["ema"] = ema_series.loc[history.index]
+    history["average"] = average_series.loc[history.index]
     history["probe"] = probe_series.loc[history.index]
-    history = history.dropna(subset=["ema", "probe"])
+    history = history.dropna(subset=["average", "probe"])
     if history.empty:
         return None
-    return bool((history["probe"] <= history["ema"]).any())
+    return bool((history["probe"] <= history["average"]).any())
