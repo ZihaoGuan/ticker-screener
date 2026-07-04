@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 from typing import Any, Sequence
+
+try:
+    from requests import exceptions as requests_exceptions
+except ImportError:  # pragma: no cover - requests ships with finviz in production
+    requests_exceptions = None
 
 
 FINVIZ_TARGET_PRICE_SCANNER_FILTERS: tuple[str, ...] = ("ind_stocksonly", "targetprice_a50")
@@ -9,6 +15,7 @@ FINVIZ_TARGET_PRICE_SCANNER_STRATEGY_ID = "finviz_target_price_50"
 TARGET_PRICE_UPSIDE_RATIO = 1.5
 _CUSTOM_TABLE_COLUMNS: tuple[str, ...] = ("1", "2", "65", "69")
 _MULTIPLIERS = {"K": 1_000.0, "M": 1_000_000.0, "B": 1_000_000_000.0, "T": 1_000_000_000_000.0}
+_RATE_LIMIT_RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0, 6.0)
 
 
 def _load_finviz_screener() -> type[Any]:
@@ -80,18 +87,36 @@ def _normalize_hit(row: dict[str, Any], *, minimum_upside_ratio: float) -> dict[
     return payload
 
 
+def _is_rate_limit_error(error: Exception) -> bool:
+    if requests_exceptions is not None and isinstance(error, requests_exceptions.HTTPError):
+        response = getattr(error, "response", None)
+        return getattr(response, "status_code", None) == 429
+    return "429" in str(error)
+
+
 def _build_screener_rows(screener_cls: type[Any]) -> tuple[list[dict[str, Any]], str]:
     filters = list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS)
 
     def _fetch_rows(*, table: str, request_method: str, custom: list[str] | None = None) -> list[dict[str, Any]]:
-        screener = screener_cls(
-            filters=filters,
-            table=table,
-            custom=custom,
-            order="ticker",
-            request_method=request_method,
-        )
-        return [dict(row) for row in screener]
+        last_error: Exception | None = None
+        for attempt_index in range(len(_RATE_LIMIT_RETRY_DELAYS) + 1):
+            try:
+                screener = screener_cls(
+                    filters=filters,
+                    table=table,
+                    custom=custom,
+                    order="ticker",
+                    request_method=request_method,
+                )
+                return [dict(row) for row in screener]
+            except Exception as exc:
+                last_error = exc
+                if not _is_rate_limit_error(exc) or attempt_index >= len(_RATE_LIMIT_RETRY_DELAYS):
+                    raise
+                time.sleep(_RATE_LIMIT_RETRY_DELAYS[attempt_index])
+        if last_error is not None:
+            raise last_error
+        return []
 
     last_error: Exception | None = None
     for request_method in ("async", "sync"):

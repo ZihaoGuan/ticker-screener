@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from unittest.mock import patch
+import requests
 
 from src.finviz_target_price_scanner import (
     FINVIZ_TARGET_PRICE_SCANNER_FILTERS,
@@ -54,6 +55,28 @@ class _AsyncFailingFakeScreener(_FakeScreener):
         )
 
 
+class _RateLimitedFakeScreener(_FakeScreener):
+    attempts: dict[tuple[str, str], int] = {}
+
+    def __init__(self, *, tickers=None, filters=None, table: str, order: str, custom=None, request_method=None) -> None:
+        key = (table, request_method or "")
+        count = self.attempts.get(key, 0)
+        self.attempts[key] = count + 1
+        if table == "Overview" and request_method == "async" and count == 0:
+            response = requests.Response()
+            response.status_code = 429
+            response.url = "https://finviz.com/screener?v=111"
+            raise requests.exceptions.HTTPError("429 Client Error: Too Many Requests", response=response)
+        super().__init__(
+            tickers=tickers,
+            filters=filters,
+            table=table,
+            order=order,
+            custom=custom,
+            request_method=request_method,
+        )
+
+
 class FinvizTargetPriceScannerTests(unittest.TestCase):
     def test_run_scanner_filters_by_target_price_upside_and_limit(self) -> None:
         with patch("src.finviz_target_price_scanner._load_finviz_screener", return_value=_FakeScreener):
@@ -87,6 +110,19 @@ class FinvizTargetPriceScannerTests(unittest.TestCase):
         self.assertEqual(payload["row_source"], "custom:sync")
         self.assertEqual(payload["total_candidates"], 3)
         self.assertEqual([hit["ticker"] for hit in payload["hits"]], ["NVDA", "APP"])
+
+    def test_run_scanner_retries_rate_limited_fetch(self) -> None:
+        _RateLimitedFakeScreener.attempts = {}
+        with patch("src.finviz_target_price_scanner._load_finviz_screener", return_value=_RateLimitedFakeScreener), patch(
+            "src.finviz_target_price_scanner.time.sleep"
+        ) as sleep_mock:
+            payload = run_finviz_target_price_scanner()
+
+        self.assertEqual(payload["scan_mode"], "filters")
+        self.assertEqual(payload["row_source"], "custom:async")
+        self.assertEqual(payload["total_candidates"], 3)
+        self.assertEqual(_RateLimitedFakeScreener.attempts[("Overview", "async")], 2)
+        sleep_mock.assert_called_once()
 
 
 if __name__ == "__main__":
