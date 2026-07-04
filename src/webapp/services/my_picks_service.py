@@ -6,6 +6,8 @@ from typing import Any
 from src.market_data_access import load_many_ticker_windows_for_range
 from src.ratings.repository import RatingsRepository
 from src.ticker_filters import normalize_ticker_symbol
+from src.trend_template_screen import PRICE_HISTORY_DAYS as TREND_TEMPLATE_PRICE_HISTORY_DAYS
+from src.trend_template_screen import evaluate_trend_template
 from src.trendline_snapshots import load_latest_trendline_snapshot_map
 from src.webapp.config import load_webapp_config
 from src.webapp.repositories.watchlist_repository import WatchlistRepository
@@ -85,6 +87,7 @@ class MyPicksService:
         self._attach_signal_context(picks)
         self._attach_trendline_context(picks)
         self._attach_price_change_context(picks)
+        self._attach_trend_template_context(picks)
         return {
             "database_configured": self.repository.is_configured(),
             "total_count": len(picks),
@@ -124,6 +127,7 @@ class MyPicksService:
         self._attach_signal_context([row])
         self._attach_trendline_context([row])
         self._attach_price_change_context([row])
+        self._attach_trend_template_context([row])
         return row
 
     def delete_pick(self, pick_id: int) -> None:
@@ -150,6 +154,7 @@ class MyPicksService:
         self._attach_signal_context([row])
         self._attach_trendline_context([row])
         self._attach_price_change_context([row])
+        self._attach_trend_template_context([row])
         return row
 
     def _attach_rating_context(self, rows: list[dict[str, Any]]) -> None:
@@ -169,7 +174,6 @@ class MyPicksService:
             canslim = canslim_map.get(ticker) or {}
             vcp = vcp_map.get(ticker) or {}
             fa_rating = _safe_float(fundamental.get("overall_rating"))
-            ta_rating = _safe_float(technical.get("overall_rating"))
             leadership_score = _safe_float(technical.get("leadership_score"))
             row["sector"] = row.get("sector") or fundamental.get("sector") or technical.get("sector")
             row["industry"] = row.get("industry") or fundamental.get("industry") or technical.get("industry")
@@ -179,17 +183,13 @@ class MyPicksService:
             row["fundamental_rating"] = fa_rating
             row["fundamental_rank"] = _safe_int(fundamental.get("current_rank"))
             row["fundamental_status"] = str(fundamental.get("rating_status") or "") or None
-            row["technical_rating"] = ta_rating
             row["leadership_score"] = leadership_score
-            row["technical_band"] = str(technical.get("rating_band") or "") or None
-            row["technical_status"] = str(technical.get("technical_status") or "") or None
             row["technical_indicator_ratings"] = indicators
             row["canslim_score"] = _safe_int(canslim.get("canslim_score"))
             row["canslim_max_score"] = _safe_int(canslim.get("canslim_max_score"))
             row["canslim_rank"] = _safe_int(canslim.get("canslim_rank"))
             row["vcp_score"] = _safe_float(vcp.get("vcp_score"))
             row["vcp_rating"] = str(vcp.get("vcp_rating") or "") or None
-            row["als_score"] = _average_present([fa_rating, ta_rating, leadership_score])
 
     def _attach_signal_context(self, rows: list[dict[str, Any]]) -> None:
         tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
@@ -272,6 +272,34 @@ class MyPicksService:
             row["ema9_tested_since_added"] = _was_ema_tested_since_date(frame, added_date, 9)
             row["ema21_tested_since_added"] = _was_ema_tested_since_date(frame, added_date, 21)
 
+    def _attach_trend_template_context(self, rows: list[dict[str, Any]]) -> None:
+        tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
+        if not tickers:
+            return
+        today = dt.date.today()
+        frames = load_many_ticker_windows_for_range(
+            tickers,
+            start_date=today,
+            end_date=today,
+            trading_days_needed=TREND_TEMPLATE_PRICE_HISTORY_DAYS,
+            database_url=self.database_url,
+        )
+        for row in rows:
+            row["trend_template_match"] = None
+            row["trend_template_criteria_passed"] = None
+            row["trend_template_criteria_total"] = None
+            row["trend_template_label"] = None
+            frame = frames.get(str(row.get("ticker") or "").upper())
+            if frame is None or frame.empty:
+                continue
+            snapshot = evaluate_trend_template(frame)
+            if snapshot is None:
+                continue
+            row["trend_template_match"] = bool(snapshot.matched)
+            row["trend_template_criteria_passed"] = int(snapshot.criteria_passed)
+            row["trend_template_criteria_total"] = int(snapshot.criteria_total)
+            row["trend_template_label"] = f"{snapshot.criteria_passed}/{snapshot.criteria_total}"
+
     def _serialize_pick(self, row: dict[str, Any]) -> dict[str, Any]:
         added_at = _to_iso_datetime(row.get("created_at"))
         added_date = added_at.split("T", 1)[0] if added_at else None
@@ -295,17 +323,13 @@ class MyPicksService:
             "fundamental_rating": None,
             "fundamental_rank": None,
             "fundamental_status": None,
-            "technical_rating": None,
             "leadership_score": None,
-            "technical_band": None,
-            "technical_status": None,
             "technical_indicator_ratings": {},
             "canslim_score": None,
             "canslim_max_score": None,
             "canslim_rank": None,
             "vcp_score": None,
             "vcp_rating": None,
-            "als_score": None,
             "recent_signal_count": 0,
             "latest_signal_date": None,
             "recent_signals": [],
@@ -317,6 +341,10 @@ class MyPicksService:
             "price_above_sma50": None,
             "distance_to_ema9_pct": None,
             "distance_to_ema21_pct": None,
+            "trend_template_match": None,
+            "trend_template_criteria_passed": None,
+            "trend_template_criteria_total": None,
+            "trend_template_label": None,
         }
 
     def _normalize_ticker(self, ticker: str) -> str:
@@ -383,13 +411,6 @@ def _safe_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _average_present(values: list[float | None]) -> float | None:
-    numbers = [value for value in values if isinstance(value, (int, float))]
-    if not numbers:
-        return None
-    return sum(float(value) for value in numbers) / len(numbers)
 
 
 def _percent_distance(value: float | None, baseline: float | None) -> float | None:

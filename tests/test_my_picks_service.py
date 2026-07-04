@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.webapp.services.my_picks_service import MyPicksService
@@ -156,14 +157,20 @@ class MyPicksServiceTests(unittest.TestCase):
         with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("MSFT")), patch(
             "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
             return_value=_build_trendline_snapshot_map("MSFT"),
+        ), patch(
+            "src.webapp.services.my_picks_service.evaluate_trend_template",
+            return_value=SimpleNamespace(matched=True, criteria_passed=8, criteria_total=8),
         ):
             row = self.service.create_pick(ticker="msft", notes="leader", actor_user_id=7)
 
         self.assertEqual(row["ticker"], "MSFT")
         self.assertEqual(row["sector"], "Technology")
         self.assertEqual(row["fundamental_rating"], 8.7)
-        self.assertEqual(row["technical_rating"], 8.2)
         self.assertEqual(row["leadership_score"], 91.0)
+        self.assertTrue(row["trend_template_match"])
+        self.assertEqual(row["trend_template_criteria_passed"], 8)
+        self.assertEqual(row["trend_template_criteria_total"], 8)
+        self.assertEqual(row["trend_template_label"], "8/8")
         self.assertEqual(row["canslim_score"], 11)
         self.assertEqual(row["canslim_max_score"], 14)
         self.assertEqual(row["vcp_score"], 84.5)
@@ -184,6 +191,9 @@ class MyPicksServiceTests(unittest.TestCase):
         with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("AAPL", "NVDA")), patch(
             "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
             return_value=_build_trendline_snapshot_map("AAPL", "NVDA"),
+        ), patch(
+            "src.webapp.services.my_picks_service.evaluate_trend_template",
+            return_value=SimpleNamespace(matched=False, criteria_passed=6, criteria_total=8),
         ):
             payload = self.service.get_context()
 
@@ -193,6 +203,8 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(payload["available_added_dates"], ["2026-06-23"])
         self.assertEqual(payload["rows"][0]["canslim_score"], 11)
         self.assertEqual(payload["rows"][0]["vcp_score"], 84.5)
+        self.assertFalse(payload["rows"][0]["trend_template_match"])
+        self.assertEqual(payload["rows"][0]["trend_template_label"], "6/8")
         self.assertAlmostEqual(payload["rows"][0]["change_1d_pct"], 10.0)
         self.assertAlmostEqual(payload["rows"][0]["change_since_added_pct"], 10.0)
         self.assertEqual(payload["rows"][0]["daily_sma50"], 104.0)

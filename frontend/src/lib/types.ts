@@ -1833,17 +1833,13 @@ export type MyPickRow = {
   fundamental_rating: number | null;
   fundamental_rank: number | null;
   fundamental_status: string | null;
-  technical_rating: number | null;
   leadership_score: number | null;
-  technical_band: string | null;
-  technical_status: string | null;
   technical_indicator_ratings: Record<string, TechnicalIndicatorRatingCell>;
   canslim_score: number | null;
   canslim_max_score: number | null;
   canslim_rank: number | null;
   vcp_score: number | null;
   vcp_rating: string | null;
-  als_score: number | null;
   recent_signal_count: number;
   latest_signal_date: string | null;
   recent_signals: Array<{
@@ -1858,6 +1854,10 @@ export type MyPickRow = {
   price_above_sma50: boolean | null;
   distance_to_ema9_pct: number | null;
   distance_to_ema21_pct: number | null;
+  trend_template_match: boolean | null;
+  trend_template_criteria_passed: number | null;
+  trend_template_criteria_total: number | null;
+  trend_template_label: string | null;
 };
 
 export type MyPicksContextResponse = {

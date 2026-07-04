@@ -433,9 +433,8 @@ export function MyPicksPage() {
                     </div>
                   </div>
                   <div className="scanner-chart-card-score-row">
-                    <span className={`scanner-score-pill ${toneForScore(row.als_score, 100)}`}>ALS {formatScoreInteger(row.als_score)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.fundamental_rating, 100)}`}>FA {formatScoreInteger(row.fundamental_rating)}</span>
-                    <span className={`scanner-score-pill ${toneForScore(row.technical_rating, 10)}`}>TA {formatScore(row.technical_rating)}</span>
+                    <span className={`scanner-score-pill ${toneForTrendTemplate(row)}`}>TT {formatTrendTemplate(row)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.leadership_score, 100)}`}>RS {formatScoreInteger(row.leadership_score)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.canslim_score, row.canslim_max_score ?? 14)}`}>CAN V2 {formatScoreFraction(row.canslim_score, row.canslim_max_score)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.vcp_score, 100)}`}>VCP {formatScore(row.vcp_score)}</span>
@@ -528,9 +527,8 @@ function PicksTable({
             <th>vs EMA9</th>
             <th>EMA21</th>
             <th>vs EMA21</th>
-            <th>ALS</th>
             <th>FA</th>
-            <th>TA</th>
+            <th>Trend Template</th>
             <th>RS Rating</th>
             <th>CAN V2</th>
             <th>VCP</th>
@@ -568,9 +566,8 @@ function PicksTable({
               <td data-label="vs EMA21">
                 <span className={toneForPercent(row.distance_to_ema21_pct)}>{formatSignedPercent(row.distance_to_ema21_pct)}</span>
               </td>
-              <td data-label="ALS">{formatScore(row.als_score)}</td>
               <td data-label="FA">{formatScore(row.fundamental_rating)}</td>
-              <td data-label="TA">{formatScore(row.technical_rating)}</td>
+              <td data-label="Trend Template">{renderTrendTemplateCell(row)}</td>
               <td data-label="RS Rating">{formatScore(row.leadership_score)}</td>
               <td data-label="CAN V2">{formatScoreFraction(row.canslim_score, row.canslim_max_score)}</td>
               <td data-label="VCP">{formatScoreWithLabel(row.vcp_score, row.vcp_rating)}</td>
@@ -687,6 +684,29 @@ function renderAboveSmaFlag(value: boolean | null | undefined) {
     return <span className="ticker-change neutral">--</span>;
   }
   return <span className={`ticker-change ${value ? "up" : "down"}`}>{value ? "Above" : "Below"}</span>;
+}
+
+function formatTrendTemplate(row: MyPickRow) {
+  return row.trend_template_label ?? "--";
+}
+
+function toneForTrendTemplate(row: MyPickRow) {
+  if (row.trend_template_criteria_passed == null || row.trend_template_criteria_total == null || row.trend_template_criteria_total <= 0) {
+    return "is-neutral";
+  }
+  return toneForScore(row.trend_template_criteria_passed, row.trend_template_criteria_total);
+}
+
+function renderTrendTemplateCell(row: MyPickRow) {
+  if (row.trend_template_criteria_passed == null || row.trend_template_criteria_total == null) {
+    return <span className="ticker-change neutral">--</span>;
+  }
+  return (
+    <span className={`ticker-change ${row.trend_template_match ? "up" : "neutral"}`}>
+      {formatTrendTemplate(row)}
+      {row.trend_template_match ? " Match" : ""}
+    </span>
+  );
 }
 
 function toneForPercent(value: number | null | undefined) {
