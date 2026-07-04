@@ -282,6 +282,7 @@ export function ScannerTopHitsPage() {
                     <th>YTD %</th>
                     <th>CAN V2</th>
                     <th>VCP</th>
+                    <th>Accel</th>
                     <th>{renderSortButton("RS", "rs", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>1D</th>
