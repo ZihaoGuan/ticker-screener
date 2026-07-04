@@ -1457,13 +1457,68 @@ class WatchlistServiceTests(unittest.TestCase):
             market_data_source="database-first",
         )
 
-        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame.copy(), "SPY": frame.copy()}):
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame.copy(), "SPY": frame.copy()}), patch(
+            "src.webapp.services.watchlist_service.load_ticker_metadata_map",
+            return_value={"NVDA": {"ipo_date": "2024-11-01"}},
+        ):
             payload = service.get_chart_payload("NVDA", as_of_date=dt.date(2026, 5, 29))
 
         self.assertEqual(payload["data_source"], "database")
         self.assertEqual(payload["candles"][-1]["close"], 103.0)
         self.assertTrue(len(payload["ipo_vwap"]) > 0)
         self.assertEqual(payload["market_extension"]["config"]["label"], "10W SMA")
+
+    def test_get_chart_payload_skips_ipo_vwap_when_cached_ipo_date_is_before_2020(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "Open": [90.0, 100.0, 102.0],
+                "High": [91.0, 103.0, 104.0],
+                "Low": [89.0, 99.0, 101.0],
+                "Close": [90.5, 102.0, 103.0],
+                "Adj Close": [90.5, 102.0, 103.0],
+                "Volume": [900000, 1000000, 1200000],
+            },
+            index=pd.to_datetime(["2019-11-01", "2026-05-28", "2026-05-29"]),
+        )
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame.copy(), "SPY": frame.copy()}), patch(
+            "src.webapp.services.watchlist_service.load_ticker_metadata_map",
+            return_value={"NVDA": {"ipo_date": "2019-11-01"}},
+        ):
+            payload = service.get_chart_payload("NVDA", as_of_date=dt.date(2026, 5, 29))
+
+        self.assertEqual(payload["ipo_vwap"], [])
+
+    def test_get_chart_payload_skips_ipo_vwap_when_loaded_frame_starts_after_cached_ipo_date(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "Open": [100.0, 102.0],
+                "High": [103.0, 104.0],
+                "Low": [99.0, 101.0],
+                "Close": [102.0, 103.0],
+                "Adj Close": [102.0, 103.0],
+                "Volume": [1000000, 1200000],
+            },
+            index=pd.to_datetime(["2026-05-28", "2026-05-29"]),
+        )
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame.copy(), "SPY": frame.copy()}), patch(
+            "src.webapp.services.watchlist_service.load_ticker_metadata_map",
+            return_value={"NVDA": {"ipo_date": "2024-11-01"}},
+        ):
+            payload = service.get_chart_payload("NVDA", as_of_date=dt.date(2026, 5, 29))
+
+        self.assertEqual(payload["ipo_vwap"], [])
 
     def test_get_chart_payload_falls_back_to_internet_for_missing_benchmark(self) -> None:
         ticker_frame = pd.DataFrame(

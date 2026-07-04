@@ -3,11 +3,14 @@ CREATE TABLE IF NOT EXISTS ticker_metadata (
   exchange TEXT,
   sector TEXT,
   industry TEXT,
+  ipo_date DATE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   currency TEXT NOT NULL DEFAULT 'USD',
   source TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE ticker_metadata ADD COLUMN IF NOT EXISTS ipo_date DATE;
 
 CREATE TABLE IF NOT EXISTS daily_bars (
   ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),

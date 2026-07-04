@@ -365,6 +365,7 @@ def main() -> int:
             ticker,
             sector=snapshot.sector or ticker_meta.sector,
             industry=snapshot.industry or ticker_meta.industry,
+            ipo_date=snapshot.ipo_date,
         )
         repository.upsert_fundamentals_snapshots([snapshot])
         latest_states[ticker] = {"as_of_date": snapshot.as_of_date, "parse_status": snapshot.parse_status}

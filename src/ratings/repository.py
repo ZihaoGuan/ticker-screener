@@ -29,22 +29,24 @@ class RatingsRepository:
         *,
         sector: str | None = None,
         industry: str | None = None,
+        ipo_date: dt.date | None = None,
         source: str = "finviz-fundamentals",
     ) -> None:
         connection = self._connect()
         if connection is None:
             return
         sql = """
-            INSERT INTO ticker_metadata (ticker, sector, industry, source)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO ticker_metadata (ticker, sector, industry, ipo_date, source)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (ticker) DO UPDATE SET
               sector = COALESCE(ticker_metadata.sector, EXCLUDED.sector),
               industry = COALESCE(ticker_metadata.industry, EXCLUDED.industry),
+              ipo_date = COALESCE(ticker_metadata.ipo_date, EXCLUDED.ipo_date),
               updated_at = NOW()
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (ticker.upper(), sector, industry, source))
+                cursor.execute(sql, (ticker.upper(), sector, industry, ipo_date, source))
             connection.commit()
 
     def list_active_tickers(
@@ -95,11 +97,12 @@ class RatingsRepository:
         if connection is None:
             return 0
         metadata_sql = """
-            INSERT INTO ticker_metadata (ticker, sector, industry, source)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO ticker_metadata (ticker, sector, industry, ipo_date, source)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (ticker) DO UPDATE SET
               sector = COALESCE(ticker_metadata.sector, EXCLUDED.sector),
               industry = COALESCE(ticker_metadata.industry, EXCLUDED.industry),
+              ipo_date = COALESCE(ticker_metadata.ipo_date, EXCLUDED.ipo_date),
               updated_at = NOW()
         """
         sql = """
@@ -175,6 +178,7 @@ class RatingsRepository:
                 item.ticker.upper(),
                 item.sector,
                 item.industry,
+                item.ipo_date,
                 item.source or "finviz-fundamentals",
             )
             for item in rows
@@ -241,6 +245,34 @@ class RatingsRepository:
                 cursor.executemany(sql, payload)
             connection.commit()
         return len(rows)
+
+    def upsert_ticker_metadata_ipo_dates(
+        self,
+        rows: Iterable[tuple[str, dt.date | None, str]],
+    ) -> int:
+        payload = [
+            (str(ticker).strip().upper(), ipo_date, str(source or "").strip() or "finviz-ipo-date")
+            for ticker, ipo_date, source in rows
+            if str(ticker).strip()
+        ]
+        if not payload:
+            return 0
+        connection = self._connect()
+        if connection is None:
+            return 0
+        sql = """
+            INSERT INTO ticker_metadata (ticker, ipo_date, source)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (ticker) DO UPDATE SET
+              ipo_date = EXCLUDED.ipo_date,
+              source = COALESCE(NULLIF(EXCLUDED.source, ''), ticker_metadata.source),
+              updated_at = NOW()
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.executemany(sql, payload)
+            connection.commit()
+        return len(payload)
 
     def upsert_chart_fundamentals_cache_entry(
         self,
@@ -636,7 +668,7 @@ class RatingsRepository:
         normalized_sectors = _normalize_text_values(sectors)
         sql = """
             SELECT fs.ticker, fs.as_of_date, COALESCE(fs.sector, tm.sector) AS sector,
-                   COALESCE(fs.industry, tm.industry) AS industry, fs.source, fs.source_url, fs.parse_status, fs.parse_error,
+                   COALESCE(fs.industry, tm.industry) AS industry, tm.ipo_date, fs.source, fs.source_url, fs.parse_status, fs.parse_error,
                    fs.scraped_at, fs.updated_at, fs.market_cap, fs.enterprise_value, fs.forward_pe, fs.peg_ratio_5y,
                    fs.price_to_sales, fs.price_to_book, fs.price_to_fcf, fs.profit_margin_pct, fs.operating_margin_pct,
                    fs.gross_margin_pct, fs.roa_pct, fs.roe_pct, fs.institutional_ownership_pct,
@@ -663,7 +695,94 @@ class RatingsRepository:
                 rows = cursor.fetchall()
         snapshots: list[FundamentalsSnapshot] = []
         for row in rows:
-            snapshots.append(FundamentalsSnapshot(*row))
+            (
+                ticker,
+                snapshot_date,
+                sector,
+                industry,
+                ipo_date,
+                source,
+                source_url,
+                parse_status,
+                parse_error,
+                scraped_at,
+                updated_at,
+                market_cap,
+                enterprise_value,
+                forward_pe,
+                peg_ratio_5y,
+                price_to_sales,
+                price_to_book,
+                price_to_fcf,
+                profit_margin_pct,
+                operating_margin_pct,
+                gross_margin_pct,
+                roa_pct,
+                roe_pct,
+                institutional_ownership_pct,
+                institutional_transactions_pct,
+                insider_ownership_pct,
+                insider_transactions_pct,
+                shares_float,
+                shares_outstanding,
+                eps_this_y_pct,
+                eps_next_y_pct,
+                eps_next_5y_pct,
+                sales_qq_pct,
+                eps_qq_pct,
+                perf_month_pct,
+                perf_quarter_pct,
+                perf_half_pct,
+                perf_year_pct,
+                perf_ytd_pct,
+                volatility_week_pct,
+                volatility_month_pct,
+            ) = row
+            snapshots.append(
+                FundamentalsSnapshot(
+                    ticker=ticker,
+                    as_of_date=snapshot_date,
+                    sector=sector,
+                    industry=industry,
+                    ipo_date=ipo_date,
+                    source=source,
+                    source_url=source_url,
+                    parse_status=parse_status,
+                    parse_error=parse_error,
+                    scraped_at=scraped_at,
+                    updated_at=updated_at,
+                    market_cap=market_cap,
+                    enterprise_value=enterprise_value,
+                    forward_pe=forward_pe,
+                    peg_ratio_5y=peg_ratio_5y,
+                    price_to_sales=price_to_sales,
+                    price_to_book=price_to_book,
+                    price_to_fcf=price_to_fcf,
+                    profit_margin_pct=profit_margin_pct,
+                    operating_margin_pct=operating_margin_pct,
+                    gross_margin_pct=gross_margin_pct,
+                    roa_pct=roa_pct,
+                    roe_pct=roe_pct,
+                    institutional_ownership_pct=institutional_ownership_pct,
+                    institutional_transactions_pct=institutional_transactions_pct,
+                    insider_ownership_pct=insider_ownership_pct,
+                    insider_transactions_pct=insider_transactions_pct,
+                    shares_float=shares_float,
+                    shares_outstanding=shares_outstanding,
+                    eps_this_y_pct=eps_this_y_pct,
+                    eps_next_y_pct=eps_next_y_pct,
+                    eps_next_5y_pct=eps_next_5y_pct,
+                    sales_qq_pct=sales_qq_pct,
+                    eps_qq_pct=eps_qq_pct,
+                    perf_month_pct=perf_month_pct,
+                    perf_quarter_pct=perf_quarter_pct,
+                    perf_half_pct=perf_half_pct,
+                    perf_year_pct=perf_year_pct,
+                    perf_ytd_pct=perf_ytd_pct,
+                    volatility_week_pct=volatility_week_pct,
+                    volatility_month_pct=volatility_month_pct,
+                )
+            )
         return snapshots
 
     def load_sector_baselines_for_date(

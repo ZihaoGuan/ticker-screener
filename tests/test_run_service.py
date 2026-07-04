@@ -636,6 +636,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertNotIn("sean_peg", action_ids)
         self.assertIn("earnings_weekly_criteria", action_ids)
         self.assertIn("sync_finviz_fundamentals", action_ids)
+        self.assertIn("sync_finviz_ipo_dates", action_ids)
         self.assertIn("build_sector_rating_baselines", action_ids)
         self.assertIn("build_ticker_ratings", action_ids)
         self.assertIn("build_technical_ratings", action_ids)
@@ -711,6 +712,67 @@ class RunServiceTests(unittest.TestCase):
                 "as_of_date": "2026-06-13",
             },
         )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        overwrite_index = command.index("--overwrite-policy")
+        self.assertEqual(command[overwrite_index + 1], "skip-existing")
+
+    def test_launch_finviz_ipo_dates_includes_custom_options(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+
+        job_id = self.service.launch(
+            "sync_finviz_ipo_dates",
+            options={
+                "tickers": "NVDA ARM",
+                "include_sectors": ["Technology"],
+                "delay_min_seconds": "4",
+                "delay_max_seconds": "7",
+                "batch_size_before_rest": "80",
+                "rest_seconds": "50",
+                "retry_failed_from_manifest": True,
+                "circuit_breaker_consecutive_503": "12",
+            },
+        )
+
+        self.assertEqual(job_id, captured["job_id"])
+        command = captured["command"]
+        self.assertIn("scripts/sync_finviz_ipo_dates.py", command)
+        self.assertIn("--tickers", command)
+        self.assertIn("NVDA", command)
+        self.assertIn("ARM", command)
+        self.assertIn("--include-sectors", command)
+        self.assertIn("Technology", command)
+        self.assertIn("--delay-min-seconds", command)
+        self.assertIn("4.0", command)
+        self.assertIn("--delay-max-seconds", command)
+        self.assertIn("7.0", command)
+        self.assertIn("--batch-size-before-rest", command)
+        self.assertIn("80", command)
+        self.assertIn("--rest-seconds", command)
+        self.assertIn("50.0", command)
+        self.assertIn("--retry-failed-from-manifest", command)
+        self.assertIn("--circuit-breaker-consecutive-503", command)
+        self.assertIn("12", command)
+
+    def test_launch_finviz_ipo_dates_defaults_to_skip_existing(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
+            captured["job_id"] = job_id
+            captured["command"] = command
+            captured["env"] = env
+
+        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+
+        job_id = self.service.launch("sync_finviz_ipo_dates", options={})
 
         self.assertEqual(job_id, captured["job_id"])
         command = captured["command"]

@@ -280,6 +280,108 @@ class RatingPipelineScriptTests(unittest.TestCase):
         self.assertEqual(result, 0)
         repository.upsert_fundamentals_snapshots.assert_not_called()
 
+    def test_sync_finviz_ipo_dates_skips_existing_cached_ipo_date(self) -> None:
+        import scripts.sync_finviz_ipo_dates as script
+
+        repository = MagicMock()
+        with patch.object(
+            script,
+            "parse_args",
+            return_value=Namespace(
+                config="",
+                limit=None,
+                tickers=["AAPL"],
+                resume_from="",
+                delay_min_seconds=0.0,
+                delay_max_seconds=0.0,
+                batch_size_before_rest=500,
+                rest_seconds=0.0,
+                overwrite_policy="skip-existing",
+                include_sectors=None,
+                database_url="postgres://example",
+                manifest_path="",
+                retry_failed_from_manifest=False,
+                circuit_breaker_consecutive_503=25,
+            ),
+        ), patch.object(script, "load_webapp_config", return_value=Namespace(database_url="postgres://example")), patch.object(
+            script, "RatingsRepository", return_value=repository
+        ), patch.object(
+            script,
+            "_load_target_universe",
+            return_value=[script.UniverseTicker(symbol="AAPL", sector="Technology", industry="Consumer Electronics")],
+        ), patch.object(
+            script,
+            "load_ticker_metadata_map",
+            return_value={"AAPL": {"ipo_date": "2024-01-15"}},
+        ), patch.object(script, "_write_manifest"), patch.object(script, "_sleep_with_jitter"):
+            result = script.main()
+
+        self.assertEqual(result, 0)
+        repository.ensure_ticker_metadata_stub.assert_not_called()
+        repository.upsert_ticker_metadata_ipo_dates.assert_not_called()
+
+    def test_sync_finviz_ipo_dates_persists_cached_ipo_date(self) -> None:
+        import scripts.sync_finviz_ipo_dates as script
+
+        repository = MagicMock()
+        snapshot = FundamentalsSnapshot(
+            ticker="AAPL",
+            as_of_date=dt.date(2026, 7, 4),
+            sector="Technology",
+            industry="Consumer Electronics",
+            ipo_date=dt.date(2024, 1, 15),
+            parse_status="ok",
+        )
+        with patch.object(
+            script,
+            "parse_args",
+            return_value=Namespace(
+                config="",
+                limit=None,
+                tickers=["AAPL"],
+                resume_from="",
+                delay_min_seconds=0.0,
+                delay_max_seconds=0.0,
+                batch_size_before_rest=500,
+                rest_seconds=0.0,
+                overwrite_policy="skip-existing",
+                include_sectors=None,
+                database_url="postgres://example",
+                manifest_path="",
+                retry_failed_from_manifest=False,
+                circuit_breaker_consecutive_503=25,
+            ),
+        ), patch.object(script, "load_webapp_config", return_value=Namespace(database_url="postgres://example")), patch.object(
+            script, "RatingsRepository", return_value=repository
+        ), patch.object(
+            script,
+            "_load_target_universe",
+            return_value=[script.UniverseTicker(symbol="AAPL", sector="Technology", industry="Consumer Electronics")],
+        ), patch.object(
+            script,
+            "load_ticker_metadata_map",
+            return_value={},
+        ), patch.object(
+            script,
+            "fetch_finviz_api_snapshot",
+            return_value=snapshot,
+        ), patch.object(script, "snapshot_needs_fallback", return_value=False), patch.object(
+            script, "_write_manifest"
+        ), patch.object(script, "_sleep_with_jitter"):
+            result = script.main()
+
+        self.assertEqual(result, 0)
+        repository.ensure_ticker_metadata_stub.assert_called_once_with(
+            "AAPL",
+            sector="Technology",
+            industry="Consumer Electronics",
+            ipo_date=dt.date(2024, 1, 15),
+            source="finviz-ipo-date",
+        )
+        repository.upsert_ticker_metadata_ipo_dates.assert_called_once_with(
+            [("AAPL", dt.date(2024, 1, 15), "finviz-ipo-date")]
+        )
+
     def test_sync_finviz_fundamentals_retry_failed_from_manifest_uses_failed_and_blocked_tickers(self) -> None:
         import scripts.sync_finviz_fundamentals as script
 

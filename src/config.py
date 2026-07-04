@@ -61,6 +61,7 @@ class AppConfig:
     gap_fill_max_distance_to_gap_bottom_pct: float = 0.12
     gap_fill_min_distance_to_gap_top_pct: float = 0.01
     gap_fill_max_distance_to_gap_top_pct: float = 0.20
+    gap_fill_min_remaining_active_gap_pct_of_original: float = 0.35
     gap_fill_tight_range_lookback_days: int = 10
     year_high_proximity: float = 0.15
     breakout_volume_ratio: float = 1.4

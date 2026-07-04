@@ -311,7 +311,7 @@ def load_ticker_metadata_map(
         return {}
 
     sql = """
-        SELECT ticker, exchange, sector, industry, is_active, currency, source
+        SELECT ticker, exchange, sector, industry, ipo_date, is_active, currency, source
         FROM ticker_metadata
         WHERE ticker = ANY(%s)
     """
@@ -321,12 +321,13 @@ def load_ticker_metadata_map(
             rows = cursor.fetchall()
 
     payload: dict[str, dict[str, object]] = {}
-    for ticker, exchange, sector, industry, is_active, currency, source in rows:
+    for ticker, exchange, sector, industry, ipo_date, is_active, currency, source in rows:
         payload[str(ticker).upper()] = {
             "ticker": str(ticker).upper(),
             "exchange": exchange,
             "sector": sector,
             "industry": industry,
+            "ipo_date": ipo_date.isoformat() if hasattr(ipo_date, "isoformat") else ipo_date,
             "is_active": is_active,
             "currency": currency,
             "source": source,

@@ -30,6 +30,7 @@ from ...market_data_access import (
     db_frame_has_recent_coverage,
     load_many_ticker_windows,
     load_many_ticker_windows_for_range,
+    load_ticker_metadata_map,
     resolve_database_url,
     resolve_market_data_source,
 )
@@ -98,6 +99,7 @@ _scanner_top_hits_cache_lock = threading.Lock()
 _sector_momentum_cache: dict[tuple[str, str, str, str], tuple[float, dict[str, dict[str, Any]]]] = {}
 _sector_momentum_cache_lock = threading.Lock()
 _SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID = "scanner_top_hits_snapshot"
+_IPO_VWAP_MIN_SUPPORTED_DATE = dt.date(2020, 1, 1)
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
         "id": "weekly_rs_new_high",
@@ -1050,6 +1052,11 @@ class WatchlistService:
         frame = frame.sort_index()
         resolved_as_of_timestamp = frame.index.max()
         resolved_as_of_date = pd.Timestamp(resolved_as_of_timestamp).date()
+        try:
+            ticker_metadata = load_ticker_metadata_map([normalized_ticker], database_url=self.database_url).get(normalized_ticker, {})
+        except Exception:
+            ticker_metadata = {}
+        ipo_date = _coerce_optional_date(ticker_metadata.get("ipo_date"))
         visible_start_date = chart_request.visible_start_date
         visible_frame = frame.loc[(frame.index.date >= visible_start_date) & (frame.index.date <= resolved_as_of_date)].copy()
         if visible_frame.empty:
@@ -1070,7 +1077,10 @@ class WatchlistService:
         weekly_close = frame["Close"].resample("W-FRI").last().dropna()
         weekly_ema8 = weekly_close.ewm(span=8, adjust=False).mean()
         frame["weekly_ema8"] = weekly_ema8.reindex(frame.index, method="ffill")
-        frame["ipo_vwap"] = _compute_ipo_vwap(frame)
+        if _should_render_ipo_vwap(frame=frame, ipo_date=ipo_date):
+            frame["ipo_vwap"] = _compute_anchored_vwap(frame, anchor_date=ipo_date)
+        else:
+            frame["ipo_vwap"] = pd.Series(pd.NA, index=frame.index, dtype="Float64")
         candles: list[dict[str, Any]] = []
         volume: list[dict[str, Any]] = []
         ma20: list[dict[str, Any]] = []
@@ -3341,12 +3351,43 @@ def _period_to_calendar_days(period: str) -> int:
 
 
 def _compute_ipo_vwap(frame: pd.DataFrame) -> pd.Series:
+    return _compute_anchored_vwap(frame, anchor_date=None)
+
+
+def _compute_anchored_vwap(frame: pd.DataFrame, *, anchor_date: dt.date | None) -> pd.Series:
     source = frame.dropna(subset=["High", "Low", "Close", "Volume"]).copy()
+    if anchor_date is not None:
+        source = source.loc[source.index.date >= anchor_date].copy()
+    if source.empty:
+        return pd.Series(pd.NA, index=frame.index, dtype="Float64")
     typical_price = (source["High"] + source["Low"] + source["Close"]) / 3.0
     cumulative_value = (typical_price * source["Volume"]).cumsum()
     cumulative_volume = source["Volume"].cumsum().replace(0, pd.NA)
     ipo_vwap = cumulative_value / cumulative_volume
     return ipo_vwap.reindex(frame.index)
+
+
+def _coerce_optional_date(value: object) -> dt.date | None:
+    if isinstance(value, dt.date):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return dt.date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _should_render_ipo_vwap(*, frame: pd.DataFrame, ipo_date: dt.date | None) -> bool:
+    if ipo_date is None or ipo_date < _IPO_VWAP_MIN_SUPPORTED_DATE:
+        return False
+    source = frame.dropna(subset=["High", "Low", "Close", "Volume"])
+    if source.empty:
+        return False
+    first_trade_timestamp = source.index.min()
+    first_trade_date = first_trade_timestamp.date() if hasattr(first_trade_timestamp, "date") else first_trade_timestamp
+    return first_trade_date == ipo_date
 
 
 def _compute_rs_line(stock: pd.Series, benchmark: pd.Series) -> pd.Series:

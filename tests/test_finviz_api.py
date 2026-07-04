@@ -52,6 +52,7 @@ class FinvizApiParserTests(unittest.TestCase):
                 "EPS/Sales Surpr.": "6.52% 3.43%",
                 "Recom": "1.57",
                 "Target Price": "138.00",
+                "IPO Date": "Sep 12, 2024",
                 "Perf Month": "-9.14%",
                 "Perf Quart": "13.84%",
                 "Perf Half Y": "11.65%",
@@ -88,6 +89,7 @@ class FinvizApiParserTests(unittest.TestCase):
         self.assertEqual(snapshot.sales_surprise_pct, 3.43)
         self.assertEqual(snapshot.analyst_recommendation, 1.57)
         self.assertEqual(snapshot.target_price, 138.0)
+        self.assertEqual(snapshot.ipo_date, dt.date(2024, 9, 12))
         self.assertFalse(snapshot_needs_fallback(snapshot))
 
     def test_missing_required_metric_does_not_trigger_fallback_when_classification_exists(self) -> None:

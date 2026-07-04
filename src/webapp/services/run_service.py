@@ -55,6 +55,7 @@ class RunService:
     REMOTE_WORKER_STALE_SECONDS = 90
     _remote_execution_action_ids = {
         "sync_finviz_fundamentals",
+        "sync_finviz_ipo_dates",
         "sync_chart_fundamentals_cache",
         "build_sector_rating_baselines",
         "build_ticker_ratings",
@@ -456,6 +457,26 @@ class RunService:
                 _execution_mode_field,
                 _target_worker_field,
                 _as_of_date_field,
+                _resume_from_field,
+                _delay_min_seconds_field,
+                _delay_max_seconds_field,
+                _batch_size_before_rest_field,
+                _rest_seconds_field,
+                _overwrite_policy_field,
+                _retry_failed_from_manifest_field,
+                _circuit_breaker_consecutive_503_field,
+            ),
+        ),
+        "sync_finviz_ipo_dates": RunAction(
+            "sync_finviz_ipo_dates",
+            "Sync Finviz IPO Dates",
+            "scripts/sync_finviz_ipo_dates.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _include_sectors_field,
+                _execution_mode_field,
+                _target_worker_field,
                 _resume_from_field,
                 _delay_min_seconds_field,
                 _delay_max_seconds_field,
@@ -2391,7 +2412,7 @@ class RunService:
 
     def _normalize_options(self, action: RunAction, options: dict[str, Any]) -> dict[str, Any]:
         normalized: dict[str, Any] = {}
-        if action.action_id in {"sync_finviz_fundamentals", "run_finviz_ratings_pipeline"}:
+        if action.action_id in {"sync_finviz_fundamentals", "sync_finviz_ipo_dates", "run_finviz_ratings_pipeline"}:
             normalized["overwrite_policy"] = "skip-existing"
         if action.supports_limit:
             raw_limit = options.get("limit")
@@ -2974,7 +2995,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach"}:
+        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach"}:
             return "admin_sync"
         return "screen_run"
 
@@ -3004,7 +3025,7 @@ class RunService:
             self._notify_completed_job(job)
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "overlap_backtest_v1", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "overlap_backtest_v1", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach"}:
             self._notify_completed_job(job)
             return
         summary_file = str(job.get("summary_file") or "").strip()

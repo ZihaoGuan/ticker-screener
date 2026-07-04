@@ -52,6 +52,7 @@
   "gap_fill_max_distance_to_gap_bottom_pct": 0.12,
   "gap_fill_min_distance_to_gap_top_pct": 0.01,
   "gap_fill_max_distance_to_gap_top_pct": 0.20,
+  "gap_fill_min_remaining_active_gap_pct_of_original": 0.35,
   "gap_fill_tight_range_lookback_days": 10,
   "year_high_proximity": 0.15,
   "breakout_volume_ratio": 1.4,

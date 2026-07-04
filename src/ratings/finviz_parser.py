@@ -60,6 +60,18 @@ def _clean_meta(value: str | None) -> str | None:
     return normalized or None
 
 
+def _parse_date(value: str | None) -> dt.date | None:
+    text = str(value or "").strip()
+    if not text or text in {"-", "N/A"}:
+        return None
+    for fmt in ("%b %d, %Y", "%B %d, %Y", "%Y-%m-%d", "%m/%d/%Y", "%b-%d-%Y", "%b-%d-%y"):
+        try:
+            return dt.datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def _fallback_sector_from_body(body_excerpt: str) -> tuple[str | None, str | None]:
     lines = [line.strip() for line in str(body_excerpt or "").splitlines() if line.strip()]
     for index, line in enumerate(lines):
@@ -96,6 +108,9 @@ def parse_finviz_probe(
             numeric_value = _coerce_number(raw_value)
             if raw_value.endswith("%"):
                 snapshot.eps_next_y_pct = numeric_value
+            continue
+        if label == "IPO Date":
+            snapshot.ipo_date = _parse_date(raw_value)
             continue
         if label == "Volatility":
             week_value, month_value = _parse_volatility(raw_value)

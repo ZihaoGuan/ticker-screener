@@ -87,6 +87,18 @@ def _parse_eps_sales_surprise(raw_value: object) -> tuple[float | None, float | 
     return value, None
 
 
+def _parse_date_value(raw_value: object) -> dt.date | None:
+    text = str(raw_value or "").strip()
+    if not text or text in {"-", "N/A"}:
+        return None
+    for fmt in ("%b %d, %Y", "%B %d, %Y", "%Y-%m-%d", "%m/%d/%Y", "%b-%d-%Y", "%b-%d-%y"):
+        try:
+            return dt.datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def parse_finviz_stock_data(
     stock_data: dict[str, Any],
     *,
@@ -101,6 +113,7 @@ def parse_finviz_stock_data(
         as_of_date=as_of_date,
         sector=str(stock_data.get("Sector") or fallback_sector or "").strip() or None,
         industry=str(stock_data.get("Industry") or fallback_industry or "").strip() or None,
+        ipo_date=_parse_date_value(stock_data.get("IPO Date")),
         source="finviz-api",
         source_url=f"https://finviz.com/quote.ashx?t={normalized_ticker}&p=d",
         parse_status="ok",

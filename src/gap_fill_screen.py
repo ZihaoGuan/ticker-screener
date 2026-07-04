@@ -32,6 +32,7 @@ class GapFillHit:
     distance_to_gap_bottom_pct: float
     distance_to_gap_top_pct: float
     gap_reclaimed: bool
+    remaining_active_gap_pct_of_original: float
     recent_low: float
     reasons: list[str]
 
@@ -112,6 +113,8 @@ def _scan_open_overhead_gap(
         # later rallies partially reclaim the original overhead gap.
         gap_bottom = max(gap_high, max_future_high or gap_high)
         gap_top = previous_low
+        original_gap_width = previous_low - gap_high
+        remaining_gap_width = gap_top - gap_bottom
         distance_to_gap_bottom_pct = (gap_bottom - current_price) / current_price
         distance_to_gap_top_pct = (gap_top - current_price) / current_price
         candidates.append(
@@ -123,6 +126,9 @@ def _scan_open_overhead_gap(
                 "distance_to_gap_bottom_pct": distance_to_gap_bottom_pct * 100.0,
                 "distance_to_gap_top_pct": distance_to_gap_top_pct * 100.0,
                 "gap_reclaimed": current_price >= gap_bottom,
+                "remaining_active_gap_pct_of_original": (
+                    (remaining_gap_width / original_gap_width) * 100.0 if original_gap_width > 0 else 0.0
+                ),
             }
         )
     if not candidates:
@@ -160,6 +166,7 @@ def _to_hit(
         f"gap size {float(gap_summary['gap_size_pct']):.1f}%",
         f"{float(gap_summary['distance_to_gap_bottom_pct']):+.1f}% vs gap entry",
         f"{float(gap_summary['distance_to_gap_top_pct']):+.1f}% to fill target",
+        f"{float(gap_summary['remaining_active_gap_pct_of_original']):.1f}% of original gap still open",
         f"above 21 EMA {ema_21:.2f} and 50 EMA {ema_50:.2f}",
     ]
     if inside_day:
@@ -189,6 +196,7 @@ def _to_hit(
         distance_to_gap_bottom_pct=float(gap_summary["distance_to_gap_bottom_pct"]),
         distance_to_gap_top_pct=float(gap_summary["distance_to_gap_top_pct"]),
         gap_reclaimed=bool(gap_summary["gap_reclaimed"]),
+        remaining_active_gap_pct_of_original=float(gap_summary["remaining_active_gap_pct_of_original"]),
         recent_low=recent_low,
         reasons=reasons,
     )
@@ -306,6 +314,19 @@ def run_gap_fill_screen(
                         print(
                             f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
                             f"gap target too far {distance_to_gap_top_pct * 100.0:+.1f}% | passed={len(hits)}"
+                        )
+                        continue
+                    remaining_active_gap_pct_of_original = (
+                        float(gap_summary["remaining_active_gap_pct_of_original"]) / 100.0
+                    )
+                    if remaining_active_gap_pct_of_original < float(
+                        config.gap_fill_min_remaining_active_gap_pct_of_original
+                    ):
+                        print(
+                            f"[{position}/{total_tickers}] {ticker.symbol} filtered: "
+                            f"remaining active gap too narrow {remaining_active_gap_pct_of_original * 100.0:.1f}% "
+                            f"< {float(config.gap_fill_min_remaining_active_gap_pct_of_original) * 100.0:.1f}% | "
+                            f"passed={len(hits)}"
                         )
                         continue
 

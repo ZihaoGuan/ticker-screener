@@ -39,6 +39,7 @@ class GapFillScreenTests(unittest.TestCase):
         self.assertAlmostEqual(float(gap["gap_bottom"]), 94.89, places=2)
         self.assertAlmostEqual(float(gap["gap_top"]), 103.35, places=2)
         self.assertAlmostEqual(float(gap["distance_to_gap_bottom_pct"]), 5.5037, places=3)
+        self.assertAlmostEqual(float(gap["remaining_active_gap_pct_of_original"]), 40.0, places=3)
         self.assertFalse(bool(gap["gap_reclaimed"]))
 
     def test_scan_rejects_gap_once_fully_filled(self) -> None:
@@ -57,6 +58,25 @@ class GapFillScreenTests(unittest.TestCase):
         )
 
         self.assertIsNone(gap)
+
+    def test_scan_reports_small_remaining_active_gap_pct_for_nearly_filled_gap(self) -> None:
+        price_data = [
+            _price_bar("2026-04-25", open=18.7, high=19.2, low=19.0, close=19.1),
+            _price_bar("2026-04-28", open=11.2, high=10.6, low=9.8, close=10.0),
+            _price_bar("2026-05-15", open=16.9, high=18.49, low=16.8, close=18.1),
+            _price_bar("2026-07-02", open=17.86, high=18.49, low=17.24, close=18.47),
+        ]
+
+        gap = _scan_open_overhead_gap(
+            price_data,
+            lookback_days=252,
+            min_gap_pct=0.03,
+            current_price=18.47,
+        )
+
+        self.assertIsNotNone(gap)
+        assert gap is not None
+        self.assertAlmostEqual(float(gap["remaining_active_gap_pct_of_original"]), 6.0714, places=3)
 
 
 if __name__ == "__main__":

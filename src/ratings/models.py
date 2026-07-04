@@ -28,6 +28,7 @@ class FundamentalsSnapshot:
     as_of_date: dt.date
     sector: str | None
     industry: str | None
+    ipo_date: dt.date | None = None
     source: str = "finviz"
     source_url: str = ""
     parse_status: str = "ok"
