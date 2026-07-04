@@ -7,6 +7,7 @@ from typing import Any, Sequence
 FINVIZ_TARGET_PRICE_SCANNER_FILTERS: tuple[str, ...] = ("ind_stocksonly", "targetprice_a50")
 FINVIZ_TARGET_PRICE_SCANNER_STRATEGY_ID = "finviz_target_price_50"
 TARGET_PRICE_UPSIDE_RATIO = 1.5
+_CUSTOM_TABLE_COLUMNS: tuple[str, ...] = ("1", "2", "65", "69")
 _MULTIPLIERS = {"K": 1_000.0, "M": 1_000_000.0, "B": 1_000_000_000.0, "T": 1_000_000_000_000.0}
 
 
@@ -79,6 +80,27 @@ def _normalize_hit(row: dict[str, Any], *, minimum_upside_ratio: float) -> dict[
     return payload
 
 
+def _build_screener_rows(screener_cls: type[Any]) -> tuple[list[dict[str, Any]], str]:
+    overview = screener_cls(
+        filters=list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS),
+        table="Overview",
+        order="ticker",
+        request_method="async",
+    )
+    overview_rows = [dict(row) for row in overview]
+    if overview_rows and "Target Price" in overview_rows[0]:
+        return overview_rows, "overview"
+
+    custom = screener_cls(
+        filters=list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS),
+        table="Custom",
+        custom=list(_CUSTOM_TABLE_COLUMNS),
+        order="ticker",
+        request_method="async",
+    )
+    return [dict(row) for row in custom], "custom"
+
+
 def run_finviz_target_price_scanner(
     *,
     limit: int | None = None,
@@ -94,9 +116,7 @@ def run_finviz_target_price_scanner(
     hits: list[dict[str, Any]] = []
     scan_mode = "filters"
 
-    screener = screener_cls(filters=list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS), table="Overview", order="ticker")
-    detail_rows = screener.get_ticker_details()
-    rows = [dict(row) for row in detail_rows] if isinstance(detail_rows, list) else [dict(row) for row in screener]
+    rows, row_source = _build_screener_rows(screener_cls)
     total_candidates = len(rows)
 
     for row in rows:
@@ -118,6 +138,7 @@ def run_finviz_target_price_scanner(
         "minimum_upside_pct": round((minimum_upside_ratio - 1.0) * 100.0, 2),
         "fetched_at": dt.datetime.now(dt.UTC).isoformat(),
         "scan_mode": scan_mode,
+        "row_source": row_source,
         "total_candidates": total_candidates,
         "returned_candidates": len(hits),
         "requested_tickers": requested_tickers,
