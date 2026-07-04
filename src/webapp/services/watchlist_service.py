@@ -248,15 +248,6 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
-        "id": "industry_group_rs_rank",
-        "strategy_id": "industry_group_rs_rank",
-        "label": "Industry Group RS Rank",
-        "description": "Daily technical leaders with persisted industry-group RS rank above 90 on the 0-99 scale.",
-        "timeframe": "Daily",
-        "accent": "cyan",
-        "bias_group": "bullish",
-    },
-    {
         "id": "venu_scanner",
         "strategy_id": "venu_scanner",
         "label": "Venu Scanner",

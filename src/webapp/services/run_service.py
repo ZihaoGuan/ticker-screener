@@ -1792,19 +1792,6 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="leaders",
         ),
-        "industry_group_rs_rank": RunAction(
-            "industry_group_rs_rank",
-            "Run Industry Group RS Rank",
-            "scripts/run_industry_group_rs_rank_screen.py",
-            fields=(
-                _limit_field,
-                _tickers_field,
-                _date_label_field,
-                _as_of_date_field,
-            ),
-            bias_group="bullish",
-            bullish_subgroup="leaders",
-        ),
         "venu_scanner": RunAction(
             "venu_scanner",
             "Run Venu Scanner",

@@ -324,7 +324,6 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("pead_screener", "pead_screener", "PEAD Screener"),
         ("canslim", "canslim", "CANSLIM"),
         ("minervini_growth_acceleration", "minervini_growth_acceleration", "Minervini Growth Acceleration"),
-        ("industry_group_rs_rank", "industry_group_rs_rank", "Industry Group RS Rank"),
         ("peg", "peg", "PEG"),
         ("rs", "rs", "RS"),
     )
