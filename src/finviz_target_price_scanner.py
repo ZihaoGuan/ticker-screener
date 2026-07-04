@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Iterable, Sequence
-
-from .market_data_access import load_active_universe_from_db
+from typing import Any, Sequence
 
 
-FINVIZ_TARGET_PRICE_SCANNER_FILTERS: tuple[str, ...] = ("ind_stocksonly",)
+FINVIZ_TARGET_PRICE_SCANNER_FILTERS: tuple[str, ...] = ("ind_stocksonly", "targetprice_a50")
 FINVIZ_TARGET_PRICE_SCANNER_STRATEGY_ID = "finviz_target_price_50"
 TARGET_PRICE_UPSIDE_RATIO = 1.5
-_TICKER_BATCH_SIZE = 150
 _MULTIPLIERS = {"K": 1_000.0, "M": 1_000_000.0, "B": 1_000_000_000.0, "T": 1_000_000_000_000.0}
 
 
@@ -33,11 +30,6 @@ def _normalize_ticker_list(tickers: Sequence[str] | None) -> list[str]:
         seen.add(ticker)
         normalized.append(ticker)
     return normalized
-
-
-def _batched(items: Sequence[str], batch_size: int) -> Iterable[list[str]]:
-    for start in range(0, len(items), batch_size):
-        yield list(items[start : start + batch_size])
 
 
 def _parse_price(value: object) -> float | None:
@@ -87,37 +79,6 @@ def _normalize_hit(row: dict[str, Any], *, minimum_upside_ratio: float) -> dict[
     return payload
 
 
-def _load_requested_universe_tickers(
-    *,
-    tickers: Sequence[str] | None,
-    as_of_date: dt.date | None,
-    database_url: str | None,
-) -> list[str]:
-    requested = _normalize_ticker_list(tickers)
-    if requested:
-        return requested
-    db_universe = load_active_universe_from_db(as_of_date=as_of_date, database_url=database_url)
-    if not db_universe:
-        return []
-    return [item.symbol for item in db_universe if getattr(item, "symbol", None)]
-
-
-def _run_screener_batch(
-    screener_cls: type[Any],
-    *,
-    batch_tickers: Sequence[str] | None,
-) -> list[dict[str, Any]]:
-    if batch_tickers:
-        screener = screener_cls(tickers=list(batch_tickers), table="Overview", order="ticker")
-    else:
-        screener = screener_cls(filters=list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS), table="Overview", order="ticker")
-
-    detail_rows = screener.get_ticker_details()
-    if isinstance(detail_rows, list):
-        return [dict(row) for row in detail_rows]
-    return [dict(row) for row in screener]
-
-
 def run_finviz_target_price_scanner(
     *,
     limit: int | None = None,
@@ -126,38 +87,27 @@ def run_finviz_target_price_scanner(
     as_of_date: dt.date | None = None,
     database_url: str | None = None,
 ) -> dict[str, Any]:
+    _ = (as_of_date, database_url)
     screener_cls = _load_finviz_screener()
-    requested_tickers = _load_requested_universe_tickers(
-        tickers=tickers,
-        as_of_date=as_of_date,
-        database_url=database_url,
-    )
+    requested_tickers = _normalize_ticker_list(tickers)
+    requested_ticker_set = set(requested_tickers)
     hits: list[dict[str, Any]] = []
-    total_candidates = 0
     scan_mode = "filters"
 
-    if requested_tickers:
-        scan_mode = "tickers"
-        for batch in _batched(requested_tickers, _TICKER_BATCH_SIZE):
-            for row in _run_screener_batch(screener_cls, batch_tickers=batch):
-                total_candidates += 1
-                normalized = _normalize_hit(row, minimum_upside_ratio=minimum_upside_ratio)
-                if normalized is None:
-                    continue
-                hits.append(normalized)
-                if limit is not None and len(hits) >= limit:
-                    break
-            if limit is not None and len(hits) >= limit:
-                break
-    else:
-        for row in _run_screener_batch(screener_cls, batch_tickers=None):
-            total_candidates += 1
-            normalized = _normalize_hit(row, minimum_upside_ratio=minimum_upside_ratio)
-            if normalized is None:
-                continue
-            hits.append(normalized)
-            if limit is not None and len(hits) >= limit:
-                break
+    screener = screener_cls(filters=list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS), table="Overview", order="ticker")
+    detail_rows = screener.get_ticker_details()
+    rows = [dict(row) for row in detail_rows] if isinstance(detail_rows, list) else [dict(row) for row in screener]
+    total_candidates = len(rows)
+
+    for row in rows:
+        normalized = _normalize_hit(row, minimum_upside_ratio=minimum_upside_ratio)
+        if normalized is None:
+            continue
+        if requested_ticker_set and str(normalized.get("ticker") or "") not in requested_ticker_set:
+            continue
+        hits.append(normalized)
+        if limit is not None and len(hits) >= limit:
+            break
 
     return {
         "strategy_id": FINVIZ_TARGET_PRICE_SCANNER_STRATEGY_ID,

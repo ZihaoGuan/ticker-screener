@@ -39,17 +39,15 @@ class FinvizTargetPriceScannerTests(unittest.TestCase):
         self.assertEqual(payload["strategy_id"], FINVIZ_TARGET_PRICE_SCANNER_STRATEGY_ID)
         self.assertEqual(payload["filters"], list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS))
         self.assertEqual(payload["minimum_upside_ratio"], TARGET_PRICE_UPSIDE_RATIO)
-        self.assertEqual(payload["scan_mode"], "tickers")
+        self.assertEqual(payload["scan_mode"], "filters")
         self.assertEqual(payload["requested_tickers"], ["NVDA", "PLTR", "APP"])
         self.assertEqual(payload["returned_candidates"], 1)
         self.assertEqual(payload["hits"][0]["ticker"], "NVDA")
         self.assertEqual(payload["hits"][0]["target_price_upside_pct"], 60.0)
+        self.assertEqual(payload["total_candidates"], 3)
 
-    def test_run_scanner_uses_default_filters_when_no_tickers_available(self) -> None:
-        with patch("src.finviz_target_price_scanner._load_finviz_screener", return_value=_FakeScreener), patch(
-            "src.finviz_target_price_scanner.load_active_universe_from_db",
-            return_value=[],
-        ):
+    def test_run_scanner_uses_direct_filters_when_no_tickers_provided(self) -> None:
+        with patch("src.finviz_target_price_scanner._load_finviz_screener", return_value=_FakeScreener):
             payload = run_finviz_target_price_scanner()
 
         self.assertEqual(payload["scan_mode"], "filters")
