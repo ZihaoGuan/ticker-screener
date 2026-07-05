@@ -371,6 +371,37 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(refreshed_payload["manual_override_target_date"], "2026-06-12")
         self.assertEqual(refreshed_cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
 
+    def test_force_scanner_board_refresh_promotes_weekly_weekend_runs(self) -> None:
+        self._write_watchlist(
+            "weekly_rs_new_high_all_2026-07-03",
+            tickers=["MSFT"],
+            modified_at=dt.datetime(2026, 7, 3, 23, 45, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
+            "weekly_rs_new_high_all_2026-07-04",
+            tickers=["NVDA", "PLTR"],
+            modified_at=dt.datetime(2026, 7, 4, 10, 5, tzinfo=dt.timezone.utc),
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()):
+            default_payload = self.service.get_scanner_board(
+                now=dt.datetime(2026, 7, 4, 23, 13, tzinfo=dt.timezone.utc)
+            )
+            refreshed_payload = self.service.force_scanner_board_refresh(
+                now=dt.datetime(2026, 7, 4, 23, 13, tzinfo=dt.timezone.utc),
+                requested_by="admin@example.com",
+            )
+
+        default_cards = {item["id"]: item for item in default_payload["cards"]}
+        refreshed_cards = {item["id"]: item for item in refreshed_payload["cards"]}
+        self.assertEqual(default_payload["target_trading_date"], "2026-07-03")
+        self.assertEqual(default_cards["weekly_rs_new_high"]["stem"], "weekly_rs_new_high_all_2026-07-03")
+        self.assertEqual(refreshed_payload["target_trading_date"], "2026-07-04")
+        self.assertTrue(refreshed_payload["manual_override_active"])
+        self.assertEqual(refreshed_payload["manual_override_target_date"], "2026-07-04")
+        self.assertEqual(refreshed_cards["weekly_rs_new_high"]["stem"], "weekly_rs_new_high_all_2026-07-04")
+        self.assertEqual(refreshed_cards["weekly_rs_new_high"]["preview_tickers"], ["NVDA", "PLTR"])
+
     def test_get_scanner_top_hits_payload_aggregates_overlap_and_sector_momentum(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         watchlists_dir = Path(self.temp_dir.name) / "watchlists"

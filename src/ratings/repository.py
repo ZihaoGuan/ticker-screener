@@ -918,15 +918,17 @@ class RatingsRepository:
                         rank_sql = """
                             WITH ranked AS (
                                 SELECT
-                                  ticker,
-                                  ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
-                                FROM ticker_rating_snapshots
-                                WHERE as_of_date = %s
-                                  AND rating_status = 'ok'
+                                  r.ticker,
+                                  ROW_NUMBER() OVER (
+                                    ORDER BY r.overall_rating DESC NULLS LAST, r.ticker ASC
+                                  ) AS current_rank
+                                FROM ticker_rating_snapshots r
+                                WHERE r.as_of_date = %s
+                                  AND r.rating_status = 'ok'
                             )
                             SELECT current_rank
                             FROM ranked
-                            WHERE ticker = %s
+                            WHERE ranked.ticker = %s
                               AND current_rank <= 200
                         """
                         cursor.execute(rank_sql, (rating_as_of_value, ticker.upper()))
@@ -1635,7 +1637,7 @@ class RatingsRepository:
                       ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
                     WHERE r.as_of_date = %s
                       AND (%s = '' OR LOWER(COALESCE(r.sector, f.sector, '')) = %s)
-                    GROUP BY rating_status
+                    GROUP BY r.rating_status
                     """,
                     (target_date, normalized_sector, normalized_sector),
                 )
@@ -1673,31 +1675,33 @@ class RatingsRepository:
                     ),
                     ranked AS (
                       SELECT
-                        *,
-                        ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS current_rank
+                        filtered.*,
+                        ROW_NUMBER() OVER (
+                          ORDER BY filtered.overall_rating DESC NULLS LAST, filtered.ticker ASC
+                        ) AS current_rank
                       FROM filtered
                     )
                     SELECT
-                      ticker,
-                      as_of_date,
-                      sector,
-                      industry,
-                      perf_year_pct,
-                      perf_ytd_pct,
-                      overall_rating,
-                      valuation_score,
-                      profitability_score,
-                      growth_score,
-                      performance_score,
-                      valuation_grade,
-                      profitability_grade,
-                      growth_grade,
-                      performance_grade,
-                      rating_status,
-                      rating_status_reason,
-                      current_rank
+                      ranked.ticker,
+                      ranked.as_of_date,
+                      ranked.sector,
+                      ranked.industry,
+                      ranked.perf_year_pct,
+                      ranked.perf_ytd_pct,
+                      ranked.overall_rating,
+                      ranked.valuation_score,
+                      ranked.profitability_score,
+                      ranked.growth_score,
+                      ranked.performance_score,
+                      ranked.valuation_grade,
+                      ranked.profitability_grade,
+                      ranked.growth_grade,
+                      ranked.performance_grade,
+                      ranked.rating_status,
+                      ranked.rating_status_reason,
+                      ranked.current_rank
                     FROM ranked
-                    ORDER BY current_rank ASC
+                    ORDER BY ranked.current_rank ASC
                     LIMIT %s
                     """,
                     (target_date, normalized_status, normalized_status, normalized_sector, normalized_sector, normalized_limit),
@@ -1720,11 +1724,13 @@ class RatingsRepository:
                         ),
                         ranked AS (
                           SELECT
-                            ticker,
-                            ROW_NUMBER() OVER (ORDER BY overall_rating DESC NULLS LAST, ticker ASC) AS previous_rank
+                            filtered.ticker,
+                            ROW_NUMBER() OVER (
+                              ORDER BY filtered.overall_rating DESC NULLS LAST, filtered.ticker ASC
+                            ) AS previous_rank
                           FROM filtered
                         )
-                        SELECT ticker, previous_rank
+                        SELECT ranked.ticker, ranked.previous_rank
                         FROM ranked
                         """,
                         (previous_date, normalized_status, normalized_status, normalized_sector, normalized_sector),
@@ -1841,7 +1847,7 @@ class RatingsRepository:
                       ON tm.ticker = r.ticker
                     WHERE r.as_of_date = %s
                       AND (%s = '' OR LOWER(COALESCE(tm.sector, '')) = %s)
-                    GROUP BY technical_status
+                    GROUP BY r.technical_status
                     """,
                     (target_date, normalized_sector, normalized_sector),
                 )

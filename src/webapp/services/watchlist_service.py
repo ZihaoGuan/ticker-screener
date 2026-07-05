@@ -580,7 +580,9 @@ class WatchlistService:
     def get_scanner_board(self, *, now: dt.datetime | None = None) -> dict[str, Any]:
         reference_now = _normalize_scanner_now(now)
         default_target_trading_date = _latest_completed_trading_day(reference_now)
-        latest_visible_trading_day = _latest_visible_trading_day(reference_now)
+        latest_manual_refresh_day = _latest_manual_refresh_day(reference_now)
+        recent_watchlists = self.repository.list_recent_watchlists(limit=400)
+        latest_available_watchlist_date = _latest_watchlist_sort_date(recent_watchlists) or default_target_trading_date
         override_payload = self._load_scanner_board_override()
         override_target_date_text = _coerce_iso_date(override_payload.get("target_trading_date"))
         override_target_date = dt.date.fromisoformat(override_target_date_text) if override_target_date_text else None
@@ -588,12 +590,12 @@ class WatchlistService:
         manual_override_active = False
         if (
             override_target_date is not None
-            and override_target_date > default_target_trading_date
-            and override_target_date <= latest_visible_trading_day
+            and override_target_date >= default_target_trading_date
+            and override_target_date <= latest_manual_refresh_day
+            and override_target_date <= latest_available_watchlist_date
         ):
             target_trading_date = override_target_date
-            manual_override_active = True
-        recent_watchlists = self.repository.list_recent_watchlists(limit=400)
+            manual_override_active = override_target_date != default_target_trading_date
         cards: list[dict[str, Any]] = []
 
         for config in _SCANNER_BOARD_CONFIG:
@@ -656,7 +658,10 @@ class WatchlistService:
         requested_by: str = "",
     ) -> dict[str, Any]:
         reference_now = _normalize_scanner_now(now)
-        target_trading_date = _latest_visible_trading_day(reference_now)
+        recent_watchlists = self.repository.list_recent_watchlists(limit=400)
+        default_target_trading_date = _latest_completed_trading_day(reference_now)
+        latest_available_watchlist_date = _latest_watchlist_sort_date(recent_watchlists) or default_target_trading_date
+        target_trading_date = max(default_target_trading_date, min(latest_available_watchlist_date, _latest_manual_refresh_day(reference_now)))
         payload = {
             "target_trading_date": target_trading_date.isoformat(),
             "requested_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -3169,12 +3174,22 @@ def _latest_completed_trading_day(now: dt.datetime) -> dt.date:
     return _previous_weekday(local_date - dt.timedelta(days=1))
 
 
-def _latest_visible_trading_day(now: dt.datetime) -> dt.date:
+def _latest_manual_refresh_day(now: dt.datetime) -> dt.date:
     local_now = now.astimezone(_NEW_YORK_TZ)
-    local_date = local_now.date()
-    if local_date.weekday() >= 5:
-        return _previous_weekday(local_date)
-    return local_date
+    return local_now.date()
+
+
+def _latest_watchlist_sort_date(watchlists: list[dict[str, Any]]) -> dt.date | None:
+    dates: list[dt.date] = []
+    for item in watchlists:
+        sort_date_raw = str(item.get("sort_date") or "").strip()
+        if not sort_date_raw:
+            continue
+        try:
+            dates.append(dt.date.fromisoformat(sort_date_raw))
+        except ValueError:
+            continue
+    return max(dates) if dates else None
 
 
 def _select_scanner_board_watchlist(
