@@ -54,6 +54,25 @@ class FinvizParserTests(unittest.TestCase):
         self.assertEqual(snapshot.price_to_fcf, 46.81)
         self.assertEqual(snapshot.perf_month_pct, -9.14)
 
+    def test_parse_probe_maps_ipo_date(self) -> None:
+        probe = FinvizProbeResult(
+            ticker="A",
+            source_url="https://finviz.com/quote.ashx?t=A&p=d",
+            status_code=200,
+            final_url="https://finviz.com/stock?t=A&p=d",
+            title="A - Agilent Technologies Inc Stock Price and Quote",
+            body_excerpt="A\nAgilent Technologies Inc\nHealthcare • Diagnostics & Research • USA • Large • NYSE",
+            sector="Healthcare",
+            industry="Diagnostics & Research",
+            metric_pairs=(
+                ("IPO", "Nov 18, 1999"),
+            ),
+        )
+
+        snapshot = parse_finviz_probe(probe, as_of_date=dt.date(2026, 7, 5))
+
+        self.assertEqual(snapshot.ipo_date, dt.date(1999, 11, 18))
+
 
 if __name__ == "__main__":
     unittest.main()

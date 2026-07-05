@@ -109,7 +109,7 @@ def parse_finviz_probe(
             if raw_value.endswith("%"):
                 snapshot.eps_next_y_pct = numeric_value
             continue
-        if label == "IPO Date":
+        if label in {"IPO", "IPO Date"}:
             snapshot.ipo_date = _parse_date(raw_value)
             continue
         if label == "Volatility":

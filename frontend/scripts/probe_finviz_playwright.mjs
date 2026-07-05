@@ -111,6 +111,8 @@ result.metric_pairs = await page.evaluate(() => {
     "Perf Half Y",
     "Perf Year",
     "Perf YTD",
+    "IPO",
+    "IPO Date",
     "Volatility",
   ]);
 
