@@ -190,7 +190,7 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "id": "monster_gap",
         "strategy_id": "monster_gap",
         "label": "Monster Gap",
-        "description": "Recent true monster gaps in the last 15 trading days: day low above the prior day high, at least 20% gap measured from prior high to current low, and at least 4x 50D volume.",
+        "description": "Recent true monster gaps in the last 15 trading days: day low above the prior day high, at least 20% gap measured from prior high to current low, at least 4x 50D volume, and the latest close still above the gap midpoint.",
         "timeframe": "Daily",
         "accent": "amber",
         "bias_group": "bullish",

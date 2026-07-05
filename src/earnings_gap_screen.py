@@ -19,6 +19,7 @@ class GapSignalSnapshot:
     signal_label: str
     signal_date: str
     trading_days_ago: int
+    current_price: float
     open_price: float
     high_price: float
     low_price: float
@@ -192,6 +193,7 @@ def _build_gap_snapshot(
     open_price = float(row['Open'])
     low_price = float(row['Low'])
     close_price = float(row['Close'])
+    latest_close = float(frame['Close'].iloc[latest_index])
     if previous_close <= 0:
         return None
 
@@ -204,10 +206,14 @@ def _build_gap_snapshot(
         gap_pct = ((low_price / previous_high) - 1.0) * 100.0
         if gap_pct < min_gap_pct or volume_ratio < min_volume_ratio:
             return None
+        gap_midpoint = previous_high + ((low_price - previous_high) * 0.5)
+        if latest_close <= gap_midpoint:
+            return None
         reasons = [
             f'low above prior high {previous_high:.2f}',
             f'true gap {gap_pct:.1f}% above prior high',
             f'volume {volume_ratio:.2f}x 50D average',
+            f'current close {latest_close:.2f} held above gap midpoint {gap_midpoint:.2f}',
         ]
     else:
         if open_price <= previous_close:
@@ -241,6 +247,7 @@ def _build_gap_snapshot(
         signal_label=signal_label,
         signal_date=frame.index[idx].date().isoformat(),
         trading_days_ago=latest_index - idx,
+        current_price=latest_close,
         open_price=open_price,
         high_price=float(row['High']),
         low_price=float(row['Low']),
@@ -341,7 +348,7 @@ def _to_hit(ticker: UniverseTicker, snapshot: GapSignalSnapshot) -> EarningsGapH
         signal_date=snapshot.signal_date,
         signal_label=snapshot.signal_label,
         trading_days_ago=snapshot.trading_days_ago,
-        current_price=snapshot.close_price,
+        current_price=snapshot.current_price,
         open_price=snapshot.open_price,
         high_price=snapshot.high_price,
         low_price=snapshot.low_price,

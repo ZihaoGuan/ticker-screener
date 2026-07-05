@@ -38,7 +38,7 @@ def build_earnings_gap_watchlist(hits: list[EarningsGapHit], *, profile: str) ->
                 'trigger_price': round(hit.high_price, 4),
                 'entry_style': entry_style,
                 'entry_price': round(hit.current_price, 4),
-                'entry_label': 'Gap day close',
+                'entry_label': 'Current close' if normalized_profile == 'monster-gap' else 'Gap day close',
                 'entry_timeframe': 'daily',
                 'secondary_entry_price': round(hit.low_price, 4),
                 'secondary_entry_label': 'Gap day low',

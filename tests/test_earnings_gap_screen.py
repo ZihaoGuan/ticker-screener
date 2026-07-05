@@ -56,7 +56,19 @@ class EarningsGapScreenTests(unittest.TestCase):
         assert snapshot is not None
         self.assertAlmostEqual(snapshot.gap_pct, 25.0, places=2)
         self.assertAlmostEqual(snapshot.close_gap_pct, ((82.0 / 59.0) - 1.0) * 100.0, places=2)
+        self.assertAlmostEqual(snapshot.current_price, 82.0, places=2)
         self.assertIn("low above prior high 60.00", snapshot.reasons)
+
+    def test_monster_gap_rejects_when_latest_close_loses_gap_midpoint(self) -> None:
+        rows = _price_rows()
+        rows[-3].update({"open": 58.0, "high": 60.0, "low": 57.5, "close": 59.0, "volume": 1_100_000.0})
+        rows[-2].update({"open": 76.0, "high": 84.0, "low": 75.0, "close": 82.0, "volume": 6_000_000.0})
+        rows[-1].update({"open": 66.0, "high": 67.0, "low": 64.0, "close": 66.0, "volume": 1_200_000.0})
+
+        frame = _build_price_frame(_FakeFinancials(rows))
+        snapshot = find_recent_gap_signal(frame, config=AppConfig(), profile="monster-gap", lookback_days=15)
+
+        self.assertIsNone(snapshot)
 
 
 if __name__ == "__main__":
