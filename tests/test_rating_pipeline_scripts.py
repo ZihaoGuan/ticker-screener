@@ -4,6 +4,7 @@ import datetime as dt
 from argparse import Namespace
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -13,6 +14,20 @@ from src.ratings.models import FundamentalsSnapshot
 
 
 class RatingPipelineScriptTests(unittest.TestCase):
+    def test_sync_finviz_ipo_dates_defaults_are_unthrottled(self) -> None:
+        import scripts.sync_finviz_ipo_dates as script
+
+        original_argv = sys.argv
+        self.addCleanup(setattr, sys, "argv", original_argv)
+        sys.argv = ["sync_finviz_ipo_dates.py"]
+
+        args = script.parse_args()
+
+        self.assertEqual(args.delay_min_seconds, 0.0)
+        self.assertEqual(args.delay_max_seconds, 0.0)
+        self.assertEqual(args.batch_size_before_rest, 0)
+        self.assertEqual(args.rest_seconds, 0.0)
+
     def test_build_sector_rating_baselines_respects_include_sectors(self) -> None:
         import scripts.build_sector_rating_baselines as script
 
