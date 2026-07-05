@@ -9,18 +9,18 @@ def build_earnings_gap_watchlist(hits: list[EarningsGapHit], *, profile: str) ->
     for hit in hits:
         if normalized_profile == 'monster-peg':
             summary = (
-                f'{hit.signal_label} {hit.close_gap_pct:.1f}% on {hit.signal_date} with {hit.volume_ratio:.2f}x 50D volume. '
+                f'{hit.signal_label} {hit.gap_pct:.1f}% on {hit.signal_date} with {hit.volume_ratio:.2f}x 50D volume. '
                 f'Earnings event {hit.earnings_trading_days_since_event or 0} trading day(s) earlier and EPS surprise '
                 f'{(hit.earnings_eps_surprise_pct or 0):.1f}%.'
             )
             badges = ['Monster Peg', '20% Gap', '4x Volume', 'Earnings']
             entry_style = 'monster_peg'
         elif normalized_profile == 'monster-gap':
-            summary = f'{hit.signal_label} {hit.close_gap_pct:.1f}% on {hit.signal_date} with {hit.volume_ratio:.2f}x 50D volume.'
+            summary = f'{hit.signal_label} {hit.gap_pct:.1f}% on {hit.signal_date} with {hit.volume_ratio:.2f}x 50D volume.'
             badges = ['Monster Gap', '20% Gap', '4x Volume']
             entry_style = 'monster_gap'
         else:
-            summary = f'{hit.signal_label}-type gap {hit.close_gap_pct:.1f}% on {hit.signal_date} with {hit.volume_ratio:.2f}x 50D volume.'
+            summary = f'{hit.signal_label}-type gap {hit.gap_pct:.1f}% on {hit.signal_date} with {hit.volume_ratio:.2f}x 50D volume.'
             badges = ['PEG Type', '10% Gap', '3x Volume']
             entry_style = 'peg_type'
         watchlist.append(
@@ -51,6 +51,7 @@ def build_earnings_gap_watchlist(hits: list[EarningsGapHit], *, profile: str) ->
                 'high_price': round(hit.high_price, 4),
                 'low_price': round(hit.low_price, 4),
                 'previous_close': round(hit.previous_close, 4),
+                'gap_pct': round(hit.gap_pct, 2),
                 'close_gap_pct': round(hit.close_gap_pct, 2),
                 'volume_ratio': round(hit.volume_ratio, 2),
                 'volume_buzz_pct': round(hit.volume_buzz_pct, 1),

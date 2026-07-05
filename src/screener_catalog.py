@@ -875,7 +875,7 @@ def _run_pine_peg(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
         metrics={
             "ticker": bundle.ticker,
             "signal_date": payload["signal_date"],
-            "close_gap_pct": payload["close_gap_pct"],
+            "gap_pct": payload["gap_pct"],
             "volume_ratio": payload["volume_ratio"],
         },
         reasons=tuple(payload.get("reasons", [])),
@@ -898,7 +898,7 @@ def _run_monster_gap(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
         metrics={
             "ticker": bundle.ticker,
             "signal_date": payload["signal_date"],
-            "close_gap_pct": payload["close_gap_pct"],
+            "gap_pct": payload["gap_pct"],
             "volume_ratio": payload["volume_ratio"],
         },
         reasons=tuple(payload.get("reasons", [])),
@@ -921,7 +921,7 @@ def _run_monster_peg(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
         metrics={
             "ticker": bundle.ticker,
             "signal_date": payload["signal_date"],
-            "close_gap_pct": payload["close_gap_pct"],
+            "gap_pct": payload["gap_pct"],
             "earnings_release_date": payload.get("earnings_release_date"),
         },
         reasons=tuple(payload.get("reasons", [])),

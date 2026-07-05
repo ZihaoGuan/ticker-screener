@@ -28,6 +28,7 @@ class GapSignalSnapshot:
     volume_ma_50: float
     volume_ratio: float
     volume_buzz_pct: float
+    gap_pct: float
     close_gap_pct: float
     earnings_release_date: str | None
     earnings_release_session: str | None
@@ -57,6 +58,7 @@ class EarningsGapHit:
     volume_ma_50: float
     volume_ratio: float
     volume_buzz_pct: float
+    gap_pct: float
     close_gap_pct: float
     earnings_release_date: str | None
     earnings_release_session: str | None
@@ -95,6 +97,7 @@ _PROFILE_RULES: dict[str, dict[str, object]] = {
         'min_volume_ratio': 3.0,
         'requires_earnings': False,
         'requires_eps_surprise': False,
+        'gap_mode': 'close_vs_prior_close',
     },
     'monster-gap': {
         'label': 'Monster Gap',
@@ -102,6 +105,7 @@ _PROFILE_RULES: dict[str, dict[str, object]] = {
         'min_volume_ratio': 4.0,
         'requires_earnings': False,
         'requires_eps_surprise': False,
+        'gap_mode': 'true_gap_above_prior_high',
     },
     'monster-peg': {
         'label': 'Monster Peg',
@@ -109,6 +113,7 @@ _PROFILE_RULES: dict[str, dict[str, object]] = {
         'min_volume_ratio': 4.0,
         'requires_earnings': True,
         'requires_eps_surprise': True,
+        'gap_mode': 'close_vs_prior_close',
     },
 }
 
@@ -169,6 +174,7 @@ def _build_gap_snapshot(
     min_volume_ratio: float,
     requires_earnings: bool,
     requires_eps_surprise: bool,
+    gap_mode: str,
     config: AppConfig,
     earnings_index: int | None,
     earnings_release_date: str | None,
@@ -182,16 +188,38 @@ def _build_gap_snapshot(
     if pd.isna(volume_ma_50) or float(volume_ma_50) <= 0:
         return None
     previous_close = float(frame['Close'].iloc[idx - 1])
+    previous_high = float(frame['High'].iloc[idx - 1])
     open_price = float(row['Open'])
+    low_price = float(row['Low'])
     close_price = float(row['Close'])
-    if previous_close <= 0 or open_price <= previous_close:
+    if previous_close <= 0:
         return None
 
     close_gap_pct = ((close_price / previous_close) - 1.0) * 100.0
     current_volume = float(row['Volume'])
     volume_ratio = current_volume / float(volume_ma_50)
-    if close_gap_pct < min_gap_pct or volume_ratio < min_volume_ratio:
-        return None
+    if gap_mode == 'true_gap_above_prior_high':
+        if previous_high <= 0 or low_price <= previous_high:
+            return None
+        gap_pct = ((low_price / previous_high) - 1.0) * 100.0
+        if gap_pct < min_gap_pct or volume_ratio < min_volume_ratio:
+            return None
+        reasons = [
+            f'low above prior high {previous_high:.2f}',
+            f'true gap {gap_pct:.1f}% above prior high',
+            f'volume {volume_ratio:.2f}x 50D average',
+        ]
+    else:
+        if open_price <= previous_close:
+            return None
+        gap_pct = close_gap_pct
+        if gap_pct < min_gap_pct or volume_ratio < min_volume_ratio:
+            return None
+        reasons = [
+            f'open above prior close {previous_close:.2f}',
+            f'close gain {gap_pct:.1f}% vs prior close',
+            f'volume {volume_ratio:.2f}x 50D average',
+        ]
 
     earnings_days_since_event: int | None = None
     if earnings_index is not None:
@@ -203,11 +231,6 @@ def _build_gap_snapshot(
             return None
 
     volume_buzz_pct = (volume_ratio - 1.0) * 100.0
-    reasons = [
-        f'open above prior close {previous_close:.2f}',
-        f'close gain {close_gap_pct:.1f}% vs prior close',
-        f'volume {volume_ratio:.2f}x 50D average',
-    ]
     if earnings_index is not None and earnings_release_date:
         session_label = earnings_release_session or 'unspecified session'
         reasons.append(f'most recent earnings event bar matched ({earnings_release_date}, {session_label})')
@@ -227,6 +250,7 @@ def _build_gap_snapshot(
         volume_ma_50=float(volume_ma_50),
         volume_ratio=float(volume_ratio),
         volume_buzz_pct=float(volume_buzz_pct),
+        gap_pct=float(gap_pct),
         close_gap_pct=float(close_gap_pct),
         earnings_release_date=earnings_release_date,
         earnings_release_session=earnings_release_session,
@@ -255,6 +279,7 @@ def find_recent_gap_signal(
     min_volume_ratio = float(rules['min_volume_ratio'])
     requires_earnings = bool(rules['requires_earnings'])
     requires_eps_surprise = bool(rules['requires_eps_surprise'])
+    gap_mode = str(rules['gap_mode'])
     signal_label = str(rules['label'])
 
     latest_index = len(frame) - 1
@@ -271,6 +296,7 @@ def find_recent_gap_signal(
             min_volume_ratio=min_volume_ratio,
             requires_earnings=requires_earnings,
             requires_eps_surprise=requires_eps_surprise,
+            gap_mode=gap_mode,
             config=config,
             earnings_index=earnings_index,
             earnings_release_date=earnings_release_date,
@@ -293,6 +319,7 @@ def find_recent_gap_signal(
             min_volume_ratio=min_volume_ratio,
             requires_earnings=False,
             requires_eps_surprise=False,
+            gap_mode=gap_mode,
             config=config,
             earnings_index=earnings_index,
             earnings_release_date=earnings_release_date,
@@ -323,6 +350,7 @@ def _to_hit(ticker: UniverseTicker, snapshot: GapSignalSnapshot) -> EarningsGapH
         volume_ma_50=snapshot.volume_ma_50,
         volume_ratio=snapshot.volume_ratio,
         volume_buzz_pct=snapshot.volume_buzz_pct,
+        gap_pct=snapshot.gap_pct,
         close_gap_pct=snapshot.close_gap_pct,
         earnings_release_date=snapshot.earnings_release_date,
         earnings_release_session=snapshot.earnings_release_session,
@@ -395,7 +423,7 @@ def run_earnings_gap_screen(
     hits.sort(
         key=lambda item: (
             item.trading_days_ago,
-            -item.close_gap_pct,
+            -item.gap_pct,
             -item.volume_ratio,
             item.ticker,
         )
