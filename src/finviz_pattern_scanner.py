@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 from typing import Any, Sequence
+
+try:
+    from requests import exceptions as requests_exceptions
+except ImportError:  # pragma: no cover - requests ships with finviz in production
+    requests_exceptions = None
 
 
 FINVIZ_PATTERN_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -35,6 +41,7 @@ FINVIZ_PATTERN_OPTIONS: tuple[tuple[str, str], ...] = (
     ("headandshouldersinv", "Head & Shoulders Inverse"),
 )
 FINVIZ_PATTERN_LABELS: dict[str, str] = dict(FINVIZ_PATTERN_OPTIONS)
+_RATE_LIMIT_RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0, 6.0)
 
 
 def _load_finviz_screener() -> type[Any]:
@@ -89,6 +96,13 @@ def _normalize_hit(row: dict[str, Any], *, pattern: str, pattern_label: str, str
     return payload
 
 
+def _is_rate_limit_error(error: Exception) -> bool:
+    if requests_exceptions is not None and isinstance(error, requests_exceptions.HTTPError):
+        response = getattr(error, "response", None)
+        return getattr(response, "status_code", None) == 429
+    return "429" in str(error)
+
+
 def run_finviz_pattern_scanner(
     *,
     pattern: str,
@@ -101,7 +115,21 @@ def run_finviz_pattern_scanner(
     strategy_id = build_finviz_pattern_strategy_id(normalized_pattern)
 
     screener_cls = _load_finviz_screener()
-    screener = screener_cls(filters=[filter_token], table="Overview", order="ticker")
+    last_error: Exception | None = None
+    screener: Any | None = None
+    for attempt_index in range(len(_RATE_LIMIT_RETRY_DELAYS) + 1):
+        try:
+            screener = screener_cls(filters=[filter_token], table="Overview", order="ticker")
+            break
+        except Exception as exc:
+            last_error = exc
+            if not _is_rate_limit_error(exc) or attempt_index >= len(_RATE_LIMIT_RETRY_DELAYS):
+                raise
+            time.sleep(_RATE_LIMIT_RETRY_DELAYS[attempt_index])
+    if screener is None:
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Finviz pattern scanner failed before building screener.")
     requested_tickers = _normalize_ticker_list(tickers)
     hits: list[dict[str, Any]] = []
 

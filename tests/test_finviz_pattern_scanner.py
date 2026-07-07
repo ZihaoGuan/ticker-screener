@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import requests
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +23,19 @@ class _FakeScreener(list):
                 {"Ticker": "APP", "Company": "AppLovin", "Market Cap": "120B"},
             ]
         )
+
+
+class _RateLimitedFakeScreener(_FakeScreener):
+    attempts = 0
+
+    def __init__(self, *, filters: list[str], table: str, order: str) -> None:
+        type(self).attempts += 1
+        if type(self).attempts == 1:
+            response = requests.Response()
+            response.status_code = 429
+            response.url = "https://finviz.com/screener?v=111"
+            raise requests.exceptions.HTTPError("429 Client Error: Too Many Requests", response=response)
+        super().__init__(filters=filters, table=table, order=order)
 
 
 class FinvizPatternScannerTests(unittest.TestCase):
@@ -78,6 +92,18 @@ class FinvizPatternScannerTests(unittest.TestCase):
                 "headandshouldersinv",
             ],
         )
+
+    def test_run_finviz_pattern_scanner_retries_rate_limited_fetch(self) -> None:
+        _RateLimitedFakeScreener.attempts = 0
+        with patch("src.finviz_pattern_scanner._load_finviz_screener", return_value=_RateLimitedFakeScreener), patch(
+            "src.finviz_pattern_scanner.time.sleep"
+        ) as sleep_mock:
+            payload = run_finviz_pattern_scanner(pattern="wedgeresistance")
+
+        self.assertEqual(payload["pattern"], "wedgeresistance")
+        self.assertEqual(payload["total_candidates"], 3)
+        self.assertEqual(_RateLimitedFakeScreener.attempts, 2)
+        sleep_mock.assert_called_once()
 
 
 if __name__ == "__main__":
