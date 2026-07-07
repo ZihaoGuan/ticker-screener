@@ -29,6 +29,45 @@ class HistoryRepository:
     _SCHEMA_ADVISORY_LOCK_KEY = 8_146_237
     _DEADLOCK_RETRY_ATTEMPTS = 3
     _DEADLOCK_RETRY_SLEEP_SECONDS = 0.2
+    _REQUIRED_HISTORY_SCHEMA_COLUMNS = {
+        "job_runs": {
+            "id",
+            "job_type",
+            "job_name",
+            "status",
+            "trigger_source",
+            "request_payload",
+        },
+        "screen_runs": {
+            "id",
+            "strategy_id",
+            "run_date",
+            "config_hash",
+            "scope_hash",
+            "market_data_mode",
+            "source_kind",
+            "hit_count",
+            "failure_count",
+            "result_summary_json",
+            "raw_artifact_path",
+            "watchlist_artifact_path",
+            "report_artifact_path",
+            "notes",
+            "deleted_at",
+            "deleted_reason",
+        },
+        "screen_run_hits": {
+            "screen_run_id",
+            "strategy_id",
+            "signal_date",
+            "ticker",
+            "passed",
+            "rank",
+            "metrics_json",
+            "reasons_json",
+            "hit_payload_json",
+        },
+    }
 
     def __init__(self, database_url: str = "", artifacts_dir: Path | None = None) -> None:
         self.database_url = resolve_database_url(database_url)
@@ -47,15 +86,38 @@ class HistoryRepository:
             return
         schema_path = Path(__file__).resolve().parents[3] / "sql" / "postgres_app_schema.sql"
         with psycopg.connect(self.database_url) as connection:
+            connection.autocommit = True
+            if self._history_schema_is_ready(connection):
+                self._schema_ready = True
+                return
             with connection.cursor() as cursor:
                 cursor.execute("SELECT pg_advisory_lock(%s)", (self._SCHEMA_ADVISORY_LOCK_KEY,))
-                try:
-                    cursor.execute(schema_path.read_text(encoding="utf-8"))
-                    connection.commit()
-                finally:
+            try:
+                if not self._history_schema_is_ready(connection):
+                    with connection.transaction():
+                        with connection.cursor() as cursor:
+                            cursor.execute(schema_path.read_text(encoding="utf-8"))
+                self._schema_ready = True
+            finally:
+                with connection.cursor() as cursor:
                     cursor.execute("SELECT pg_advisory_unlock(%s)", (self._SCHEMA_ADVISORY_LOCK_KEY,))
-                    connection.commit()
         self._schema_ready = True
+
+    def _history_schema_is_ready(self, connection: Any) -> bool:
+        table_names = list(self._REQUIRED_HISTORY_SCHEMA_COLUMNS)
+        sql = """
+            SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = ANY(%s)
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(sql, (table_names,))
+            rows = cursor.fetchall()
+        found: dict[str, set[str]] = {}
+        for table_name, column_name in rows:
+            found.setdefault(str(table_name), set()).add(str(column_name))
+        return all(required.issubset(found.get(table_name, set())) for table_name, required in self._REQUIRED_HISTORY_SCHEMA_COLUMNS.items())
 
     def _connect(self):
         if not self.database_url:
