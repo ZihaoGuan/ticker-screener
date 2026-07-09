@@ -212,6 +212,49 @@ class RunServiceTests(unittest.TestCase):
         notifier.notify_job_completion.assert_called_once()
         self.assertEqual(job["screen_run_id"], 321)
 
+    def test_persist_completed_job_skips_generic_discord_notice_for_my_picks_sma50_reclaim(self) -> None:
+        summary_path = self.project_root / "artifacts" / "output" / "run_summary.json"
+        raw_path = self.project_root / "artifacts" / "output" / "raw.json"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "strategy_id": "my_picks_sma50_reclaim",
+                    "raw_results_file": str(raw_path),
+                    "watchlist_file": "/tmp/my_picks_sma50_reclaim_2026-07-09.json",
+                }
+            ),
+            encoding="utf-8",
+        )
+        raw_path.write_text(json.dumps({"rows": []}), encoding="utf-8")
+        notifier = MagicMock(spec=DiscordNotificationService)
+        service = RunService(project_root=self.project_root, discord_notification_service=notifier)
+        service.history_repository.update_job_run = MagicMock()  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = MagicMock()  # type: ignore[method-assign]
+        service.screener_history_service.persist_screen_run = MagicMock(return_value=999)  # type: ignore[method-assign]
+        job = {
+            "job_id": "job-4",
+            "job_run_id": 56,
+            "action_id": "my_picks_sma50_reclaim",
+            "label": "Run My Picks 50 SMA Reclaim",
+            "status": "success",
+            "finished_at": "2026-07-09T00:01:00+00:00",
+            "return_code": 0,
+            "summary_file": str(summary_path),
+            "watchlist_file": "/tmp/my_picks_sma50_reclaim_2026-07-09.json",
+            "raw_results_file": str(raw_path),
+            "success_count": 2,
+            "options": {},
+            "trigger_source": "scheduler",
+        }
+        RunService._jobs = [job]
+        RunService._jobs_by_id = {"job-4": job}
+
+        service._persist_completed_job("job-4")
+
+        notifier.notify_job_completion.assert_not_called()
+        self.assertEqual(job["screen_run_id"], 999)
+
     def test_build_command_supports_trendline_snapshot_backfill(self) -> None:
         command = self.service.build_command(
             "backfill_trendline_snapshots",

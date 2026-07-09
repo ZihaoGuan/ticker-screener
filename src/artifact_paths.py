@@ -129,6 +129,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("ema21_pullback_buy_{date_label}.json",),
         "legacy_summary_templates": ("ema21_pullback_buy_run_summary_{date_label}.json",),
     },
+    "my_picks_sma50_reclaim": {
+        "stem_template": "my_picks_sma50_reclaim_{date_label}",
+        "legacy_watchlist_templates": ("my_picks_sma50_reclaim_{date_label}.json",),
+        "legacy_raw_templates": ("my_picks_sma50_reclaim_{date_label}.json",),
+        "legacy_summary_templates": ("my_picks_sma50_reclaim_run_summary_{date_label}.json",),
+    },
     "sma200_pullback_buy": {
         "stem_template": "sma200_pullback_buy_{date_label}",
         "legacy_watchlist_templates": ("sma200_pullback_buy_{date_label}.json",),

@@ -79,6 +79,19 @@ class DiscordNotificationServiceTests(unittest.TestCase):
         self.assertFalse(notified)
         service._post_webhook.assert_not_called()
 
+    def test_send_message_posts_when_webhook_is_configured(self) -> None:
+        service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
+        service.update_settings(webhook_url="https://discord.example/webhook", app_base_url="https://ticker.example.com")
+        service._post_webhook = MagicMock()
+
+        notified = service.send_message("Hello scanner")
+
+        self.assertTrue(notified)
+        service._post_webhook.assert_called_once_with(
+            webhook_url="https://discord.example/webhook",
+            message="Hello scanner",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

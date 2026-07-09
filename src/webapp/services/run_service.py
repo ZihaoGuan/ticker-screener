@@ -1155,6 +1155,19 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="pullbacks",
         ),
+        "my_picks_sma50_reclaim": RunAction(
+            "my_picks_sma50_reclaim",
+            "Run My Picks 50 SMA Reclaim",
+            "scripts/run_my_picks_sma50_reclaim_screen.py",
+            supports_limit=False,
+            fields=(
+                _date_label_field,
+                _as_of_date_field,
+                _market_data_source_field,
+            ),
+            bias_group="bullish",
+            bullish_subgroup="pullbacks",
+        ),
         "sma200_pullback_buy": RunAction(
             "sma200_pullback_buy",
             "Run 200 SMA Pullback Buy",
@@ -3068,6 +3081,8 @@ class RunService:
         self._notify_completed_job(job)
 
     def _notify_completed_job(self, job: dict[str, Any]) -> None:
+        if str(job.get("action_id") or "").strip() == "my_picks_sma50_reclaim":
+            return
         try:
             self.discord_notification_service.notify_job_completion(
                 action_id=str(job.get("action_id") or ""),

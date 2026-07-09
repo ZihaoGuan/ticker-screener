@@ -16,6 +16,7 @@ _ARG_OPTION_KEYS = (
     "as_of_date",
     "reference_date",
     "source",
+    "market_data_source",
     "filter_precedence",
     "include_sectors",
     "exclude_sectors",

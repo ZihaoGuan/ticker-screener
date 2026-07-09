@@ -90,6 +90,17 @@ class DiscordNotificationService:
         self._post_webhook(webhook_url=webhook_url, message=message)
         return True
 
+    def send_message(self, message: str) -> bool:
+        text = str(message or "").strip()
+        if not text:
+            return False
+        settings = self.get_settings()
+        webhook_url = str(settings.get("webhook_url") or "").strip()
+        if not webhook_url:
+            return False
+        self._post_webhook(webhook_url=webhook_url, message=text)
+        return True
+
     def build_completion_message(
         self,
         *,
