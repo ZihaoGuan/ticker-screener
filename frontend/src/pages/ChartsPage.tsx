@@ -16,6 +16,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   sma200: true,
   weeklyEma8: true,
   ipoVwap: true,
+  anchoredVwap52wLow: false,
   marketExtension: true,
   fibOverlay: false,
   gapZones: true,
@@ -451,6 +452,7 @@ export function ChartsPage() {
     { key: "sma200", label: "SMA 200" },
     { key: "weeklyEma8", label: "Weekly 8 EMA" },
     { key: "ipoVwap", label: "IPO VWAP" },
+    { key: "anchoredVwap52wLow", label: "AVWAP from 52W low" },
     { key: "marketExtension", label: "10W extension" },
     { key: "fibOverlay", label: "Fib overlay (exp)" },
     { key: "gapZones", label: "Gap zones" },
@@ -2173,4 +2175,3 @@ function buildSignalGuideGroups({
 
   return groups;
 }
-

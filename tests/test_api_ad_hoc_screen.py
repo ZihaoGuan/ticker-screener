@@ -515,6 +515,7 @@ class _FakeWatchlistService:
             "ema21": [],
             "weekly_ema8": [],
             "ipo_vwap": [],
+            "anchored_vwap_52w_low": [],
             "market_extension": {"config": {"timeframe": "weekly", "ma_type": "sma", "length": 10, "warning_pct": 11.0, "extreme_pct": 15.0, "label": "10W SMA"}, "line": [], "signals": [], "latest": None},
             "rs_line": [],
             "daily_rs_rating": [],

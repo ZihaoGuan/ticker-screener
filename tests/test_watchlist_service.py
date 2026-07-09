@@ -1551,6 +1551,63 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["ipo_vwap"], [])
 
+    def test_get_chart_payload_includes_anchored_vwap_from_52w_low(self) -> None:
+        index = pd.bdate_range("2025-01-02", periods=260)
+        low_values = [100.0 + (i * 0.1) for i in range(len(index))]
+        low_values[20] = 80.0
+        frame = pd.DataFrame(
+            {
+                "Open": [value + 1.0 for value in low_values],
+                "High": [value + 2.0 for value in low_values],
+                "Low": low_values,
+                "Close": [value + 1.5 for value in low_values],
+                "Adj Close": [value + 1.5 for value in low_values],
+                "Volume": [1_000_000 + (i * 1_000) for i in range(len(index))],
+            },
+            index=index,
+        )
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+
+        with patch.object(WatchlistService, "_load_chart_frames", return_value=(frame.copy(), frame.copy(), "database")), patch(
+            "src.webapp.services.watchlist_service.load_ticker_metadata_map",
+            return_value={"NVDA": {}},
+        ):
+            payload = service.get_chart_payload("NVDA", as_of_date=index[-1].date())
+
+        self.assertTrue(len(payload["anchored_vwap_52w_low"]) > 0)
+        self.assertEqual(payload["anchored_vwap_52w_low"][0]["time"], index[20].date().isoformat())
+
+    def test_get_chart_payload_skips_anchored_vwap_from_52w_low_without_full_lookback(self) -> None:
+        index = pd.bdate_range("2025-01-02", periods=200)
+        frame = pd.DataFrame(
+            {
+                "Open": [100.0 + (i * 0.1) for i in range(len(index))],
+                "High": [101.0 + (i * 0.1) for i in range(len(index))],
+                "Low": [99.0 + (i * 0.1) for i in range(len(index))],
+                "Close": [100.5 + (i * 0.1) for i in range(len(index))],
+                "Adj Close": [100.5 + (i * 0.1) for i in range(len(index))],
+                "Volume": [1_000_000 + (i * 1_000) for i in range(len(index))],
+            },
+            index=index,
+        )
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+
+        with patch.object(WatchlistService, "_load_chart_frames", return_value=(frame.copy(), frame.copy(), "database")), patch(
+            "src.webapp.services.watchlist_service.load_ticker_metadata_map",
+            return_value={"NVDA": {}},
+        ):
+            payload = service.get_chart_payload("NVDA", as_of_date=index[-1].date())
+
+        self.assertEqual(payload["anchored_vwap_52w_low"], [])
+
     def test_get_chart_payload_falls_back_to_internet_for_missing_benchmark(self) -> None:
         ticker_frame = pd.DataFrame(
             {

@@ -14,6 +14,7 @@ export type ChartVisibility = {
   sma200: boolean;
   weeklyEma8: boolean;
   ipoVwap: boolean;
+  anchoredVwap52wLow: boolean;
   marketExtension: boolean;
   fibOverlay: boolean;
   gapZones: boolean;
@@ -32,7 +33,7 @@ type PriceChartProps = {
   candles: CandlePoint[];
   overlays?: Pick<
     WatchlistChartResponse,
-    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "market_extension" | "rs_line" | "rs_markers" | "setup_markers" | "benchmark_ticker" | "fearzone_panel"
+    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "anchored_vwap_52w_low" | "market_extension" | "rs_line" | "rs_markers" | "setup_markers" | "benchmark_ticker" | "fearzone_panel"
   >;
   annotations?: ChartAnnotations;
   extraAnnotations?: ChartAnnotations[];
@@ -160,6 +161,7 @@ export function PriceChart({
     sma200: true,
     weeklyEma8: true,
     ipoVwap: true,
+    anchoredVwap52wLow: false,
     marketExtension: true,
     fibOverlay: false,
     gapZones: true,
@@ -179,6 +181,7 @@ export function PriceChart({
   const ema21 = useMemo(() => overlays?.ema21 ?? buildExponentialMovingAverage(candles, 21), [candles, overlays?.ema21]);
   const weeklyEma8 = useMemo(() => overlays?.weekly_ema8 ?? [], [overlays?.weekly_ema8]);
   const ipoVwap = useMemo(() => overlays?.ipo_vwap ?? [], [overlays?.ipo_vwap]);
+  const anchoredVwap52wLow = useMemo(() => overlays?.anchored_vwap_52w_low ?? [], [overlays?.anchored_vwap_52w_low]);
   const marketExtension = useMemo(
     () =>
       overlays?.market_extension ?? {
@@ -356,6 +359,7 @@ export function PriceChart({
     const ema21Series = priceChart.addLineSeries({ color: "#f59e0b", lineWidth: 2, priceLineVisible: false });
     const weeklyEma8Series = priceChart.addLineSeries({ color: "#4ade80", lineWidth: 2, priceLineVisible: false });
     const ipoVwapSeries = priceChart.addLineSeries({ color: "#f472b6", lineWidth: 2, priceLineVisible: false });
+    const anchoredVwap52wLowSeries = priceChart.addLineSeries({ color: "#22c55e", lineWidth: 2, priceLineVisible: false });
     const marketExtensionSeries = priceChart.addLineSeries({ color: "rgba(96, 165, 250, 0.95)", lineWidth: 2, lineStyle: LineStyle.Dashed, priceLineVisible: false });
     const ma50Series = priceChart.addLineSeries({ color: "rgba(251, 146, 60, 0.45)", lineWidth: 1, priceLineVisible: false });
     const ma200Series = priceChart.addLineSeries({ color: "rgba(167, 139, 250, 0.52)", lineWidth: 1, priceLineVisible: false });
@@ -491,6 +495,7 @@ export function PriceChart({
     ema21Series.setData(options.ema21 ? ema21 : []);
     weeklyEma8Series.setData(options.weeklyEma8 ? weeklyEma8 : []);
     ipoVwapSeries.setData(options.ipoVwap ? ipoVwap : []);
+    anchoredVwap52wLowSeries.setData(options.anchoredVwap52wLow ? anchoredVwap52wLow : []);
     marketExtensionSeries.setData(options.marketExtension ? marketExtension.line : []);
     ma50Series.setData(options.sma50 ? ma50 : []);
     ma200Series.setData(options.sma200 ? ma200 : []);
@@ -782,6 +787,7 @@ export function PriceChart({
     ema8,
     ema21,
     ipoVwap,
+    anchoredVwap52wLow,
     marketExtension,
     ma50,
     ma200,
@@ -795,6 +801,7 @@ export function PriceChart({
     options.sma200,
     options.weeklyEma8,
     options.ipoVwap,
+    options.anchoredVwap52wLow,
     options.marketExtension,
     options.fibOverlay,
     options.gapZones,
@@ -1848,4 +1855,3 @@ function addBusinessDays(baseDate: string, offset: number) {
   }
   return parsed.toISOString().slice(0, 10);
 }
-

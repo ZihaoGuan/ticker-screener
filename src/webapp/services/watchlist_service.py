@@ -88,6 +88,7 @@ _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
 _SCANNER_BOARD_CUTOFF_HOUR = 20
 _SCANNER_BOARD_CUTOFF_MINUTE = 30
+_ANCHORED_VWAP_52W_LOOKBACK_DAYS = 252
 _chart_payload_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
 _chart_payload_cache_lock = threading.Lock()
 _chart_gex_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -1077,6 +1078,11 @@ class WatchlistService:
             frame["ipo_vwap"] = _compute_anchored_vwap(frame, anchor_date=ipo_date)
         else:
             frame["ipo_vwap"] = pd.Series(pd.NA, index=frame.index, dtype="Float64")
+        anchor_52w_low_date = _resolve_anchored_vwap_52w_low_date(frame)
+        if anchor_52w_low_date is not None:
+            frame["anchored_vwap_52w_low"] = _compute_anchored_vwap(frame, anchor_date=anchor_52w_low_date)
+        else:
+            frame["anchored_vwap_52w_low"] = pd.Series(pd.NA, index=frame.index, dtype="Float64")
         candles: list[dict[str, Any]] = []
         volume: list[dict[str, Any]] = []
         ma20: list[dict[str, Any]] = []
@@ -1086,6 +1092,7 @@ class WatchlistService:
         ema21: list[dict[str, Any]] = []
         weekly_ema8_points: list[dict[str, Any]] = []
         ipo_vwap: list[dict[str, Any]] = []
+        anchored_vwap_52w_low: list[dict[str, Any]] = []
 
         visible_index_set = set(visible_frame.index)
 
@@ -1125,6 +1132,8 @@ class WatchlistService:
                 weekly_ema8_points.append({"time": time_value, "value": float(row["weekly_ema8"])})
             if pd.notna(row["ipo_vwap"]):
                 ipo_vwap.append({"time": time_value, "value": float(row["ipo_vwap"])})
+            if pd.notna(row["anchored_vwap_52w_low"]):
+                anchored_vwap_52w_low.append({"time": time_value, "value": float(row["anchored_vwap_52w_low"])})
 
         payload = {
             "ticker": normalized_ticker,
@@ -1143,6 +1152,7 @@ class WatchlistService:
             "ema21": ema21,
             "weekly_ema8": weekly_ema8_points,
             "ipo_vwap": ipo_vwap,
+            "anchored_vwap_52w_low": anchored_vwap_52w_low,
             "market_extension": _empty_market_extension_overlay(),
             "rs_line": [],
             "daily_rs_rating": [],
@@ -2362,6 +2372,7 @@ def _empty_chart_payload(
         "ema21": [],
         "weekly_ema8": [],
         "ipo_vwap": [],
+        "anchored_vwap_52w_low": [],
         "market_extension": _empty_market_extension_overlay(),
         "rs_line": [],
         "daily_rs_rating": [],
@@ -3394,6 +3405,23 @@ def _should_render_ipo_vwap(*, frame: pd.DataFrame, ipo_date: dt.date | None) ->
     first_trade_timestamp = source.index.min()
     first_trade_date = first_trade_timestamp.date() if hasattr(first_trade_timestamp, "date") else first_trade_timestamp
     return first_trade_date == ipo_date
+
+
+def _resolve_anchored_vwap_52w_low_date(frame: pd.DataFrame) -> dt.date | None:
+    source = frame.dropna(subset=["Low", "High", "Close", "Volume"]).copy()
+    if len(source.index) < _ANCHORED_VWAP_52W_LOOKBACK_DAYS:
+        return None
+    trailing_window = source.tail(_ANCHORED_VWAP_52W_LOOKBACK_DAYS)
+    if trailing_window.empty:
+        return None
+    low_52w = trailing_window["Low"].min()
+    if pd.isna(low_52w):
+        return None
+    anchor_rows = trailing_window.loc[trailing_window["Low"] == low_52w]
+    if anchor_rows.empty:
+        return None
+    anchor_timestamp = anchor_rows.index.min()
+    return anchor_timestamp.date() if hasattr(anchor_timestamp, "date") else anchor_timestamp
 
 
 def _compute_rs_line(stock: pd.Series, benchmark: pd.Series) -> pd.Series:

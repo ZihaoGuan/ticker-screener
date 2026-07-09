@@ -766,6 +766,7 @@ export type WatchlistChartResponse = {
   ema21: Array<{ time: string; value: number }>;
   weekly_ema8: Array<{ time: string; value: number }>;
   ipo_vwap: Array<{ time: string; value: number }>;
+  anchored_vwap_52w_low: Array<{ time: string; value: number }>;
   market_extension: {
     config: {
       timeframe: "weekly";
