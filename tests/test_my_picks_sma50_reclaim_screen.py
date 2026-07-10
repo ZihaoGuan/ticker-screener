@@ -10,6 +10,7 @@ from src.my_picks_sma50_reclaim_screen import (
     find_my_picks_sma50_reclaim_hit,
     run_my_picks_sma50_reclaim_screen,
 )
+from scripts.run_my_picks_sma50_reclaim_screen import _notify_discord_hits
 
 
 def _build_reclaim_frame() -> pd.DataFrame:
@@ -83,6 +84,43 @@ class MyPicksSma50ReclaimScreenTests(unittest.TestCase):
         self.assertEqual(result.passed_tickers, 1)
         self.assertEqual(result.hits[0].ticker, "NVDA")
         self.assertEqual(result.hits[0].notes, "Core leader")
+
+    def test_notify_discord_hits_reports_failed_status_when_send_fails(self) -> None:
+        payload = {
+            "hits": [
+                {
+                    "ticker": "NVDA",
+                    "current_price": 129.5,
+                    "sma50": 120.0,
+                    "ema9": 126.0,
+                    "ema21": 123.5,
+                }
+            ]
+        }
+
+        with patch("scripts.run_my_picks_sma50_reclaim_screen.DiscordNotificationService.get_settings", return_value={"webhook_url": "https://discord.example/webhook", "effective_app_base_url": "https://ticker.example.com"}), patch(
+            "scripts.run_my_picks_sma50_reclaim_screen.DiscordNotificationService.send_message",
+            return_value=False,
+        ):
+            sent, status = _notify_discord_hits(
+                as_of_date=dt.date(2026, 7, 9),
+                result_payload=payload,
+                watchlist_file="/tmp/my_picks_sma50_reclaim_2026-07-09.json",
+            )
+
+        self.assertFalse(sent)
+        self.assertEqual(status, "failed: attempted 1 hit(s)")
+
+    def test_notify_discord_hits_reports_skip_when_webhook_missing(self) -> None:
+        with patch("scripts.run_my_picks_sma50_reclaim_screen.DiscordNotificationService.get_settings", return_value={"webhook_url": "", "effective_app_base_url": ""}):
+            sent, status = _notify_discord_hits(
+                as_of_date=dt.date(2026, 7, 9),
+                result_payload={"hits": [{"ticker": "NVDA"}]},
+                watchlist_file="/tmp/my_picks_sma50_reclaim_2026-07-09.json",
+            )
+
+        self.assertFalse(sent)
+        self.assertEqual(status, "skipped: discord webhook not configured")
 
 
 if __name__ == "__main__":

@@ -58,12 +58,15 @@ def _notify_discord_hits(
     as_of_date: dt.date,
     result_payload: dict[str, object],
     watchlist_file: str,
-) -> bool:
+) -> tuple[bool, str]:
     hits = list(result_payload.get("hits") or [])
     if not hits:
-        return False
+        return False, "skipped: no hits"
     service = DiscordNotificationService(project_root=PROJECT_ROOT)
     settings = service.get_settings()
+    webhook_url = str(settings.get("webhook_url") or "").strip()
+    if not webhook_url:
+        return False, "skipped: discord webhook not configured"
     app_base_url = str(settings.get("effective_app_base_url") or "").strip()
     watchlist_url = _build_watchlist_url(app_base_url=app_base_url, watchlist_file=watchlist_file)
 
@@ -88,7 +91,10 @@ def _notify_discord_hits(
         lines.append(f"...and {len(hits) - 20} more.")
     if watchlist_url:
         lines.append(f"Open: {watchlist_url}")
-    return service.send_message("\n".join(lines))
+    sent = service.send_message("\n".join(lines))
+    if sent:
+        return True, f"sent: {len(hits)} hit(s)"
+    return False, f"failed: attempted {len(hits)} hit(s)"
 
 
 def main() -> int:
@@ -133,11 +139,13 @@ def main() -> int:
     )
     if persisted_run_id is not None:
         print(f"Persisted screen run id={persisted_run_id}")
-    if _notify_discord_hits(
+    discord_sent, discord_status = _notify_discord_hits(
         as_of_date=as_of_date,
         result_payload=result.to_dict(),
         watchlist_file=str(artifact_paths.watchlist_path),
-    ):
+    )
+    print(f"Discord alert status: {discord_status}")
+    if discord_sent:
         print("Sent Discord alert for My Picks 50 SMA reclaim hits.")
     return 0
 
