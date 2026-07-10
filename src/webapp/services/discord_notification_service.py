@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 from typing import Any
+from urllib import request
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 
@@ -221,6 +223,12 @@ class DiscordNotificationService:
         return payload if isinstance(payload, dict) else {}
 
     def _post_webhook(self, *, webhook_url: str, message: str) -> None:
+        if shutil.which("curl"):
+            self._post_webhook_with_curl(webhook_url=webhook_url, message=message)
+            return
+        self._post_webhook_with_urllib(webhook_url=webhook_url, message=message)
+
+    def _post_webhook_with_curl(self, *, webhook_url: str, message: str) -> None:
         payload = {
             "content": message,
             "allowed_mentions": {"parse": []},
@@ -248,6 +256,22 @@ class DiscordNotificationService:
             )
         finally:
             payload_path.unlink(missing_ok=True)
+
+    def _post_webhook_with_urllib(self, *, webhook_url: str, message: str) -> None:
+        payload = json.dumps(
+            {
+                "content": message,
+                "allowed_mentions": {"parse": []},
+            }
+        ).encode("utf-8")
+        req = request.Request(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with request.urlopen(req, timeout=10):
+            return
 
     def _split_message(self, message: str) -> list[str]:
         text = str(message or "").strip()

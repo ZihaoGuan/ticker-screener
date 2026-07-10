@@ -149,7 +149,9 @@ class DiscordNotificationServiceTests(unittest.TestCase):
     def test_post_webhook_uses_same_curl_shape_as_github_actions(self) -> None:
         service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
 
-        with patch("src.webapp.services.discord_notification_service.subprocess.run") as run_mock:
+        with patch("src.webapp.services.discord_notification_service.shutil.which", return_value="/usr/bin/curl"), patch(
+            "src.webapp.services.discord_notification_service.subprocess.run"
+        ) as run_mock:
             service._post_webhook(
                 webhook_url="https://discord.example/webhook",
                 message="Hello scanner",
@@ -162,6 +164,28 @@ class DiscordNotificationServiceTests(unittest.TestCase):
         data_index = command.index("--data")
         self.assertTrue(command[data_index + 1].startswith("@"))
         self.assertEqual(command[-1], "https://discord.example/webhook")
+
+    def test_post_webhook_falls_back_to_urllib_when_curl_is_unavailable(self) -> None:
+        service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = None
+
+        with patch("src.webapp.services.discord_notification_service.shutil.which", return_value=None), patch(
+            "src.webapp.services.discord_notification_service.request.urlopen",
+            return_value=response,
+        ) as urlopen_mock:
+            service._post_webhook(
+                webhook_url="https://discord.example/webhook",
+                message="Hello scanner",
+            )
+
+        urlopen_mock.assert_called_once()
+        req = urlopen_mock.call_args.args[0]
+        self.assertEqual(req.full_url, "https://discord.example/webhook")
+        self.assertEqual(req.get_method(), "POST")
+        self.assertEqual(req.headers["Content-type"], "application/json")
+        self.assertIn(b'"content": "Hello scanner"', req.data)
 
     def test_send_message_records_curl_error_detail(self) -> None:
         service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
