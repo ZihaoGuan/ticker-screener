@@ -101,6 +101,9 @@ class MyPicksSma50ReclaimScreenTests(unittest.TestCase):
         with patch("scripts.run_my_picks_sma50_reclaim_screen.DiscordNotificationService.get_settings", return_value={"webhook_url": "https://discord.example/webhook", "effective_app_base_url": "https://ticker.example.com"}), patch(
             "scripts.run_my_picks_sma50_reclaim_screen.DiscordNotificationService.send_message",
             return_value=False,
+        ), patch(
+            "scripts.run_my_picks_sma50_reclaim_screen.DiscordNotificationService.get_last_error_message",
+            return_value="http 404 Not Found",
         ):
             sent, status = _notify_discord_hits(
                 as_of_date=dt.date(2026, 7, 9),
@@ -109,7 +112,7 @@ class MyPicksSma50ReclaimScreenTests(unittest.TestCase):
             )
 
         self.assertFalse(sent)
-        self.assertEqual(status, "failed: attempted 1 hit(s)")
+        self.assertEqual(status, "failed: attempted 1 hit(s) | http 404 Not Found")
 
     def test_notify_discord_hits_reports_skip_when_webhook_missing(self) -> None:
         with patch("scripts.run_my_picks_sma50_reclaim_screen.DiscordNotificationService.get_settings", return_value={"webhook_url": "", "effective_app_base_url": ""}):

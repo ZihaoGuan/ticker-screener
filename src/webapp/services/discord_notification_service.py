@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib import request
 from urllib.parse import quote
 
@@ -47,6 +48,10 @@ class DiscordNotificationService:
         self.default_app_base_url = str(app_base_url or "").strip()
         self._route_id_by_scanner_id = {route_id: route_id for route_id, _ in _SCANNER_ROUTE_CONFIG}
         self._route_id_by_strategy_id = {strategy_id: route_id for route_id, strategy_id in _SCANNER_ROUTE_CONFIG if strategy_id}
+        self._last_error_message = ""
+
+    def get_last_error_message(self) -> str:
+        return self._last_error_message
 
     def get_settings(self) -> dict[str, Any]:
         payload = self._load_settings()
@@ -95,10 +100,15 @@ class DiscordNotificationService:
         )
         if not message:
             return False
+        self._last_error_message = ""
         try:
             self._post_webhook(webhook_url=webhook_url, message=message)
-        except Exception:
-            print("warning: discord webhook send failed for job completion notification", file=sys.stderr)
+        except Exception as exc:
+            self._last_error_message = self._format_error(exc)
+            print(
+                f"warning: discord webhook send failed for job completion notification: {self._last_error_message}",
+                file=sys.stderr,
+            )
             return False
         return True
 
@@ -110,15 +120,20 @@ class DiscordNotificationService:
         webhook_url = str(settings.get("webhook_url") or "").strip()
         if not webhook_url:
             return False
+        self._last_error_message = ""
         sent = False
         all_succeeded = True
         for chunk in self._split_message(text):
             try:
                 self._post_webhook(webhook_url=webhook_url, message=chunk)
                 sent = True
-            except Exception:
+            except Exception as exc:
                 all_succeeded = False
-                print("warning: discord webhook send failed for message chunk", file=sys.stderr)
+                self._last_error_message = self._format_error(exc)
+                print(
+                    f"warning: discord webhook send failed for message chunk: {self._last_error_message}",
+                    file=sys.stderr,
+                )
         return sent and all_succeeded
 
     def build_completion_message(
@@ -248,6 +263,21 @@ class DiscordNotificationService:
         if current:
             chunks.append(current)
         return chunks
+
+    def _format_error(self, exc: Exception) -> str:
+        if isinstance(exc, HTTPError):
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace").strip()
+            except Exception:
+                body = ""
+            if body:
+                return f"http {exc.code} {exc.reason}: {body[:200]}"
+            return f"http {exc.code} {exc.reason}"
+        if isinstance(exc, URLError):
+            return f"url error: {exc.reason}"
+        message = str(exc).strip()
+        return message or exc.__class__.__name__
 
     def _join_url(self, base_url: str, path: str) -> str:
         clean_base = str(base_url or "").strip().rstrip("/")

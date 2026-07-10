@@ -94,6 +94,9 @@ def _notify_discord_hits(
     sent = service.send_message("\n".join(lines))
     if sent:
         return True, f"sent: {len(hits)} hit(s)"
+    error_detail = str(service.get_last_error_message() or "").strip()
+    if error_detail:
+        return False, f"failed: attempted {len(hits)} hit(s) | {error_detail}"
     return False, f"failed: attempted {len(hits)} hit(s)"
 
 
