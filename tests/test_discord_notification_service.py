@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.webapp.services.discord_notification_service import DiscordNotificationService
 
@@ -144,6 +145,42 @@ class DiscordNotificationServiceTests(unittest.TestCase):
 
         self.assertFalse(notified)
         self.assertGreater(len(posted_messages), 1)
+
+    def test_post_webhook_uses_same_curl_shape_as_github_actions(self) -> None:
+        service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
+
+        with patch("src.webapp.services.discord_notification_service.subprocess.run") as run_mock:
+            service._post_webhook(
+                webhook_url="https://discord.example/webhook",
+                message="Hello scanner",
+            )
+
+        run_mock.assert_called_once()
+        command = run_mock.call_args.args[0]
+        self.assertEqual(command[:6], ["curl", "-sS", "-X", "POST", "-H", "Content-Type: application/json"])
+        self.assertIn("--data", command)
+        data_index = command.index("--data")
+        self.assertTrue(command[data_index + 1].startswith("@"))
+        self.assertEqual(command[-1], "https://discord.example/webhook")
+
+    def test_send_message_records_curl_error_detail(self) -> None:
+        service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
+        service.update_settings(webhook_url="https://discord.example/webhook", app_base_url="https://ticker.example.com")
+        service._post_webhook = MagicMock(
+            side_effect=subprocess.CalledProcessError(
+                22,
+                ["curl"],
+                stderr="curl: (22) The requested URL returned error: 403",
+            )
+        )
+
+        notified = service.send_message("Hello scanner")
+
+        self.assertFalse(notified)
+        self.assertEqual(
+            service.get_last_error_message(),
+            "curl exit 22: curl: (22) The requested URL returned error: 403",
+        )
 
     def test_notify_job_completion_returns_false_when_webhook_post_fails(self) -> None:
         service = DiscordNotificationService(project_root=self.project_root, app_base_url="")

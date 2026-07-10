@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib import request
 from urllib.parse import quote
 
 from src.artifact_paths import strategy_id_from_legacy_stem, watchlist_stem_from_path
@@ -220,20 +221,33 @@ class DiscordNotificationService:
         return payload if isinstance(payload, dict) else {}
 
     def _post_webhook(self, *, webhook_url: str, message: str) -> None:
-        payload = json.dumps(
-            {
-                "content": message,
-                "allowed_mentions": {"parse": []},
-            }
-        ).encode("utf-8")
-        req = request.Request(
-            webhook_url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with request.urlopen(req, timeout=10):
-            return
+        payload = {
+            "content": message,
+            "allowed_mentions": {"parse": []},
+        }
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
+            payload_path = Path(handle.name)
+            json.dump(payload, handle)
+        try:
+            subprocess.run(
+                [
+                    "curl",
+                    "-sS",
+                    "-X",
+                    "POST",
+                    "-H",
+                    "Content-Type: application/json",
+                    "--data",
+                    f"@{payload_path}",
+                    webhook_url,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10,
+            )
+        finally:
+            payload_path.unlink(missing_ok=True)
 
     def _split_message(self, message: str) -> list[str]:
         text = str(message or "").strip()
@@ -276,6 +290,13 @@ class DiscordNotificationService:
             return f"http {exc.code} {exc.reason}"
         if isinstance(exc, URLError):
             return f"url error: {exc.reason}"
+        if isinstance(exc, subprocess.TimeoutExpired):
+            return "curl timeout after 10s"
+        if isinstance(exc, subprocess.CalledProcessError):
+            details = str(exc.stderr or exc.stdout or "").strip()
+            if details:
+                return f"curl exit {exc.returncode}: {details[:200]}"
+            return f"curl exit {exc.returncode}"
         message = str(exc).strip()
         return message or exc.__class__.__name__
 
