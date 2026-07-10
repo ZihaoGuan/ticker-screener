@@ -107,12 +107,13 @@ class DiscordNotificationServiceTests(unittest.TestCase):
     def test_send_message_records_http_error_detail(self) -> None:
         service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
         service.update_settings(webhook_url="https://discord.example/webhook", app_base_url="https://ticker.example.com")
+        service._last_transport = "urllib"
         service._post_webhook = MagicMock(side_effect=HTTPError("https://discord.example/webhook", 404, "Not Found", hdrs=None, fp=None))
 
         notified = service.send_message("Hello scanner")
 
         self.assertFalse(notified)
-        self.assertEqual(service.get_last_error_message(), "http 404 Not Found")
+        self.assertEqual(service.get_last_error_message(), "urllib http 404 Not Found")
 
     def test_send_message_splits_large_payload_using_workflow_limit(self) -> None:
         service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
@@ -190,6 +191,7 @@ class DiscordNotificationServiceTests(unittest.TestCase):
     def test_send_message_records_curl_error_detail(self) -> None:
         service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
         service.update_settings(webhook_url="https://discord.example/webhook", app_base_url="https://ticker.example.com")
+        service._last_transport = "curl"
         service._post_webhook = MagicMock(
             side_effect=subprocess.CalledProcessError(
                 22,

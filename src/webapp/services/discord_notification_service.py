@@ -52,9 +52,13 @@ class DiscordNotificationService:
         self._route_id_by_scanner_id = {route_id: route_id for route_id, _ in _SCANNER_ROUTE_CONFIG}
         self._route_id_by_strategy_id = {strategy_id: route_id for route_id, strategy_id in _SCANNER_ROUTE_CONFIG if strategy_id}
         self._last_error_message = ""
+        self._last_transport = ""
 
     def get_last_error_message(self) -> str:
         return self._last_error_message
+
+    def get_last_transport(self) -> str:
+        return self._last_transport
 
     def get_settings(self) -> dict[str, Any]:
         payload = self._load_settings()
@@ -224,8 +228,10 @@ class DiscordNotificationService:
 
     def _post_webhook(self, *, webhook_url: str, message: str) -> None:
         if shutil.which("curl"):
+            self._last_transport = "curl"
             self._post_webhook_with_curl(webhook_url=webhook_url, message=message)
             return
+        self._last_transport = "urllib"
         self._post_webhook_with_urllib(webhook_url=webhook_url, message=message)
 
     def _post_webhook_with_curl(self, *, webhook_url: str, message: str) -> None:
@@ -303,6 +309,7 @@ class DiscordNotificationService:
         return chunks
 
     def _format_error(self, exc: Exception) -> str:
+        transport_prefix = f"{self._last_transport} " if self._last_transport else ""
         if isinstance(exc, HTTPError):
             body = ""
             try:
@@ -310,19 +317,21 @@ class DiscordNotificationService:
             except Exception:
                 body = ""
             if body:
-                return f"http {exc.code} {exc.reason}: {body[:200]}"
-            return f"http {exc.code} {exc.reason}"
+                return f"{transport_prefix}http {exc.code} {exc.reason}: {body[:200]}".strip()
+            return f"{transport_prefix}http {exc.code} {exc.reason}".strip()
         if isinstance(exc, URLError):
-            return f"url error: {exc.reason}"
+            return f"{transport_prefix}url error: {exc.reason}".strip()
         if isinstance(exc, subprocess.TimeoutExpired):
-            return "curl timeout after 10s"
+            return f"{transport_prefix}timeout after 10s".strip()
         if isinstance(exc, subprocess.CalledProcessError):
             details = str(exc.stderr or exc.stdout or "").strip()
             if details:
-                return f"curl exit {exc.returncode}: {details[:200]}"
-            return f"curl exit {exc.returncode}"
+                return f"{transport_prefix}exit {exc.returncode}: {details[:200]}".strip()
+            return f"{transport_prefix}exit {exc.returncode}".strip()
         message = str(exc).strip()
-        return message or exc.__class__.__name__
+        if not message:
+            return transport_prefix.strip() or exc.__class__.__name__
+        return f"{transport_prefix}{message}".strip()
 
     def _join_url(self, base_url: str, path: str) -> str:
         clean_base = str(base_url or "").strip().rstrip("/")
