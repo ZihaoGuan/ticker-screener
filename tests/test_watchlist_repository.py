@@ -337,6 +337,19 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "sepa_vcp_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "sepa_vcp")
 
+    def test_group_key_supports_weekly_vcp(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="weekly_vcp",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "weekly_vcp_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "weekly_vcp")
+
     def test_group_key_supports_sean_breakout(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",

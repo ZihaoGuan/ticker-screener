@@ -38,6 +38,7 @@ class DashboardService:
             "strategy_cards": [
                 {"id": "rs", "label": "RS", "description": "Daily RS new high before price."},
                 {"id": "vcp", "label": "VCP", "description": "Volatility contraction pattern scan."},
+                {"id": "weekly_vcp", "label": "Weekly VCP", "description": "Weekly volatility contraction pattern scan."},
                 {"id": "cup_handle", "label": "Cup and Handle", "description": "Breakout candidate scan."},
                 {"id": "ftd_sweep", "label": "FTD Sweep", "description": "Recent FTD sweep breakout within the lookback window."},
                 {"id": "overlap", "label": "Report", "description": "Daily cross-strategy overlap report."},

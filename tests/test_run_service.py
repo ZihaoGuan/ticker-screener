@@ -406,6 +406,20 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["vcp_spec"]["label"], "Run VCP Spec")
         self.assertIn("scripts/run_vcp_spec_screen.py", actions["vcp_spec"]["command"])
 
+    def test_list_actions_includes_weekly_vcp_family(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("weekly_vcp", actions)
+        self.assertIn("weekly_vcp_scored", actions)
+        self.assertIn("weekly_vcp_v3", actions)
+        self.assertIn("weekly_vcp_spec", actions)
+        self.assertIn("weekly_sepa_vcp", actions)
+        self.assertIn("scripts/run_weekly_vcp_screen.py", actions["weekly_vcp"]["command"])
+        self.assertIn("scripts/run_weekly_vcp_scored_screen.py", actions["weekly_vcp_scored"]["command"])
+        self.assertIn("scripts/run_weekly_vcp_v3_screen.py", actions["weekly_vcp_v3"]["command"])
+        self.assertIn("scripts/run_weekly_vcp_spec_screen.py", actions["weekly_vcp_spec"]["command"])
+        self.assertIn("scripts/run_weekly_sepa_vcp_screen.py", actions["weekly_sepa_vcp"]["command"])
+
     def test_list_actions_includes_market_breadth(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 

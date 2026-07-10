@@ -45,17 +45,35 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("vcp_{date_label}.json",),
         "legacy_summary_templates": ("vcp_run_summary_{date_label}.json",),
     },
+    "weekly_vcp": {
+        "stem_template": "weekly_vcp_{date_label}",
+        "legacy_watchlist_templates": ("weekly_vcp_{date_label}.json",),
+        "legacy_raw_templates": ("weekly_vcp_{date_label}.json",),
+        "legacy_summary_templates": ("weekly_vcp_run_summary_{date_label}.json",),
+    },
     "vcp_scored": {
         "stem_template": "vcp_scored_{date_label}",
         "legacy_watchlist_templates": ("vcp_scored_{date_label}.json",),
         "legacy_raw_templates": ("vcp_scored_{date_label}.json",),
         "legacy_summary_templates": ("vcp_scored_run_summary_{date_label}.json",),
     },
+    "weekly_vcp_scored": {
+        "stem_template": "weekly_vcp_scored_{date_label}",
+        "legacy_watchlist_templates": ("weekly_vcp_scored_{date_label}.json",),
+        "legacy_raw_templates": ("weekly_vcp_scored_{date_label}.json",),
+        "legacy_summary_templates": ("weekly_vcp_scored_run_summary_{date_label}.json",),
+    },
     "vcp_v3": {
         "stem_template": "vcp_v3_{date_label}",
         "legacy_watchlist_templates": ("vcp_v3_{date_label}.json",),
         "legacy_raw_templates": ("vcp_v3_{date_label}.json",),
         "legacy_summary_templates": ("vcp_v3_run_summary_{date_label}.json",),
+    },
+    "weekly_vcp_v3": {
+        "stem_template": "weekly_vcp_v3_{date_label}",
+        "legacy_watchlist_templates": ("weekly_vcp_v3_{date_label}.json",),
+        "legacy_raw_templates": ("weekly_vcp_v3_{date_label}.json",),
+        "legacy_summary_templates": ("weekly_vcp_v3_run_summary_{date_label}.json",),
     },
     "cup_handle": {
         "stem_template": "cup_handle_{date_label}",
@@ -146,6 +164,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_watchlist_templates": ("sepa_vcp_{date_label}.json",),
         "legacy_raw_templates": ("sepa_vcp_{date_label}.json",),
         "legacy_summary_templates": ("sepa_vcp_run_summary_{date_label}.json",),
+    },
+    "weekly_sepa_vcp": {
+        "stem_template": "weekly_sepa_vcp_{date_label}",
+        "legacy_watchlist_templates": ("weekly_sepa_vcp_{date_label}.json",),
+        "legacy_raw_templates": ("weekly_sepa_vcp_{date_label}.json",),
+        "legacy_summary_templates": ("weekly_sepa_vcp_run_summary_{date_label}.json",),
     },
     "rti": {
         "stem_template": "rti_{date_label}",
@@ -327,6 +351,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("vcp_spec_{date_label}.json",),
         "legacy_summary_templates": ("vcp_spec_run_summary_{date_label}.json",),
     },
+    "weekly_vcp_spec": {
+        "stem_template": "weekly_vcp_spec_{date_label}",
+        "legacy_watchlist_templates": ("weekly_vcp_spec_{date_label}.json",),
+        "legacy_raw_templates": ("weekly_vcp_spec_{date_label}.json",),
+        "legacy_summary_templates": ("weekly_vcp_spec_run_summary_{date_label}.json",),
+    },
     "eight_week_100_runup": {
         "stem_template": "eight_week_100_runup_{date_label}",
         "legacy_watchlist_templates": (
@@ -467,6 +497,11 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("trend_template", "trend_template"),
     ("market_correction_resilience", "market_correction_resilience"),
     ("stockbee_momentum_burst", "stockbee_momentum_burst"),
+    ("weekly_vcp_spec", "weekly_vcp_spec"),
+    ("weekly_vcp_scored", "weekly_vcp_scored"),
+    ("weekly_vcp_v3", "weekly_vcp_v3"),
+    ("weekly_vcp", "weekly_vcp"),
+    ("weekly_sepa_vcp", "weekly_sepa_vcp"),
     ("vcp_spec", "vcp_spec"),
     ("pre_earnings_ma_stack", "pre_earnings_ma_stack"),
     ("pre_earnings_focus", "pre_earnings_focus"),

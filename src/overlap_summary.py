@@ -44,6 +44,16 @@ PIPELINES = (
         "filename": "vcp_{date}.json",
     },
     {
+        "id": "weekly_vcp",
+        "label": "Weekly VCP",
+        "filename": "weekly_vcp_{date}.json",
+    },
+    {
+        "id": "weekly_vcp_scored",
+        "label": "Weekly VCP Scored",
+        "filename": "weekly_vcp_scored_{date}.json",
+    },
+    {
         "id": "cup_handle",
         "label": "Cup and Handle",
         "filename": "cup_handle_{date}.json",
@@ -129,14 +139,29 @@ PIPELINES = (
         "filename": "sepa_vcp_{date}.json",
     },
     {
+        "id": "weekly_sepa_vcp",
+        "label": "Weekly SEPA VCP",
+        "filename": "weekly_sepa_vcp_{date}.json",
+    },
+    {
         "id": "vcp_v3",
         "label": "VCP v3",
         "filename": "vcp_v3_{date}.json",
     },
     {
+        "id": "weekly_vcp_v3",
+        "label": "Weekly VCP v3",
+        "filename": "weekly_vcp_v3_{date}.json",
+    },
+    {
         "id": "vcp_spec",
         "label": "VCP Spec",
         "filename": "vcp_spec_{date}.json",
+    },
+    {
+        "id": "weekly_vcp_spec",
+        "label": "Weekly VCP Spec",
+        "filename": "weekly_vcp_spec_{date}.json",
     },
     {
         "id": "rti",
@@ -212,6 +237,8 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "legacy_peg": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "canslim": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "weekly_vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "weekly_vcp_scored": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "cup_handle": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "weekly_htf_pullback": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "eight_week_100_runup": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
@@ -229,8 +256,11 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "high_tight_flag_setup": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "leif_high_tight_flag": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sepa_vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "weekly_sepa_vcp": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcp_v3": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "weekly_vcp_v3": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcp_spec": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "weekly_vcp_spec": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "rti": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sean_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "vcs_setup_stage": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

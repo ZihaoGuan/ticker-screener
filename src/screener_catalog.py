@@ -55,6 +55,11 @@ from .weinstein_stage2_early_screen import (
     find_weinstein_stage2_early_hit,
 )
 from .weekly_tight_close_screen import find_weekly_tight_close_breakout_hit, find_weekly_tight_close_hit
+from .weekly_sepa_vcp_screen import WEEKLY_SEPA_VCP_HISTORY_DAYS, find_weekly_sepa_vcp_hit
+from .weekly_vcp_screen import WEEKLY_VCP_HISTORY_DAYS, run_weekly_vcp_screen
+from .weekly_vcp_scored_screen import score_weekly_vcp_hit
+from .weekly_vcp_spec_screen import WEEKLY_VCP_SPEC_HISTORY_DAYS, find_weekly_vcp_spec_hit
+from .weekly_vcp_v3_screen import WEEKLY_VCP_V3_HISTORY_DAYS, find_weekly_vcp_v3_hit
 from .weekly_htf_pullback_screen import run_weekly_htf_pullback_screen
 from .wyckoff_analysis import WYCKOFF_HISTORY_DAYS, find_recent_wyckoff_signal_hit
 
@@ -110,6 +115,11 @@ def _run_rs_weekly(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
 def _run_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     return _single_ticker_result(bundle, run_vcp_screen, config)
+
+
+def _run_weekly_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    return _single_ticker_result(bundle, run_weekly_vcp_screen, config)
 
 
 def _run_canslim_v2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
@@ -412,6 +422,29 @@ def _run_sean_breakout(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
 
 def _run_sepa_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     hit = find_recent_sepa_vcp_hit(
+        bundle.bars,
+        bundle.benchmark_bars,
+        ticker=_ticker_from_bundle(bundle),
+        benchmark_ticker=str(bundle.extras["config"].benchmark_ticker),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "rpr_score": payload["rpr_score"],
+            "buy_risk_status": payload["buy_risk_status"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_weekly_sepa_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_weekly_sepa_vcp_hit(
         bundle.bars,
         bundle.benchmark_bars,
         ticker=_ticker_from_bundle(bundle),
@@ -1046,6 +1079,36 @@ def _run_vcp_scored(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
         hit=payload,
     )
 
+
+def _run_weekly_vcp_scored(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    result = run_weekly_vcp_screen(config, [_ticker_from_bundle(bundle)], as_of_date=bundle.as_of_date)
+    hits = list(getattr(result, "hits", []))
+    failures = list(getattr(result, "failed_tickers", []))
+    if failures:
+        return ScreenerEvaluationResult(passed=False, error=str(failures[0].get("error") or "unknown screener failure"))
+    if not hits:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    if bundle.benchmark_bars is None:
+        return ScreenerEvaluationResult(passed=False, error="missing benchmark bars for weekly scored vcp")
+    hit = score_weekly_vcp_hit(hits[0], bars=bundle.bars, benchmark_bars=bundle.benchmark_bars)
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, error="unable to score weekly vcp candidate")
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "composite_score": payload["composite_score"],
+            "rating": payload["rating"],
+            "execution_state": payload["execution_state"],
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_vcp_v3(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     hit = find_vcp_v3_hit(
         bundle.bars,
@@ -1064,6 +1127,53 @@ def _run_vcp_v3(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
             "category": payload["category"],
             "vcp_score": payload["vcp_score"],
             "risk_reward": payload["risk_reward"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_weekly_vcp_v3(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_weekly_vcp_v3_hit(
+        bundle.bars,
+        bundle.benchmark_bars,
+        ticker=_ticker_from_bundle(bundle),
+        benchmark_ticker=str(bundle.extras["config"].benchmark_ticker),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "category": payload["category"],
+            "vcp_score": payload["vcp_score"],
+            "risk_reward": payload["risk_reward"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_weekly_vcp_spec(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_weekly_vcp_spec_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        benchmark_ticker=str(bundle.extras["config"].benchmark_ticker),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "category": payload["category"],
+            "contractions_count": payload["contractions_count"],
+            "prior_uptrend_pct": payload["prior_uptrend_pct"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
@@ -1116,12 +1226,26 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             warmup_trading_days=40,
             evaluator=_run_vcp,
         ),
+        "weekly_vcp": ScreenerSpec(
+            id="weekly_vcp",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=max(max_vcp_days, WEEKLY_VCP_HISTORY_DAYS),
+            warmup_trading_days=40,
+            evaluator=_run_weekly_vcp,
+        ),
         "vcp_scored": ScreenerSpec(
             id="vcp_scored",
             required_inputs=("daily_bars", "benchmark_bars", "metadata"),
             lookback_trading_days=max(max_vcp_days, VCP_SCORED_HISTORY_DAYS),
             warmup_trading_days=40,
             evaluator=_run_vcp_scored,
+        ),
+        "weekly_vcp_scored": ScreenerSpec(
+            id="weekly_vcp_scored",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=max(max_vcp_days, WEEKLY_VCP_HISTORY_DAYS),
+            warmup_trading_days=40,
+            evaluator=_run_weekly_vcp_scored,
         ),
         "vcp_v3": ScreenerSpec(
             id="vcp_v3",
@@ -1130,12 +1254,26 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             warmup_trading_days=40,
             evaluator=_run_vcp_v3,
         ),
+        "weekly_vcp_v3": ScreenerSpec(
+            id="weekly_vcp_v3",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=max(max_vcp_days, WEEKLY_VCP_V3_HISTORY_DAYS),
+            warmup_trading_days=40,
+            evaluator=_run_weekly_vcp_v3,
+        ),
         "vcp_spec": ScreenerSpec(
             id="vcp_spec",
             required_inputs=("daily_bars", "metadata"),
             lookback_trading_days=max(max_vcp_days, VCP_SPEC_HISTORY_DAYS),
             warmup_trading_days=40,
             evaluator=_run_vcp_spec,
+        ),
+        "weekly_vcp_spec": ScreenerSpec(
+            id="weekly_vcp_spec",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=max(max_vcp_days, WEEKLY_VCP_SPEC_HISTORY_DAYS),
+            warmup_trading_days=40,
+            evaluator=_run_weekly_vcp_spec,
         ),
         "canslim_v2": ScreenerSpec(
             id="canslim_v2",
@@ -1343,6 +1481,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=SEPA_HISTORY_DAYS,
             warmup_trading_days=20,
             evaluator=_run_sepa_vcp,
+        ),
+        "weekly_sepa_vcp": ScreenerSpec(
+            id="weekly_sepa_vcp",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=WEEKLY_SEPA_VCP_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_weekly_sepa_vcp,
         ),
         "rti": ScreenerSpec(
             id="rti",
