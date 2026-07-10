@@ -30,10 +30,11 @@ class MyPicksRepository:
             connection.commit()
         self._schema_ready = True
 
-    def _connect(self):
+    def _connect(self, *, ensure_schema: bool = True):
         if not self.database_url:
             return None
-        self.ensure_schema()
+        if ensure_schema:
+            self.ensure_schema()
         try:
             import psycopg
         except ImportError:
@@ -45,7 +46,7 @@ class MyPicksRepository:
         return [dict(zip(columns, row)) for row in rows]
 
     def list_picks(self) -> list[dict[str, Any]]:
-        connection = self._connect()
+        connection = self._connect(ensure_schema=False)
         if connection is None:
             return []
         sql = """
@@ -111,7 +112,7 @@ class MyPicksRepository:
         return rows[0] if rows else None
 
     def list_recent_signal_summary(self, tickers: list[str], *, lookback_days: int = 45) -> dict[str, dict[str, Any]]:
-        connection = self._connect()
+        connection = self._connect(ensure_schema=False)
         if connection is None:
             return {}
         normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
