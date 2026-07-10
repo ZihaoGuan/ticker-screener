@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 from typing import Any
 from urllib import request
 from urllib.parse import quote
@@ -33,6 +34,8 @@ _SCANNER_ROUTE_CONFIG: tuple[tuple[str, str], ...] = (
 
 
 class DiscordNotificationService:
+    _DISCORD_CONTENT_LIMIT = 1800
+
     def __init__(self, *, project_root: Path, app_base_url: str = "") -> None:
         self.project_root = project_root
         self.settings_path = project_root / "config" / "discord_notifications.json"
@@ -87,7 +90,11 @@ class DiscordNotificationService:
         )
         if not message:
             return False
-        self._post_webhook(webhook_url=webhook_url, message=message)
+        try:
+            self._post_webhook(webhook_url=webhook_url, message=message)
+        except Exception:
+            print("warning: discord webhook send failed for job completion notification", file=sys.stderr)
+            return False
         return True
 
     def send_message(self, message: str) -> bool:
@@ -98,8 +105,16 @@ class DiscordNotificationService:
         webhook_url = str(settings.get("webhook_url") or "").strip()
         if not webhook_url:
             return False
-        self._post_webhook(webhook_url=webhook_url, message=text)
-        return True
+        sent = False
+        all_succeeded = True
+        for chunk in self._split_message(text):
+            try:
+                self._post_webhook(webhook_url=webhook_url, message=chunk)
+                sent = True
+            except Exception:
+                all_succeeded = False
+                print("warning: discord webhook send failed for message chunk", file=sys.stderr)
+        return sent and all_succeeded
 
     def build_completion_message(
         self,
@@ -199,6 +214,35 @@ class DiscordNotificationService:
         )
         with request.urlopen(req, timeout=10):
             return
+
+    def _split_message(self, message: str) -> list[str]:
+        text = str(message or "").strip()
+        if not text:
+            return []
+        lines = text.splitlines()
+        if not lines:
+            return []
+        chunks: list[str] = []
+        current = ""
+        for line in lines:
+            candidate = line if not current else f"{current}\n{line}"
+            if len(candidate) <= self._DISCORD_CONTENT_LIMIT:
+                current = candidate
+                continue
+            if current:
+                chunks.append(current)
+            if len(line) <= self._DISCORD_CONTENT_LIMIT:
+                current = line
+                continue
+            start = 0
+            while start < len(line):
+                end = start + self._DISCORD_CONTENT_LIMIT
+                chunks.append(line[start:end])
+                start = end
+            current = ""
+        if current:
+            chunks.append(current)
+        return chunks
 
     def _join_url(self, base_url: str, path: str) -> str:
         clean_base = str(base_url or "").strip().rstrip("/")

@@ -92,6 +92,63 @@ class DiscordNotificationServiceTests(unittest.TestCase):
             message="Hello scanner",
         )
 
+    def test_send_message_returns_false_when_webhook_post_fails(self) -> None:
+        service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
+        service.update_settings(webhook_url="https://discord.example/webhook", app_base_url="https://ticker.example.com")
+        service._post_webhook = MagicMock(side_effect=RuntimeError("boom"))
+
+        notified = service.send_message("Hello scanner")
+
+        self.assertFalse(notified)
+
+    def test_send_message_splits_large_payload_using_workflow_limit(self) -> None:
+        service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
+        service.update_settings(webhook_url="https://discord.example/webhook", app_base_url="https://ticker.example.com")
+        service._post_webhook = MagicMock()
+        lines = [f"`TK{i:03d}` gap 5.0% vol 1.50x" for i in range(120)]
+
+        notified = service.send_message("\n".join(lines))
+
+        self.assertTrue(notified)
+        self.assertGreater(service._post_webhook.call_count, 1)
+        for hook_call in service._post_webhook.call_args_list:
+            message = hook_call.kwargs["message"]
+            self.assertLessEqual(len(message), 1800)
+
+    def test_send_message_continues_after_chunk_failure(self) -> None:
+        service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
+        service.update_settings(webhook_url="https://discord.example/webhook", app_base_url="https://ticker.example.com")
+        posted_messages: list[str] = []
+
+        def fake_post(*, webhook_url: str, message: str) -> None:
+            posted_messages.append(message)
+            if len(posted_messages) == 1:
+                raise RuntimeError("boom")
+
+        service._post_webhook = MagicMock(side_effect=fake_post)
+        lines = [f"`TK{i:03d}` gap 5.0% vol 1.50x" for i in range(120)]
+
+        notified = service.send_message("\n".join(lines))
+
+        self.assertFalse(notified)
+        self.assertGreater(len(posted_messages), 1)
+
+    def test_notify_job_completion_returns_false_when_webhook_post_fails(self) -> None:
+        service = DiscordNotificationService(project_root=self.project_root, app_base_url="")
+        service.update_settings(webhook_url="https://discord.example/webhook", app_base_url="https://ticker.example.com")
+        service._post_webhook = MagicMock(side_effect=RuntimeError("boom"))
+
+        notified = service.notify_job_completion(
+            action_id="weekly_rs",
+            job_label="Weekly RS",
+            status="success",
+            success_count=5,
+            trigger_source="manual",
+            watchlist_file="/tmp/weekly_rs_new_high_2026-06-20.json",
+        )
+
+        self.assertFalse(notified)
+
 
 if __name__ == "__main__":
     unittest.main()
