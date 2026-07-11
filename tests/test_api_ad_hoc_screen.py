@@ -25,6 +25,7 @@ if TestClient is not None:
         get_rrg_service,
         get_run_service,
         get_screener_history_service,
+        get_tiger_positions_service,
         get_user_admin_service,
         get_watchlist_service,
     )
@@ -992,6 +993,100 @@ class _FakeMyPicksService:
         return None
 
 
+class _FakeTigerPositionsService:
+    def get_context(self, *, user_id: int):
+        return {
+            "database_configured": True,
+            "settings": {
+                "user_id": user_id,
+                "display_name": "Main Tiger",
+                "tiger_id": "demo-tiger-id",
+                "account": "U12345678",
+                "private_key_env_var": "TIGER_PRIVATE_KEY",
+                "is_enabled": True,
+                "last_synced_at": "2026-07-11T00:00:00+00:00",
+                "last_sync_error": None,
+                "has_private_key": True,
+            },
+            "summary": {
+                "position_count": 2,
+                "total_market_value": 3500.0,
+                "total_cost_basis": 3000.0,
+                "total_unrealized_pl": 500.0,
+                "total_unrealized_pl_pct": 16.67,
+                "add_count": 1,
+                "hold_count": 1,
+                "trim_count": 0,
+                "last_synced_at": "2026-07-11T00:00:00+00:00",
+            },
+            "positions": [
+                {
+                    "id": 1,
+                    "ticker": "NVDA",
+                    "tiger_account": "U12345678",
+                    "quantity": 10.0,
+                    "average_cost": 100.0,
+                    "market_price": 140.0,
+                    "market_value": 1400.0,
+                    "cost_basis": 1000.0,
+                    "unrealized_pl": 400.0,
+                    "unrealized_pl_pct": 40.0,
+                    "currency": "USD",
+                    "as_of_date": "2026-07-11",
+                    "captured_at": "2026-07-11T00:00:00+00:00",
+                    "raw_json": {},
+                    "position_action": {
+                        "action": "hold_position",
+                        "action_score": 3.0,
+                        "reason_summary": "Trend still intact.",
+                    },
+                },
+                {
+                    "id": 2,
+                    "ticker": "AAPL",
+                    "tiger_account": "U12345678",
+                    "quantity": 5.0,
+                    "average_cost": 320.0,
+                    "market_price": 420.0,
+                    "market_value": 2100.0,
+                    "cost_basis": 1600.0,
+                    "unrealized_pl": 500.0,
+                    "unrealized_pl_pct": 31.25,
+                    "currency": "USD",
+                    "as_of_date": "2026-07-11",
+                    "captured_at": "2026-07-11T00:00:00+00:00",
+                    "raw_json": {},
+                    "position_action": {
+                        "action": "add_position",
+                        "action_score": 4.2,
+                        "reason_summary": "Still in addable zone.",
+                    },
+                },
+            ],
+        }
+
+    def update_settings(self, **kwargs: object):
+        return {
+            "user_id": int(kwargs.get("user_id") or 0),
+            "display_name": str(kwargs.get("display_name") or ""),
+            "tiger_id": str(kwargs.get("tiger_id") or ""),
+            "account": str(kwargs.get("account") or ""),
+            "private_key_env_var": str(kwargs.get("private_key_env_var") or "TIGER_PRIVATE_KEY"),
+            "is_enabled": bool(kwargs.get("is_enabled", True)),
+            "last_synced_at": None,
+            "last_sync_error": None,
+            "has_private_key": False,
+        }
+
+    def sync_user_positions(self, *, user_id: int):
+        return {
+            "ok": True,
+            "synced_count": 2,
+            "captured_at": "2026-07-11T00:00:00+00:00",
+            "account": f"U{user_id:08d}",
+        }
+
+
 class _FakeRrgService:
     def get_latest_report(self):
         return self.get_universe_report(universe="sector", benchmark="SPY", period="3y", trail_weeks=12, cadence="weekly")
@@ -1041,6 +1136,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_earnings_calendar_service] = lambda: _FakeEarningsCalendarService()
         app.dependency_overrides[get_portfolio_service] = lambda: _FakePortfolioService()
         app.dependency_overrides[get_my_picks_service] = lambda: _FakeMyPicksService()
+        app.dependency_overrides[get_tiger_positions_service] = lambda: _FakeTigerPositionsService()
         app.dependency_overrides[get_rrg_service] = lambda: _FakeRrgService()
         app.dependency_overrides[get_current_principal] = anonymous_principal
         self.client = TestClient(app)
@@ -1380,6 +1476,50 @@ class ApiAdHocScreenTests(unittest.TestCase):
         response = self.client.get("/api/admin/portfolio")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["positions"][0]["ticker"], "NVDA")
+
+    def test_member_can_access_tiger_positions(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=7,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+        response = self.client.get("/api/tiger/positions/me")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["settings"]["account"], "U12345678")
+        self.assertEqual(payload["positions"][0]["ticker"], "NVDA")
+
+    def test_member_can_update_tiger_settings(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=7,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+        response = self.client.post(
+            "/api/tiger/positions/me/settings",
+            json={
+                "display_name": "Tiger Taxable",
+                "tiger_id": "abc123",
+                "account": "U99999999",
+                "private_key_env_var": "MY_TIGER_KEY",
+                "is_enabled": True,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["settings"]["account"], "U99999999")
+
+    def test_member_can_sync_tiger_positions(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=7,
+            email="premium@example.com",
+            role="premium",
+            is_active=True,
+        )
+        response = self.client.post("/api/tiger/positions/me/sync")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["synced_count"], 2)
 
     def test_admin_can_import_portfolio_positions(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(

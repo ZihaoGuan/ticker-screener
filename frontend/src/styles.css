@@ -329,6 +329,43 @@ a {
   gap: 12px;
 }
 
+.stack-form {
+  display: grid;
+  gap: 14px;
+}
+
+.stack-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.checkbox-row {
+  align-items: center;
+  display: flex !important;
+  gap: 10px;
+}
+
+.checkbox-row input {
+  margin: 0;
+}
+
+.detail-table-wrapper {
+  overflow-x: auto;
+}
+
+.detail-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.detail-table th,
+.detail-table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
 .calendar-legend {
   display: flex;
   flex-wrap: wrap;

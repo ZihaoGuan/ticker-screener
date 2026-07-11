@@ -1833,6 +1833,76 @@ export type PortfolioRefreshResponse = {
   }>;
 };
 
+export type TigerPositionAction = {
+  as_of_date?: string | null;
+  action?: string | null;
+  action_score?: number | null;
+  regime_state?: string | null;
+  trend_state?: string | null;
+  extension_state?: string | null;
+  support_reference?: string | null;
+  atr_dist_21?: number | null;
+  atr_dist_10w?: number | null;
+  atr_pct?: number | null;
+  daily_atr_ratio?: number | null;
+  close_price?: number | null;
+  ema21?: number | null;
+  sma50?: number | null;
+  sma10w?: number | null;
+  danger_signal_count?: number;
+  reason_summary?: string | null;
+  evidence?: Record<string, unknown>;
+};
+
+export type TigerPositionRow = {
+  id: number;
+  ticker: string;
+  tiger_account: string;
+  quantity?: number | null;
+  average_cost?: number | null;
+  market_price?: number | null;
+  market_value?: number | null;
+  cost_basis?: number | null;
+  unrealized_pl?: number | null;
+  unrealized_pl_pct?: number | null;
+  currency?: string | null;
+  as_of_date?: string | null;
+  captured_at?: string | null;
+  raw_json?: Record<string, unknown>;
+  position_action?: TigerPositionAction | null;
+};
+
+export type TigerPositionsSettings = {
+  user_id: number;
+  display_name: string;
+  tiger_id: string;
+  account: string;
+  private_key_env_var: string;
+  is_enabled: boolean;
+  last_synced_at?: string | null;
+  last_sync_error?: string | null;
+  has_private_key: boolean;
+};
+
+export type TigerPositionsSummary = {
+  position_count: number;
+  total_market_value: number;
+  total_cost_basis: number;
+  total_unrealized_pl: number;
+  total_unrealized_pl_pct: number;
+  add_count: number;
+  hold_count: number;
+  trim_count: number;
+  last_synced_at?: string | null;
+};
+
+export type TigerPositionsContextResponse = {
+  database_configured: boolean;
+  settings: TigerPositionsSettings;
+  summary: TigerPositionsSummary;
+  positions: TigerPositionRow[];
+};
+
 export type FundamentalChecklistItem = {
   key: string;
   label: string;

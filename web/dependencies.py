@@ -33,6 +33,7 @@ from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.scheduled_job_service import ScheduledJobService
 from src.webapp.services.screener_history_service import ScreenerHistoryService
+from src.webapp.services.tiger_positions_service import TigerPositionsService
 from src.webapp.services.watchlist_service import WatchlistService
 
 
@@ -103,6 +104,10 @@ def get_pair_trade_service() -> PairTradeService:
 
 def get_portfolio_service() -> PortfolioService:
     return PortfolioService(database_url=config.database_url)
+
+
+def get_tiger_positions_service() -> TigerPositionsService:
+    return TigerPositionsService(database_url=config.database_url)
 
 
 def get_my_picks_service() -> MyPicksService:

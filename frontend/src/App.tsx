@@ -62,6 +62,7 @@ const RrgPage = lazyPage(() => import("./pages/RrgPage"), "RrgPage");
 const OverlapPage = lazyPage(() => import("./pages/OverlapPage"), "OverlapPage");
 const MyPicksPage = lazyPage(() => import("./pages/MyPicksPage"), "MyPicksPage");
 const PortfolioPage = lazyPage(() => import("./pages/PortfolioPage"), "PortfolioPage");
+const TigerPositionsPage = lazyPage(() => import("./pages/TigerPositionsPage"), "TigerPositionsPage");
 const AdminPage = lazyPage(() => import("./pages/AdminPage"), "AdminPage");
 const AdminMissingSectorsPage = lazyPage(() => import("./pages/AdminMissingSectorsPage"), "AdminMissingSectorsPage");
 const AdminMissingFinvizTickersPage = lazyPage(() => import("./pages/AdminMissingFinvizTickersPage"), "AdminMissingFinvizTickersPage");
@@ -198,6 +199,14 @@ export default function App() {
             element={
               <RoleRoute allowedRoles={["admin"]}>
                 <PortfolioPage />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/tiger-positions"
+            element={
+              <RoleRoute allowedRoles={["premium", "admin"]}>
+                <TigerPositionsPage />
               </RoleRoute>
             }
           />

@@ -27,6 +27,7 @@ from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.scheduled_job_service import ScheduledJobService
 from src.webapp.services.screener_history_service import ScreenerHistoryService
+from src.webapp.services.tiger_positions_service import TigerPositionsService
 from src.webapp.services.watchlist_service import WatchlistService
 from web.dependencies import (
     get_ad_hoc_screen_service,
@@ -49,6 +50,7 @@ from web.dependencies import (
     get_run_service,
     get_scheduled_job_service,
     get_screener_history_service,
+    get_tiger_positions_service,
     get_user_admin_service,
     get_watchlist_service,
     require_member_access,
@@ -1654,6 +1656,76 @@ def admin_portfolio_context(
         return JSONResponse(jsonable_encoder(service.get_context()))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/tiger/positions/me", response_class=JSONResponse)
+def tiger_positions_context(
+    service: TigerPositionsService = Depends(get_tiger_positions_service),
+    principal: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    try:
+        return JSONResponse(jsonable_encoder(service.get_context(user_id=int(principal.user_id or 0))))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/tiger/positions/me/settings", response_class=JSONResponse)
+def update_tiger_positions_settings(
+    request: Request,
+    payload: dict[str, object] | None = Body(default=None),
+    service: TigerPositionsService = Depends(get_tiger_positions_service),
+    principal: Principal = Depends(require_member_access),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    request_payload = payload or {}
+    try:
+        settings = service.update_settings(
+            user_id=int(principal.user_id or 0),
+            display_name=str(request_payload.get("display_name") or ""),
+            tiger_id=str(request_payload.get("tiger_id") or ""),
+            account=str(request_payload.get("account") or ""),
+            private_key_env_var=str(request_payload.get("private_key_env_var") or ""),
+            is_enabled=bool(request_payload.get("is_enabled", True)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="tiger.settings.update",
+        resource_type="tiger_account_settings",
+        resource_id=str(principal.user_id or ""),
+        resource_label=str(settings.get("account") or principal.email or principal.user_id or ""),
+        message="Updated Tiger account settings.",
+        metadata=settings,
+    )
+    return JSONResponse({"ok": True, "settings": jsonable_encoder(settings)})
+
+
+@router.post("/tiger/positions/me/sync", response_class=JSONResponse)
+def sync_tiger_positions(
+    request: Request,
+    service: TigerPositionsService = Depends(get_tiger_positions_service),
+    principal: Principal = Depends(require_member_access),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    try:
+        result = service.sync_user_positions(user_id=int(principal.user_id or 0))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="tiger.positions.sync",
+        resource_type="tiger_positions",
+        resource_id=str(principal.user_id or ""),
+        resource_label=str(result.get("account") or principal.email or principal.user_id or ""),
+        message=f"Synced {result.get('synced_count')} Tiger position(s).",
+        metadata=result,
+    )
+    return JSONResponse(jsonable_encoder(result))
 
 
 @router.get("/admin/my-picks", response_class=JSONResponse)

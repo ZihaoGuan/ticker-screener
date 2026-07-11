@@ -729,6 +729,45 @@ CREATE INDEX IF NOT EXISTS idx_daily_position_decisions_date_action
 CREATE INDEX IF NOT EXISTS idx_daily_position_decisions_ticker_date
   ON daily_position_decisions(ticker, as_of_date DESC);
 
+CREATE TABLE IF NOT EXISTS tiger_account_settings (
+  user_id BIGINT PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
+  display_name TEXT NOT NULL DEFAULT '',
+  tiger_id TEXT NOT NULL DEFAULT '',
+  account TEXT NOT NULL DEFAULT '',
+  private_key_env_var TEXT NOT NULL DEFAULT 'TIGER_PRIVATE_KEY',
+  is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  last_synced_at TIMESTAMPTZ,
+  last_sync_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tiger_account_settings_enabled
+  ON tiger_account_settings(is_enabled, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS tiger_position_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+  tiger_account TEXT NOT NULL,
+  ticker TEXT NOT NULL REFERENCES ticker_metadata(ticker),
+  quantity NUMERIC(24,6) NOT NULL,
+  average_cost NUMERIC(24,6),
+  market_price NUMERIC(24,6),
+  market_value NUMERIC(24,6),
+  unrealized_pl NUMERIC(24,6),
+  currency TEXT,
+  as_of_date DATE,
+  captured_at TIMESTAMPTZ NOT NULL,
+  raw_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tiger_position_snapshots_user_captured
+  ON tiger_position_snapshots(user_id, captured_at DESC, ticker ASC);
+
+CREATE INDEX IF NOT EXISTS idx_tiger_position_snapshots_user_ticker
+  ON tiger_position_snapshots(user_id, ticker, captured_at DESC);
+
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS scope_json JSONB NOT NULL DEFAULT '{}'::jsonb;
