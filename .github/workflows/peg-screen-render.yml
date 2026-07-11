@@ -15,8 +15,7 @@ on:
         options:
           - sean-peg
           - legacy
-  schedule:
-    - cron: "0 1 * * 2-6"
+  # schedule temporarily disabled
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

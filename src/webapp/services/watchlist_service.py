@@ -26,6 +26,7 @@ from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_t
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
 from ...flashalpha_gex import build_gamma_exposure_report, render_gamma_exposure_report_svgs
 from ...market_extension import compute_extension_frame, resample_to_weekly
+from ...bollinger_band_screen import compute_latest_bollinger_snapshot
 from ...market_data_access import (
     db_frame_has_recent_coverage,
     load_many_ticker_windows,
@@ -932,6 +933,8 @@ class WatchlistService:
                         "industry": "",
                         "day_close": None,
                         "change_pct": None,
+                        "change_from_52wk_low_pct": None,
+                        "bollinger_band_status": None,
                         "perf_year_pct": None,
                         "perf_ytd_pct": None,
                         "rs_rating": None,
@@ -2142,11 +2145,11 @@ class WatchlistService:
             frames = load_many_ticker_windows(
                 tickers,
                 dt.date.today(),
-                2,
+                _ANCHORED_VWAP_52W_LOOKBACK_DAYS,
                 database_url=self.database_url,
             )
         except Exception as exc:
-            logger.warning("Scanner top hits latest market enrichment unavailable; continuing without DB day-volume/change data: %s", exc)
+            logger.warning("Scanner top hits latest market enrichment unavailable; continuing without DB day/change/52-week-low data: %s", exc)
             return
         for ticker in tickers:
             row = rows_by_ticker.get(ticker)
@@ -2159,6 +2162,9 @@ class WatchlistService:
             change_pct = row.get("change_pct")
             if latest_close is not None and row.get("day_close") is None:
                 row["day_close"] = latest_close
+            row["change_from_52wk_low_pct"] = _compute_pct_from_52wk_low(frame, latest_close)
+            bollinger_snapshot = compute_latest_bollinger_snapshot(frame)
+            row["bollinger_band_status"] = bollinger_snapshot.status if bollinger_snapshot is not None else None
             if change_pct is None and latest_close is not None and previous_close is not None and previous_close > 0:
                 row["change_pct"] = ((latest_close / previous_close) - 1.0) * 100.0
 
@@ -3508,6 +3514,21 @@ def _resolve_anchored_vwap_52w_low_date(frame: pd.DataFrame) -> dt.date | None:
         return None
     anchor_timestamp = anchor_rows.index.min()
     return anchor_timestamp.date() if hasattr(anchor_timestamp, "date") else anchor_timestamp
+
+
+def _compute_pct_from_52wk_low(frame: pd.DataFrame, latest_close: float | None) -> float | None:
+    if latest_close is None:
+        return None
+    source = frame.dropna(subset=["Low"]).copy()
+    if source.empty:
+        return None
+    trailing_window = source.tail(_ANCHORED_VWAP_52W_LOOKBACK_DAYS)
+    if trailing_window.empty:
+        return None
+    low_52w = _coerce_optional_float(trailing_window["Low"].min())
+    if low_52w is None or low_52w <= 0:
+        return None
+    return ((latest_close / low_52w) - 1.0) * 100.0
 
 
 def _compute_rs_line(stock: pd.Series, benchmark: pd.Series) -> pd.Series:

@@ -119,6 +119,11 @@ PIPELINES = (
         "filename": "bb_squeeze_{date}.json",
     },
     {
+        "id": "bollinger_band_breakout",
+        "label": "Above Upper Bollinger Band",
+        "filename": "bollinger_band_breakout_{date}.json",
+    },
+    {
         "id": "high_tight_flag",
         "label": "High Tight Flag",
         "filename": "high_tight_flag_{date}.json",
@@ -252,6 +257,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "ftd_sweep": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "fearzone_zeiierman": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "bb_squeeze": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "bollinger_band_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "high_tight_flag": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "high_tight_flag_setup": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "leif_high_tight_flag": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

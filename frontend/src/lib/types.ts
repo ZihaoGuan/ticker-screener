@@ -232,6 +232,8 @@ export type ScannerTopHitRow = {
   industry: string;
   day_close: number | null;
   change_pct: number | null;
+  change_from_52wk_low_pct: number | null;
+  bollinger_band_status?: string | null;
   perf_year_pct: number | null;
   perf_ytd_pct: number | null;
   rs_rating: number | null;
@@ -1853,6 +1855,8 @@ export type MyPickRow = {
   perf_year_pct: number | null;
   perf_ytd_pct: number | null;
   change_since_added_pct: number | null;
+  change_from_52wk_low_pct: number | null;
+  bollinger_band_status: string | null;
   ema9_tested_since_added: boolean | null;
   ema21_tested_since_added: boolean | null;
   sma50_tested_since_added: boolean | null;

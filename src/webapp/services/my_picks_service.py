@@ -4,6 +4,7 @@ import datetime as dt
 from typing import Any
 
 from src.market_data_access import load_many_ticker_windows_for_range
+from src.bollinger_band_screen import compute_latest_bollinger_snapshot
 from src.ratings.repository import RatingsRepository
 from src.ticker_filters import normalize_ticker_symbol
 from src.trend_template_screen import PRICE_HISTORY_DAYS as TREND_TEMPLATE_PRICE_HISTORY_DAYS
@@ -16,6 +17,7 @@ from src.webapp.repositories.my_picks_repository import MyPicksRepository
 
 
 _SMA50_LOOKBACK_DAYS = 60
+_FIFTY_TWO_WEEK_LOOKBACK_DAYS = 252
 FUNDAMENTAL_CHECKLIST: tuple[dict[str, str], ...] = (
     {
         "key": "revenue_growth",
@@ -258,7 +260,7 @@ class MyPicksService:
             tickers,
             start_date=min(baseline_dates),
             end_date=today,
-            trading_days_needed=_SMA50_LOOKBACK_DAYS,
+            trading_days_needed=max(_SMA50_LOOKBACK_DAYS, _FIFTY_TWO_WEEK_LOOKBACK_DAYS),
             database_url=self.database_url,
         )
         for row in rows:
@@ -266,6 +268,8 @@ class MyPicksService:
             frame = frames.get(ticker)
             row["change_1d_pct"] = None
             row["change_since_added_pct"] = None
+            row["change_from_52wk_low_pct"] = None
+            row["bollinger_band_status"] = None
             row["ema9_tested_since_added"] = None
             row["ema21_tested_since_added"] = None
             row["sma50_tested_since_added"] = None
@@ -277,6 +281,9 @@ class MyPicksService:
             latest_close = _safe_float(close_series.iloc[-1])
             if row.get("latest_close") is None:
                 row["latest_close"] = latest_close
+            row["change_from_52wk_low_pct"] = _percent_change_from_52wk_low(frame, latest_close)
+            bollinger_snapshot = compute_latest_bollinger_snapshot(frame)
+            row["bollinger_band_status"] = bollinger_snapshot.status if bollinger_snapshot is not None else None
             if len(close_series) >= 2:
                 prev_close = _safe_float(close_series.iloc[-2])
                 row["change_1d_pct"] = _percent_change(latest_close, prev_close)
@@ -338,6 +345,8 @@ class MyPicksService:
             "perf_ytd_pct": None,
             "change_1d_pct": None,
             "change_since_added_pct": None,
+            "change_from_52wk_low_pct": None,
+            "bollinger_band_status": None,
             "ema9_tested_since_added": None,
             "ema21_tested_since_added": None,
             "sma50_tested_since_added": None,
@@ -468,6 +477,18 @@ def _percent_distance(value: float | None, baseline: float | None) -> float | No
 
 def _percent_change(value: float | None, baseline: float | None) -> float | None:
     return _percent_distance(value, baseline)
+
+
+def _percent_change_from_52wk_low(frame: Any, latest_close: float | None) -> float | None:
+    if latest_close is None or frame is None or frame.empty or "Low" not in frame:
+        return None
+    low_series = frame["Low"].dropna()
+    if low_series.empty:
+        return None
+    trailing_low = _safe_float(low_series.tail(_FIFTY_TWO_WEEK_LOOKBACK_DAYS).min())
+    if trailing_low is None or trailing_low <= 0:
+        return None
+    return _percent_change(latest_close, trailing_low)
 
 
 def _close_on_or_before(frame: Any, target_date: dt.date) -> float | None:

@@ -26,6 +26,8 @@ type MyPicksSortKey =
   | "change_1d_pct"
   | "perf_ytd_pct"
   | "change_since_added_pct"
+  | "change_from_52wk_low_pct"
+  | "bollinger_band_status"
   | "ema9_tested_since_added"
   | "ema21_tested_since_added"
   | "sma50_tested_since_added"
@@ -351,6 +353,8 @@ export function MyPicksPage() {
               <option value="change_1d_pct">1D %</option>
               <option value="perf_ytd_pct">YTD %</option>
               <option value="change_since_added_pct">Since Add %</option>
+              <option value="change_from_52wk_low_pct">From 52W Low %</option>
+              <option value="bollinger_band_status">Bollinger</option>
               <option value="ema9_tested_since_added">EMA9 Test</option>
               <option value="ema21_tested_since_added">EMA21 Test</option>
               <option value="sma50_tested_since_added">Retest 50 SMA</option>
@@ -584,6 +588,8 @@ function PicksTable({
             <th>{renderSortHeader("1D %", "change_1d_pct", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("YTD %", "perf_ytd_pct", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("Since Add %", "change_since_added_pct", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+            <th>{renderSortHeader("From 52W Low %", "change_from_52wk_low_pct", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+            <th>{renderSortHeader("Bollinger", "bollinger_band_status", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("EMA9 Test", "ema9_tested_since_added", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("EMA21 Test", "ema21_tested_since_added", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("Retest 50 SMA", "sma50_tested_since_added", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
@@ -622,6 +628,8 @@ function PicksTable({
               <td data-label="1D %">{renderChange(row.change_1d_pct)}</td>
               <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
               <td data-label="Since Add %">{renderChange(row.change_since_added_pct)}</td>
+              <td data-label="From 52W Low %">{renderChange(row.change_from_52wk_low_pct)}</td>
+              <td data-label="Bollinger">{renderBollingerBandStatus(row.bollinger_band_status)}</td>
               <td data-label="EMA9 Test">{renderTestFlag(row.ema9_tested_since_added)}</td>
               <td data-label="EMA21 Test">{renderTestFlag(row.ema21_tested_since_added)}</td>
               <td data-label="Retest 50 SMA">{renderTestFlag(row.sma50_tested_since_added)}</td>
@@ -737,6 +745,12 @@ function compareMyPickRows(left: MyPickRow, right: MyPickRow, sortBy: MyPicksSor
       break;
     case "change_since_added_pct":
       comparison = compareNullableNumber(left.change_since_added_pct, right.change_since_added_pct, sortDirection);
+      break;
+    case "change_from_52wk_low_pct":
+      comparison = compareNullableNumber(left.change_from_52wk_low_pct, right.change_from_52wk_low_pct, sortDirection);
+      break;
+    case "bollinger_band_status":
+      comparison = compareNullableText(left.bollinger_band_status, right.bollinger_band_status, sortDirection);
       break;
     case "ema9_tested_since_added":
       comparison = compareNullableBoolean(left.ema9_tested_since_added, right.ema9_tested_since_added, sortDirection);
@@ -904,6 +918,22 @@ function renderPositionActionCell(positionAction: MyPickRow["position_action"]) 
       </div>
     </div>
   );
+}
+
+function renderBollingerBandStatus(status: string | null | undefined) {
+  if (!status) {
+    return <span className="panel-copy">--</span>;
+  }
+  switch (status.trim().toLowerCase()) {
+    case "above_upper_band":
+      return <span className="scanner-score-pill is-caution">Above</span>;
+    case "within_bands":
+      return <span className="scanner-score-pill is-neutral">Within</span>;
+    case "below_lower_band":
+      return <span className="scanner-score-pill is-negative">Below</span>;
+    default:
+      return <span className="panel-copy">{status}</span>;
+  }
 }
 
 function humanizePositionAction(value: string | null | undefined) {

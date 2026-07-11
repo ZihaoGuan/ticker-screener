@@ -12,6 +12,7 @@ export type ChartVisibility = {
   ema21: boolean;
   sma50: boolean;
   sma200: boolean;
+  bollingerBands: boolean;
   weeklyEma8: boolean;
   ipoVwap: boolean;
   anchoredVwap52wLow: boolean;
@@ -159,6 +160,7 @@ export function PriceChart({
     ema21: true,
     sma50: true,
     sma200: true,
+    bollingerBands: false,
     weeklyEma8: true,
     ipoVwap: true,
     anchoredVwap52wLow: false,
@@ -177,6 +179,7 @@ export function PriceChart({
 
   const ma50 = useMemo(() => (overlays?.ma50?.length ? overlays.ma50 : buildMovingAverage(candles, 50)), [candles, overlays?.ma50]);
   const ma200 = useMemo(() => (overlays?.ma200?.length ? overlays.ma200 : buildMovingAverage(candles, 200)), [candles, overlays?.ma200]);
+  const bollingerBands = useMemo(() => buildBollingerBands(candles, 20, 2), [candles]);
   const ema8 = useMemo(() => overlays?.ema8 ?? buildExponentialMovingAverage(candles, 8), [candles, overlays?.ema8]);
   const ema21 = useMemo(() => overlays?.ema21 ?? buildExponentialMovingAverage(candles, 21), [candles, overlays?.ema21]);
   const weeklyEma8 = useMemo(() => overlays?.weekly_ema8 ?? [], [overlays?.weekly_ema8]);
@@ -363,6 +366,9 @@ export function PriceChart({
     const marketExtensionSeries = priceChart.addLineSeries({ color: "rgba(96, 165, 250, 0.95)", lineWidth: 2, lineStyle: LineStyle.Dashed, priceLineVisible: false });
     const ma50Series = priceChart.addLineSeries({ color: "rgba(251, 146, 60, 0.45)", lineWidth: 1, priceLineVisible: false });
     const ma200Series = priceChart.addLineSeries({ color: "rgba(167, 139, 250, 0.52)", lineWidth: 1, priceLineVisible: false });
+    const bollingerUpperSeries = priceChart.addLineSeries({ color: "rgba(244, 114, 182, 0.9)", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false });
+    const bollingerMiddleSeries = priceChart.addLineSeries({ color: "rgba(251, 191, 36, 0.75)", lineWidth: 1, priceLineVisible: false });
+    const bollingerLowerSeries = priceChart.addLineSeries({ color: "rgba(244, 114, 182, 0.9)", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false });
     const fibImpulseSeries = fibChart.addLineSeries({
       color: "rgba(248, 250, 252, 0.75)",
       lineWidth: 1,
@@ -499,6 +505,9 @@ export function PriceChart({
     marketExtensionSeries.setData(options.marketExtension ? marketExtension.line : []);
     ma50Series.setData(options.sma50 ? ma50 : []);
     ma200Series.setData(options.sma200 ? ma200 : []);
+    bollingerUpperSeries.setData(options.bollingerBands ? bollingerBands.upper : []);
+    bollingerMiddleSeries.setData(options.bollingerBands ? bollingerBands.middle : []);
+    bollingerLowerSeries.setData(options.bollingerBands ? bollingerBands.lower : []);
     fibImpulseSeries.setData(showFibPane ? fibOverlay?.impulseLine ?? [] : []);
     rsSeries.setData(showRsPane ? rsLine : []);
     flexResistanceSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.backfit ?? [] : []);
@@ -791,6 +800,7 @@ export function PriceChart({
     marketExtension,
     ma50,
     ma200,
+    bollingerBands,
     fibOverlay,
     rsLine,
     rsMarkers,
@@ -799,6 +809,7 @@ export function PriceChart({
     options.ema21,
     options.sma50,
     options.sma200,
+    options.bollingerBands,
     options.weeklyEma8,
     options.ipoVwap,
     options.anchoredVwap52wLow,
@@ -1182,6 +1193,26 @@ function buildExponentialMovingAverage(candles: CandlePoint[], span: number) {
     points.push({ time: candles[index].time, value: Number(ema.toFixed(2)) });
   }
   return points;
+}
+
+function buildBollingerBands(candles: CandlePoint[], window: number, stdMultiplier: number) {
+  const upper: { time: string; value: number }[] = [];
+  const middle: { time: string; value: number }[] = [];
+  const lower: { time: string; value: number }[] = [];
+  if (candles.length < window) {
+    return { upper, middle, lower };
+  }
+  for (let index = window - 1; index < candles.length; index += 1) {
+    const slice = candles.slice(index - window + 1, index + 1);
+    const mean = slice.reduce((sum, item) => sum + item.close, 0) / window;
+    const variance = slice.reduce((sum, item) => sum + (item.close - mean) ** 2, 0) / window;
+    const deviation = Math.sqrt(variance) * stdMultiplier;
+    const time = candles[index].time;
+    middle.push({ time, value: Number(mean.toFixed(2)) });
+    upper.push({ time, value: Number((mean + deviation).toFixed(2)) });
+    lower.push({ time, value: Number((mean - deviation).toFixed(2)) });
+  }
+  return { upper, middle, lower };
 }
 
 function detectGapZones(candles: CandlePoint[]): GapZone[] {

@@ -5,6 +5,7 @@ import datetime as dt
 from typing import Callable
 
 from .bb_squeeze_screen import find_recent_bb_squeeze_hit
+from .bollinger_band_screen import find_recent_bollinger_band_breakout_hit
 from .config import AppConfig
 from .base_detection_screen import find_active_base_detection_hit
 from .cup_detection_screen import find_active_cup_detection_hit
@@ -264,6 +265,26 @@ def _run_bb_squeeze(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
             "signal_date": payload["signal_date"],
             "signal_kind": payload["signal_kind"],
             "bb_squeeze_ratio": payload["bb_squeeze_ratio"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_bollinger_band_breakout(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_bollinger_band_breakout_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "close_vs_upper_pct": payload["close_vs_upper_pct"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
@@ -1439,6 +1460,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=90,
             warmup_trading_days=20,
             evaluator=_run_bb_squeeze,
+        ),
+        "bollinger_band_breakout": ScreenerSpec(
+            id="bollinger_band_breakout",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=120,
+            warmup_trading_days=20,
+            evaluator=_run_bollinger_band_breakout,
         ),
         "ema21_pullback_buy": ScreenerSpec(
             id="ema21_pullback_buy",

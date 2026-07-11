@@ -125,11 +125,16 @@ def _build_price_frame_map(*tickers: str):
 
     index = pd.bdate_range(end="2026-06-24", periods=60)
     close = [100.0] * 58 + [100.0, 110.0]
+    open_values = [99.5] * 58 + [99.5, 101.0]
+    high = [100.5] * 58 + [100.5, 111.0]
     low = [99.0] * 58 + [99.5, 100.0]
     frame = pd.DataFrame(
         {
+            "Open": open_values,
+            "High": high,
             "Low": low,
             "Close": close,
+            "Volume": [1_000_000.0] * 60,
         },
         index=index,
     )
@@ -184,6 +189,8 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertTrue(row["price_above_sma50"])
         self.assertAlmostEqual(row["change_1d_pct"], 10.0)
         self.assertAlmostEqual(row["change_since_added_pct"], 10.0)
+        self.assertAlmostEqual(row["change_from_52wk_low_pct"], ((110.0 / 99.0) - 1.0) * 100.0)
+        self.assertEqual(row["bollinger_band_status"], "above_upper_band")
         self.assertTrue(row["ema9_tested_since_added"])
         self.assertTrue(row["ema21_tested_since_added"])
         self.assertTrue(row["sma50_tested_since_added"])
@@ -240,6 +247,7 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["trend_template_label"], "6/8")
         self.assertAlmostEqual(payload["rows"][0]["change_1d_pct"], 10.0)
         self.assertAlmostEqual(payload["rows"][0]["change_since_added_pct"], 10.0)
+        self.assertEqual(payload["rows"][0]["bollinger_band_status"], "above_upper_band")
         self.assertEqual(payload["rows"][0]["daily_sma50"], 104.0)
         self.assertTrue(payload["rows"][0]["price_above_sma50"])
         self.assertTrue(payload["rows"][0]["ema9_tested_since_added"])

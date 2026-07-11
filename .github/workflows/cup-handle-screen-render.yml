@@ -7,8 +7,7 @@ on:
         description: Optional candidate limit for smoke runs
         required: false
         type: string
-  schedule:
-    - cron: "0 0 * * 2-6"
+  # schedule temporarily disabled
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

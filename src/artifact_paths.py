@@ -141,6 +141,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("bb_squeeze_{date_label}.json",),
         "legacy_summary_templates": ("bb_squeeze_run_summary_{date_label}.json",),
     },
+    "bollinger_band_breakout": {
+        "stem_template": "bollinger_band_breakout_{date_label}",
+        "legacy_watchlist_templates": ("bollinger_band_breakout_{date_label}.json",),
+        "legacy_raw_templates": ("bollinger_band_breakout_{date_label}.json",),
+        "legacy_summary_templates": ("bollinger_band_breakout_run_summary_{date_label}.json",),
+    },
     "ema21_pullback_buy": {
         "stem_template": "ema21_pullback_buy_{date_label}",
         "legacy_watchlist_templates": ("ema21_pullback_buy_{date_label}.json",),
@@ -531,6 +537,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("monster_peg", "monster_peg"),
     ("hve", "hve"),
     ("bb_squeeze", "bb_squeeze"),
+    ("bollinger_band_breakout", "bollinger_band_breakout"),
     ("ema21_pullback_buy", "ema21_pullback_buy"),
     ("sma200_pullback_buy", "sma200_pullback_buy"),
     ("sepa_vcp", "sepa_vcp"),

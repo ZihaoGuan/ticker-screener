@@ -509,6 +509,9 @@ class WatchlistServiceTests(unittest.TestCase):
             "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
             return_value={},
         ), patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows",
+            return_value={"PLTR": self._long_price_frame()},
+        ), patch(
             "src.ratings.repository.RatingsRepository.load_latest_rating_snapshots_for_tickers",
             return_value={
                 "PLTR": {"overall_rating": 91.0, "current_rank": 7, "sector": "Information Technology", "industry": "Software"},
@@ -545,6 +548,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["scanner_labels"], ["RS New High Before Price", "Fearzone"])
         self.assertEqual(pltr["day_close"], 132.45)
         self.assertEqual(pltr["change_pct"], 2.1)
+        self.assertIsInstance(pltr["change_from_52wk_low_pct"], float)
+        self.assertGreater(pltr["change_from_52wk_low_pct"], 0.0)
         self.assertEqual(pltr["rs_rating"], 97.0)
         self.assertEqual(pltr["ta_rating"], 95.0)
         self.assertEqual(pltr["fa_rating"], 91.0)
@@ -721,6 +726,7 @@ class WatchlistServiceTests(unittest.TestCase):
         pltr = payload["rows"][0]
         self.assertEqual(pltr["ticker"], "PLTR")
         self.assertEqual(pltr["scanner_count"], 3)
+        self.assertEqual(pltr["bollinger_band_status"], "within_bands")
         self.assertEqual(
             pltr["scanner_labels"],
             ["Fearzone", "Weekly RS New High", "Weekly RS New High Before Price"],

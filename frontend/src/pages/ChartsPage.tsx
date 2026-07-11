@@ -14,6 +14,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   ema21: true,
   sma50: true,
   sma200: true,
+  bollingerBands: false,
   weeklyEma8: true,
   ipoVwap: true,
   anchoredVwap52wLow: false,
@@ -358,6 +359,18 @@ export function ChartsPage() {
   const marketExtensionLabel = chartPayload?.market_extension?.config?.label ?? "10W SMA";
   const latestPositionAction = chartPayload?.position_action ?? null;
   const trendTemplate = chartPayload?.trend_template ?? null;
+  const low52Week = useMemo(() => {
+    if (trendTemplate?.low_52wk != null && Number.isFinite(trendTemplate.low_52wk)) {
+      return trendTemplate.low_52wk;
+    }
+    if (chartData.length === 0) {
+      return null;
+    }
+    return Math.min(...chartData.map((candle) => candle.low));
+  }, [chartData, trendTemplate?.low_52wk]);
+  const changeFrom52WeekLowPct =
+    lastClose != null && low52Week != null && low52Week > 0 ? ((lastClose - low52Week) / low52Week) * 100 : null;
+  const latestBollingerSnapshot = useMemo(() => computeLatestBollingerSnapshot(chartData, 20, 2), [chartData]);
   const atrMultipleFrom50Ma =
     atr14 != null && latestMa50 != null && Number.isFinite(lastClose ?? NaN)
       ? ((lastClose ?? 0) - latestMa50) / atr14
@@ -451,6 +464,7 @@ export function ChartsPage() {
     { key: "ema21", label: "EMA 21" },
     { key: "sma50", label: "SMA 50" },
     { key: "sma200", label: "SMA 200" },
+    { key: "bollingerBands", label: "Bollinger Bands" },
     { key: "weeklyEma8", label: "Weekly 8 EMA" },
     { key: "ipoVwap", label: "IPO VWAP" },
     { key: "anchoredVwap52wLow", label: "AVWAP from 52W low" },
@@ -580,6 +594,12 @@ export function ChartsPage() {
             value: formatMarketExtensionState(latestMarketExtension?.state),
             className: latestMarketExtension ? `status-pill ${marketExtensionStateClass(latestMarketExtension.state)}` : undefined,
           },
+          { label: "From 52W Low", value: formatPercent(changeFrom52WeekLowPct) },
+          {
+            label: "Bollinger",
+            value: formatBollingerBandStatus(latestBollingerSnapshot?.status),
+            className: latestBollingerSnapshot ? `status-pill ${bollingerBandStatusClass(latestBollingerSnapshot.status)}` : undefined,
+          },
           {
             label: "ADR14",
             value: formatPercent(adr14Pct),
@@ -634,6 +654,7 @@ export function ChartsPage() {
       adr14Pct,
       atr14,
       atrMultipleFrom50Ma,
+      changeFrom52WeekLowPct,
       chartData.length,
       chartPayload?.data_source,
       chartPayload?.resolved_as_of_date,
@@ -645,6 +666,7 @@ export function ChartsPage() {
       fundamentalsPayload?.vcp_rating,
       fundamentalsPayload?.vcp_score,
       hasTrimWarning,
+      latestBollingerSnapshot,
       dangerSignalCount,
       highestDangerSeverity,
       latestMarketExtension,
@@ -1946,6 +1968,61 @@ function formatAtrMultiple(value: number | null | undefined) {
   }
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(2)}x`;
+}
+
+function formatBollingerBandStatus(value: string | null | undefined) {
+  switch (String(value ?? "").trim().toLowerCase()) {
+    case "above_upper_band":
+      return "Above";
+    case "within_bands":
+      return "Within";
+    case "below_lower_band":
+      return "Below";
+    default:
+      return "--";
+  }
+}
+
+function bollingerBandStatusClass(value: string | null | undefined) {
+  switch (String(value ?? "").trim().toLowerCase()) {
+    case "above_upper_band":
+      return "is-caution";
+    case "within_bands":
+      return "status-unknown";
+    case "below_lower_band":
+      return "is-negative";
+    default:
+      return "status-unknown";
+  }
+}
+
+function computeLatestBollingerSnapshot(candles: CandlePoint[], window: number, stdMultiplier: number) {
+  if (candles.length < window) {
+    return null;
+  }
+  const slice = candles.slice(-window);
+  const mean = slice.reduce((sum, item) => sum + item.close, 0) / window;
+  const variance = slice.reduce((sum, item) => sum + (item.close - mean) ** 2, 0) / window;
+  const deviation = Math.sqrt(variance) * stdMultiplier;
+  const latestClose = candles[candles.length - 1]?.close ?? null;
+  if (latestClose == null) {
+    return null;
+  }
+  const upper = mean + deviation;
+  const lower = mean - deviation;
+  let status = "within_bands";
+  if (latestClose > upper) {
+    status = "above_upper_band";
+  } else if (latestClose < lower) {
+    status = "below_lower_band";
+  }
+  return {
+    status,
+    upper,
+    middle: mean,
+    lower,
+    close: latestClose,
+  };
 }
 
 function toNullableNumber(value: string | number | boolean | null | undefined) {

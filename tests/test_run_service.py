@@ -662,6 +662,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("rsi_ma_bb_bullish", action_ids)
         self.assertIn("rsi_ma_bb_bearish", action_ids)
         self.assertIn("bb_squeeze", action_ids)
+        self.assertIn("bollinger_band_breakout", action_ids)
         self.assertIn("ema21_pullback_buy", action_ids)
         self.assertIn("sma200_pullback_buy", action_ids)
         self.assertIn("high_tight_flag", action_ids)

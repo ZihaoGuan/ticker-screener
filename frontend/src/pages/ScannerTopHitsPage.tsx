@@ -7,7 +7,7 @@ import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type { MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell } from "../lib/types";
 
-type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "rs" | "ta" | "fa" | "decision" | "decisionScore";
+type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rs" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
 const PAGE_SIZE = 50;
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "sean_breakout", "venu_scanner"]);
@@ -278,6 +278,8 @@ export function ScannerTopHitsPage() {
                     <th>Sector Momentum</th>
                     <th>{renderSortButton("Close", "close", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("Change", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("From 52W Low %", "from52wLow", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("Bollinger", "bollinger", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>1Y %</th>
                     <th>YTD %</th>
                     <th>CAN V2</th>
@@ -344,6 +346,8 @@ export function ScannerTopHitsPage() {
                       </td>
                       <td data-label="Close">{formatPrice(row.day_close)}</td>
                       <td data-label="Change">{renderChange(row.change_pct)}</td>
+                      <td data-label="From 52W Low %">{renderChange(row.change_from_52wk_low_pct)}</td>
+                      <td data-label="Bollinger">{renderBollingerBandStatus(row.bollinger_band_status)}</td>
                       <td data-label="1Y %">{renderChange(row.perf_year_pct)}</td>
                       <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
                       <td data-label="CAN V2">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
@@ -476,6 +480,12 @@ function compareRows(
   if (sortBy === "change") {
     return compareNullableNumber(left.change_pct, right.change_pct, sortDirection) || left.ticker.localeCompare(right.ticker);
   }
+  if (sortBy === "from52wLow") {
+    return compareNullableNumber(left.change_from_52wk_low_pct, right.change_from_52wk_low_pct, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "bollinger") {
+    return compareText(left.bollinger_band_status ?? "", right.bollinger_band_status ?? "", sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
   if (sortBy === "rs") {
     return compareNullableNumber(left.rs_rating, right.rs_rating, sortDirection) || left.ticker.localeCompare(right.ticker);
   }
@@ -532,6 +542,22 @@ function formatVcpScore(score: number | null | undefined, rating: string | null 
   }
   const base = score.toFixed(1);
   return rating ? `${base} ${rating}` : base;
+}
+
+function renderBollingerBandStatus(status: string | null | undefined) {
+  if (!status) {
+    return <span className="panel-copy">--</span>;
+  }
+  switch (status.trim().toLowerCase()) {
+    case "above_upper_band":
+      return <span className="scanner-score-pill is-caution">Above</span>;
+    case "within_bands":
+      return <span className="scanner-score-pill is-neutral">Within</span>;
+    case "below_lower_band":
+      return <span className="scanner-score-pill is-negative">Below</span>;
+    default:
+      return <span className="panel-copy">{status}</span>;
+  }
 }
 
 function formatCompactNumber(value: number | null | undefined) {

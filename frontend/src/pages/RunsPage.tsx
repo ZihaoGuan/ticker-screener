@@ -2004,6 +2004,7 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     td9_bullish: "Bullish TD Sequential exhaustion names where downside pressure may be spent.",
     sean_breakout: "Daily leaders already clearing key EMA, volume, and ADR thresholds.",
     rsi_ma_bb_bullish: "RSI and MA/Bollinger bullish trigger set for early continuation entries.",
+    bollinger_band_breakout: "Names already closing above the upper Bollinger Band, useful for tracking short-term extension pressure.",
     double_bottom_detection:
       "Active double-bottom bases still building below the middle-high breakout pivot, before a confirmed breakout invalidates the setup-stage scan.",
     rsi_ma_bb_bearish: "Bearish RSI and MA/Bollinger trigger set for breakdown continuation.",

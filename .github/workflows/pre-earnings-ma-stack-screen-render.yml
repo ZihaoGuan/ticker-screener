@@ -11,8 +11,7 @@ on:
         description: Optional reference date for next-week earnings watchlist (YYYY-MM-DD)
         required: false
         type: string
-  schedule:
-    - cron: "0 0 * * 6"
+  # schedule temporarily disabled
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
