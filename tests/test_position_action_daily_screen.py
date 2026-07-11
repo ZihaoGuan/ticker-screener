@@ -87,3 +87,19 @@ class PositionActionDailyScreenTests(unittest.TestCase):
         self.assertEqual(snapshot.action, "trim_reduce")
         self.assertEqual(snapshot.extension_state, "extreme")
         self.assertGreaterEqual(snapshot.danger_signal_count, 1)
+
+    def test_snapshot_uses_latest_available_bar_date_when_requested_date_is_later(self) -> None:
+        close_values = [100.0 + (idx * 0.45) for idx in range(58)] + [121.0, 121.2, 121.1, 121.3, 121.5, 121.7]
+        snapshot = build_position_action_snapshot(_frame(close_values), as_of_date=dt.date(2026, 7, 11))
+
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.as_of_date, "2026-07-10")
+
+    def test_snapshot_filters_future_bars_beyond_requested_date(self) -> None:
+        close_values = [100.0 + (idx * 0.45) for idx in range(58)] + [121.0, 121.2, 121.1, 121.3, 121.5, 121.7]
+        snapshot = build_position_action_snapshot(_frame(close_values), as_of_date=dt.date(2026, 7, 9))
+
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.as_of_date, "2026-07-09")

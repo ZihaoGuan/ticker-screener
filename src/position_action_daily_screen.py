@@ -151,6 +151,8 @@ def _true_range(frame: pd.DataFrame) -> pd.Series:
 
 def build_position_action_snapshot(frame: pd.DataFrame, *, as_of_date: dt.date | None = None) -> PositionActionSnapshot | None:
     bars = _normalize_bars_frame(frame)
+    if as_of_date is not None and not bars.empty:
+        bars = bars.loc[bars.index.date <= as_of_date]
     if bars.empty or len(bars) < max(SMA50_PERIOD + 5, ATR_PERIOD + 3):
         return None
 
@@ -271,7 +273,7 @@ def build_position_action_snapshot(frame: pd.DataFrame, *, as_of_date: dt.date |
         elif daily_atr_ratio <= -1.0:
             reason_bits.append("latest day sold off more than 1 ATR")
 
-    resolved_as_of_date = as_of_date or bars.index[-1].date()
+    resolved_as_of_date = bars.index[-1].date()
     evidence = {
         "danger_flags": danger_flags,
         "close_above_ema21": close_price >= ema21,
