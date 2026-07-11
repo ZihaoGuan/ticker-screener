@@ -15,6 +15,7 @@ from src.market_data_access import db_frame_has_recent_coverage, load_many_ticke
 from src.ticker_filters import normalize_ticker_symbol
 from src.universe import UniverseTicker
 from src.webapp.repositories.portfolio_repository import PortfolioRepository
+from src.webapp.repositories.position_decision_repository import PositionDecisionRepository
 
 
 DEFAULT_PORTFOLIO_NAME = "Main"
@@ -30,10 +31,12 @@ class PortfolioService:
         self.repository = repository or PortfolioRepository(database_url=database_url)
         self.database_url = self.repository.database_url
         self.config = load_app_config()
+        self.position_decision_repository = PositionDecisionRepository(database_url=self.database_url)
 
     def get_context(self) -> dict[str, Any]:
         base_rows = self.repository.list_positions()
         positions = [self._serialize_position(row) for row in self._build_positions_with_transactions(base_rows)]
+        self._attach_latest_position_actions(positions)
         summary = self._build_summary(positions)
         return {
             "database_configured": self.repository.is_configured(),
@@ -46,6 +49,20 @@ class PortfolioService:
                 "description": "Space reserved for VIX, Fear & Greed, or other macro gauges in a later iteration.",
             },
         }
+
+    def _attach_latest_position_actions(self, positions: list[dict[str, Any]]) -> None:
+        tickers = [str(item.get("ticker") or "").upper() for item in positions if str(item.get("ticker") or "").strip()]
+        if not tickers:
+            return
+        try:
+            decision_map = self.position_decision_repository.load_latest_decision_map(tickers)
+        except Exception:
+            return
+        for item in positions:
+            advice = item.get("advice")
+            if not isinstance(advice, dict):
+                continue
+            advice["position_action"] = _serialize_position_action_snapshot(decision_map.get(str(item.get("ticker") or "").upper()))
 
     def record_transaction(
         self,
@@ -574,6 +591,7 @@ class PortfolioService:
                 "data_source": str(row.get("data_source") or ""),
                 "signal_context": dict(row.get("signal_context_json") or {}),
                 "refreshed_at": _to_iso_datetime(row.get("refreshed_at")),
+                "position_action": None,
             },
         }
 
@@ -744,6 +762,36 @@ def _round_price(value: float | None) -> float | None:
     if value is None:
         return None
     return round(float(value), 2)
+
+
+def _serialize_position_action_snapshot(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    as_of_date = row.get("as_of_date")
+    if isinstance(as_of_date, dt.date):
+        as_of_text = as_of_date.isoformat()
+    else:
+        as_of_text = str(as_of_date or "") or None
+    return {
+        "as_of_date": as_of_text,
+        "action": str(row.get("action") or ""),
+        "action_score": round(float(row.get("action_score") or 0.0), 2),
+        "regime_state": str(row.get("regime_state") or ""),
+        "trend_state": str(row.get("trend_state") or ""),
+        "extension_state": str(row.get("extension_state") or ""),
+        "support_reference": str(row.get("support_reference") or ""),
+        "atr_dist_21": _safe_float(row.get("atr_dist_21")),
+        "atr_dist_10w": _safe_float(row.get("atr_dist_10w")),
+        "atr_pct": _safe_float(row.get("atr_pct")),
+        "daily_atr_ratio": _safe_float(row.get("daily_atr_ratio")),
+        "close_price": _safe_float(row.get("close_price")),
+        "ema21": _safe_float(row.get("ema21")),
+        "sma50": _safe_float(row.get("sma50")),
+        "sma10w": _safe_float(row.get("sma10w")),
+        "danger_signal_count": int(row.get("danger_signal_count") or 0),
+        "reason_summary": str(row.get("reason_summary") or ""),
+        "evidence": dict(row.get("evidence_json") or {}),
+    }
 
 
 def _compute_atr(frame: pd.DataFrame, *, length: int) -> pd.Series:

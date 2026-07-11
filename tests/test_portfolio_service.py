@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.webapp.services import portfolio_service as portfolio_service_module
 from src.webapp.services.portfolio_service import PortfolioService
+from unittest.mock import patch
 
 
 class _FakePortfolioRepository:
@@ -222,6 +223,49 @@ class PortfolioServiceTests(unittest.TestCase):
         self.assertIsNotNone(advice["average_up_price"])
         self.assertIsNotNone(advice["blended_entry_after_average_up"])
         self.assertIn(advice["signal_status"], {"hold", "raise_stop"})
+
+    def test_get_context_attaches_latest_position_action(self) -> None:
+        self.service.create_position(
+            ticker="NVDA",
+            shares=10,
+            entry_price=100,
+            opened_at="2026-05-01",
+            portfolio_name="Main",
+        )
+
+        with patch.object(
+            self.service.position_decision_repository,
+            "load_latest_decision_map",
+            return_value={
+                "NVDA": {
+                    "ticker": "NVDA",
+                    "as_of_date": dt.date(2026, 7, 10),
+                    "action": "trim_reduce",
+                    "action_score": 63.4,
+                    "regime_state": "bullish",
+                    "trend_state": "healthy",
+                    "extension_state": "stretched",
+                    "support_reference": "ema21",
+                    "atr_dist_21": 1.8,
+                    "atr_dist_10w": 2.6,
+                    "atr_pct": 4.1,
+                    "daily_atr_ratio": 1.1,
+                    "close_price": 140.0,
+                    "ema21": 132.0,
+                    "sma50": 125.0,
+                    "sma10w": 120.0,
+                    "danger_signal_count": 1,
+                    "reason_summary": "Extension is elevated.",
+                    "evidence_json": {"danger_flags": ["stretched"]},
+                }
+            },
+        ):
+            payload = self.service.get_context()
+
+        action = payload["positions"][0]["advice"]["position_action"]
+        self.assertIsNotNone(action)
+        self.assertEqual(action["action"], "trim_reduce")
+        self.assertEqual(action["extension_state"], "stretched")
 
     def test_transactions_update_current_shares_and_average_cost(self) -> None:
         position = self.service.create_position(

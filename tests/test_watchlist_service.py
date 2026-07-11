@@ -1744,6 +1744,53 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertIn(latest["state"], {"warning", "extreme"})
         self.assertGreater(latest["extension_pct"], 11.0)
 
+    def test_get_chart_payload_includes_latest_position_action_snapshot(self) -> None:
+        frame = self._long_price_frame()
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+
+        with patch.object(
+            service.position_decision_repository,
+            "load_latest_decision_map",
+            return_value={
+                "NVDA": {
+                    "ticker": "NVDA",
+                    "as_of_date": dt.date(2026, 6, 5),
+                    "action": "add_position",
+                    "action_score": 77.5,
+                    "regime_state": "bullish",
+                    "trend_state": "healthy",
+                    "extension_state": "normal",
+                    "support_reference": "ema21",
+                    "atr_dist_21": 0.8,
+                    "atr_dist_10w": 1.4,
+                    "atr_pct": 3.2,
+                    "daily_atr_ratio": 0.3,
+                    "close_price": 190.3,
+                    "ema21": 188.4,
+                    "sma50": 180.2,
+                    "sma10w": 176.1,
+                    "danger_signal_count": 0,
+                    "reason_summary": "Trend intact and price still close enough to support.",
+                    "evidence_json": {"danger_flags": []},
+                }
+            },
+        ), patch.object(
+            WatchlistService,
+            "_load_chart_frames",
+            return_value=(frame.copy(), frame.copy(), "database"),
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_metadata_map",
+            return_value={"NVDA": {"ipo_date": "2024-11-01"}},
+        ):
+            payload = service.get_chart_payload("NVDA", as_of_date=dt.date(2026, 6, 5))
+
+        self.assertEqual(payload["position_action"]["action"], "add_position")
+        self.assertEqual(payload["position_action"]["trend_state"], "healthy")
+
     def test_get_chart_overlays_payload_includes_mark_daily_extend_marker(self) -> None:
         index = pd.date_range(start="2026-01-05", periods=40, freq="B")
         close_values = [100.0 + (idx * 0.4) for idx in range(len(index) - 1)] + [118.0]

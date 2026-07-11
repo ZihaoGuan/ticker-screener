@@ -452,6 +452,11 @@ export function PortfolioPage() {
               <div className="portfolio-advice-layout">
                 <div className="portfolio-advice-metrics">
                   <AdviceMetric label="Signal" value={humanizeSignal(selectedPosition.advice.signal_status)} status={selectedPosition.advice.signal_status} />
+                  <AdviceMetric
+                    label="Position Action"
+                    value={humanizePositionAction(selectedPosition.advice.position_action?.action)}
+                    status={normalizePositionActionClass(selectedPosition.advice.position_action?.action)}
+                  />
                   <AdviceMetric label="Close" value={formatCurrency(selectedPosition.advice.close_price)} />
                   <AdviceMetric label="Current Shares" value={formatNumber(selectedPosition.shares)} />
                   <AdviceMetric label="Average Cost" value={formatCurrency(selectedPosition.entry_price)} />
@@ -471,6 +476,11 @@ export function PortfolioPage() {
                     <div>
                       <div className="summary-stat">{selectedPosition.ticker} recommendation</div>
                       <p className="panel-copy">{selectedPosition.advice.explanation || "No explanation available yet."}</p>
+                      {selectedPosition.advice.position_action?.reason_summary ? (
+                        <p className="panel-copy">
+                          Position Action: {selectedPosition.advice.position_action.reason_summary}
+                        </p>
+                      ) : null}
                     </div>
                     <span className={`portfolio-data-badge is-${selectedPosition.advice.market_data_status}`}>
                       {selectedPosition.advice.market_data_status.toUpperCase()}
@@ -507,6 +517,26 @@ export function PortfolioPage() {
                         Add {formatFraction(selectedPosition.advice.average_up_share_fraction)} near {formatCurrency(selectedPosition.advice.average_up_price)}
                       </span>
                     </div>
+                    {selectedPosition.advice.position_action ? (
+                      <>
+                        <div className="range-item">
+                          <span>Position Action Snapshot</span>
+                          <span>
+                            {humanizePositionAction(selectedPosition.advice.position_action.action)} ({formatScore(selectedPosition.advice.position_action.action_score)})
+                          </span>
+                        </div>
+                        <div className="range-item">
+                          <span>Decision Layer</span>
+                          <span>
+                            Trend {humanizePositionTrend(selectedPosition.advice.position_action.trend_state)}, extension {humanizePositionExtension(selectedPosition.advice.position_action.extension_state)}, danger {selectedPosition.advice.position_action.danger_signal_count}
+                          </span>
+                        </div>
+                        <div className="range-item">
+                          <span>Decision As Of</span>
+                          <span>{formatLocalDate(selectedPosition.advice.position_action.as_of_date)}</span>
+                        </div>
+                      </>
+                    ) : null}
                     {selectedPosition.notes ? (
                       <div className="range-item">
                         <span>Notes</span>
@@ -713,6 +743,77 @@ function humanizeSignal(value: string): string {
     default:
       return value.replace(/_/g, " ");
   }
+}
+
+function humanizePositionAction(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+  if (value === "add_position") {
+    return "Add Position";
+  }
+  if (value === "hold_position") {
+    return "Hold";
+  }
+  if (value === "trim_reduce") {
+    return "Trim / Reduce";
+  }
+  if (value === "avoid_new") {
+    return "Avoid New";
+  }
+  return value.replace(/_/g, " ");
+}
+
+function normalizePositionActionClass(value: string | null | undefined): string {
+  if (value === "add_position") {
+    return "hold";
+  }
+  if (value === "hold_position") {
+    return "raise_stop";
+  }
+  if (value === "trim_reduce") {
+    return "trim";
+  }
+  return "review";
+}
+
+function humanizePositionTrend(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+  if (value === "healthy") {
+    return "Healthy";
+  }
+  if (value === "weakening") {
+    return "Weakening";
+  }
+  if (value === "broken") {
+    return "Broken";
+  }
+  return value.replace(/_/g, " ");
+}
+
+function humanizePositionExtension(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+  if (value === "normal") {
+    return "Normal";
+  }
+  if (value === "stretched") {
+    return "Stretched";
+  }
+  if (value === "extreme") {
+    return "Extreme";
+  }
+  return value.replace(/_/g, " ");
+}
+
+function formatScore(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  return value.toFixed(1);
 }
 
 function normalizeSignalClass(value: string): string {

@@ -45,6 +45,7 @@ from ...vcs_indicator import latest_vcs_snapshot
 from ...wyckoff_analysis import compute_wyckoff_markers
 from ...config import load_app_config
 from ..repositories.insider_repository import InsiderRepository
+from ..repositories.position_decision_repository import PositionDecisionRepository
 from ..repositories.watchlist_repository import WatchlistRepository
 from .insider_fetcher import fetch_insider_trades_window
 from .screener_history_service import ScreenerHistoryService
@@ -614,6 +615,7 @@ class WatchlistService:
         self.benchmark_ticker = str(benchmark_ticker or "SPY").strip().upper() or "SPY"
         self._excluded_tickers: set[str] | None = None
         self._scanner_board_override_path = self.repository.artifacts_dir / "status" / "scanner_board_override.json"
+        self.position_decision_repository = PositionDecisionRepository(database_url=self.database_url or "")
         self.screener_history_service = ScreenerHistoryService(
             database_url=self.database_url or "",
             artifacts_dir=artifacts_dir,
@@ -1204,11 +1206,13 @@ class WatchlistService:
             "weekly_rs_rating": [],
             "rs_markers": [],
             "setup_markers": [],
+            "position_action": _empty_position_action_snapshot(),
             "fearzone_panel": {"rows": [], "signals": []},
             "trend_template": None,
             "vcs": None,
             "sepa_dashboard": None,
         }
+        payload["position_action"] = self._load_latest_position_action(normalized_ticker, resolved_as_of_date)
         if payload["candles"]:
             _write_chart_payload_cache(cache_key, payload)
         return payload
@@ -1334,6 +1338,7 @@ class WatchlistService:
             benchmark_frame=benchmark_frame,
             market_extension=market_extension,
         )
+        position_action = self._load_latest_position_action(normalized_ticker, resolved_as_of_date)
 
         rs_points: list[dict[str, Any]] = []
         daily_rs_rating_points: list[dict[str, Any]] = []
@@ -1384,6 +1389,7 @@ class WatchlistService:
             "weekly_rs_rating": weekly_rs_rating_points,
             "rs_markers": rs_markers,
             "setup_markers": setup_markers,
+            "position_action": position_action,
             "danger_signals": danger_signals,
             "fearzone_panel": fearzone_panel,
             "trend_template": trend_template_snapshot.to_dict() if trend_template_snapshot is not None else None,
@@ -1392,6 +1398,13 @@ class WatchlistService:
         }
         _write_chart_overlay_cache(cache_key, payload)
         return payload
+
+    def _load_latest_position_action(self, ticker: str, as_of_date: dt.date) -> dict[str, Any] | None:
+        try:
+            decision_map = self.position_decision_repository.load_latest_decision_map([ticker], as_of_date=as_of_date)
+        except Exception:
+            return None
+        return _serialize_position_action_snapshot(decision_map.get(str(ticker or "").strip().upper()))
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
@@ -2424,6 +2437,7 @@ def _empty_chart_payload(
         "weekly_rs_rating": [],
         "rs_markers": [],
         "setup_markers": [],
+        "position_action": _empty_position_action_snapshot(),
         "danger_signals": {"as_of_date": resolved_as_of_date.isoformat() if resolved_as_of_date else None, "active_count": 0, "highest_severity": None, "signals": []},
         "fearzone_panel": {"rows": [], "signals": []},
         "trend_template": None,
@@ -2455,6 +2469,7 @@ def _empty_chart_overlay_payload(
         "weekly_rs_rating": [],
         "rs_markers": [],
         "setup_markers": [],
+        "position_action": _empty_position_action_snapshot(),
         "danger_signals": {"as_of_date": resolved_as_of_date.isoformat() if resolved_as_of_date else None, "active_count": 0, "highest_severity": None, "signals": []},
         "fearzone_panel": {"rows": [], "signals": []},
         "trend_template": None,
@@ -2477,6 +2492,10 @@ def _empty_market_extension_overlay() -> dict[str, Any]:
         "signals": [],
         "latest": None,
     }
+
+
+def _empty_position_action_snapshot() -> None:
+    return None
 
 
 def _normalize_download_frame(history: pd.DataFrame | None) -> pd.DataFrame | None:
@@ -3706,6 +3725,36 @@ def _compute_market_extension_overlay(frame: pd.DataFrame, *, visible_dates: set
         "line": line,
         "signals": signals,
         "latest": latest,
+    }
+
+
+def _serialize_position_action_snapshot(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    as_of_date = row.get("as_of_date")
+    if isinstance(as_of_date, dt.date):
+        as_of_text = as_of_date.isoformat()
+    else:
+        as_of_text = str(as_of_date or "") or None
+    return {
+        "as_of_date": as_of_text,
+        "action": str(row.get("action") or ""),
+        "action_score": round(float(row.get("action_score") or 0.0), 2),
+        "regime_state": str(row.get("regime_state") or ""),
+        "trend_state": str(row.get("trend_state") or ""),
+        "extension_state": str(row.get("extension_state") or ""),
+        "support_reference": str(row.get("support_reference") or ""),
+        "atr_dist_21": _coerce_optional_float(row.get("atr_dist_21")),
+        "atr_dist_10w": _coerce_optional_float(row.get("atr_dist_10w")),
+        "atr_pct": _coerce_optional_float(row.get("atr_pct")),
+        "daily_atr_ratio": _coerce_optional_float(row.get("daily_atr_ratio")),
+        "close_price": _coerce_optional_float(row.get("close_price")),
+        "ema21": _coerce_optional_float(row.get("ema21")),
+        "sma50": _coerce_optional_float(row.get("sma50")),
+        "sma10w": _coerce_optional_float(row.get("sma10w")),
+        "danger_signal_count": int(row.get("danger_signal_count") or 0),
+        "reason_summary": str(row.get("reason_summary") or ""),
+        "evidence": dict(row.get("evidence_json") or {}),
     }
 
 

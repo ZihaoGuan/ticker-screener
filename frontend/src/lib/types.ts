@@ -876,6 +876,7 @@ export type WatchlistChartResponse = {
     recent_vcp_signal_low?: number | null;
     recent_vcp_signal_close?: number | null;
   } | null;
+  position_action?: PositionActionSnapshot | null;
   danger_signals?: {
     as_of_date: string | null;
     active_count: number;
@@ -1717,6 +1718,28 @@ export type PortfolioAdvice = {
   data_source?: string | null;
   signal_context?: Record<string, unknown>;
   refreshed_at?: string | null;
+  position_action?: PositionActionSnapshot | null;
+};
+
+export type PositionActionSnapshot = {
+  as_of_date?: string | null;
+  action: "add_position" | "hold_position" | "trim_reduce" | "avoid_new" | string;
+  action_score: number;
+  regime_state?: string | null;
+  trend_state?: string | null;
+  extension_state?: string | null;
+  support_reference?: string | null;
+  atr_dist_21?: number | null;
+  atr_dist_10w?: number | null;
+  atr_pct?: number | null;
+  daily_atr_ratio?: number | null;
+  close_price?: number | null;
+  ema21?: number | null;
+  sma50?: number | null;
+  sma10w?: number | null;
+  danger_signal_count: number;
+  reason_summary?: string | null;
+  evidence?: Record<string, unknown>;
 };
 
 export type PortfolioTransaction = {

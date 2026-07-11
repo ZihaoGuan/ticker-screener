@@ -697,6 +697,38 @@ CREATE INDEX IF NOT EXISTS idx_my_picks_created_at
 CREATE INDEX IF NOT EXISTS idx_my_picks_ticker_created_at
   ON my_picks(ticker, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS daily_position_decisions (
+  id BIGSERIAL PRIMARY KEY,
+  as_of_date DATE NOT NULL,
+  ticker TEXT NOT NULL,
+  action TEXT NOT NULL,
+  action_score NUMERIC(12,6) NOT NULL DEFAULT 0,
+  regime_state TEXT,
+  trend_state TEXT,
+  extension_state TEXT,
+  support_reference TEXT,
+  atr_dist_21 NUMERIC(24,6),
+  atr_dist_10w NUMERIC(24,6),
+  atr_pct NUMERIC(24,6),
+  daily_atr_ratio NUMERIC(24,6),
+  close_price NUMERIC(24,6),
+  ema21 NUMERIC(24,6),
+  sma50 NUMERIC(24,6),
+  sma10w NUMERIC(24,6),
+  danger_signal_count INTEGER NOT NULL DEFAULT 0,
+  reason_summary TEXT,
+  evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (as_of_date, ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_position_decisions_date_action
+  ON daily_position_decisions(as_of_date DESC, action, action_score DESC);
+
+CREATE INDEX IF NOT EXISTS idx_daily_position_decisions_ticker_date
+  ON daily_position_decisions(ticker, as_of_date DESC);
+
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE screen_runs ADD COLUMN IF NOT EXISTS scope_json JSONB NOT NULL DEFAULT '{}'::jsonb;

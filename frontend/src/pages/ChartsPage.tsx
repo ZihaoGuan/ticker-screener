@@ -356,6 +356,7 @@ export function ChartsPage() {
   const latestMa50 = chartPayload?.ma50?.[chartPayload.ma50.length - 1]?.value ?? null;
   const latestMarketExtension = chartPayload?.market_extension?.latest ?? null;
   const marketExtensionLabel = chartPayload?.market_extension?.config?.label ?? "10W SMA";
+  const latestPositionAction = chartPayload?.position_action ?? null;
   const trendTemplate = chartPayload?.trend_template ?? null;
   const atrMultipleFrom50Ma =
     atr14 != null && latestMa50 != null && Number.isFinite(lastClose ?? NaN)
@@ -599,6 +600,24 @@ export function ChartsPage() {
         ],
       },
       {
+        id: "position-action",
+        title: "Position Action",
+        description:
+          "Position Action summarizes whether the current setup still supports adding, should stay on hold, or is stretched enough to trim. It combines trend health, ATR-normalized extension, and active danger signals into one daily decision layer.",
+        items: [
+          {
+            label: "Action",
+            value: formatPositionAction(latestPositionAction?.action),
+            className: latestPositionAction ? `status-pill ${positionActionClass(latestPositionAction.action)}` : undefined,
+          },
+          { label: "Score", value: formatScore(latestPositionAction?.action_score) },
+          { label: "Trend", value: formatPositionTrend(latestPositionAction?.trend_state) },
+          { label: "Extension", value: formatPositionExtension(latestPositionAction?.extension_state) },
+          { label: "Danger", value: latestPositionAction ? `${latestPositionAction.danger_signal_count} active` : "-" },
+          { label: "As Of", value: latestPositionAction?.as_of_date ?? "-" },
+        ],
+      },
+      {
         id: "fundamentals",
         title: "Fundamentals",
         description: "Quick fundamental pressure-check. These numbers help frame sponsorship, growth quality, and near-term event risk around the technical setup.",
@@ -629,6 +648,7 @@ export function ChartsPage() {
       dangerSignalCount,
       highestDangerSeverity,
       latestMarketExtension,
+      latestPositionAction,
       marketExtensionLabel,
       latestFundamentalRank,
       sepaDashboard,
@@ -1616,6 +1636,73 @@ function marketExtensionChartPillClass(state: "normal" | "warning" | "extreme"):
     return "chart-pill chart-pill-trigger";
   }
   return "chart-pill chart-pill-setup";
+}
+
+function formatPositionAction(action: string | null | undefined): string {
+  if (!action) {
+    return "-";
+  }
+  if (action === "add_position") {
+    return "Add Position";
+  }
+  if (action === "hold_position") {
+    return "Hold";
+  }
+  if (action === "trim_reduce") {
+    return "Trim / Reduce";
+  }
+  if (action === "avoid_new") {
+    return "Avoid New";
+  }
+  return action.replace(/_/g, " ");
+}
+
+function positionActionClass(action: string | null | undefined): string {
+  if (action === "add_position") {
+    return "status-success";
+  }
+  if (action === "hold_position") {
+    return "status-queued";
+  }
+  if (action === "trim_reduce") {
+    return "status-risk";
+  }
+  if (action === "avoid_new") {
+    return "status-failed";
+  }
+  return "status-unknown";
+}
+
+function formatPositionTrend(trend: string | null | undefined): string {
+  if (!trend) {
+    return "-";
+  }
+  if (trend === "healthy") {
+    return "Healthy";
+  }
+  if (trend === "weakening") {
+    return "Weakening";
+  }
+  if (trend === "broken") {
+    return "Broken";
+  }
+  return trend.replace(/_/g, " ");
+}
+
+function formatPositionExtension(state: string | null | undefined): string {
+  if (!state) {
+    return "-";
+  }
+  if (state === "normal") {
+    return "Normal";
+  }
+  if (state === "stretched") {
+    return "Stretched";
+  }
+  if (state === "extreme") {
+    return "Extreme";
+  }
+  return state.replace(/_/g, " ");
 }
 
 function RsRatingMiniChart({
