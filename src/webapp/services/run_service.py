@@ -16,6 +16,7 @@ from typing import Any
 
 from src.artifact_paths import watchlist_stem_from_path
 from src.config import load_app_config
+from src.finviz_analyst_recom_scanner import FINVIZ_ANALYST_RECOM_STRONGBUY_STRATEGY_ID
 from src.finviz_pattern_scanner import FINVIZ_PATTERN_OPTIONS
 from src.market_data_access import db_frame_has_recent_coverage, load_many_ticker_windows
 from src.screener_catalog import build_screener_catalog
@@ -1978,6 +1979,18 @@ class RunService:
                 _tickers_field,
                 _date_label_field,
                 _as_of_date_field,
+            ),
+            bias_group="bullish",
+            bullish_subgroup="leaders",
+        ),
+        FINVIZ_ANALYST_RECOM_STRONGBUY_STRATEGY_ID: RunAction(
+            FINVIZ_ANALYST_RECOM_STRONGBUY_STRATEGY_ID,
+            "Run Finviz Analyst Recom Strong Buy",
+            "scripts/run_finviz_analyst_recom_scanner.py",
+            fields=(
+                _limit_field,
+                _tickers_field,
+                _date_label_field,
             ),
             bias_group="bullish",
             bullish_subgroup="leaders",

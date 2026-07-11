@@ -1215,6 +1215,22 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["finviz_target_price_50"]["entry_count"], 2)
         self.assertEqual(cards["finviz_target_price_50"]["preview_tickers"], ["NVDA", "APP"])
 
+    def test_get_scanner_board_includes_finviz_analyst_recom_strongbuy_card(self) -> None:
+        self._write_watchlist(
+            "finviz_analyst_recom_strongbuy_2026-06-12",
+            tickers=["NVDA", "PLTR"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 36, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertTrue(cards["finviz_analyst_recom_strongbuy"]["available"])
+        self.assertEqual(cards["finviz_analyst_recom_strongbuy"]["entry_count"], 2)
+        self.assertEqual(cards["finviz_analyst_recom_strongbuy"]["preview_tickers"], ["NVDA", "PLTR"])
+
     def test_get_scanner_board_includes_bullish_finviz_pattern_cards(self) -> None:
         dated_dir = Path(self.temp_dir.name) / "screeners" / "2026-06-12" / "finviz_pattern_doublebottom"
         dated_dir.mkdir(parents=True, exist_ok=True)

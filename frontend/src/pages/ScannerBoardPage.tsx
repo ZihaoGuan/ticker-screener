@@ -30,6 +30,7 @@ const CARD_ART: Record<string, string> = {
   finviz_pattern_multiplebottom: "M24 82 L64 106 L104 70 L146 104 L188 74 L230 98 L276 52",
   finviz_pattern_headandshouldersinv: "M24 108 L68 88 L110 118 L156 74 L200 102 L244 62 L276 44",
   finviz_target_price_50: "M24 118 L72 110 L118 96 L162 76 L208 56 L244 42 L276 24",
+  finviz_analyst_recom_strongbuy: "M24 120 L82 112 L132 92 L178 76 L220 52 L252 36 L276 22",
   inside_dryup_v2: "M24 74 L92 74 L140 74 L188 76 L234 78 L276 80",
   wyckoff_buy_signal: "M24 118 L72 120 L118 108 L152 126 L190 94 L228 84 L276 52",
   wyckoff_sell_signal: "M24 48 L76 44 L118 58 L162 54 L208 82 L246 104 L276 118",
@@ -114,7 +115,7 @@ export function ScannerBoardPage() {
         <div className="scanner-board-console-row">
           <div>
             <span className="eyebrow">Board logic</span>
-            <p className="panel-copy">Weekly RS New High, Weekly RS New High Before Price, Daily RS New High, RS New High Before Price, VCP Scored, VCP v3, VCP Spec, Sean Gap Up, Gap Fill, CANSLIM High Score, CANSLIM V2, Fundamental Quality, Venu Scanner, Finviz Target +50%, bullish Finviz pattern cards, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Cup Detection, 8 Week Run Up (Doubler), Three Weeks Tight, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Fearzone, and TD9 Bullish.</p>
+            <p className="panel-copy">Weekly RS New High, Weekly RS New High Before Price, Daily RS New High, RS New High Before Price, VCP Scored, VCP v3, VCP Spec, Sean Gap Up, Gap Fill, CANSLIM High Score, CANSLIM V2, Fundamental Quality, Venu Scanner, Finviz Target +50%, Finviz Analyst Strong Buy, bullish Finviz pattern cards, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Cup Detection, 8 Week Run Up (Doubler), Three Weeks Tight, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Fearzone, and TD9 Bullish.</p>
           </div>
           <div>
             <span className="eyebrow">Navigation</span>

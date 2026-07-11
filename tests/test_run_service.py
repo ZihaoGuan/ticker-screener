@@ -300,6 +300,38 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["finviz_target_price_50"]["label"], "Run Finviz Target Price +50%")
         self.assertIn("scripts/run_finviz_target_price_scanner.py", actions["finviz_target_price_50"]["command"])
 
+    def test_list_actions_includes_finviz_analyst_recom_strongbuy_scanner(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("finviz_analyst_recom_strongbuy", actions)
+        self.assertEqual(actions["finviz_analyst_recom_strongbuy"]["label"], "Run Finviz Analyst Recom Strong Buy")
+        self.assertIn("scripts/run_finviz_analyst_recom_scanner.py", actions["finviz_analyst_recom_strongbuy"]["command"])
+
+    def test_build_command_supports_finviz_analyst_recom_strongbuy_scanner(self) -> None:
+        command = self.service.build_command(
+            "finviz_analyst_recom_strongbuy",
+            {
+                "limit": "25",
+                "tickers": "AAPL NVDA",
+                "date_label": "2026-07-03",
+            },
+        )
+
+        self.assertEqual(
+            command,
+            [
+                run_service_module.sys.executable,
+                "scripts/run_finviz_analyst_recom_scanner.py",
+                "--limit",
+                "25",
+                "--tickers",
+                "AAPL",
+                "NVDA",
+                "--date-label",
+                "2026-07-03",
+            ],
+        )
+
     def test_build_command_supports_finviz_target_price_scanner(self) -> None:
         command = self.service.build_command(
             "finviz_target_price_50",

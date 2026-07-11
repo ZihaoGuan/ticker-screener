@@ -304,6 +304,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "finviz_analyst_recom_strongbuy",
+        "strategy_id": "finviz_analyst_recom_strongbuy",
+        "label": "Finviz Analyst Strong Buy",
+        "description": "Live Finviz scan for stocks currently tagged with an Analyst Recom of Strong Buy (1).",
+        "timeframe": "Daily",
+        "accent": "lime",
+        "bias_group": "bullish",
+    },
+    {
         "id": "finviz_pattern_horizontal",
         "strategy_id": "finviz_pattern_horizontal",
         "label": "Finviz Horizontal S/R",
