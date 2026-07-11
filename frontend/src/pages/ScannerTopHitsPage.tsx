@@ -7,7 +7,7 @@ import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type { MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell } from "../lib/types";
 
-type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "rs" | "ta" | "fa";
+type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "rs" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
 const PAGE_SIZE = 50;
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "sean_breakout", "venu_scanner"]);
@@ -289,6 +289,8 @@ export function ScannerTopHitsPage() {
                     <th>1W</th>
                     <th>{renderSortButton("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>FA Rank</th>
+                    <th>{renderSortButton("Decision", "decision", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("Decision Score", "decisionScore", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     {eliteOnly ? <th>{renderSortButton("Sector Top Hit", "sectorTopHit", sortBy, sortDirection, setSortBy, setSortDirection)}</th> : null}
                     {eliteOnly ? <th>{renderSortButton("Industry Top Hit", "industryTopHit", sortBy, sortDirection, setSortBy, setSortDirection)}</th> : null}
                   </tr>
@@ -353,6 +355,8 @@ export function ScannerTopHitsPage() {
                       <td data-label="1W">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1w"])}</td>
                       <td data-label="FA">{formatRating(row.fa_rating)}</td>
                       <td data-label="FA Rank">{row.fa_current_rank != null ? `#${formatCount(row.fa_current_rank)}` : "--"}</td>
+                      <td data-label="Decision">{renderPositionActionCell(row.position_action)}</td>
+                      <td data-label="Decision Score">{formatDecisionScore(row.position_action?.action_score)}</td>
                       {eliteOnly ? (
                         <td data-label="Sector Top Hit">
                           {eliteSectorLeaders.get(normalizeSectorKey(row.sector)) === row.ticker ? (
@@ -478,6 +482,12 @@ function compareRows(
   if (sortBy === "ta") {
     return compareNullableNumber(left.ta_rating, right.ta_rating, sortDirection) || left.ticker.localeCompare(right.ticker);
   }
+  if (sortBy === "decision") {
+    return compareText(left.position_action?.action ?? "", right.position_action?.action ?? "", sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "decisionScore") {
+    return compareNullableNumber(left.position_action?.action_score ?? null, right.position_action?.action_score ?? null, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
   return compareNullableNumber(left.fa_rating, right.fa_rating, sortDirection) || left.ticker.localeCompare(right.ticker);
 }
 
@@ -538,6 +548,80 @@ function formatAccelerationScore(score: number | null | undefined, label: string
 
 function formatTechnicalIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {
   return value?.rating_label ?? "--";
+}
+
+function formatDecisionScore(value: number | null | undefined) {
+  return value == null ? "--" : value.toFixed(1);
+}
+
+function renderPositionActionCell(positionAction: ScannerTopHitRow["position_action"]) {
+  if (!positionAction?.action) {
+    return <span className="panel-copy">--</span>;
+  }
+  return (
+    <div title={positionAction.reason_summary ?? undefined}>
+      <span className={`scanner-score-pill ${toneForPositionAction(positionAction.action)}`}>{humanizePositionAction(positionAction.action)}</span>
+      <div className="ticker-company-inline">
+        {humanizePositionTrend(positionAction.trend_state)} / {humanizePositionExtension(positionAction.extension_state)}
+      </div>
+    </div>
+  );
+}
+
+function humanizePositionAction(value: string | null | undefined) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "add_position":
+      return "Add";
+    case "hold_position":
+      return "Hold";
+    case "trim_reduce":
+      return "Trim";
+    case "avoid_new":
+      return "Avoid";
+    default:
+      return "--";
+  }
+}
+
+function humanizePositionTrend(value: string | null | undefined) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "healthy":
+      return "Healthy";
+    case "weakening":
+      return "Weakening";
+    case "broken":
+      return "Broken";
+    default:
+      return "--";
+  }
+}
+
+function humanizePositionExtension(value: string | null | undefined) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "normal":
+      return "Normal";
+    case "stretched":
+      return "Stretched";
+    case "extreme":
+      return "Extreme";
+    default:
+      return "--";
+  }
+}
+
+function toneForPositionAction(value: string | null | undefined) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "add_position":
+      return "is-strong";
+    case "hold_position":
+      return "is-neutral";
+    case "trim_reduce":
+      return "is-warning";
+    case "avoid_new":
+      return "is-weak";
+    default:
+      return "";
+  }
 }
 
 function isElitePick(row: ScannerTopHitRow) {

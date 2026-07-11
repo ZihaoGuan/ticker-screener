@@ -556,6 +556,61 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["sector_momentum"]["quadrant"], "Leading")
         self.assertEqual(pltr["sector_momentum"]["etf_ticker"], "XLK")
 
+    def test_get_scanner_top_hits_payload_attaches_position_action(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        watchlists_dir = Path(self.temp_dir.name) / "watchlists"
+        (watchlists_dir / "rs_new_high_before_price_2026-06-12.json").write_text(
+            json.dumps([{"ticker": "PLTR", "company_name": "Palantir", "sector": "Information Technology"}]),
+            encoding="utf-8",
+        )
+        (watchlists_dir / "fearzone_2026-06-12.json").write_text(
+            json.dumps([{"ticker": "PLTR", "company_name": "Palantir", "sector": "Information Technology"}]),
+            encoding="utf-8",
+        )
+        import os
+
+        os.utime(
+            watchlists_dir / "rs_new_high_before_price_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 35, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+        os.utime(
+            watchlists_dir / "fearzone_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()), patch(
+            "src.webapp.services.watchlist_service.load_universe",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch.object(
+            service.position_decision_repository,
+            "load_latest_decision_map",
+            return_value={
+                "PLTR": {
+                    "ticker": "PLTR",
+                    "as_of_date": dt.date(2026, 6, 12),
+                    "action": "trim_reduce",
+                    "action_score": 39.5,
+                    "trend_state": "healthy",
+                    "extension_state": "stretched",
+                    "danger_signal_count": 1,
+                    "reason_summary": "Extension is elevated.",
+                    "evidence_json": {"danger_flags": ["extreme_extension"]},
+                }
+            },
+        ):
+            payload = service.get_scanner_top_hits_payload(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc),
+            )
+
+        self.assertEqual(payload["rows"][0]["position_action"]["action"], "trim_reduce")
+        self.assertEqual(payload["rows"][0]["position_action"]["action_score"], 39.5)
+
     def test_get_scanner_top_hits_payload_falls_back_to_weekly_rs_when_daily_missing(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         watchlists_dir = Path(self.temp_dir.name) / "watchlists"

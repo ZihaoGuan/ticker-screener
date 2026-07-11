@@ -41,6 +41,8 @@ type MyPicksSortKey =
   | "vcp_score"
   | "technical_indicator_1d"
   | "technical_indicator_1w"
+  | "position_action"
+  | "position_action_score"
   | "recent_signal_count"
   | "latest_signal_date";
 type SortDirection = "desc" | "asc";
@@ -364,6 +366,8 @@ export function MyPicksPage() {
               <option value="vcp_score">VCP</option>
               <option value="technical_indicator_1d">1D</option>
               <option value="technical_indicator_1w">1W</option>
+              <option value="position_action">Decision</option>
+              <option value="position_action_score">Decision Score</option>
               <option value="recent_signal_count">Signals</option>
               <option value="latest_signal_date">Latest Signal</option>
             </select>
@@ -595,6 +599,8 @@ function PicksTable({
             <th>{renderSortHeader("VCP", "vcp_score", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("1D", "technical_indicator_1d", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("1W", "technical_indicator_1w", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+            <th>{renderSortHeader("Decision", "position_action", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+            <th>{renderSortHeader("Decision Score", "position_action_score", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("Signals", "recent_signal_count", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("Latest Signal", "latest_signal_date", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>Notes</th>
@@ -635,6 +641,8 @@ function PicksTable({
               <td data-label="VCP">{formatScoreWithLabel(row.vcp_score, row.vcp_rating)}</td>
               <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? "-"}</td>
               <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? "-"}</td>
+              <td data-label="Decision">{renderPositionActionCell(row.position_action)}</td>
+              <td data-label="Decision Score">{formatDecisionScore(row.position_action?.action_score)}</td>
               <td data-label="Signals">
                 {row.recent_signal_count}
                 {row.recent_signals.length > 0 ? ` | ${row.recent_signals.slice(0, 2).map((item) => item.strategy_id).join(", ")}` : ""}
@@ -777,6 +785,12 @@ function compareMyPickRows(left: MyPickRow, right: MyPickRow, sortBy: MyPicksSor
     case "technical_indicator_1w":
       comparison = compareNullableText(left.technical_indicator_ratings?.["1w"]?.rating_label, right.technical_indicator_ratings?.["1w"]?.rating_label, sortDirection);
       break;
+    case "position_action":
+      comparison = compareNullableText(left.position_action?.action, right.position_action?.action, sortDirection);
+      break;
+    case "position_action_score":
+      comparison = compareNullableNumber(left.position_action?.action_score, right.position_action?.action_score, sortDirection);
+      break;
     case "recent_signal_count":
       comparison = compareNullableNumber(left.recent_signal_count, right.recent_signal_count, sortDirection);
       break;
@@ -792,7 +806,7 @@ function compareMyPickRows(left: MyPickRow, right: MyPickRow, sortBy: MyPicksSor
 }
 
 function isAlphabeticalSort(sortBy: MyPicksSortKey) {
-  return sortBy === "ticker" || sortBy === "sector_industry" || sortBy === "technical_indicator_1d" || sortBy === "technical_indicator_1w";
+  return sortBy === "ticker" || sortBy === "sector_industry" || sortBy === "technical_indicator_1d" || sortBy === "technical_indicator_1w" || sortBy === "position_action";
 }
 
 function isDateSort(sortBy: MyPicksSortKey) {
@@ -869,6 +883,83 @@ function formatPrice(value: number | null | undefined) {
     return "--";
   }
   return value.toFixed(2);
+}
+
+function formatDecisionScore(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  return value.toFixed(1);
+}
+
+function renderPositionActionCell(positionAction: MyPickRow["position_action"]) {
+  if (!positionAction?.action) {
+    return <span className="panel-copy">--</span>;
+  }
+  return (
+    <div title={positionAction.reason_summary ?? undefined}>
+      <span className={`scanner-score-pill ${toneForPositionAction(positionAction.action)}`}>{humanizePositionAction(positionAction.action)}</span>
+      <div className="ticker-company-inline">
+        {humanizePositionTrend(positionAction.trend_state)} / {humanizePositionExtension(positionAction.extension_state)}
+      </div>
+    </div>
+  );
+}
+
+function humanizePositionAction(value: string | null | undefined) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "add_position":
+      return "Add";
+    case "hold_position":
+      return "Hold";
+    case "trim_reduce":
+      return "Trim";
+    case "avoid_new":
+      return "Avoid";
+    default:
+      return "--";
+  }
+}
+
+function humanizePositionTrend(value: string | null | undefined) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "healthy":
+      return "Healthy";
+    case "weakening":
+      return "Weakening";
+    case "broken":
+      return "Broken";
+    default:
+      return "--";
+  }
+}
+
+function humanizePositionExtension(value: string | null | undefined) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "normal":
+      return "Normal";
+    case "stretched":
+      return "Stretched";
+    case "extreme":
+      return "Extreme";
+    default:
+      return "--";
+  }
+}
+
+function toneForPositionAction(value: string | null | undefined) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "add_position":
+      return "is-strong";
+    case "hold_position":
+      return "is-neutral";
+    case "trim_reduce":
+      return "is-warning";
+    case "avoid_new":
+      return "is-weak";
+    default:
+      return "";
+  }
 }
 
 function formatSignedPercent(value: number | null | undefined) {

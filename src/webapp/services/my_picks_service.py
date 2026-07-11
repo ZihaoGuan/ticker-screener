@@ -10,6 +10,7 @@ from src.trend_template_screen import PRICE_HISTORY_DAYS as TREND_TEMPLATE_PRICE
 from src.trend_template_screen import evaluate_trend_template
 from src.trendline_snapshots import load_latest_trendline_snapshot_map
 from src.webapp.config import load_webapp_config
+from src.webapp.repositories.position_decision_repository import PositionDecisionRepository
 from src.webapp.repositories.watchlist_repository import WatchlistRepository
 from src.webapp.repositories.my_picks_repository import MyPicksRepository
 
@@ -81,6 +82,7 @@ class MyPicksService:
         self.database_url = self.repository.database_url
         self.ratings_repository = RatingsRepository(self.database_url)
         self.watchlist_repository = WatchlistRepository(artifacts_dir=load_webapp_config().artifacts_dir, database_url=self.database_url)
+        self.position_decision_repository = PositionDecisionRepository(database_url=self.database_url)
 
     def get_context(self) -> dict[str, Any]:
         picks = [self._serialize_pick(row) for row in self.repository.list_picks()]
@@ -89,6 +91,7 @@ class MyPicksService:
         self._attach_trendline_context(picks)
         self._attach_price_change_context(picks)
         self._attach_trend_template_context(picks)
+        self._attach_latest_position_actions(picks)
         return {
             "database_configured": self.repository.is_configured(),
             "total_count": len(picks),
@@ -129,6 +132,7 @@ class MyPicksService:
         self._attach_trendline_context([row])
         self._attach_price_change_context([row])
         self._attach_trend_template_context([row])
+        self._attach_latest_position_actions([row])
         return row
 
     def delete_pick(self, pick_id: int) -> None:
@@ -156,7 +160,20 @@ class MyPicksService:
         self._attach_trendline_context([row])
         self._attach_price_change_context([row])
         self._attach_trend_template_context([row])
+        self._attach_latest_position_actions([row])
         return row
+
+    def _attach_latest_position_actions(self, rows: list[dict[str, Any]]) -> None:
+        tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
+        if not tickers:
+            return
+        try:
+            decision_map = self.position_decision_repository.load_latest_decision_map(tickers)
+        except Exception:
+            decision_map = {}
+        for row in rows:
+            ticker = str(row.get("ticker") or "").upper()
+            row["position_action"] = _serialize_position_action_snapshot(decision_map.get(ticker))
 
     def _attach_rating_context(self, rows: list[dict[str, Any]]) -> None:
         tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
@@ -349,6 +366,7 @@ class MyPicksService:
             "trend_template_criteria_passed": None,
             "trend_template_criteria_total": None,
             "trend_template_label": None,
+            "position_action": None,
         }
 
     def _normalize_ticker(self, ticker: str) -> str:
@@ -415,6 +433,31 @@ def _safe_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _serialize_position_action_snapshot(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    return {
+        "as_of_date": _to_iso_date(row.get("as_of_date")),
+        "action": str(row.get("action") or ""),
+        "action_score": round(_safe_float(row.get("action_score")) or 0.0, 2),
+        "regime_state": str(row.get("regime_state") or "") or None,
+        "trend_state": str(row.get("trend_state") or "") or None,
+        "extension_state": str(row.get("extension_state") or "") or None,
+        "support_reference": str(row.get("support_reference") or "") or None,
+        "atr_dist_21": _safe_float(row.get("atr_dist_21")),
+        "atr_dist_10w": _safe_float(row.get("atr_dist_10w")),
+        "atr_pct": _safe_float(row.get("atr_pct")),
+        "daily_atr_ratio": _safe_float(row.get("daily_atr_ratio")),
+        "close_price": _safe_float(row.get("close_price")),
+        "ema21": _safe_float(row.get("ema21")),
+        "sma50": _safe_float(row.get("sma50")),
+        "sma10w": _safe_float(row.get("sma10w")),
+        "danger_signal_count": _safe_int(row.get("danger_signal_count")) or 0,
+        "reason_summary": str(row.get("reason_summary") or "") or None,
+        "evidence": dict(row.get("evidence_json") or {}),
+    }
 
 
 def _percent_distance(value: float | None, baseline: float | None) -> float | None:

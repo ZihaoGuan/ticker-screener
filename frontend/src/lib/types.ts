@@ -263,6 +263,7 @@ export type ScannerTopHitRow = {
     momentum: number | null;
     as_of_date: string | null;
   } | null;
+  position_action?: PositionActionSnapshot | null;
 };
 
 export type ScannerTopHitsResponse = ScannerBoardResponse & {
@@ -1883,6 +1884,7 @@ export type MyPickRow = {
   trend_template_criteria_passed: number | null;
   trend_template_criteria_total: number | null;
   trend_template_label: string | null;
+  position_action?: PositionActionSnapshot | null;
 };
 
 export type MyPicksContextResponse = {

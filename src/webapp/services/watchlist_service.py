@@ -881,6 +881,7 @@ class WatchlistService:
             }
             if rows_by_ticker:
                 self._attach_latest_rating_snapshots(rows_by_ticker, sorted(rows_by_ticker))
+                self._attach_latest_position_actions(rows_by_ticker, sorted(rows_by_ticker), as_of_date=run_date)
             return {
                 "generated_at": str(summary_payload.get("generated_at") or ""),
                 "reference_now_new_york": str(summary_payload.get("reference_now_new_york") or ""),
@@ -959,6 +960,8 @@ class WatchlistService:
         if top_hit_tickers:
             self._attach_latest_market_snapshots(aggregated, top_hit_tickers)
             self._attach_latest_rating_snapshots(aggregated, top_hit_tickers)
+            target_trading_date = _coerce_optional_date(board_payload.get("target_trading_date")) or _coerce_optional_date(board_payload.get("latest_signal_date"))
+            self._attach_latest_position_actions(aggregated, top_hit_tickers, as_of_date=target_trading_date)
         sector_momentum_map = self._load_sector_momentum_map(rrg_service) if top_hit_tickers else {}
 
         rows = []
@@ -1405,6 +1408,25 @@ class WatchlistService:
         except Exception:
             return None
         return _serialize_position_action_snapshot(decision_map.get(str(ticker or "").strip().upper()))
+
+    def _attach_latest_position_actions(
+        self,
+        rows_by_ticker: dict[str, dict[str, Any]],
+        tickers: list[str],
+        *,
+        as_of_date: dt.date | None = None,
+    ) -> None:
+        if not tickers:
+            return
+        try:
+            decision_map = self.position_decision_repository.load_latest_decision_map(tickers, as_of_date=as_of_date)
+        except Exception:
+            decision_map = {}
+        for ticker in tickers:
+            row = rows_by_ticker.get(ticker)
+            if not isinstance(row, dict):
+                continue
+            row["position_action"] = _serialize_position_action_snapshot(decision_map.get(ticker))
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()

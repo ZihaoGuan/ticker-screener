@@ -188,6 +188,35 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertTrue(row["ema21_tested_since_added"])
         self.assertTrue(row["sma50_tested_since_added"])
 
+    def test_create_pick_attaches_latest_position_action(self) -> None:
+        with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("MSFT")), patch(
+            "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
+            return_value=_build_trendline_snapshot_map("MSFT"),
+        ), patch(
+            "src.webapp.services.my_picks_service.evaluate_trend_template",
+            return_value=SimpleNamespace(matched=True, criteria_passed=8, criteria_total=8),
+        ), patch.object(
+            self.service.position_decision_repository,
+            "load_latest_decision_map",
+            return_value={
+                "MSFT": {
+                    "ticker": "MSFT",
+                    "as_of_date": dt.date(2026, 6, 24),
+                    "action": "add_position",
+                    "action_score": 81.2,
+                    "trend_state": "healthy",
+                    "extension_state": "normal",
+                    "danger_signal_count": 0,
+                    "reason_summary": "Trend intact.",
+                    "evidence_json": {"danger_flags": []},
+                }
+            },
+        ):
+            row = self.service.create_pick(ticker="msft", notes="leader", actor_user_id=7)
+
+        self.assertEqual(row["position_action"]["action"], "add_position")
+        self.assertEqual(row["position_action"]["action_score"], 81.2)
+
     def test_get_context_sorts_newest_first(self) -> None:
         self.service.create_pick(ticker="AAPL")
         self.service.create_pick(ticker="NVDA")

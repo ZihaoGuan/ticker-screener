@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import datetime as dt
+import math
 
 import pandas as pd
 
@@ -85,8 +86,22 @@ class PositionActionDailyScreenResult:
             "passed_tickers": self.passed_tickers,
             "failed_tickers": self.failed_tickers,
             "hits": [item.to_dict() for item in self.hits],
-            "decision_rows": self.decision_rows,
+            "decision_rows": _normalize_json_payload(self.decision_rows),
         }
+
+
+def _normalize_json_payload(value: object) -> object:
+    if isinstance(value, dt.datetime):
+        return value.isoformat()
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): _normalize_json_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_json_payload(item) for item in value]
+    return value
 
 
 def _normalize_bars_frame(frame: pd.DataFrame) -> pd.DataFrame:
