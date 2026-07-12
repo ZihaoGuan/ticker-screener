@@ -313,6 +313,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "finviz_smallover_sales_growth_trend",
+        "strategy_id": "finviz_smallover_sales_growth_trend",
+        "label": "Finviz Small+ Sales Growth Trend",
+        "description": "Live Finviz scan for stocks over $300M market cap, sales growth qtr over qtr above 5%, current volume above 50K, institutional ownership above 10%, price above $20, within 0-10% of the 52-week high, price above the 50-day SMA, the 200-day SMA below the 50-day SMA, and daily RS rating above 75.",
+        "timeframe": "Daily",
+        "accent": "lime",
+        "bias_group": "bullish",
+    },
+    {
         "id": "finviz_pattern_horizontal",
         "strategy_id": "finviz_pattern_horizontal",
         "label": "Finviz Horizontal S/R",
