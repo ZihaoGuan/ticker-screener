@@ -601,6 +601,7 @@ function PicksTable({
             <th>{renderSortHeader("FA", "fundamental_rating", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("Trend Template", "trend_template", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("RS Rating", "leadership_score", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+            <th>Daily RS</th>
             <th>{renderSortHeader("CAN V2", "canslim_score", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("VCP", "vcp_score", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("1D", "technical_indicator_1d", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
@@ -645,6 +646,7 @@ function PicksTable({
               <td data-label="FA">{formatScore(row.fundamental_rating)}</td>
               <td data-label="Trend Template">{renderTrendTemplateCell(row)}</td>
               <td data-label="RS Rating">{formatScore(row.leadership_score)}</td>
+              <td data-label="Daily RS">{formatScore(row.daily_rs_rating)}</td>
               <td data-label="CAN V2">{formatScoreFraction(row.canslim_score, row.canslim_max_score)}</td>
               <td data-label="VCP">{formatScoreWithLabel(row.vcp_score, row.vcp_rating)}</td>
               <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? "-"}</td>

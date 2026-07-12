@@ -82,6 +82,7 @@ class _FakeRatingsRepository:
                 "industry": "Software",
                 "overall_rating": 8.2,
                 "leadership_score": 91.0,
+                "daily_rs_rating": 96.0,
                 "rating_band": "A",
                 "technical_status": "ok",
             }
@@ -175,6 +176,7 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertEqual(row["sector"], "Technology")
         self.assertEqual(row["fundamental_rating"], 8.7)
         self.assertEqual(row["leadership_score"], 91.0)
+        self.assertEqual(row["daily_rs_rating"], 96.0)
         self.assertTrue(row["trend_template_match"])
         self.assertEqual(row["trend_template_criteria_passed"], 8)
         self.assertEqual(row["trend_template_criteria_total"], 8)

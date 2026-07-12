@@ -204,6 +204,7 @@ class MyPicksService:
             row["fundamental_rank"] = _safe_int(fundamental.get("current_rank"))
             row["fundamental_status"] = str(fundamental.get("rating_status") or "") or None
             row["leadership_score"] = leadership_score
+            row["daily_rs_rating"] = _safe_float(technical.get("daily_rs_rating"))
             row["technical_indicator_ratings"] = indicators
             row["canslim_score"] = _safe_int(canslim.get("canslim_score"))
             row["canslim_max_score"] = _safe_int(canslim.get("canslim_max_score"))
@@ -354,6 +355,7 @@ class MyPicksService:
             "fundamental_rank": None,
             "fundamental_status": None,
             "leadership_score": None,
+            "daily_rs_rating": None,
             "technical_indicator_ratings": {},
             "canslim_score": None,
             "canslim_max_score": None,

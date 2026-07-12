@@ -1934,6 +1934,7 @@ export type MyPickRow = {
   fundamental_rank: number | null;
   fundamental_status: string | null;
   leadership_score: number | null;
+  daily_rs_rating: number | null;
   technical_indicator_ratings: Record<string, TechnicalIndicatorRatingCell>;
   canslim_score: number | null;
   canslim_max_score: number | null;

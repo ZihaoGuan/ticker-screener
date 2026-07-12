@@ -286,6 +286,7 @@ export function ScannerTopHitsPage() {
                     <th>VCP</th>
                     <th>Accel</th>
                     <th>{renderSortButton("RS", "rs", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>Daily RS</th>
                     <th>{renderSortButton("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>1D</th>
                     <th>1W</th>
@@ -354,6 +355,7 @@ export function ScannerTopHitsPage() {
                       <td data-label="VCP">{formatVcpScore(row.vcp_score, row.vcp_rating)}</td>
                       <td data-label="Accel">{formatAccelerationScore(row.growth_acceleration_score, row.growth_acceleration_label)}</td>
                       <td data-label="RS">{formatRating(row.rs_rating)}</td>
+                      <td data-label="Daily RS">{formatRating(row.daily_rs_rating ?? null)}</td>
                       <td data-label="TA">{formatRating(row.ta_rating)}</td>
                       <td data-label="1D">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1d"])}</td>
                       <td data-label="1W">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1w"])}</td>
