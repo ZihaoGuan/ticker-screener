@@ -24,6 +24,8 @@ export function ScannerTopHitsPage() {
   const [hasLeadershipScannerOnly, setHasLeadershipScannerOnly] = useState(false);
   const [hasFundamentalQualityOnly, setHasFundamentalQualityOnly] = useState(false);
   const [leaderRsOnly, setLeaderRsOnly] = useState(false);
+  const [leaderRsThreshold, setLeaderRsThreshold] = useState("90");
+  const [selectedScannerIds, setSelectedScannerIds] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<SortKey>("hits");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [currentPage, setCurrentPage] = useState(1);
@@ -62,6 +64,28 @@ export function ScannerTopHitsPage() {
     () => Array.from(new Set(rows.map((row) => row.sector).filter((sector) => sector && sector !== "Unknown sector"))).sort(),
     [rows],
   );
+  const scannerOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const row of rows) {
+      for (const scanner of row.scanners) {
+        const normalizedId = normalizeScannerId(scanner.id);
+        const label = String(scanner.label || "").trim();
+        if (normalizedId && label && !options.has(normalizedId)) {
+          options.set(normalizedId, label);
+        }
+      }
+    }
+    return Array.from(options.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }, [rows]);
+  const normalizedLeaderRsThreshold = useMemo(() => {
+    const parsed = Number.parseInt(leaderRsThreshold, 10);
+    if (!Number.isFinite(parsed)) {
+      return 90;
+    }
+    return Math.max(1, Math.min(99, parsed));
+  }, [leaderRsThreshold]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -84,17 +108,20 @@ export function ScannerTopHitsPage() {
       nextRows = nextRows.filter(hasFundamentalQualitySignal);
     }
     if (leaderRsOnly) {
-      nextRows = nextRows.filter(hasLeaderRsRating);
+      nextRows = nextRows.filter((row) => hasLeaderRsRating(row, normalizedLeaderRsThreshold));
+    }
+    if (selectedScannerIds.length > 0) {
+      nextRows = nextRows.filter((row) => hasSelectedScannerSignals(row, selectedScannerIds));
     }
     return [...nextRows].sort((left, right) => compareRows(left, right, sortBy, sortDirection, {
       sectorLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeSectorKey(item.sector)) : new Map<string, string>(),
       industryLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeIndustryKey(item.industry)) : new Map<string, string>(),
     }));
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, rows, search, sectorFilter, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, normalizedLeaderRsThreshold, rows, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, search, sectorFilter, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsThreshold, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const normalizedPage = Math.min(currentPage, totalPages);
@@ -233,9 +260,43 @@ export function ScannerTopHitsPage() {
           <span>RS Leader</span>
           <span className="scanner-result-check">
             <input type="checkbox" checked={leaderRsOnly} onChange={(event) => setLeaderRsOnly(event.target.checked)} />
-            <span>RS rating 90 or higher</span>
+            <span>Daily RS above threshold</span>
           </span>
-          <span className="panel-copy">Using 90+ instead of 85 to better isolate true leaders.</span>
+          <input
+            type="number"
+            min={1}
+            max={99}
+            value={leaderRsThreshold}
+            onChange={(event) => setLeaderRsThreshold(event.target.value)}
+            placeholder="90"
+          />
+          <span className="panel-copy">Uses `daily_rs_rating`, with a threshold from 1 to 99.</span>
+        </label>
+        <label className="scanner-result-filter panel">
+          <span>Scanners</span>
+          <div className="scanner-top-hit-filter-list">
+            {scannerOptions.map((scanner) => {
+              const checked = selectedScannerIds.includes(scanner.id);
+              return (
+                <label key={scanner.id} className="scanner-result-check">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      setSelectedScannerIds((current) => {
+                        if (event.target.checked) {
+                          return current.includes(scanner.id) ? current : [...current, scanner.id];
+                        }
+                        return current.filter((item) => item !== scanner.id);
+                      });
+                    }}
+                  />
+                  <span>{scanner.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <span className="panel-copy">Checked scanners use AND logic: a ticker must appear in every selected scanner.</span>
         </label>
         <div className="scanner-result-filter panel scanner-result-filter-actions">
           <span>Board Snapshot</span>
@@ -667,8 +728,13 @@ function hasFundamentalQualitySignal(row: ScannerTopHitRow) {
   return row.scanners.some((scanner) => normalizeScannerId(scanner.id) === "fundamental_quality");
 }
 
-function hasLeaderRsRating(row: ScannerTopHitRow) {
-  return row.rs_rating != null && row.rs_rating >= 90;
+function hasLeaderRsRating(row: ScannerTopHitRow, minimumDailyRsRating: number) {
+  return row.daily_rs_rating != null && row.daily_rs_rating > minimumDailyRsRating;
+}
+
+function hasSelectedScannerSignals(row: ScannerTopHitRow, selectedScannerIds: string[]) {
+  const rowScannerIds = new Set(row.scanners.map((scanner) => normalizeScannerId(scanner.id)).filter(Boolean));
+  return selectedScannerIds.every((scannerId) => rowScannerIds.has(scannerId));
 }
 
 function normalizeIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {
