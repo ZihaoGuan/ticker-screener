@@ -2009,6 +2009,7 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
       "Active double-bottom bases still building below the middle-high breakout pivot, before a confirmed breakout invalidates the setup-stage scan.",
     rsi_ma_bb_bearish: "Bearish RSI and MA/Bollinger trigger set for breakdown continuation.",
     near_200ma: "Names testing the 200 day moving average with clear inflection context.",
+    near_52wk_high: "Names trading from flat to 20% below their rolling 52-week high, useful for hunting leadership that stays close to highs.",
     lost_21ema: "Recent loss of 21 EMA support while longer trend structure still matters.",
     earnings_growth: "Earnings-led growth names showing improving fundamental acceleration.",
     earnings_weekly_criteria: "Weekly earnings filter using repo criteria for cleaner candidate sets.",

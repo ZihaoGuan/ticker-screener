@@ -79,6 +79,11 @@ PIPELINES = (
         "filename": "near_200ma_{date}.json",
     },
     {
+        "id": "near_52wk_high",
+        "label": "Near 52W High",
+        "filename": "near_52wk_high_{date}.json",
+    },
+    {
         "id": "hve",
         "label": "HVE",
         "filename": "hve_{date}.json",
@@ -249,6 +254,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "eight_week_100_runup": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "gap_fill": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "near_200ma": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
+    "near_52wk_high": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "hve": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "inside_dryup": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},
     "inside_dryup_v2": {"bias_group": "bullish", "bullish_subgroup": "bottoming"},

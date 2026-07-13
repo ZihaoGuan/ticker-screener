@@ -466,6 +466,13 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["stockbee_momentum_burst"]["label"], "Run Stockbee Momentum Burst")
         self.assertIn("scripts/run_stockbee_momentum_burst_screen.py", actions["stockbee_momentum_burst"]["command"])
 
+    def test_list_actions_includes_near_52wk_high(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertIn("near_52wk_high", actions)
+        self.assertEqual(actions["near_52wk_high"]["label"], "Run Near 52W High")
+        self.assertIn("scripts/run_near_52wk_high_screen.py", actions["near_52wk_high"]["command"])
+
     def test_list_actions_includes_vcp_spec(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 

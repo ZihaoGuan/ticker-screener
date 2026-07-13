@@ -327,6 +327,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("near_200ma_{date_label}.json",),
         "legacy_summary_templates": ("near_200ma_run_summary_{date_label}.json",),
     },
+    "near_52wk_high": {
+        "stem_template": "near_52wk_high_{date_label}",
+        "legacy_watchlist_templates": ("near_52wk_high_{date_label}.json",),
+        "legacy_raw_templates": ("near_52wk_high_{date_label}.json",),
+        "legacy_summary_templates": ("near_52wk_high_run_summary_{date_label}.json",),
+    },
     "lost_21ema": {
         "stem_template": "lost_21ema_{date_label}",
         "legacy_watchlist_templates": ("lost_21ema_{date_label}.json",),
@@ -511,6 +517,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("three_weeks_tight", "three_weeks_tight"),
     ("fearzone", "fearzone"),
     ("near_200ma", "near_200ma"),
+    ("near_52wk_high", "near_52wk_high"),
     ("lost_21ema", "lost_21ema"),
     ("trend_template", "trend_template"),
     ("market_correction_resilience", "market_correction_resilience"),

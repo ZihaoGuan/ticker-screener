@@ -28,6 +28,7 @@ from .inside_dryup_v2_screen import HISTORY_DAYS as INSIDE_DRYUP_V2_HISTORY_DAYS
 from .leif_high_tight_flag_screen import LEIF_HTF_LOOKBACK_DAYS, find_leif_high_tight_flag_hit
 from .lost_21ema_screen import run_lost_21ema_screen
 from .macd_screen import find_recent_macd_hit
+from .near_52wk_high_screen import PRICE_HISTORY_DAYS as NEAR_52WK_HIGH_HISTORY_DAYS, run_near_52wk_high_screen
 from .near_200ma_screen import run_near_200ma_screen
 from .rti_screen import find_recent_rti_hit
 from .sean_breakout_screen import find_recent_sean_breakout_hit
@@ -837,6 +838,28 @@ def _run_near_200ma(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     return ScreenerEvaluationResult(passed=True, metrics={"ticker": bundle.ticker}, reasons=tuple(payload.get("reasons", [])), hit=payload)
 
 
+def _run_near_52wk_high(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    config = bundle.extras["config"]
+    result = run_near_52wk_high_screen(config, [_ticker_from_bundle(bundle)], as_of_date=bundle.as_of_date)
+    hits = list(getattr(result, "hits", []))
+    failures = list(getattr(result, "failed_tickers", []))
+    if failures:
+        return ScreenerEvaluationResult(passed=False, error=str(failures[0].get("error") or "unknown screener failure"))
+    if not hits:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hits[0].to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "distance_from_52wk_high_pct": payload["distance_from_52wk_high_pct"],
+        },
+        reasons=tuple(payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_lost_21ema(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     config = bundle.extras["config"]
     result = run_lost_21ema_screen(config, [_ticker_from_bundle(bundle)])
@@ -1621,6 +1644,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=320,
             warmup_trading_days=20,
             evaluator=_run_near_200ma,
+        ),
+        "near_52wk_high": ScreenerSpec(
+            id="near_52wk_high",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=NEAR_52WK_HIGH_HISTORY_DAYS,
+            warmup_trading_days=0,
+            evaluator=_run_near_52wk_high,
         ),
         "lost_21ema": ScreenerSpec(
             id="lost_21ema",

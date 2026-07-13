@@ -448,6 +448,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "near_52wk_high",
+        "strategy_id": "near_52wk_high",
+        "label": "Near 52W High",
+        "description": "Names trading from flat to 20% below their rolling 52-week high, a simple leadership-hunting list for stocks still living near highs.",
+        "timeframe": "Daily",
+        "accent": "lime",
+        "bias_group": "bullish",
+    },
+    {
         "id": "macd_golden_cross",
         "strategy_id": "macd_golden_cross",
         "label": "MACD Golden Cross",

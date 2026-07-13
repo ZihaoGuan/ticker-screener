@@ -320,6 +320,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("fearzone", "fearzone", "Fearzone"),
         ("gamma_squeeze", "gamma_squeeze", "Gamma Squeeze"),
         ("near_200ma", "near_200ma", "Near 200MA"),
+        ("near_52wk_high", "near_52wk_high", "Near 52W High"),
         ("lost_21ema", "lost_21ema", "Lost 21EMA"),
         ("trend_template", "trend_template", "Trend Template"),
         ("market_correction_resilience", "market_correction_resilience", "Market Correction Resilience"),
