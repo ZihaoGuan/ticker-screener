@@ -74,6 +74,48 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["entry_count"], 1)
         self.assertEqual(payload["entries"][0]["ticker"], "NVDA")
 
+    def test_get_watchlist_detail_repairs_shifted_finviz_rows(self) -> None:
+        path = Path(self.temp_dir.name) / "watchlists" / "venu_scanner_2026-07-21.json"
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "No.": "9",
+                        "Ticker": "D",
+                        "Company": "DRH",
+                        "Sector": "Diamondrock Hospitality Co",
+                        "Industry": "Real Estate",
+                        "Country": "REIT - Hotel & Motel",
+                        "Market Cap": "USA",
+                        "P/E": "2.62B",
+                        "Price": "27.31",
+                        "Change": "12.75",
+                        "Volume": "1.59%",
+                        "ticker": "D",
+                        "company_name": "DRH",
+                        "strategy_id": "venu_scanner",
+                        "source": "finviz",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("src.webapp.services.watchlist_service.load_universe", return_value=[]), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.load_excluded_tickers",
+            return_value=set(),
+        ):
+            payload = self.service.get_watchlist_detail("venu_scanner_2026-07-21")
+
+        self.assertEqual(payload["entries"][0]["ticker"], "DRH")
+        self.assertEqual(payload["entries"][0]["company_name"], "Diamondrock Hospitality Co")
+
     def test_get_watchlist_detail_includes_latest_canslim_score(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         dated_dir = Path(self.temp_dir.name) / "screeners" / "2026-06-22" / "canslim"

@@ -24,7 +24,7 @@ from ...config import AppConfig
 from ...canslim_screen import CANSLIM_HISTORY_DAYS, CANSLIM_INSIDER_LOOKBACK_DAYS, compute_canslim_frame_metrics, evaluate_canslim_ticker
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
-from ...finviz_screener_rows import is_ticker_like_finviz_company_name
+from ...finviz_screener_rows import is_ticker_like_finviz_company_name, repair_shifted_finviz_row
 from ...flashalpha_gex import build_gamma_exposure_report, render_gamma_exposure_report_svgs
 from ...market_extension import compute_extension_frame, resample_to_weekly
 from ...bollinger_band_screen import compute_latest_bollinger_snapshot
@@ -1937,9 +1937,10 @@ class WatchlistService:
         universe_index = self._get_universe_index()
         overrides = load_ticker_theme_overrides()
         theme_catalog = self._get_theme_catalog()
-        latest_market_map = self._load_latest_market_snapshot_map(entries)
+        repaired_entries = [repair_shifted_finviz_row(dict(raw_entry)) for raw_entry in entries]
+        latest_market_map = self._load_latest_market_snapshot_map(repaired_entries)
         enriched: list[dict[str, Any]] = []
-        for raw_entry in entries:
+        for raw_entry in repaired_entries:
             entry = dict(raw_entry)
             ticker = normalize_ticker_symbol(str(entry.get("ticker", "")))
             metadata = universe_index.get(ticker)
@@ -1979,7 +1980,7 @@ class WatchlistService:
         universe_index = self._get_universe_index()
         normalized: list[dict[str, Any]] = []
         for raw_entry in entries:
-            entry = dict(raw_entry)
+            entry = repair_shifted_finviz_row(dict(raw_entry))
             ticker = normalize_ticker_symbol(str(entry.get("ticker", "")))
             metadata = universe_index.get(ticker)
             sector = _coalesce_text(entry.get("sector"), metadata.sector if metadata else None)

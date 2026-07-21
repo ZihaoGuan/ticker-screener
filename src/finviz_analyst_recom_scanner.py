@@ -4,7 +4,7 @@ import datetime as dt
 import time
 from typing import Any, Sequence
 
-from .finviz_screener_rows import normalize_finviz_ticker, sanitize_finviz_company_name
+from .finviz_screener_rows import SafeFinvizScreener, normalize_finviz_ticker, sanitize_finviz_company_name
 
 try:
     from requests import exceptions as requests_exceptions
@@ -20,13 +20,13 @@ _RATE_LIMIT_RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0, 6.0)
 
 def _load_finviz_screener() -> type[Any]:
     try:
-        from finviz.screener import Screener
+        import requests  # noqa: F401
+        import lxml  # noqa: F401
     except ImportError as exc:
         raise RuntimeError(
-            "finviz dependency missing. Install requirements-finviz.txt or requirements.txt before running analyst recommendation scanner."
+            "Finviz parser dependencies missing. Install requirements-finviz.txt or requirements.txt before running analyst recommendation scanner."
         ) from exc
-    return Screener
-
+    return SafeFinvizScreener
 
 def _normalize_ticker_list(tickers: Sequence[str] | None) -> list[str]:
     normalized: list[str] = []
