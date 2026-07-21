@@ -34,6 +34,20 @@ class VenuScannerTests(unittest.TestCase):
         self.assertEqual(payload["hits"][0]["company_name"], "Palantir")
         self.assertEqual(payload["hits"][0]["source"], "finviz")
 
+    def test_run_venu_scanner_drops_adjacent_ticker_company_values(self) -> None:
+        class _ShiftedScreener(list):
+            def __init__(self, *, filters: list[str], table: str, order: str) -> None:
+                self.filters = filters
+                self.table = table
+                self.order = order
+                super().__init__([{"Ticker": "S", "Company": "SGHC", "Market Cap": "6B"}])
+
+        with patch("src.venu_scanner._load_finviz_screener", return_value=_ShiftedScreener):
+            payload = run_venu_scanner()
+
+        self.assertEqual(payload["hits"][0]["ticker"], "S")
+        self.assertEqual(payload["hits"][0]["company_name"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

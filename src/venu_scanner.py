@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Sequence
 
+from .finviz_screener_rows import normalize_finviz_ticker, sanitize_finviz_company_name
+
 
 VENU_SCANNER_FILTERS: tuple[str, ...] = (
     "cap_midover",
@@ -37,10 +39,10 @@ def _normalize_ticker_list(tickers: Sequence[str] | None) -> set[str]:
 
 
 def _normalize_hit(row: dict[str, Any]) -> dict[str, Any]:
-    ticker = str(row.get("Ticker") or "").strip().upper()
+    ticker = normalize_finviz_ticker(row)
     payload = dict(row)
     payload["ticker"] = ticker
-    payload["company_name"] = str(row.get("Company") or "").strip()
+    payload["company_name"] = sanitize_finviz_company_name(row, ticker=ticker)
     payload["strategy_id"] = "venu_scanner"
     payload["source"] = "finviz"
     return payload

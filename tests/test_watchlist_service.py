@@ -561,6 +561,66 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["sector_momentum"]["quadrant"], "Leading")
         self.assertEqual(pltr["sector_momentum"]["etf_ticker"], "XLK")
 
+    def test_get_scanner_top_hits_payload_suppresses_ticker_like_company_names(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        watchlists_dir = Path(self.temp_dir.name) / "watchlists"
+        (watchlists_dir / "rs_new_high_before_price_2026-06-12.json").write_text(
+            json.dumps([{"ticker": "S", "company_name": "SGHC", "sector": "Technology"}]),
+            encoding="utf-8",
+        )
+        (watchlists_dir / "fearzone_2026-06-12.json").write_text(
+            json.dumps([{"ticker": "S", "company_name": "SGHC", "sector": "Technology"}]),
+            encoding="utf-8",
+        )
+        import os
+
+        timestamp = dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc).timestamp()
+        os.utime(watchlists_dir / "rs_new_high_before_price_2026-06-12.json", (timestamp, timestamp))
+        os.utime(watchlists_dir / "fearzone_2026-06-12.json", (timestamp, timestamp))
+
+        with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()), patch(
+            "src.webapp.services.watchlist_service.load_universe",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_etf_catalog",
+            return_value=[],
+        ), patch(
+            "src.webapp.services.watchlist_service.load_ticker_theme_overrides",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_rating_snapshots_for_tickers",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
+            return_value={},
+        ), patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.load_latest_technical_indicator_ratings_for_tickers",
+            return_value={},
+        ), patch.object(
+            service,
+            "_load_latest_stored_canslim_score_map",
+            return_value={},
+        ), patch.object(
+            service,
+            "_load_latest_stored_vcp_score_map",
+            return_value={},
+        ), patch.object(
+            service,
+            "_load_latest_stored_growth_acceleration_map",
+            return_value={},
+        ), patch.object(
+            service,
+            "_load_sector_momentum_map",
+            return_value={},
+        ):
+            payload = service.get_scanner_top_hits_payload(now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc))
+
+        self.assertEqual(payload["rows"][0]["ticker"], "S")
+        self.assertEqual(payload["rows"][0]["company"], "")
+
     def test_get_scanner_top_hits_payload_attaches_position_action(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         watchlists_dir = Path(self.temp_dir.name) / "watchlists"

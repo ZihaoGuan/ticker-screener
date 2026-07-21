@@ -4,6 +4,7 @@ import datetime as dt
 import time
 from typing import Any, Sequence
 
+from .finviz_screener_rows import normalize_finviz_ticker, sanitize_finviz_company_name
 from .ratings.repository import RatingsRepository
 
 try:
@@ -51,12 +52,12 @@ def _normalize_ticker_list(tickers: Sequence[str] | None) -> list[str]:
 
 
 def _normalize_hit(row: dict[str, Any], *, daily_rs_rating: float) -> dict[str, Any] | None:
-    ticker = str(row.get("Ticker") or "").strip().upper()
+    ticker = normalize_finviz_ticker(row)
     if not ticker:
         return None
     payload = dict(row)
     payload["ticker"] = ticker
-    payload["company_name"] = str(row.get("Company") or "").strip()
+    payload["company_name"] = sanitize_finviz_company_name(row, ticker=ticker)
     payload["strategy_id"] = FINVIZ_SMALLOVER_SALES_GROWTH_TREND_STRATEGY_ID
     payload["source"] = "finviz"
     payload["finviz_filter_set"] = "smallover_sales_growth_trend"
@@ -97,7 +98,7 @@ def run_finviz_smallover_sales_growth_trend_scanner(
 
     requested_tickers = _normalize_ticker_list(tickers)
     requested_ticker_set = set(requested_tickers)
-    candidate_tickers = [str(row.get("Ticker") or "").strip().upper() for row in screener if str(row.get("Ticker") or "").strip()]
+    candidate_tickers = [normalize_finviz_ticker(row) for row in screener if normalize_finviz_ticker(row)]
     rs_snapshot_map = RatingsRepository(database_url).load_latest_technical_rating_snapshots_for_tickers(
         candidate_tickers,
         allow_older_as_of_date=True,
@@ -105,7 +106,7 @@ def run_finviz_smallover_sales_growth_trend_scanner(
     hits: list[dict[str, Any]] = []
 
     for row in screener:
-        ticker = str(row.get("Ticker") or "").strip().upper()
+        ticker = normalize_finviz_ticker(row)
         snapshot = rs_snapshot_map.get(ticker) or {}
         daily_rs_rating = snapshot.get("daily_rs_rating")
         if daily_rs_rating is None or float(daily_rs_rating) <= float(MIN_DAILY_RS_RATING):

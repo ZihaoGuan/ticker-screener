@@ -24,6 +24,7 @@ from ...config import AppConfig
 from ...canslim_screen import CANSLIM_HISTORY_DAYS, CANSLIM_INSIDER_LOOKBACK_DAYS, compute_canslim_frame_metrics, evaluate_canslim_ticker
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
+from ...finviz_screener_rows import is_ticker_like_finviz_company_name
 from ...flashalpha_gex import build_gamma_exposure_report, render_gamma_exposure_report_svgs
 from ...market_extension import compute_extension_frame, resample_to_weekly
 from ...bollinger_band_screen import compute_latest_bollinger_snapshot
@@ -910,6 +911,7 @@ class WatchlistService:
             if rows_by_ticker:
                 self._attach_latest_rating_snapshots(rows_by_ticker, sorted(rows_by_ticker))
                 self._attach_latest_position_actions(rows_by_ticker, sorted(rows_by_ticker), as_of_date=run_date)
+            _sanitize_scanner_top_hit_company_names(rows_payload)
             return {
                 "generated_at": str(summary_payload.get("generated_at") or ""),
                 "reference_now_new_york": str(summary_payload.get("reference_now_new_york") or ""),
@@ -2039,7 +2041,8 @@ class WatchlistService:
         return snapshots
 
     def _merge_scanner_top_hit_entry(self, bucket: dict[str, Any], entry: dict[str, Any]) -> None:
-        company = _coalesce_text(bucket.get("company"), entry.get("company_name"), entry.get("company"))
+        ticker = normalize_ticker_symbol(str(entry.get("ticker") or bucket.get("ticker") or ""))
+        company = _coalesce_company_name(ticker, bucket.get("company"), entry.get("company_name"), entry.get("company"))
         sector = _coalesce_text(bucket.get("sector"), entry.get("sector"))
         industry = _coalesce_text(bucket.get("industry"), entry.get("industry"))
         day_close = bucket.get("day_close")
@@ -2084,8 +2087,7 @@ class WatchlistService:
         if not isinstance(technical_indicator_ratings, dict) or not technical_indicator_ratings:
             raw_indicator_ratings = entry.get("technical_indicator_ratings")
             technical_indicator_ratings = raw_indicator_ratings if isinstance(raw_indicator_ratings, dict) else {}
-        if company:
-            bucket["company"] = company
+        bucket["company"] = company or ""
         if sector:
             bucket["sector"] = sector
         if industry:
@@ -4180,6 +4182,23 @@ def _coalesce_text(*values: object) -> str | None:
         if text:
             return text
     return None
+
+
+def _coalesce_company_name(ticker: str, *values: object) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text and not is_ticker_like_finviz_company_name(text, ticker=ticker):
+            return text
+    return None
+
+
+def _sanitize_scanner_top_hit_company_names(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        ticker = normalize_ticker_symbol(str(row.get("ticker") or ""))
+        company = _coalesce_text(row.get("company"), row.get("company_name"))
+        if company and is_ticker_like_finviz_company_name(company, ticker=ticker):
+            row["company"] = ""
+            row["company_name"] = ""
 
 
 def _resolve_entry_display_price(entry: dict[str, Any]) -> float | None:

@@ -4,6 +4,8 @@ import datetime as dt
 import time
 from typing import Any, Sequence
 
+from .finviz_screener_rows import normalize_finviz_ticker, sanitize_finviz_company_name
+
 try:
     from requests import exceptions as requests_exceptions
 except ImportError:  # pragma: no cover - requests ships with finviz in production
@@ -84,10 +86,10 @@ def resolve_finviz_pattern_filter(pattern: str) -> str:
 
 
 def _normalize_hit(row: dict[str, Any], *, pattern: str, pattern_label: str, strategy_id: str) -> dict[str, Any]:
-    ticker = str(row.get("Ticker") or "").strip().upper()
+    ticker = normalize_finviz_ticker(row)
     payload = dict(row)
     payload["ticker"] = ticker
-    payload["company_name"] = str(row.get("Company") or "").strip()
+    payload["company_name"] = sanitize_finviz_company_name(row, ticker=ticker)
     payload["strategy_id"] = strategy_id
     payload["source"] = "finviz"
     payload["pattern"] = pattern
