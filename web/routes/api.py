@@ -27,6 +27,7 @@ from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.scheduled_job_service import ScheduledJobService
 from src.webapp.services.screener_history_service import ScreenerHistoryService
+from src.webapp.services.sector_leaderboard_service import SectorLeaderboardService
 from src.webapp.services.tiger_positions_service import TigerPositionsService
 from src.webapp.services.watchlist_service import WatchlistService
 from web.dependencies import (
@@ -50,6 +51,7 @@ from web.dependencies import (
     get_run_service,
     get_scheduled_job_service,
     get_screener_history_service,
+    get_sector_leaderboard_service,
     get_tiger_positions_service,
     get_user_admin_service,
     get_watchlist_service,
@@ -954,6 +956,15 @@ def scanner_top_hits_data(
     _: Principal = Depends(get_current_principal),
 ) -> JSONResponse:
     return JSONResponse(service.get_scanner_top_hits_payload(rrg_service=rrg_service))
+
+
+@router.get("/sector-leaderboard", response_class=JSONResponse)
+def sector_leaderboard_data(
+    as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
+    service: SectorLeaderboardService = Depends(get_sector_leaderboard_service),
+    _: Principal = Depends(get_current_principal),
+) -> JSONResponse:
+    return JSONResponse(service.get_payload(as_of_date=as_of_date))
 
 
 @router.get("/watchlists/weekly", response_class=JSONResponse)

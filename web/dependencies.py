@@ -33,6 +33,7 @@ from src.webapp.services.rrg_service import RrgService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.scheduled_job_service import ScheduledJobService
 from src.webapp.services.screener_history_service import ScreenerHistoryService
+from src.webapp.services.sector_leaderboard_service import SectorLeaderboardService
 from src.webapp.services.tiger_positions_service import TigerPositionsService
 from src.webapp.services.watchlist_service import WatchlistService
 
@@ -116,6 +117,10 @@ def get_my_picks_service() -> MyPicksService:
 
 def get_rrg_service() -> RrgService:
     return RrgService(output_dir=config.output_dir, reports_fqdn=config.reports_fqdn, database_url=config.database_url)
+
+
+def get_sector_leaderboard_service() -> SectorLeaderboardService:
+    return SectorLeaderboardService(database_url=config.database_url)
 
 
 def get_ad_hoc_screen_service() -> AdHocScreenService:

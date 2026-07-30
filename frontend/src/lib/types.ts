@@ -275,6 +275,40 @@ export type ScannerTopHitsResponse = ScannerBoardResponse & {
   rows: ScannerTopHitRow[];
 };
 
+export type SectorLeaderboardHolding = {
+  ticker: string;
+  weight: number;
+  day_change_pct: number | null;
+};
+
+export type SectorLeaderboardRow = {
+  ticker: string;
+  description: string;
+  provider: string;
+  source_url: string;
+  price: number | null;
+  day_change_pct: number | null;
+  week_change_pct: number | null;
+  month_change_pct: number | null;
+  year_change_pct: number | null;
+  atr_pct: number | null;
+  volume: number | null;
+  latest_date: string | null;
+  top_holdings: SectorLeaderboardHolding[];
+};
+
+export type SectorLeaderboardResponse = {
+  generated_at: string;
+  as_of_date: string;
+  latest_data_date: string | null;
+  source: {
+    provider: string;
+    fund_finder_url: string;
+    note: string;
+  };
+  rows: SectorLeaderboardRow[];
+};
+
 export type WatchlistTicker = {
   ticker: string;
   company?: string;

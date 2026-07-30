@@ -51,6 +51,7 @@ const EarningsPage = lazyPage(() => import("./pages/EarningsPage"), "EarningsPag
 const ScannerBoardPage = lazyPage(() => import("./pages/ScannerBoardPage"), "ScannerBoardPage");
 const ScannerTopHitsPage = lazyPage(() => import("./pages/ScannerTopHitsPage"), "ScannerTopHitsPage");
 const ScannerResultPage = lazyPage(() => import("./pages/ScannerResultPage"), "ScannerResultPage");
+const SectorLeaderboardPage = lazyPage(() => import("./pages/SectorLeaderboardPage"), "SectorLeaderboardPage");
 const RatingsPage = lazyPage(() => import("./pages/RatingsPage"), "RatingsPage");
 const RunsPage = lazyPage(() => import("./pages/RunsPage"), "RunsPage");
 const WarmupPage = lazyPage(() => import("./pages/WarmupPage"), "WarmupPage");
@@ -103,6 +104,10 @@ export default function App() {
           <Route
             path="/scanner/:scannerId"
             element={<ScannerResultPage />}
+          />
+          <Route
+            path="/sector-leaderboard"
+            element={<SectorLeaderboardPage />}
           />
           <Route
             path="/ratings"
