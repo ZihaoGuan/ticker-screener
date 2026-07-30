@@ -279,6 +279,7 @@ export type SectorLeaderboardHolding = {
   ticker: string;
   weight: number;
   day_change_pct: number | null;
+  daily_rs_rating: number | null;
 };
 
 export type SectorLeaderboardRow = {

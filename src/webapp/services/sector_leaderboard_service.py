@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from ...market_data_access import load_many_ticker_windows
+from ...ratings.repository import RatingsRepository
 
 
 @dataclass(frozen=True)
@@ -333,8 +334,9 @@ class SectorLeaderboardService:
         holding_tickers = sorted({holding.ticker for item in self.etfs for holding in item.holdings})
         etf_frames = load_many_ticker_windows(etf_tickers, resolved_as_of, 270, database_url=self.database_url)
         holding_frames = load_many_ticker_windows(holding_tickers, resolved_as_of, 3, database_url=self.database_url)
+        technical_map = self._load_technical_rating_map(holding_tickers, as_of_date=resolved_as_of)
 
-        rows = [self._build_row(item, etf_frames.get(item.ticker), holding_frames) for item in self.etfs]
+        rows = [self._build_row(item, etf_frames.get(item.ticker), holding_frames, technical_map) for item in self.etfs]
         rows.sort(key=lambda row: _sort_value(row.get("day_change_pct")), reverse=True)
         latest_dates = [row["latest_date"] for row in rows if row.get("latest_date")]
         latest_update = max(latest_dates) if latest_dates else None
@@ -350,16 +352,18 @@ class SectorLeaderboardService:
             "rows": rows,
         }
 
-    def _build_row(self, etf: SectorEtf, frame: Any, holding_frames: dict[str, Any]) -> dict[str, Any]:
+    def _build_row(self, etf: SectorEtf, frame: Any, holding_frames: dict[str, Any], technical_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
         metrics = _compute_metrics(frame)
         holdings = []
         for holding in etf.holdings:
             holding_metrics = _compute_metrics(holding_frames.get(holding.ticker))
+            technical = technical_map.get(holding.ticker, {})
             holdings.append(
                 {
                     "ticker": holding.ticker,
                     "weight": holding.weight,
                     "day_change_pct": holding_metrics["day_change_pct"],
+                    "daily_rs_rating": _finite_float(technical.get("daily_rs_rating")),
                 }
             )
 
@@ -378,6 +382,18 @@ class SectorLeaderboardService:
             "latest_date": metrics["latest_date"],
             "top_holdings": holdings,
         }
+
+    def _load_technical_rating_map(self, tickers: list[str], *, as_of_date: dt.date) -> dict[str, dict[str, Any]]:
+        if not self.database_url or not tickers:
+            return {}
+        try:
+            return RatingsRepository(self.database_url).load_latest_technical_rating_snapshots_for_tickers(
+                tickers,
+                as_of_date=as_of_date,
+                allow_older_as_of_date=True,
+            )
+        except Exception:
+            return {}
 
 
 def _compute_metrics(frame: Any) -> dict[str, Any]:

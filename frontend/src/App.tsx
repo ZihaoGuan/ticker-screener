@@ -110,6 +110,10 @@ export default function App() {
             element={<SectorLeaderboardPage />}
           />
           <Route
+            path="/sector-leaderboard/:ticker"
+            element={<SectorLeaderboardPage />}
+          />
+          <Route
             path="/ratings"
             element={
               <RatingsPage />

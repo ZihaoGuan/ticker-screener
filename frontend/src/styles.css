@@ -5300,6 +5300,7 @@ a {
   font-family: inherit;
   font-size: 16px;
   font-weight: 800;
+  text-decoration: none;
 }
 
 .is-positive {
@@ -5412,6 +5413,62 @@ a {
 
 .sector-price-chart .chart-card-rs {
   display: none;
+}
+
+.sector-all-chart-grid {
+  padding: 0;
+}
+
+.sector-detail-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(92px, 1fr));
+  min-width: 320px;
+}
+
+.sector-detail-metrics > div {
+  background: #0b1020;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.sector-detail-metrics span {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sector-detail-metrics strong {
+  color: #e4e4e7;
+  font-size: 18px;
+}
+
+.sector-holdings-table {
+  min-width: 760px;
+}
+
+.sector-sort-button {
+  align-items: center;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  font: inherit;
+  text-align: left;
+}
+
+.sector-sort-button span {
+  color: #22d3ee;
+  font-size: 10px;
+}
+
+.compact-table-action {
+  min-height: 32px;
+  padding: 6px 10px;
 }
 
 @media (max-width: 1400px) {
@@ -5560,6 +5617,11 @@ a {
   .sector-chart-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .sector-detail-metrics {
+    grid-template-columns: 1fr;
+    min-width: 0;
   }
 
   .sector-leaderboard-meta {

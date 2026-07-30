@@ -39,20 +39,29 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
         def fake_load_many_ticker_windows(tickers, as_of_date, trading_days_needed, *, database_url=None):
             return {ticker: frames[ticker] for ticker in tickers if ticker in frames}
 
-        with patch.object(module, "load_many_ticker_windows", fake_load_many_ticker_windows):
+        with patch.object(module, "load_many_ticker_windows", fake_load_many_ticker_windows), patch.object(
+            SectorLeaderboardService,
+            "_load_technical_rating_map",
+            return_value={"ONE": {"daily_rs_rating": 91.0}, "TWO": {"daily_rs_rating": 42.0}},
+        ):
             payload = SectorLeaderboardService(database_url="postgres://example", etfs=etfs).get_payload(as_of_date=dt.date(2026, 7, 30))
 
         self.assertEqual(payload["rows"][0]["ticker"], "AAA")
         self.assertEqual(payload["rows"][0]["price"], 369.0)
         self.assertEqual(payload["rows"][0]["day_change_pct"], 0.27)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["day_change_pct"], 9.09)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["daily_rs_rating"], 91.0)
         self.assertEqual(payload["rows"][1]["ticker"], "BBB")
         self.assertEqual(payload["rows"][1]["top_holdings"][0]["day_change_pct"], -11.11)
 
     def test_keeps_empty_rows_when_database_has_no_bars(self):
         etfs = (SectorEtf("AAA", "Alpha", "Test", "https://example.test/aaa", (SectorHolding("ONE", 10.0),)),)
 
-        with patch.object(module, "load_many_ticker_windows", lambda *args, **kwargs: {}):
+        with patch.object(module, "load_many_ticker_windows", lambda *args, **kwargs: {}), patch.object(
+            SectorLeaderboardService,
+            "_load_technical_rating_map",
+            return_value={},
+        ):
             payload = SectorLeaderboardService(etfs=etfs).get_payload(as_of_date=dt.date(2026, 7, 30))
 
         self.assertEqual(
@@ -71,7 +80,7 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
                     "atr_pct": None,
                     "volume": None,
                     "latest_date": None,
-                    "top_holdings": [{"ticker": "ONE", "weight": 10.0, "day_change_pct": None}],
+                    "top_holdings": [{"ticker": "ONE", "weight": 10.0, "day_change_pct": None, "daily_rs_rating": None}],
                 }
             ],
         )
