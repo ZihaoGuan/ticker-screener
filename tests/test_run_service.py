@@ -775,9 +775,22 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("run_finviz_ratings_pipeline", action_ids)
         self.assertIn("sync_chart_fundamentals_cache", action_ids)
         self.assertIn("flashalpha_gex_close", action_ids)
+        self.assertIn("refresh_sector_etf_holdings", action_ids)
         self.assertNotIn("gamma_squeeze", action_ids)
         self.assertIn("backfill_trendline_snapshots", action_ids)
         self.assertIn("reload_postgres_market_data_date", action_ids)
+
+    def test_build_command_supports_refresh_sector_etf_holdings(self) -> None:
+        command = self.service.build_command(
+            "refresh_sector_etf_holdings",
+            {
+                "tickers": "XLC XLK",
+            },
+        )
+
+        self.assertEqual(command[1], "scripts/refresh_sector_etf_holdings.py")
+        tickers_index = command.index("--tickers")
+        self.assertEqual(command[tickers_index + 1 : tickers_index + 3], ["XLC", "XLK"])
 
     def test_launch_finviz_ratings_pipeline_includes_custom_options(self) -> None:
         captured: dict[str, object] = {}

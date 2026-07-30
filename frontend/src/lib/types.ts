@@ -277,7 +277,9 @@ export type ScannerTopHitsResponse = ScannerBoardResponse & {
 
 export type SectorLeaderboardHolding = {
   ticker: string;
+  name?: string;
   weight: number;
+  shares_held?: number | null;
   day_change_pct: number | null;
   daily_rs_rating: number | null;
 };
@@ -306,6 +308,7 @@ export type SectorLeaderboardResponse = {
     provider: string;
     fund_finder_url: string;
     note: string;
+    holdings_cache_generated_at?: string;
   };
   rows: SectorLeaderboardRow[];
 };

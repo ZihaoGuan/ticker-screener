@@ -120,7 +120,7 @@ def get_rrg_service() -> RrgService:
 
 
 def get_sector_leaderboard_service() -> SectorLeaderboardService:
-    return SectorLeaderboardService(database_url=config.database_url)
+    return SectorLeaderboardService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
 
 
 def get_ad_hoc_screen_service() -> AdHocScreenService:

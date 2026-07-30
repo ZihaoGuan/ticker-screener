@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -9,12 +10,15 @@ import pandas as pd
 
 from ...market_data_access import load_many_ticker_windows
 from ...ratings.repository import RatingsRepository
+from ...ssga_holdings import load_holdings_cache
 
 
 @dataclass(frozen=True)
 class SectorHolding:
     ticker: str
     weight: float
+    name: str = ""
+    shares_held: float | None = None
 
 
 @dataclass(frozen=True)
@@ -324,19 +328,22 @@ DEFAULT_SECTOR_ETFS: tuple[SectorEtf, ...] = (
 
 
 class SectorLeaderboardService:
-    def __init__(self, *, database_url: str | None = None, etfs: tuple[SectorEtf, ...] = DEFAULT_SECTOR_ETFS):
+    def __init__(self, *, database_url: str | None = None, artifacts_dir: Path | None = None, etfs: tuple[SectorEtf, ...] = DEFAULT_SECTOR_ETFS):
         self.database_url = database_url
+        self.artifacts_dir = artifacts_dir
         self.etfs = etfs
 
     def get_payload(self, *, as_of_date: dt.date | None = None) -> dict[str, Any]:
         resolved_as_of = as_of_date or dt.date.today()
         etf_tickers = [item.ticker for item in self.etfs]
-        holding_tickers = sorted({holding.ticker for item in self.etfs for holding in item.holdings})
+        cache = load_holdings_cache(self.artifacts_dir) if self.artifacts_dir is not None else None
+        holdings_by_etf = self._resolve_holdings_by_etf(cache)
+        holding_tickers = sorted({holding.ticker for holdings in holdings_by_etf.values() for holding in holdings})
         etf_frames = load_many_ticker_windows(etf_tickers, resolved_as_of, 270, database_url=self.database_url)
         holding_frames = load_many_ticker_windows(holding_tickers, resolved_as_of, 3, database_url=self.database_url)
         technical_map = self._load_technical_rating_map(holding_tickers, as_of_date=resolved_as_of)
 
-        rows = [self._build_row(item, etf_frames.get(item.ticker), holding_frames, technical_map) for item in self.etfs]
+        rows = [self._build_row(item, etf_frames.get(item.ticker), holdings_by_etf.get(item.ticker, item.holdings), holding_frames, technical_map) for item in self.etfs]
         rows.sort(key=lambda row: _sort_value(row.get("day_change_pct")), reverse=True)
         latest_dates = [row["latest_date"] for row in rows if row.get("latest_date")]
         latest_update = max(latest_dates) if latest_dates else None
@@ -348,20 +355,30 @@ class SectorLeaderboardService:
                 "provider": "State Street Global Advisors",
                 "fund_finder_url": "https://www.ssga.com/us/en/intermediary/fund-finder?g=assetclass%3Aequity!noLabel*Sectors---Industries&type=etfs",
                 "note": "Default catalog uses Select Sector SPDR equity sector ETFs and excludes premium-income variants.",
+                "holdings_cache_generated_at": str(cache.get("generated_at") or "") if isinstance(cache, dict) else "",
             },
             "rows": rows,
         }
 
-    def _build_row(self, etf: SectorEtf, frame: Any, holding_frames: dict[str, Any], technical_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    def _build_row(
+        self,
+        etf: SectorEtf,
+        frame: Any,
+        holdings_source: tuple[SectorHolding, ...],
+        holding_frames: dict[str, Any],
+        technical_map: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
         metrics = _compute_metrics(frame)
         holdings = []
-        for holding in etf.holdings:
+        for holding in holdings_source:
             holding_metrics = _compute_metrics(holding_frames.get(holding.ticker))
             technical = technical_map.get(holding.ticker, {})
             holdings.append(
                 {
                     "ticker": holding.ticker,
+                    "name": holding.name,
                     "weight": holding.weight,
+                    "shares_held": holding.shares_held,
                     "day_change_pct": holding_metrics["day_change_pct"],
                     "daily_rs_rating": _finite_float(technical.get("daily_rs_rating")),
                 }
@@ -382,6 +399,40 @@ class SectorLeaderboardService:
             "latest_date": metrics["latest_date"],
             "top_holdings": holdings,
         }
+
+    def _resolve_holdings_by_etf(self, cache: dict[str, Any] | None) -> dict[str, tuple[SectorHolding, ...]]:
+        fallback = {item.ticker: item.holdings for item in self.etfs}
+        if not isinstance(cache, dict):
+            return fallback
+        results = cache.get("results")
+        if not isinstance(results, dict):
+            return fallback
+
+        resolved: dict[str, tuple[SectorHolding, ...]] = {}
+        for etf in self.etfs:
+            result = results.get(etf.ticker)
+            raw_holdings = result.get("holdings") if isinstance(result, dict) else None
+            if not isinstance(raw_holdings, list):
+                resolved[etf.ticker] = etf.holdings
+                continue
+            holdings: list[SectorHolding] = []
+            for item in raw_holdings:
+                if not isinstance(item, dict):
+                    continue
+                ticker = str(item.get("ticker") or "").strip().upper()
+                weight = _finite_float(item.get("weight"))
+                if not ticker or weight is None:
+                    continue
+                holdings.append(
+                    SectorHolding(
+                        ticker=ticker,
+                        weight=weight,
+                        name=str(item.get("name") or ""),
+                        shares_held=_finite_float(item.get("shares_held")),
+                    )
+                )
+            resolved[etf.ticker] = tuple(holdings) if holdings else etf.holdings
+        return resolved
 
     def _load_technical_rating_map(self, tickers: list[str], *, as_of_date: dt.date) -> dict[str, dict[str, Any]]:
         if not self.database_url or not tickers:

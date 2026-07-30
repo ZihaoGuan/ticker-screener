@@ -414,6 +414,7 @@ function SectorDetailPage({
           <thead>
             <tr>
               <th>{renderHoldingSortHeader("Ticker", "ticker", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+              <th>Name</th>
               <th>{renderHoldingSortHeader("Weight", "weight", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
               <th>{renderHoldingSortHeader("DY%", "change", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
               <th>{renderHoldingSortHeader("Daily RS", "dailyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
@@ -428,6 +429,7 @@ function SectorDetailPage({
                     {holding.ticker}
                   </Link>
                 </td>
+                <td>{holding.name || holding.ticker}</td>
                 <td>{formatPercent(holding.weight, { signed: false })}</td>
                 <td className={valueClass(holding.day_change_pct)}>{formatPercent(holding.day_change_pct)}</td>
                 <td>{formatRating(holding.daily_rs_rating)}</td>
@@ -448,7 +450,7 @@ function SectorDetailPage({
 function HoldingPills({ row }: { row: SectorLeaderboardRow }) {
   return (
     <div className="sector-holding-list">
-      {row.top_holdings.map((holding) => (
+      {row.top_holdings.slice(0, 5).map((holding) => (
         <span className="sector-holding-pill" key={`${row.ticker}-${holding.ticker}`}>
           <span className={`holding-dot ${valueClass(holding.day_change_pct)}`} />
           <span>{holding.ticker}</span>

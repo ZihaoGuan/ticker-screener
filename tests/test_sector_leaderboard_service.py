@@ -1,5 +1,8 @@
 import datetime as dt
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -80,10 +83,50 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
                     "atr_pct": None,
                     "volume": None,
                     "latest_date": None,
-                    "top_holdings": [{"ticker": "ONE", "weight": 10.0, "day_change_pct": None, "daily_rs_rating": None}],
+                    "top_holdings": [{"ticker": "ONE", "name": "", "weight": 10.0, "shares_held": None, "day_change_pct": None, "daily_rs_rating": None}],
                 }
             ],
         )
+
+    def test_uses_cached_ssga_holdings_when_available(self):
+        etfs = (SectorEtf("AAA", "Alpha", "Test", "https://example.test/aaa", (SectorHolding("OLD", 10.0),)),)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "sector_etf_holdings"
+            cache_dir.mkdir()
+            (cache_dir / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-30T12:00:00+00:00",
+                        "results": {
+                            "AAA": {
+                                "holdings": [
+                                    {
+                                        "ticker": "NEW",
+                                        "name": "New Holding",
+                                        "weight": 17.5,
+                                        "shares_held": 123.0,
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(module, "load_many_ticker_windows", lambda *args, **kwargs: {}), patch.object(
+                SectorLeaderboardService,
+                "_load_technical_rating_map",
+                return_value={"NEW": {"daily_rs_rating": 88.0}},
+            ):
+                payload = SectorLeaderboardService(etfs=etfs, artifacts_dir=Path(tmpdir)).get_payload(as_of_date=dt.date(2026, 7, 30))
+
+        self.assertEqual(payload["source"]["holdings_cache_generated_at"], "2026-07-30T12:00:00+00:00")
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["ticker"], "NEW")
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["name"], "New Holding")
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["shares_held"], 123.0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["daily_rs_rating"], 88.0)
 
 
 if __name__ == "__main__":
