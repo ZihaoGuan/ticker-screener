@@ -31,6 +31,7 @@ class SectorEtf:
 
 
 _SSGA_BASE_URL = "https://www.ssga.com/us/en/intermediary/etfs"
+_BENCHMARK_TICKER = "SPY"
 
 
 DEFAULT_SECTOR_ETFS: tuple[SectorEtf, ...] = (
@@ -339,11 +340,22 @@ class SectorLeaderboardService:
         cache = load_holdings_cache(self.artifacts_dir) if self.artifacts_dir is not None else None
         holdings_by_etf = self._resolve_holdings_by_etf(cache)
         holding_tickers = sorted({holding.ticker for holdings in holdings_by_etf.values() for holding in holdings})
-        etf_frames = load_many_ticker_windows(etf_tickers, resolved_as_of, 270, database_url=self.database_url)
+        etf_frames = load_many_ticker_windows([*etf_tickers, _BENCHMARK_TICKER], resolved_as_of, 270, database_url=self.database_url)
+        benchmark_frame = etf_frames.get(_BENCHMARK_TICKER)
         holding_frames = load_many_ticker_windows(holding_tickers, resolved_as_of, 3, database_url=self.database_url)
         technical_map = self._load_technical_rating_map(holding_tickers, as_of_date=resolved_as_of)
 
-        rows = [self._build_row(item, etf_frames.get(item.ticker), holdings_by_etf.get(item.ticker, item.holdings), holding_frames, technical_map) for item in self.etfs]
+        rows = [
+            self._build_row(
+                item,
+                etf_frames.get(item.ticker),
+                benchmark_frame,
+                holdings_by_etf.get(item.ticker, item.holdings),
+                holding_frames,
+                technical_map,
+            )
+            for item in self.etfs
+        ]
         rows.sort(key=lambda row: _sort_value(row.get("day_change_pct")), reverse=True)
         latest_dates = [row["latest_date"] for row in rows if row.get("latest_date")]
         latest_update = max(latest_dates) if latest_dates else None
@@ -355,6 +367,7 @@ class SectorLeaderboardService:
                 "provider": "State Street Global Advisors",
                 "fund_finder_url": "https://www.ssga.com/us/en/intermediary/fund-finder?g=assetclass%3Aequity!noLabel*Sectors---Industries&type=etfs",
                 "note": "Default catalog uses Select Sector SPDR equity sector ETFs and excludes premium-income variants.",
+                "benchmark_ticker": _BENCHMARK_TICKER,
                 "holdings_cache_generated_at": str(cache.get("generated_at") or "") if isinstance(cache, dict) else "",
             },
             "rows": rows,
@@ -364,11 +377,13 @@ class SectorLeaderboardService:
         self,
         etf: SectorEtf,
         frame: Any,
+        benchmark_frame: Any,
         holdings_source: tuple[SectorHolding, ...],
         holding_frames: dict[str, Any],
         technical_map: dict[str, dict[str, Any]],
     ) -> dict[str, Any]:
         metrics = _compute_metrics(frame)
+        relative_metrics = _compute_relative_metrics(frame, benchmark_frame)
         holdings = []
         for holding in holdings_source:
             holding_metrics = _compute_metrics(holding_frames.get(holding.ticker))
@@ -394,6 +409,9 @@ class SectorLeaderboardService:
             "week_change_pct": metrics["week_change_pct"],
             "month_change_pct": metrics["month_change_pct"],
             "year_change_pct": metrics["year_change_pct"],
+            "rs_vs_spy_1m_pct": relative_metrics["rs_1m_pct"],
+            "rs_vs_spy_3m_pct": relative_metrics["rs_3m_pct"],
+            "rs_momentum_score": relative_metrics["rs_momentum_score"],
             "atr_pct": metrics["atr_pct"],
             "volume": metrics["volume"],
             "latest_date": metrics["latest_date"],
@@ -473,6 +491,57 @@ def _compute_metrics(frame: Any) -> dict[str, Any]:
         "volume": _finite_int(latest.get("Volume")),
         "latest_date": latest_date,
     }
+
+
+def _compute_relative_metrics(frame: Any, benchmark_frame: Any) -> dict[str, float | None]:
+    if frame is None or benchmark_frame is None or frame.empty or benchmark_frame.empty:
+        return {"rs_1m_pct": None, "rs_3m_pct": None, "rs_momentum_score": None}
+
+    pair = pd.concat([frame["Close"], benchmark_frame["Close"]], axis=1, join="inner").dropna()
+    pair.columns = ["sector_close", "benchmark_close"]
+    pair = pair[(pair["sector_close"] > 0) & (pair["benchmark_close"] > 0)]
+    if pair.empty:
+        return {"rs_1m_pct": None, "rs_3m_pct": None, "rs_momentum_score": None}
+
+    ratio = pair["sector_close"] / pair["benchmark_close"]
+    rs_1m = _ratio_change_pct(ratio, 21)
+    rs_3m = _ratio_change_pct(ratio, 63)
+    score = _relative_momentum_score(ratio)
+    return {"rs_1m_pct": rs_1m, "rs_3m_pct": rs_3m, "rs_momentum_score": score}
+
+
+def _ratio_change_pct(ratio: pd.Series, lookback: int) -> float | None:
+    if len(ratio) <= lookback:
+        return None
+    latest = _finite_float(ratio.iloc[-1])
+    prior = _finite_float(ratio.iloc[-(lookback + 1)])
+    if latest is None or prior is None or prior <= 0:
+        return None
+    return round(((latest / prior) - 1) * 100, 2)
+
+
+def _relative_momentum_score(ratio: pd.Series) -> float | None:
+    log_ratio = ratio.apply(math.log)
+    momentum_21 = _log_momentum_pct(log_ratio, 21)
+    momentum_63 = _log_momentum_pct(log_ratio, 63)
+    if momentum_21 is None and momentum_63 is None:
+        return None
+    raw_score = 50.0
+    if momentum_21 is not None:
+        raw_score += momentum_21 * 4.0
+    if momentum_63 is not None:
+        raw_score += momentum_63 * 1.5
+    return round(min(100.0, max(0.0, raw_score)), 1)
+
+
+def _log_momentum_pct(log_ratio: pd.Series, lookback: int) -> float | None:
+    if len(log_ratio) <= lookback:
+        return None
+    latest = _finite_float(log_ratio.iloc[-1])
+    prior = _finite_float(log_ratio.iloc[-(lookback + 1)])
+    if latest is None or prior is None:
+        return None
+    return (latest - prior) * 100
 
 
 def _change_pct(frame: Any, lookback: int) -> float | None:

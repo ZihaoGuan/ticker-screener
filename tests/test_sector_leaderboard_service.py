@@ -35,6 +35,7 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
         frames = {
             "AAA": _frame([100 + index for index in range(270)]),
             "BBB": _frame([100 + index * 0.5 for index in range(269)] + [80]),
+            "SPY": _frame([100 for _ in range(270)]),
             "ONE": _frame([10, 11, 12]),
             "TWO": _frame([10, 9, 8]),
         }
@@ -52,6 +53,9 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["ticker"], "AAA")
         self.assertEqual(payload["rows"][0]["price"], 369.0)
         self.assertEqual(payload["rows"][0]["day_change_pct"], 0.27)
+        self.assertEqual(payload["rows"][0]["rs_vs_spy_1m_pct"], 6.03)
+        self.assertEqual(payload["rows"][0]["rs_vs_spy_3m_pct"], 20.59)
+        self.assertEqual(payload["rows"][0]["rs_momentum_score"], 100.0)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["day_change_pct"], 9.09)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["daily_rs_rating"], 91.0)
         self.assertEqual(payload["rows"][1]["ticker"], "BBB")
@@ -80,6 +84,9 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
                     "week_change_pct": None,
                     "month_change_pct": None,
                     "year_change_pct": None,
+                    "rs_vs_spy_1m_pct": None,
+                    "rs_vs_spy_3m_pct": None,
+                    "rs_momentum_score": None,
                     "atr_pct": None,
                     "volume": None,
                     "latest_date": None,
@@ -87,6 +94,7 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
                 }
             ],
         )
+        self.assertEqual(payload["source"]["benchmark_ticker"], "SPY")
 
     def test_uses_cached_ssga_holdings_when_available(self):
         etfs = (SectorEtf("AAA", "Alpha", "Test", "https://example.test/aaa", (SectorHolding("OLD", 10.0),)),)

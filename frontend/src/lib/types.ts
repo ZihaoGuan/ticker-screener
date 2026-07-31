@@ -294,6 +294,9 @@ export type SectorLeaderboardRow = {
   week_change_pct: number | null;
   month_change_pct: number | null;
   year_change_pct: number | null;
+  rs_vs_spy_1m_pct: number | null;
+  rs_vs_spy_3m_pct: number | null;
+  rs_momentum_score: number | null;
   atr_pct: number | null;
   volume: number | null;
   latest_date: string | null;
@@ -308,6 +311,7 @@ export type SectorLeaderboardResponse = {
     provider: string;
     fund_finder_url: string;
     note: string;
+    benchmark_ticker?: string;
     holdings_cache_generated_at?: string;
   };
   rows: SectorLeaderboardRow[];

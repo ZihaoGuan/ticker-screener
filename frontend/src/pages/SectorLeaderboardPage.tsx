@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
-import { ScannerMiniChart } from "../components/ScannerMiniChart";
+import { RebasedComparisonChart } from "../components/RebasedComparisonChart";
 import { fetchJson } from "../lib/api";
 import { formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type { CandlePoint, SectorLeaderboardHolding, SectorLeaderboardResponse, SectorLeaderboardRow, WatchlistChartResponse } from "../lib/types";
@@ -288,6 +288,9 @@ function SectorLeaderboardTable({ rows }: { rows: SectorLeaderboardRow[] }) {
               <th>WK%</th>
               <th>MO%</th>
               <th>1Y%</th>
+              <th>RS 1M</th>
+              <th>RS 3M</th>
+              <th>RS Mom</th>
               <th>ATR%</th>
               <th>Vol</th>
               <th>Top Holdings</th>
@@ -307,6 +310,11 @@ function SectorLeaderboardTable({ rows }: { rows: SectorLeaderboardRow[] }) {
                 <td data-label="WK%" className={valueClass(row.week_change_pct)}>{formatPercent(row.week_change_pct)}</td>
                 <td data-label="MO%" className={valueClass(row.month_change_pct)}>{formatPercent(row.month_change_pct)}</td>
                 <td data-label="1Y%" className={valueClass(row.year_change_pct)}>{formatPercent(row.year_change_pct)}</td>
+                <td data-label="RS 1M" className={valueClass(row.rs_vs_spy_1m_pct)}>{formatPercent(row.rs_vs_spy_1m_pct)}</td>
+                <td data-label="RS 3M" className={valueClass(row.rs_vs_spy_3m_pct)}>{formatPercent(row.rs_vs_spy_3m_pct)}</td>
+                <td data-label="RS Mom">
+                  <span className={`scanner-score-pill ${toneForMomentumScore(row.rs_momentum_score)}`}>{formatRating(row.rs_momentum_score)}</span>
+                </td>
                 <td data-label="ATR%">{formatPercent(row.atr_pct, { signed: false })}</td>
                 <td data-label="Vol">{formatVolume(row.volume)}</td>
                 <td data-label="Top Holdings">
@@ -368,30 +376,19 @@ function SectorChartGrid({
                 <span className="scanner-chart-card-volume">Vol {formatVolume(row.volume)}</span>
               </div>
               <div className="scanner-chart-card-body">
-                <div className="sector-chart-comparison">
-                  <div className="sector-mini-chart-panel">
-                    <div className="sector-mini-chart-label">
-                      <strong>{row.ticker}</strong>
-                      <span>{formatPercent(row.day_change_pct)}</span>
-                    </div>
-                    {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
-                    {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
-                    {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
-                    {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={row.ticker} candles={chartCandles} /> : null}
-                  </div>
-                  <div className="sector-mini-chart-panel">
-                    <div className="sector-mini-chart-label">
-                      <strong>{BENCHMARK_TICKER}</strong>
-                      <span>Benchmark</span>
-                    </div>
-                    {isBenchmarkLoading ? <LoadingBlock label={`Loading ${BENCHMARK_TICKER} chart...`} /> : null}
-                    {!isBenchmarkLoading && benchmarkError ? <p className="panel-copy">{benchmarkError}</p> : null}
-                    {!isBenchmarkLoading && !benchmarkError && benchmarkCandles.length === 0 ? <p className="panel-copy">No SPY chart data.</p> : null}
-                    {!isBenchmarkLoading && !benchmarkError && benchmarkCandles.length > 0 ? (
-                      <ScannerMiniChart ticker={BENCHMARK_TICKER} candles={benchmarkCandles} />
-                    ) : null}
-                  </div>
-                </div>
+                {isChartLoading || isBenchmarkLoading ? <LoadingBlock label={`Loading ${row.ticker} vs ${BENCHMARK_TICKER} chart...`} /> : null}
+                {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
+                {!isBenchmarkLoading && benchmarkError ? <p className="panel-copy">{benchmarkError}</p> : null}
+                {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
+                {!isBenchmarkLoading && !benchmarkError && benchmarkCandles.length === 0 ? <p className="panel-copy">No SPY chart data.</p> : null}
+                {!isChartLoading && !isBenchmarkLoading && !chartError && !benchmarkError && chartCandles.length > 0 && benchmarkCandles.length > 0 ? (
+                  <RebasedComparisonChart
+                    sectorTicker={row.ticker}
+                    benchmarkTicker={BENCHMARK_TICKER}
+                    sectorCandles={chartCandles}
+                    benchmarkCandles={benchmarkCandles}
+                  />
+                ) : null}
               </div>
               <div className="scanner-chart-card-footer">
                 <span>{chartPayload?.resolved_as_of_date ? `Sector as of ${chartPayload.resolved_as_of_date}` : "Latest"}</span>
@@ -597,6 +594,19 @@ function renderHoldingSortHeader(
 
 function renderChange(value: number | null | undefined) {
   return <span className={valueClass(value)}>{formatPercent(value)}</span>;
+}
+
+function toneForMomentumScore(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) {
+    return "is-muted";
+  }
+  if (value >= 65) {
+    return "is-strong";
+  }
+  if (value >= 50) {
+    return "is-warm";
+  }
+  return "is-neutral";
 }
 
 function formatMoney(value: number | null | undefined): string {
