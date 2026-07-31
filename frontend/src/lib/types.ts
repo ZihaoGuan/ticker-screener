@@ -353,7 +353,7 @@ export type OverlapPipelineStatus = {
   label: string;
   count: number;
   file_present: boolean;
-  bias_group?: "bullish" | "bearish" | "other";
+  bias_group?: "bullish" | "bearish" | "data" | "other";
   bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
 };
 
@@ -618,7 +618,7 @@ export type DashboardResponse = {
 export type RunAction = {
   id: string;
   label: string;
-  bias_group?: "bullish" | "bearish" | "other";
+  bias_group?: "bullish" | "bearish" | "data" | "other";
   bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
   command: string;
   supports_limit: boolean;
@@ -1555,7 +1555,7 @@ export type ScheduledJobConfigResponse = {
   available_actions: Array<{
     id: string;
     label: string;
-    bias_group?: "bullish" | "bearish" | "other";
+    bias_group?: "bullish" | "bearish" | "data" | "other";
     bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
     fields: Array<{
       id: string;

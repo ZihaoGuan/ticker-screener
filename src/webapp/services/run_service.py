@@ -399,7 +399,7 @@ class RunService:
             fields=(
                 _tickers_field,
             ),
-            bias_group="other",
+            bias_group="data",
         ),
         "market_breadth": RunAction(
             "market_breadth",

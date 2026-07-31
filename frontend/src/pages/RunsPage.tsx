@@ -28,7 +28,7 @@ type RunsPageProps = {
 type ScheduledActionOption = {
   id: string;
   label: string;
-  bias_group?: "bullish" | "bearish" | "other";
+  bias_group?: "bullish" | "bearish" | "data" | "other";
   bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
   fields: Array<{
     id: string;
@@ -560,7 +560,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     actions: Array<{
       id: string;
       label: string;
-      bias_group?: "bullish" | "bearish" | "other";
+      bias_group?: "bullish" | "bearish" | "data" | "other";
       bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
       command: string;
       supports_limit: boolean;
@@ -795,10 +795,15 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       return [{ key: "all", label: "", sections: [{ key: "all", label: "", actions: visibleActions }] }];
     }
     const order: Array<{
-      key: "bullish" | "bearish" | "other";
+      key: "data" | "bullish" | "bearish" | "other";
       label: string;
       sections: Array<{ key: string; label: string; match: (action: (typeof visibleActions)[number]) => boolean }>;
     }> = [
+      {
+        key: "data",
+        label: "Data Refresh",
+        sections: [{ key: "data", label: "", match: (action) => (action.bias_group ?? "other") === "data" }],
+      },
       {
         key: "bullish",
         label: "Bullish",
@@ -2221,6 +2226,9 @@ function groupScheduledActions(actions: ScheduledActionOption[]): Array<{ label:
 }
 
 function scheduledActionGroupLabel(action: ScheduledActionOption): string {
+  if ((action.bias_group ?? "other") === "data") {
+    return "Data Refresh";
+  }
   if ((action.bias_group ?? "other") === "bullish") {
     if ((action.bullish_subgroup ?? "") === "leaders") {
       return "Bullish / Leader Signals";
@@ -2240,22 +2248,25 @@ function scheduledActionGroupLabel(action: ScheduledActionOption): string {
 }
 
 function scheduledGroupRank(label: string): number {
-  if (label === "Bullish / Leader Signals") {
+  if (label === "Data Refresh") {
     return 0;
   }
-  if (label === "Bullish / Pullback Signals") {
+  if (label === "Bullish / Leader Signals") {
     return 1;
   }
-  if (label === "Bullish / Bottoming Breakouts") {
+  if (label === "Bullish / Pullback Signals") {
     return 2;
   }
-  if (label === "Bullish / Other") {
+  if (label === "Bullish / Bottoming Breakouts") {
     return 3;
   }
-  if (label === "Bearish") {
+  if (label === "Bullish / Other") {
     return 4;
   }
-  return 5;
+  if (label === "Bearish") {
+    return 5;
+  }
+  return 6;
 }
 
 function buildScheduleOptionsTemplate(action: ScheduledActionOption | null): string {
