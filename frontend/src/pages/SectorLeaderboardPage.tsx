@@ -4,7 +4,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
-import { formatLocalDate } from "../lib/format";
+import { formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type { CandlePoint, SectorLeaderboardHolding, SectorLeaderboardResponse, SectorLeaderboardRow, WatchlistChartResponse } from "../lib/types";
 
 type ViewMode = "list" | "chart";
@@ -178,91 +178,129 @@ function SectorHeader({
 }) {
   return (
     <>
-      <section className="sector-leaderboard-hero">
-        <div>
-          <span className="eyebrow">ETF Rotation</span>
-          <h1>U.S. ETF Sector Leaderboard</h1>
-          <p>
-            Sector and industry ETF leaderboard ranked by daily performance, with cached OHLCV metrics and top holdings from the
-            default State Street ETF catalog.
-          </p>
+      <section className="scanner-result-hero panel">
+        <div className="scanner-result-breadcrumbs">
+          <Link to="/">Dashboard</Link>
+          <span>›</span>
+          <span>Sector Leaderboard</span>
         </div>
-        <div className="sector-leaderboard-actions">
-          <div className="segmented-control" role="tablist" aria-label="Sector leaderboard view">
-            <button className={viewMode === "list" ? "is-active" : ""} type="button" onClick={() => onViewModeChange("list")}>
+        <div className="scanner-result-title-row">
+          <div>
+            <span className="scanner-result-kicker">ETF Rotation</span>
+            <h1>U.S. ETF Sector Leaderboard</h1>
+          </div>
+          <span className={`scanner-result-status${rows.length > 0 ? " is-live" : ""}`}>{rows.length > 0 ? "Data Ready" : "No Data"}</span>
+        </div>
+        <p className="scanner-result-copy">
+          Sector and industry ETF leaderboard ranked by daily performance, with cached OHLCV metrics and top holdings from the
+          default State Street ETF catalog.
+        </p>
+        <SectorMetricStrip payload={payload} rows={rows} />
+      </section>
+
+      <section className="scanner-result-filter-grid sector-leaderboard-controls">
+        <div className="scanner-result-filter panel scanner-result-filter-actions">
+          <span className="eyebrow">Views</span>
+          <div className="scanner-result-view-actions" role="tablist" aria-label="Sector leaderboard view">
+            <button
+              className={`scanner-result-view-chip${viewMode === "list" ? " is-active" : ""}`}
+              type="button"
+              onClick={() => onViewModeChange("list")}
+            >
               List
             </button>
-            <button className={viewMode === "chart" ? "is-active" : ""} type="button" onClick={() => onViewModeChange("chart")}>
+            <button
+              className={`scanner-result-view-chip${viewMode === "chart" ? " is-active" : ""}`}
+              type="button"
+              onClick={() => onViewModeChange("chart")}
+            >
               Charts
             </button>
           </div>
-          <button className="ghost-button" type="button" onClick={() => window.location.reload()}>
-            Refresh
-          </button>
         </div>
-      </section>
-
-      <section className="sector-leaderboard-meta">
-        <div>
-          <span>Latest Data</span>
-          <strong>{formatLocalDate(payload?.latest_data_date)}</strong>
-        </div>
-        <div>
-          <span>Catalog</span>
-          <strong>{rows.length} ETFs</strong>
-        </div>
-        <div>
-          <span>Source</span>
-          <a href={payload?.source.fund_finder_url} target="_blank" rel="noreferrer">
-            SSGA Fund Finder
-          </a>
+        <div className="scanner-result-filter panel scanner-result-filter-actions">
+          <span className="eyebrow">Page Data</span>
+          <div className="scanner-result-view-actions">
+            <button className="ghost-button sector-refresh-button" type="button" onClick={() => window.location.reload()}>
+              Refresh
+            </button>
+          </div>
         </div>
       </section>
     </>
   );
 }
 
+function SectorMetricStrip({ payload, rows }: { payload: SectorLeaderboardResponse | null; rows: SectorLeaderboardRow[] }) {
+  return (
+    <div className="scanner-result-metrics">
+      <div className="scanner-result-metric">
+        <span className="eyebrow">Latest Data</span>
+        <strong>{formatLocalDate(payload?.latest_data_date)}</strong>
+      </div>
+      <div className="scanner-result-metric">
+        <span className="eyebrow">ETF Catalog</span>
+        <strong>{rows.length} ETFs</strong>
+      </div>
+      <div className="scanner-result-metric">
+        <span className="eyebrow">Holdings Cache</span>
+        <strong>{formatLocalDateTime(payload?.source.holdings_cache_generated_at)}</strong>
+      </div>
+      <div className="scanner-result-metric">
+        <span className="eyebrow">Source</span>
+        <strong>
+          <a href={payload?.source.fund_finder_url} target="_blank" rel="noreferrer">
+            SSGA
+          </a>
+        </strong>
+      </div>
+    </div>
+  );
+}
+
 function SectorLeaderboardTable({ rows }: { rows: SectorLeaderboardRow[] }) {
   return (
-    <section className="sector-table-wrap">
-      <table className="sector-leaderboard-table">
-        <thead>
-          <tr>
-            <th>Ticker</th>
-            <th>Description</th>
-            <th>Price</th>
-            <th>DY%</th>
-            <th>WK%</th>
-            <th>MO%</th>
-            <th>1Y%</th>
-            <th>ATR%</th>
-            <th>Vol</th>
-            <th>Top Holdings</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.ticker}>
-              <td>
-                <Link className="ticker-link-button" to={`/sector-leaderboard/${encodeURIComponent(row.ticker)}`}>
-                  {row.ticker}
-                </Link>
-              </td>
-              <td>{row.description}</td>
-              <td>{formatMoney(row.price)}</td>
-              <td className={valueClass(row.day_change_pct)}>{formatPercent(row.day_change_pct)}</td>
-              <td className={valueClass(row.week_change_pct)}>{formatPercent(row.week_change_pct)}</td>
-              <td className={valueClass(row.month_change_pct)}>{formatPercent(row.month_change_pct)}</td>
-              <td className={valueClass(row.year_change_pct)}>{formatPercent(row.year_change_pct)}</td>
-              <td>{formatPercent(row.atr_pct, { signed: false })}</td>
-              <td>{formatVolume(row.volume)}</td>
-              <td>
-                <HoldingPills row={row} />
-              </td>
+    <section className="scanner-result-table-shell panel">
+      <div className="data-table-responsive sector-table-wrap">
+        <table className="data-table sector-leaderboard-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Description</th>
+              <th>Price</th>
+              <th>DY%</th>
+              <th>WK%</th>
+              <th>MO%</th>
+              <th>1Y%</th>
+              <th>ATR%</th>
+              <th>Vol</th>
+              <th>Top Holdings</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.ticker}>
+                <td data-label="Ticker">
+                  <Link className="scanner-result-symbol" to={`/sector-leaderboard/${encodeURIComponent(row.ticker)}`}>
+                    <span>{row.ticker}</span>
+                  </Link>
+                </td>
+                <td data-label="Description">{row.description}</td>
+                <td data-label="Price">{formatMoney(row.price)}</td>
+                <td data-label="DY%" className={valueClass(row.day_change_pct)}>{formatPercent(row.day_change_pct)}</td>
+                <td data-label="WK%" className={valueClass(row.week_change_pct)}>{formatPercent(row.week_change_pct)}</td>
+                <td data-label="MO%" className={valueClass(row.month_change_pct)}>{formatPercent(row.month_change_pct)}</td>
+                <td data-label="1Y%" className={valueClass(row.year_change_pct)}>{formatPercent(row.year_change_pct)}</td>
+                <td data-label="ATR%">{formatPercent(row.atr_pct, { signed: false })}</td>
+                <td data-label="Vol">{formatVolume(row.volume)}</td>
+                <td data-label="Top Holdings">
+                  <HoldingPills row={row} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -352,44 +390,55 @@ function SectorDetailPage({
   if (!row) {
     return (
       <div className="page-grid sector-leaderboard-page">
-        <div className="notice-banner">Unknown sector ETF: {requestedTicker}</div>
-        <Link className="ghost-button" to="/sector-leaderboard">
-          Back To Leaderboard
-        </Link>
+        <section className="panel">
+          <p className="panel-copy">Unknown sector ETF: {requestedTicker}</p>
+          <Link className="ghost-button" to="/sector-leaderboard">
+            Back To Leaderboard
+          </Link>
+        </section>
       </div>
     );
   }
 
   return (
     <div className="page-grid sector-leaderboard-page">
-      <section className="sector-leaderboard-hero">
-        <div>
-          <div className="scanner-result-breadcrumbs">
-            <Link to="/sector-leaderboard">Sector Leaderboard</Link>
-            <span>/</span>
-            <span>{row.ticker}</span>
-          </div>
-          <span className="eyebrow">{row.provider}</span>
-          <h1>{row.ticker} {row.description}</h1>
-          <p>ETF detail view with a full candle chart and sortable holding momentum table.</p>
+      <section className="scanner-result-hero panel">
+        <div className="scanner-result-breadcrumbs">
+          <Link to="/">Dashboard</Link>
+          <span>›</span>
+          <Link to="/sector-leaderboard">Sector Leaderboard</Link>
+          <span>›</span>
+          <span>{row.ticker}</span>
         </div>
-        <div className="sector-detail-metrics">
+        <div className="scanner-result-title-row">
           <div>
-            <span>Price</span>
+            <span className="scanner-result-kicker">{row.provider}</span>
+            <h1>{row.ticker} {row.description}</h1>
+          </div>
+          <span className={`scanner-result-status${row.day_change_pct && row.day_change_pct > 0 ? " is-live" : ""}`}>{formatPercent(row.day_change_pct)}</span>
+        </div>
+        <p className="scanner-result-copy">ETF detail view with a full candle chart and sortable holding momentum table.</p>
+        <div className="scanner-result-metrics">
+          <div className="scanner-result-metric">
+            <span className="eyebrow">Price</span>
             <strong>{formatMoney(row.price)}</strong>
           </div>
-          <div>
-            <span>DY%</span>
-            <strong className={valueClass(row.day_change_pct)}>{formatPercent(row.day_change_pct)}</strong>
+          <div className="scanner-result-metric">
+            <span className="eyebrow">Week</span>
+            <strong className={valueClass(row.week_change_pct)}>{formatPercent(row.week_change_pct)}</strong>
           </div>
-          <div>
-            <span>1Y%</span>
+          <div className="scanner-result-metric">
+            <span className="eyebrow">Month</span>
+            <strong className={valueClass(row.month_change_pct)}>{formatPercent(row.month_change_pct)}</strong>
+          </div>
+          <div className="scanner-result-metric">
+            <span className="eyebrow">1 Year</span>
             <strong className={valueClass(row.year_change_pct)}>{formatPercent(row.year_change_pct)}</strong>
           </div>
         </div>
       </section>
 
-      <section className="sector-chart-panel">
+      <section className="panel sector-chart-panel">
         <div className="sector-chart-header">
           <div>
             <span className="eyebrow">Candle Chart</span>
@@ -409,39 +458,47 @@ function SectorDetailPage({
         ) : null}
       </section>
 
-      <section className="sector-table-wrap">
-        <table className="sector-leaderboard-table sector-holdings-table">
-          <thead>
-            <tr>
-              <th>{renderHoldingSortHeader("Ticker", "ticker", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
-              <th>Name</th>
-              <th>{renderHoldingSortHeader("Weight", "weight", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
-              <th>{renderHoldingSortHeader("DY%", "change", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
-              <th>{renderHoldingSortHeader("Daily RS", "dailyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
-              <th>Chart</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedHoldings.map((holding) => (
-              <tr key={`${row.ticker}-${holding.ticker}`}>
-                <td>
-                  <Link className="ticker-link-button" to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>
-                    {holding.ticker}
-                  </Link>
-                </td>
-                <td>{holding.name || holding.ticker}</td>
-                <td>{formatPercent(holding.weight, { signed: false })}</td>
-                <td className={valueClass(holding.day_change_pct)}>{formatPercent(holding.day_change_pct)}</td>
-                <td>{formatRating(holding.daily_rs_rating)}</td>
-                <td>
-                  <Link className="ghost-button compact-table-action" to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>
-                    Analyze
-                  </Link>
-                </td>
+      <section className="scanner-result-table-shell panel">
+        <div className="panel-head">
+          <div>
+            <span className="eyebrow">Holdings</span>
+            <h2>Top holdings momentum</h2>
+          </div>
+        </div>
+        <div className="data-table-responsive sector-table-wrap">
+          <table className="data-table sector-leaderboard-table sector-holdings-table">
+            <thead>
+              <tr>
+                <th>{renderHoldingSortHeader("Ticker", "ticker", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+                <th>Name</th>
+                <th>{renderHoldingSortHeader("Weight", "weight", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+                <th>{renderHoldingSortHeader("DY%", "change", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+                <th>{renderHoldingSortHeader("Daily RS", "dailyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+                <th>Chart</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sortedHoldings.map((holding) => (
+                <tr key={`${row.ticker}-${holding.ticker}`}>
+                  <td data-label="Ticker">
+                    <Link className="scanner-result-symbol" to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>
+                      <span>{holding.ticker}</span>
+                    </Link>
+                  </td>
+                  <td data-label="Name">{holding.name || holding.ticker}</td>
+                  <td data-label="Weight">{formatPercent(holding.weight, { signed: false })}</td>
+                  <td data-label="DY%" className={valueClass(holding.day_change_pct)}>{formatPercent(holding.day_change_pct)}</td>
+                  <td data-label="Daily RS">{formatRating(holding.daily_rs_rating)}</td>
+                  <td data-label="Chart">
+                    <Link className="ghost-button compact-table-action" to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>
+                      Analyze
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   );
