@@ -3,15 +3,18 @@ import { Link, useParams } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { RebasedComparisonChart } from "../components/RebasedComparisonChart";
+import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type { CandlePoint, SectorLeaderboardHolding, SectorLeaderboardResponse, SectorLeaderboardRow, WatchlistChartResponse } from "../lib/types";
 
 type ViewMode = "list" | "chart";
+type HoldingViewMode = "list" | "chart";
 type HoldingSortKey = "weight" | "dailyRs" | "ticker" | "change";
 type SortDirection = "asc" | "desc";
 
 const BENCHMARK_TICKER = "SPY";
+const HOLDING_CHART_LIMIT = 40;
 
 const CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
@@ -45,6 +48,7 @@ export function SectorLeaderboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [holdingViewMode, setHoldingViewMode] = useState<HoldingViewMode>("list");
   const [holdingSortBy, setHoldingSortBy] = useState<HoldingSortKey>("weight");
   const [holdingSortDirection, setHoldingSortDirection] = useState<SortDirection>("desc");
 
@@ -64,13 +68,19 @@ export function SectorLeaderboardPage() {
   const detailRow = requestedTicker ? rows.find((row) => row.ticker === requestedTicker) ?? null : null;
   const chartTickers = useMemo(() => {
     if (requestedTicker && detailRow) {
-      return [detailRow.ticker];
+      const holdingChartTickers = holdingViewMode === "chart"
+        ? [...detailRow.top_holdings]
+            .sort((left, right) => compareHoldings(left, right, holdingSortBy, holdingSortDirection))
+            .slice(0, HOLDING_CHART_LIMIT)
+            .map((holding) => holding.ticker)
+        : [];
+      return [detailRow.ticker, ...holdingChartTickers];
     }
     if (!requestedTicker && viewMode === "chart") {
       return [...rows.map((row) => row.ticker), BENCHMARK_TICKER];
     }
     return [];
-  }, [detailRow, requestedTicker, rows, viewMode]);
+  }, [detailRow, holdingSortBy, holdingSortDirection, holdingViewMode, requestedTicker, rows, viewMode]);
   const chartTickerKey = chartTickers.join("|");
 
   useEffect(() => {
@@ -144,8 +154,13 @@ export function SectorLeaderboardPage() {
         chartPayload={chartPayloads[requestedTicker]}
         chartError={chartErrors[requestedTicker]}
         isChartLoading={Boolean(chartLoadingTickers[requestedTicker])}
+        holdingViewMode={holdingViewMode}
+        onHoldingViewModeChange={setHoldingViewMode}
         holdingSortBy={holdingSortBy}
         holdingSortDirection={holdingSortDirection}
+        chartPayloads={chartPayloads}
+        chartErrors={chartErrors}
+        chartLoadingTickers={chartLoadingTickers}
         onSortHoldings={(key) => {
           if (holdingSortBy === key) {
             setHoldingSortDirection((current) => (current === "asc" ? "desc" : "asc"));
@@ -408,8 +423,13 @@ function SectorDetailPage({
   chartPayload,
   chartError,
   isChartLoading,
+  holdingViewMode,
+  onHoldingViewModeChange,
   holdingSortBy,
   holdingSortDirection,
+  chartPayloads,
+  chartErrors,
+  chartLoadingTickers,
   onSortHoldings,
 }: {
   row: SectorLeaderboardRow | null;
@@ -417,8 +437,13 @@ function SectorDetailPage({
   chartPayload: WatchlistChartResponse | null | undefined;
   chartError: string | undefined;
   isChartLoading: boolean;
+  holdingViewMode: HoldingViewMode;
+  onHoldingViewModeChange: (mode: HoldingViewMode) => void;
   holdingSortBy: HoldingSortKey;
   holdingSortDirection: SortDirection;
+  chartPayloads: Record<string, WatchlistChartResponse | null | undefined>;
+  chartErrors: Record<string, string>;
+  chartLoadingTickers: Record<string, boolean>;
   onSortHoldings: (key: HoldingSortKey) => void;
 }) {
   const chartCandles = useMemo(() => buildChartCandles(chartPayload), [chartPayload]);
@@ -426,6 +451,7 @@ function SectorDetailPage({
     () => [...(row?.top_holdings ?? [])].sort((left, right) => compareHoldings(left, right, holdingSortBy, holdingSortDirection)),
     [holdingSortBy, holdingSortDirection, row?.top_holdings],
   );
+  const chartHoldings = sortedHoldings.slice(0, HOLDING_CHART_LIMIT);
 
   if (!row) {
     return (
@@ -499,47 +525,195 @@ function SectorDetailPage({
       </section>
 
       <section className="scanner-result-table-shell panel">
-        <div className="panel-head">
+        <div className="panel-head sector-holdings-panel-head">
           <div>
             <span className="eyebrow">Holdings</span>
             <h2>Top holdings momentum</h2>
           </div>
+          <SectorHoldingsControls
+            viewMode={holdingViewMode}
+            onViewModeChange={onHoldingViewModeChange}
+            sortBy={holdingSortBy}
+            sortDirection={holdingSortDirection}
+            onSort={onSortHoldings}
+          />
         </div>
-        <div className="data-table-responsive sector-table-wrap">
-          <table className="data-table sector-leaderboard-table sector-holdings-table">
-            <thead>
-              <tr>
-                <th>{renderHoldingSortHeader("Ticker", "ticker", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
-                <th>Name</th>
-                <th>{renderHoldingSortHeader("Weight", "weight", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
-                <th>{renderHoldingSortHeader("DY%", "change", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
-                <th>{renderHoldingSortHeader("Daily RS", "dailyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
-                <th>Chart</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedHoldings.map((holding) => (
-                <tr key={`${row.ticker}-${holding.ticker}`}>
-                  <td data-label="Ticker">
+        {holdingViewMode === "list" ? (
+          <SectorHoldingsTable
+            row={row}
+            sortedHoldings={sortedHoldings}
+            holdingSortBy={holdingSortBy}
+            holdingSortDirection={holdingSortDirection}
+            onSortHoldings={onSortHoldings}
+          />
+        ) : (
+          <SectorHoldingsChartGrid
+            sectorTicker={row.ticker}
+            holdings={chartHoldings}
+            chartPayloads={chartPayloads}
+            chartErrors={chartErrors}
+            chartLoadingTickers={chartLoadingTickers}
+            totalHoldings={sortedHoldings.length}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SectorHoldingsControls({
+  viewMode,
+  onViewModeChange,
+  sortBy,
+  sortDirection,
+  onSort,
+}: {
+  viewMode: HoldingViewMode;
+  onViewModeChange: (mode: HoldingViewMode) => void;
+  sortBy: HoldingSortKey;
+  sortDirection: SortDirection;
+  onSort: (key: HoldingSortKey) => void;
+}) {
+  return (
+    <div className="sector-holdings-controls">
+      <div className="sector-holdings-control-group">
+        <span className="eyebrow">View</span>
+        <div className="scanner-result-view-actions">
+          <button className={`scanner-result-view-chip${viewMode === "list" ? " is-active" : ""}`} type="button" onClick={() => onViewModeChange("list")}>
+            List
+          </button>
+          <button className={`scanner-result-view-chip${viewMode === "chart" ? " is-active" : ""}`} type="button" onClick={() => onViewModeChange("chart")}>
+            Charts
+          </button>
+        </div>
+      </div>
+      <div className="sector-holdings-control-group">
+        <span className="eyebrow">Sort</span>
+        <div className="sector-holdings-sort-actions">
+          {(["weight", "dailyRs", "change", "ticker"] as HoldingSortKey[]).map((key) => (
+            <button className={`scanner-result-view-chip${sortBy === key ? " is-active" : ""}`} key={key} type="button" onClick={() => onSort(key)}>
+              {labelForHoldingSort(key)}{sortBy === key ? ` ${sortDirection === "asc" ? "Asc" : "Desc"}` : ""}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectorHoldingsTable({
+  row,
+  sortedHoldings,
+  holdingSortBy,
+  holdingSortDirection,
+  onSortHoldings,
+}: {
+  row: SectorLeaderboardRow;
+  sortedHoldings: SectorLeaderboardHolding[];
+  holdingSortBy: HoldingSortKey;
+  holdingSortDirection: SortDirection;
+  onSortHoldings: (key: HoldingSortKey) => void;
+}) {
+  return (
+    <div className="data-table-responsive sector-table-wrap">
+      <table className="data-table sector-leaderboard-table sector-holdings-table">
+        <thead>
+          <tr>
+            <th>{renderHoldingSortHeader("Ticker", "ticker", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>Name</th>
+            <th>{renderHoldingSortHeader("Weight", "weight", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("DY%", "change", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("Daily RS", "dailyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>Chart</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedHoldings.map((holding) => (
+            <tr key={`${row.ticker}-${holding.ticker}`}>
+              <td data-label="Ticker">
+                <Link className="scanner-result-symbol" to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>
+                  <span>{holding.ticker}</span>
+                </Link>
+              </td>
+              <td data-label="Name">{holding.name || holding.ticker}</td>
+              <td data-label="Weight">{formatPercent(holding.weight, { signed: false })}</td>
+              <td data-label="DY%" className={valueClass(holding.day_change_pct)}>{formatPercent(holding.day_change_pct)}</td>
+              <td data-label="Daily RS">{formatRating(holding.daily_rs_rating)}</td>
+              <td data-label="Chart">
+                <Link className="ghost-button compact-table-action" to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>
+                  Analyze
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SectorHoldingsChartGrid({
+  sectorTicker,
+  holdings,
+  chartPayloads,
+  chartErrors,
+  chartLoadingTickers,
+  totalHoldings,
+}: {
+  sectorTicker: string;
+  holdings: SectorLeaderboardHolding[];
+  chartPayloads: Record<string, WatchlistChartResponse | null | undefined>;
+  chartErrors: Record<string, string>;
+  chartLoadingTickers: Record<string, boolean>;
+  totalHoldings: number;
+}) {
+  return (
+    <div className="sector-holdings-chart-section">
+      <div className="scanner-result-toolbar sector-holdings-chart-toolbar">
+        <div className="scanner-result-toolbar-left">
+          <strong>Showing {Math.min(holdings.length, HOLDING_CHART_LIMIT)} charted holdings</strong>
+          <span>{totalHoldings > HOLDING_CHART_LIMIT ? `Limited to first ${HOLDING_CHART_LIMIT} by current sort` : `All ${totalHoldings} holdings`}</span>
+        </div>
+      </div>
+      <div className="scanner-result-chart-grid is-3-col sector-holdings-chart-grid">
+        {holdings.map((holding) => {
+          const chartPayload = chartPayloads[holding.ticker];
+          const chartCandles = buildChartCandles(chartPayload);
+          const chartError = chartErrors[holding.ticker];
+          const isChartLoading = Boolean(chartLoadingTickers[holding.ticker]);
+          return (
+            <article className="scanner-chart-card" key={`${sectorTicker}-${holding.ticker}-chart`}>
+              <div className="scanner-chart-card-header">
+                <div className="scanner-chart-card-heading">
+                  <div className="scanner-chart-card-symbol-row">
                     <Link className="scanner-result-symbol" to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>
                       <span>{holding.ticker}</span>
                     </Link>
-                  </td>
-                  <td data-label="Name">{holding.name || holding.ticker}</td>
-                  <td data-label="Weight">{formatPercent(holding.weight, { signed: false })}</td>
-                  <td data-label="DY%" className={valueClass(holding.day_change_pct)}>{formatPercent(holding.day_change_pct)}</td>
-                  <td data-label="Daily RS">{formatRating(holding.daily_rs_rating)}</td>
-                  <td data-label="Chart">
-                    <Link className="ghost-button compact-table-action" to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>
-                      Analyze
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                    <span className="scanner-inline-badge">{formatPercent(holding.weight, { signed: false })}</span>
+                  </div>
+                  <strong>{holding.name || holding.ticker}</strong>
+                  <span>Holding in {sectorTicker}</span>
+                </div>
+                <div className="scanner-chart-card-price">{renderChange(holding.day_change_pct)}</div>
+              </div>
+              <div className="scanner-chart-card-score-row">
+                <span className={`scanner-score-pill ${toneForMomentumScore(holding.daily_rs_rating)}`}>RS {formatRating(holding.daily_rs_rating)}</span>
+                <span className="scanner-chart-card-volume">Weight {formatPercent(holding.weight, { signed: false })}</span>
+              </div>
+              <div className="scanner-chart-card-body">
+                {isChartLoading ? <LoadingBlock label={`Loading ${holding.ticker} chart...`} /> : null}
+                {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
+                {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
+                {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={holding.ticker} candles={chartCandles} /> : null}
+              </div>
+              <div className="scanner-chart-card-footer">
+                <span>{chartPayload?.resolved_as_of_date ? `As of ${chartPayload.resolved_as_of_date}` : "Latest"}</span>
+                <Link to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>Analyze</Link>
+              </div>
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -590,6 +764,16 @@ function renderHoldingSortHeader(
       {isActive ? <span>{direction === "asc" ? " Asc" : " Desc"}</span> : null}
     </button>
   );
+}
+
+function labelForHoldingSort(key: HoldingSortKey): string {
+  if (key === "dailyRs") {
+    return "Daily RS";
+  }
+  if (key === "change") {
+    return "DY%";
+  }
+  return key.charAt(0).toUpperCase() + key.slice(1);
 }
 
 function renderChange(value: number | null | undefined) {

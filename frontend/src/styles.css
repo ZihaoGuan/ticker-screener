@@ -5336,6 +5336,41 @@ a {
   min-width: 760px;
 }
 
+.sector-holdings-panel-head {
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.sector-holdings-controls {
+  display: grid;
+  gap: 12px;
+  min-width: min(620px, 100%);
+}
+
+.sector-holdings-control-group {
+  display: grid;
+  gap: 8px;
+}
+
+.sector-holdings-sort-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.sector-holdings-chart-section {
+  display: grid;
+  gap: 0;
+}
+
+.sector-holdings-chart-toolbar {
+  border-radius: 0;
+}
+
+.sector-holdings-chart-grid {
+  border-top: 1px solid #27272a;
+}
+
 .sector-sort-button {
   align-items: center;
   color: inherit;
@@ -5473,6 +5508,10 @@ a {
   .scanner-result-chart-grid.is-3-col {
     grid-template-columns: 1fr;
     padding: 14px;
+  }
+
+  .sector-holdings-sort-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .scanner-chart-card {
