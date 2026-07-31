@@ -11,6 +11,8 @@ type ViewMode = "list" | "chart";
 type HoldingSortKey = "weight" | "dailyRs" | "ticker" | "change";
 type SortDirection = "asc" | "desc";
 
+const BENCHMARK_TICKER = "SPY";
+
 const CHART_VISIBILITY: ChartVisibility = {
   ema8: true,
   ema21: true,
@@ -60,16 +62,22 @@ export function SectorLeaderboardPage() {
 
   const rows = payload?.rows ?? [];
   const detailRow = requestedTicker ? rows.find((row) => row.ticker === requestedTicker) ?? null : null;
-  const chartRows = requestedTicker && detailRow ? [detailRow] : rows;
-  const chartTickerKey = useMemo(() => chartRows.map((row) => row.ticker).join("|"), [chartRows]);
+  const chartTickers = useMemo(() => {
+    if (requestedTicker && detailRow) {
+      return [detailRow.ticker];
+    }
+    if (!requestedTicker && viewMode === "chart") {
+      return [...rows.map((row) => row.ticker), BENCHMARK_TICKER];
+    }
+    return [];
+  }, [detailRow, requestedTicker, rows, viewMode]);
+  const chartTickerKey = chartTickers.join("|");
 
   useEffect(() => {
-    if ((!requestedTicker && viewMode !== "chart") || chartRows.length === 0) {
+    if (chartTickers.length === 0) {
       return;
     }
-    const missingTickers = chartRows
-      .map((row) => row.ticker)
-      .filter((symbol) => chartPayloads[symbol] === undefined && !chartLoadingTickers[symbol]);
+    const missingTickers = chartTickers.filter((symbol) => chartPayloads[symbol] === undefined && !chartLoadingTickers[symbol]);
     if (missingTickers.length === 0) {
       return;
     }
@@ -122,7 +130,7 @@ export function SectorLeaderboardPage() {
     return () => {
       ignore = true;
     };
-  }, [chartTickerKey, requestedTicker, viewMode]);
+  }, [chartTickerKey]);
 
   if (isLoading) {
     return <LoadingBlock label="Loading sector leaderboard..." />;
@@ -159,7 +167,15 @@ export function SectorLeaderboardPage() {
       {viewMode === "list" ? (
         <SectorLeaderboardTable rows={rows} />
       ) : (
-        <SectorChartGrid rows={rows} chartPayloads={chartPayloads} chartErrors={chartErrors} chartLoadingTickers={chartLoadingTickers} />
+        <SectorChartGrid
+          rows={rows}
+          chartPayloads={chartPayloads}
+          chartErrors={chartErrors}
+          chartLoadingTickers={chartLoadingTickers}
+          benchmarkPayload={chartPayloads[BENCHMARK_TICKER]}
+          benchmarkError={chartErrors[BENCHMARK_TICKER]}
+          isBenchmarkLoading={Boolean(chartLoadingTickers[BENCHMARK_TICKER])}
+        />
       )}
     </div>
   );
@@ -310,15 +326,22 @@ function SectorChartGrid({
   chartPayloads,
   chartErrors,
   chartLoadingTickers,
+  benchmarkPayload,
+  benchmarkError,
+  isBenchmarkLoading,
 }: {
   rows: SectorLeaderboardRow[];
   chartPayloads: Record<string, WatchlistChartResponse | null | undefined>;
   chartErrors: Record<string, string>;
   chartLoadingTickers: Record<string, boolean>;
+  benchmarkPayload: WatchlistChartResponse | null | undefined;
+  benchmarkError: string | undefined;
+  isBenchmarkLoading: boolean;
 }) {
+  const benchmarkCandles = buildChartCandles(benchmarkPayload);
   return (
     <section className="scanner-result-table-shell panel">
-      <div className="scanner-result-chart-grid is-3-col sector-all-chart-grid">
+      <div className="scanner-result-chart-grid is-2-col sector-all-chart-grid">
         {rows.map((row) => {
           const chartPayload = chartPayloads[row.ticker];
           const chartCandles = buildChartCandles(chartPayload);
@@ -345,13 +368,33 @@ function SectorChartGrid({
                 <span className="scanner-chart-card-volume">Vol {formatVolume(row.volume)}</span>
               </div>
               <div className="scanner-chart-card-body">
-                {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
-                {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
-                {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
-                {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={row.ticker} candles={chartCandles} /> : null}
+                <div className="sector-chart-comparison">
+                  <div className="sector-mini-chart-panel">
+                    <div className="sector-mini-chart-label">
+                      <strong>{row.ticker}</strong>
+                      <span>{formatPercent(row.day_change_pct)}</span>
+                    </div>
+                    {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
+                    {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
+                    {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
+                    {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={row.ticker} candles={chartCandles} /> : null}
+                  </div>
+                  <div className="sector-mini-chart-panel">
+                    <div className="sector-mini-chart-label">
+                      <strong>{BENCHMARK_TICKER}</strong>
+                      <span>Benchmark</span>
+                    </div>
+                    {isBenchmarkLoading ? <LoadingBlock label={`Loading ${BENCHMARK_TICKER} chart...`} /> : null}
+                    {!isBenchmarkLoading && benchmarkError ? <p className="panel-copy">{benchmarkError}</p> : null}
+                    {!isBenchmarkLoading && !benchmarkError && benchmarkCandles.length === 0 ? <p className="panel-copy">No SPY chart data.</p> : null}
+                    {!isBenchmarkLoading && !benchmarkError && benchmarkCandles.length > 0 ? (
+                      <ScannerMiniChart ticker={BENCHMARK_TICKER} candles={benchmarkCandles} />
+                    ) : null}
+                  </div>
+                </div>
               </div>
               <div className="scanner-chart-card-footer">
-                <span>{chartPayload?.resolved_as_of_date ? `As of ${chartPayload.resolved_as_of_date}` : "Latest"}</span>
+                <span>{chartPayload?.resolved_as_of_date ? `Sector as of ${chartPayload.resolved_as_of_date}` : "Latest"}</span>
                 <Link to={`/sector-leaderboard/${encodeURIComponent(row.ticker)}`}>Open Details</Link>
               </div>
             </article>
