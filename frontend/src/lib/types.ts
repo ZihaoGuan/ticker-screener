@@ -242,7 +242,6 @@ export type ScannerTopHitRow = {
   daily_rs_rating?: number | null;
   weekly_rs_rating?: number | null;
   industry_group?: string | null;
-  industry_group_rs_rank?: number | null;
   industry_group_member_count?: number | null;
   growth_acceleration_score?: number | null;
   growth_acceleration_label?: string | null;
@@ -281,7 +280,13 @@ export type SectorLeaderboardHolding = {
   weight: number;
   shares_held?: number | null;
   day_change_pct: number | null;
+  avg_volume_20d: number | null;
+  relative_volume_20d: number | null;
+  rs_days_21d: number | null;
+  rs_days_21d_pct: number | null;
   daily_rs_rating: number | null;
+  weekly_rs_rating: number | null;
+  leadership_score: number | null;
 };
 
 export type SectorLeaderboardRow = {
@@ -297,8 +302,12 @@ export type SectorLeaderboardRow = {
   rs_vs_spy_1m_pct: number | null;
   rs_vs_spy_3m_pct: number | null;
   rs_momentum_score: number | null;
+  rs_days_21d: number | null;
+  rs_days_21d_pct: number | null;
   atr_pct: number | null;
   volume: number | null;
+  avg_volume_20d: number | null;
+  relative_volume_20d: number | null;
   latest_date: string | null;
   top_holdings: SectorLeaderboardHolding[];
 };
@@ -1080,7 +1089,6 @@ export type ChartFundamentalsResponse = {
     weekly_rs_rating?: number | null;
     leadership_score?: number | null;
     industry_group?: string | null;
-    industry_group_rs_rank?: number | null;
     industry_group_member_count?: number | null;
     rating_band?: string | null;
     technical_status?: string | null;
@@ -1208,7 +1216,6 @@ export type TopTechnicalRatingEntry = {
   leadership_score: number | null;
   structure_volume_score: number | null;
   industry_group?: string | null;
-  industry_group_rs_rank?: number | null;
   industry_group_member_count?: number | null;
   rating_band: string | null;
   technical_status: string | null;

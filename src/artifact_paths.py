@@ -540,7 +540,6 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("canslim", "canslim"),
     ("fundamental_quality", "fundamental_quality"),
     ("minervini_growth_acceleration", "minervini_growth_acceleration"),
-    ("industry_group_rs_rank", "industry_group_rs_rank"),
     ("venu_scanner", "venu_scanner"),
     ("finviz_target_price_50", "finviz_target_price_50"),
     ("finviz_analyst_recom_strongbuy", "finviz_analyst_recom_strongbuy"),

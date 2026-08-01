@@ -10,7 +10,7 @@ import type { CandlePoint, SectorLeaderboardHolding, SectorLeaderboardResponse, 
 
 type ViewMode = "list" | "chart";
 type HoldingViewMode = "list" | "chart";
-type HoldingSortKey = "weight" | "dailyRs" | "ticker" | "change";
+type HoldingSortKey = "weight" | "dailyRs" | "weeklyRs" | "leadership" | "rsDays" | "relVol" | "ticker" | "change";
 type SortDirection = "asc" | "desc";
 
 const BENCHMARK_TICKER = "SPY";
@@ -306,8 +306,10 @@ function SectorLeaderboardTable({ rows }: { rows: SectorLeaderboardRow[] }) {
               <th>RS 1M</th>
               <th>RS 3M</th>
               <th>RS Mom</th>
+              <th>RS Days</th>
               <th>ATR%</th>
-              <th>Vol</th>
+              <th>Avg Vol</th>
+              <th>Rel Vol</th>
               <th>Top Holdings</th>
             </tr>
           </thead>
@@ -330,8 +332,10 @@ function SectorLeaderboardTable({ rows }: { rows: SectorLeaderboardRow[] }) {
                 <td data-label="RS Mom">
                   <span className={`scanner-score-pill ${toneForMomentumScore(row.rs_momentum_score)}`}>{formatRating(row.rs_momentum_score)}</span>
                 </td>
+                <td data-label="RS Days">{formatCountWithPercent(row.rs_days_21d, row.rs_days_21d_pct)}</td>
                 <td data-label="ATR%">{formatPercent(row.atr_pct, { signed: false })}</td>
-                <td data-label="Vol">{formatVolume(row.volume)}</td>
+                <td data-label="Avg Vol">{formatVolume(row.avg_volume_20d)}</td>
+                <td data-label="Rel Vol">{formatMultiple(row.relative_volume_20d)}</td>
                 <td data-label="Top Holdings">
                   <HoldingPills row={row} />
                 </td>
@@ -388,7 +392,7 @@ function SectorChartGrid({
               <div className="scanner-chart-card-score-row">
                 <span className="scanner-score-pill">WK {formatPercent(row.week_change_pct)}</span>
                 <span className="scanner-score-pill">MO {formatPercent(row.month_change_pct)}</span>
-                <span className="scanner-chart-card-volume">Vol {formatVolume(row.volume)}</span>
+                <span className="scanner-chart-card-volume">Rel Vol {formatMultiple(row.relative_volume_20d)}</span>
               </div>
               <div className="scanner-chart-card-body">
                 {isChartLoading || isBenchmarkLoading ? <LoadingBlock label={`Loading ${row.ticker} vs ${BENCHMARK_TICKER} chart...`} /> : null}
@@ -451,6 +455,7 @@ function SectorDetailPage({
     () => [...(row?.top_holdings ?? [])].sort((left, right) => compareHoldings(left, right, holdingSortBy, holdingSortDirection)),
     [holdingSortBy, holdingSortDirection, row?.top_holdings],
   );
+  const holdingBreadth = useMemo(() => buildHoldingBreadth(row?.top_holdings ?? []), [row?.top_holdings]);
   const chartHoldings = sortedHoldings.slice(0, HOLDING_CHART_LIMIT);
 
   if (!row) {
@@ -501,6 +506,29 @@ function SectorDetailPage({
             <span className="eyebrow">1 Year</span>
             <strong className={valueClass(row.year_change_pct)}>{formatPercent(row.year_change_pct)}</strong>
           </div>
+        </div>
+      </section>
+
+      <section className="scanner-result-metrics">
+        <div className="scanner-result-metric">
+          <span className="eyebrow">Daily RS &gt; 80</span>
+          <strong>{holdingBreadth.dailyRs80} / {holdingBreadth.total}</strong>
+        </div>
+        <div className="scanner-result-metric">
+          <span className="eyebrow">Daily RS &gt; 90</span>
+          <strong>{holdingBreadth.dailyRs90} / {holdingBreadth.total}</strong>
+        </div>
+        <div className="scanner-result-metric">
+          <span className="eyebrow">Avg Daily RS</span>
+          <strong>{formatRating(holdingBreadth.avgDailyRs)}</strong>
+        </div>
+        <div className="scanner-result-metric">
+          <span className="eyebrow">RS Days Avg</span>
+          <strong>{formatPercent(holdingBreadth.avgRsDaysPct, { signed: false })}</strong>
+        </div>
+        <div className="scanner-result-metric">
+          <span className="eyebrow">Rel Vol &gt; 1.5x</span>
+          <strong>{holdingBreadth.relVol15} / {holdingBreadth.total}</strong>
         </div>
       </section>
 
@@ -590,7 +618,7 @@ function SectorHoldingsControls({
       <div className="sector-holdings-control-group">
         <span className="eyebrow">Sort</span>
         <div className="sector-holdings-sort-actions">
-          {(["weight", "dailyRs", "change", "ticker"] as HoldingSortKey[]).map((key) => (
+          {(["weight", "dailyRs", "weeklyRs", "leadership", "rsDays", "relVol", "change", "ticker"] as HoldingSortKey[]).map((key) => (
             <button className={`scanner-result-view-chip${sortBy === key ? " is-active" : ""}`} key={key} type="button" onClick={() => onSort(key)}>
               {labelForHoldingSort(key)}{sortBy === key ? ` ${sortDirection === "asc" ? "Asc" : "Desc"}` : ""}
             </button>
@@ -624,6 +652,11 @@ function SectorHoldingsTable({
             <th>{renderHoldingSortHeader("Weight", "weight", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>{renderHoldingSortHeader("DY%", "change", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>{renderHoldingSortHeader("Daily RS", "dailyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("Weekly RS", "weeklyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("Leader", "leadership", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("RS Days", "rsDays", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>Avg Vol</th>
+            <th>{renderHoldingSortHeader("Rel Vol", "relVol", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>Chart</th>
           </tr>
         </thead>
@@ -639,6 +672,11 @@ function SectorHoldingsTable({
               <td data-label="Weight">{formatPercent(holding.weight, { signed: false })}</td>
               <td data-label="DY%" className={valueClass(holding.day_change_pct)}>{formatPercent(holding.day_change_pct)}</td>
               <td data-label="Daily RS">{formatRating(holding.daily_rs_rating)}</td>
+              <td data-label="Weekly RS">{formatRating(holding.weekly_rs_rating)}</td>
+              <td data-label="Leader">{formatRating(holding.leadership_score)}</td>
+              <td data-label="RS Days">{formatCountWithPercent(holding.rs_days_21d, holding.rs_days_21d_pct)}</td>
+              <td data-label="Avg Vol">{formatVolume(holding.avg_volume_20d)}</td>
+              <td data-label="Rel Vol">{formatMultiple(holding.relative_volume_20d)}</td>
               <td data-label="Chart">
                 <Link className="ghost-button compact-table-action" to={`/charts?ticker=${encodeURIComponent(holding.ticker)}`}>
                   Analyze
@@ -698,6 +736,9 @@ function SectorHoldingsChartGrid({
               </div>
               <div className="scanner-chart-card-score-row">
                 <span className={`scanner-score-pill ${toneForMomentumScore(holding.daily_rs_rating)}`}>RS {formatRating(holding.daily_rs_rating)}</span>
+                <span className={`scanner-score-pill ${toneForMomentumScore(holding.weekly_rs_rating)}`}>WRS {formatRating(holding.weekly_rs_rating)}</span>
+                <span className="scanner-score-pill">RS Days {formatPercent(holding.rs_days_21d_pct, { signed: false })}</span>
+                <span className="scanner-chart-card-volume">Rel Vol {formatMultiple(holding.relative_volume_20d)}</span>
                 <span className="scanner-chart-card-volume">Weight {formatPercent(holding.weight, { signed: false })}</span>
               </div>
               <div className="scanner-chart-card-body">
@@ -732,6 +773,19 @@ function HoldingPills({ row }: { row: SectorLeaderboardRow }) {
   );
 }
 
+function buildHoldingBreadth(holdings: SectorLeaderboardHolding[]) {
+  const dailyRsValues = holdings.map((holding) => holding.daily_rs_rating).filter(isFiniteNumber);
+  const rsDaysValues = holdings.map((holding) => holding.rs_days_21d_pct).filter(isFiniteNumber);
+  return {
+    total: holdings.length,
+    dailyRs80: holdings.filter((holding) => isFiniteNumber(holding.daily_rs_rating) && holding.daily_rs_rating > 80).length,
+    dailyRs90: holdings.filter((holding) => isFiniteNumber(holding.daily_rs_rating) && holding.daily_rs_rating > 90).length,
+    avgDailyRs: average(dailyRsValues),
+    avgRsDaysPct: average(rsDaysValues),
+    relVol15: holdings.filter((holding) => isFiniteNumber(holding.relative_volume_20d) && holding.relative_volume_20d > 1.5).length,
+  };
+}
+
 function buildChartCandles(chartPayload: WatchlistChartResponse | null | undefined): CandlePoint[] {
   const volumeByTime = new Map((chartPayload?.volume ?? []).map((item) => [item.time, item.value]));
   return (chartPayload?.candles ?? []).map((item) => ({
@@ -745,9 +799,31 @@ function compareHoldings(left: SectorLeaderboardHolding, right: SectorLeaderboar
   if (key === "ticker") {
     return left.ticker.localeCompare(right.ticker) * multiplier;
   }
-  const leftValue = key === "weight" ? left.weight : key === "dailyRs" ? left.daily_rs_rating : left.day_change_pct;
-  const rightValue = key === "weight" ? right.weight : key === "dailyRs" ? right.daily_rs_rating : right.day_change_pct;
+  const leftValue = holdingSortValue(left, key);
+  const rightValue = holdingSortValue(right, key);
   return (numericSortValue(leftValue) - numericSortValue(rightValue)) * multiplier;
+}
+
+function holdingSortValue(holding: SectorLeaderboardHolding, key: HoldingSortKey): number | null | undefined {
+  if (key === "weight") {
+    return holding.weight;
+  }
+  if (key === "dailyRs") {
+    return holding.daily_rs_rating;
+  }
+  if (key === "weeklyRs") {
+    return holding.weekly_rs_rating;
+  }
+  if (key === "leadership") {
+    return holding.leadership_score;
+  }
+  if (key === "rsDays") {
+    return holding.rs_days_21d_pct;
+  }
+  if (key === "relVol") {
+    return holding.relative_volume_20d;
+  }
+  return holding.day_change_pct;
 }
 
 function renderHoldingSortHeader(
@@ -770,8 +846,20 @@ function labelForHoldingSort(key: HoldingSortKey): string {
   if (key === "dailyRs") {
     return "Daily RS";
   }
+  if (key === "weeklyRs") {
+    return "Weekly RS";
+  }
+  if (key === "rsDays") {
+    return "RS Days";
+  }
+  if (key === "relVol") {
+    return "Rel Vol";
+  }
   if (key === "change") {
     return "DY%";
+  }
+  if (key === "leadership") {
+    return "Leader";
   }
   return key.charAt(0).toUpperCase() + key.slice(1);
 }
@@ -816,6 +904,20 @@ function formatRating(value: number | null | undefined): string {
   return value.toFixed(1);
 }
 
+function formatMultiple(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) {
+    return "-";
+  }
+  return `${value.toFixed(2)}x`;
+}
+
+function formatCountWithPercent(count: number | null | undefined, percent: number | null | undefined): string {
+  if (count == null || !Number.isFinite(count) || percent == null || !Number.isFinite(percent)) {
+    return "-";
+  }
+  return `${count} (${percent.toFixed(0)}%)`;
+}
+
 function formatVolume(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) {
     return "-";
@@ -827,6 +929,17 @@ function formatVolume(value: number | null | undefined): string {
     return `${(value / 1_000).toFixed(1)}K`;
   }
   return `${value}`;
+}
+
+function average(values: number[]): number | null {
+  if (values.length === 0) {
+    return null;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function isFiniteNumber(value: number | null | undefined): value is number {
+  return value != null && Number.isFinite(value);
 }
 
 function valueClass(value: number | null | undefined): string {

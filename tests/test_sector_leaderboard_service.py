@@ -46,7 +46,10 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
         with patch.object(module, "load_many_ticker_windows", fake_load_many_ticker_windows), patch.object(
             SectorLeaderboardService,
             "_load_technical_rating_map",
-            return_value={"ONE": {"daily_rs_rating": 91.0}, "TWO": {"daily_rs_rating": 42.0}},
+            return_value={
+                "ONE": {"daily_rs_rating": 91.0, "weekly_rs_rating": 87.0, "leadership_score": 94.0},
+                "TWO": {"daily_rs_rating": 42.0, "weekly_rs_rating": 38.0, "leadership_score": 41.0},
+            },
         ):
             payload = SectorLeaderboardService(database_url="postgres://example", etfs=etfs).get_payload(as_of_date=dt.date(2026, 7, 30))
 
@@ -56,8 +59,18 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["rs_vs_spy_1m_pct"], 6.03)
         self.assertEqual(payload["rows"][0]["rs_vs_spy_3m_pct"], 20.59)
         self.assertEqual(payload["rows"][0]["rs_momentum_score"], 100.0)
+        self.assertEqual(payload["rows"][0]["rs_days_21d"], 21)
+        self.assertEqual(payload["rows"][0]["rs_days_21d_pct"], 100.0)
+        self.assertEqual(payload["rows"][0]["avg_volume_20d"], 1_000_260)
+        self.assertEqual(payload["rows"][0]["relative_volume_20d"], 1.0)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["day_change_pct"], 9.09)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["avg_volume_20d"], 1_000_001)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["relative_volume_20d"], 1.0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["rs_days_21d"], 2)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["rs_days_21d_pct"], 100.0)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["daily_rs_rating"], 91.0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["weekly_rs_rating"], 87.0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["leadership_score"], 94.0)
         self.assertEqual(payload["rows"][1]["ticker"], "BBB")
         self.assertEqual(payload["rows"][1]["top_holdings"][0]["day_change_pct"], -11.11)
 
@@ -87,10 +100,29 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
                     "rs_vs_spy_1m_pct": None,
                     "rs_vs_spy_3m_pct": None,
                     "rs_momentum_score": None,
+                    "rs_days_21d": None,
+                    "rs_days_21d_pct": None,
                     "atr_pct": None,
                     "volume": None,
+                    "avg_volume_20d": None,
+                    "relative_volume_20d": None,
                     "latest_date": None,
-                    "top_holdings": [{"ticker": "ONE", "name": "", "weight": 10.0, "shares_held": None, "day_change_pct": None, "daily_rs_rating": None}],
+                    "top_holdings": [
+                        {
+                            "ticker": "ONE",
+                            "name": "",
+                            "weight": 10.0,
+                            "shares_held": None,
+                            "day_change_pct": None,
+                            "avg_volume_20d": None,
+                            "relative_volume_20d": None,
+                            "rs_days_21d": None,
+                            "rs_days_21d_pct": None,
+                            "daily_rs_rating": None,
+                            "weekly_rs_rating": None,
+                            "leadership_score": None,
+                        }
+                    ],
                 }
             ],
         )

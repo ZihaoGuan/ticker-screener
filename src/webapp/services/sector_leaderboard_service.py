@@ -342,7 +342,7 @@ class SectorLeaderboardService:
         holding_tickers = sorted({holding.ticker for holdings in holdings_by_etf.values() for holding in holdings})
         etf_frames = load_many_ticker_windows([*etf_tickers, _BENCHMARK_TICKER], resolved_as_of, 270, database_url=self.database_url)
         benchmark_frame = etf_frames.get(_BENCHMARK_TICKER)
-        holding_frames = load_many_ticker_windows(holding_tickers, resolved_as_of, 3, database_url=self.database_url)
+        holding_frames = load_many_ticker_windows(holding_tickers, resolved_as_of, 270, database_url=self.database_url)
         technical_map = self._load_technical_rating_map(holding_tickers, as_of_date=resolved_as_of)
 
         rows = [
@@ -386,7 +386,9 @@ class SectorLeaderboardService:
         relative_metrics = _compute_relative_metrics(frame, benchmark_frame)
         holdings = []
         for holding in holdings_source:
-            holding_metrics = _compute_metrics(holding_frames.get(holding.ticker))
+            holding_frame = holding_frames.get(holding.ticker)
+            holding_metrics = _compute_metrics(holding_frame)
+            holding_relative_metrics = _compute_relative_metrics(holding_frame, benchmark_frame)
             technical = technical_map.get(holding.ticker, {})
             holdings.append(
                 {
@@ -395,7 +397,13 @@ class SectorLeaderboardService:
                     "weight": holding.weight,
                     "shares_held": holding.shares_held,
                     "day_change_pct": holding_metrics["day_change_pct"],
+                    "avg_volume_20d": holding_metrics["avg_volume_20d"],
+                    "relative_volume_20d": holding_metrics["relative_volume_20d"],
+                    "rs_days_21d": holding_relative_metrics["rs_days_21d"],
+                    "rs_days_21d_pct": holding_relative_metrics["rs_days_21d_pct"],
                     "daily_rs_rating": _finite_float(technical.get("daily_rs_rating")),
+                    "weekly_rs_rating": _finite_float(technical.get("weekly_rs_rating")),
+                    "leadership_score": _finite_float(technical.get("leadership_score")),
                 }
             )
 
@@ -412,8 +420,12 @@ class SectorLeaderboardService:
             "rs_vs_spy_1m_pct": relative_metrics["rs_1m_pct"],
             "rs_vs_spy_3m_pct": relative_metrics["rs_3m_pct"],
             "rs_momentum_score": relative_metrics["rs_momentum_score"],
+            "rs_days_21d": relative_metrics["rs_days_21d"],
+            "rs_days_21d_pct": relative_metrics["rs_days_21d_pct"],
             "atr_pct": metrics["atr_pct"],
             "volume": metrics["volume"],
+            "avg_volume_20d": metrics["avg_volume_20d"],
+            "relative_volume_20d": metrics["relative_volume_20d"],
             "latest_date": metrics["latest_date"],
             "top_holdings": holdings,
         }
@@ -475,6 +487,8 @@ def _compute_metrics(frame: Any) -> dict[str, Any]:
             "year_change_pct": None,
             "atr_pct": None,
             "volume": None,
+            "avg_volume_20d": None,
+            "relative_volume_20d": None,
             "latest_date": None,
         }
     ordered = frame.sort_index()
@@ -489,25 +503,28 @@ def _compute_metrics(frame: Any) -> dict[str, Any]:
         "year_change_pct": _change_pct(ordered, 252),
         "atr_pct": _atr_pct(ordered, 14),
         "volume": _finite_int(latest.get("Volume")),
+        "avg_volume_20d": _avg_volume(ordered, 20),
+        "relative_volume_20d": _relative_volume(ordered, 20),
         "latest_date": latest_date,
     }
 
 
-def _compute_relative_metrics(frame: Any, benchmark_frame: Any) -> dict[str, float | None]:
+def _compute_relative_metrics(frame: Any, benchmark_frame: Any) -> dict[str, float | int | None]:
     if frame is None or benchmark_frame is None or frame.empty or benchmark_frame.empty:
-        return {"rs_1m_pct": None, "rs_3m_pct": None, "rs_momentum_score": None}
+        return {"rs_1m_pct": None, "rs_3m_pct": None, "rs_momentum_score": None, "rs_days_21d": None, "rs_days_21d_pct": None}
 
     pair = pd.concat([frame["Close"], benchmark_frame["Close"]], axis=1, join="inner").dropna()
     pair.columns = ["sector_close", "benchmark_close"]
     pair = pair[(pair["sector_close"] > 0) & (pair["benchmark_close"] > 0)]
     if pair.empty:
-        return {"rs_1m_pct": None, "rs_3m_pct": None, "rs_momentum_score": None}
+        return {"rs_1m_pct": None, "rs_3m_pct": None, "rs_momentum_score": None, "rs_days_21d": None, "rs_days_21d_pct": None}
 
     ratio = pair["sector_close"] / pair["benchmark_close"]
     rs_1m = _ratio_change_pct(ratio, 21)
     rs_3m = _ratio_change_pct(ratio, 63)
     score = _relative_momentum_score(ratio)
-    return {"rs_1m_pct": rs_1m, "rs_3m_pct": rs_3m, "rs_momentum_score": score}
+    rs_days_count, rs_days_pct = _rs_days(pair["sector_close"], pair["benchmark_close"], 21)
+    return {"rs_1m_pct": rs_1m, "rs_3m_pct": rs_3m, "rs_momentum_score": score, "rs_days_21d": rs_days_count, "rs_days_21d_pct": rs_days_pct}
 
 
 def _ratio_change_pct(ratio: pd.Series, lookback: int) -> float | None:
@@ -544,6 +561,22 @@ def _log_momentum_pct(log_ratio: pd.Series, lookback: int) -> float | None:
     return (latest - prior) * 100
 
 
+def _rs_days(stock_close: pd.Series, benchmark_close: pd.Series, lookback: int) -> tuple[int | None, float | None]:
+    aligned = pd.concat([stock_close, benchmark_close], axis=1, join="inner").dropna()
+    aligned.columns = ["stock", "benchmark"]
+    if len(aligned) <= 1:
+        return None, None
+    stock_returns = aligned["stock"].pct_change()
+    benchmark_returns = aligned["benchmark"].pct_change()
+    comparison = pd.concat([stock_returns, benchmark_returns], axis=1, join="inner").dropna()
+    comparison.columns = ["stock_return", "benchmark_return"]
+    window = comparison.tail(max(1, int(lookback)))
+    if window.empty:
+        return None, None
+    rs_days = int((window["stock_return"] > window["benchmark_return"]).sum())
+    return rs_days, round((rs_days / len(window)) * 100, 1)
+
+
 def _change_pct(frame: Any, lookback: int) -> float | None:
     if len(frame) <= lookback:
         return None
@@ -576,6 +609,25 @@ def _atr_pct(frame: Any, lookback: int) -> float | None:
     if not ranges or latest_close is None or latest_close <= 0:
         return None
     return round((sum(ranges[-lookback:]) / len(ranges[-lookback:]) / latest_close) * 100, 2)
+
+
+def _avg_volume(frame: Any, lookback: int) -> int | None:
+    if frame is None or frame.empty or "Volume" not in frame.columns:
+        return None
+    volumes = pd.to_numeric(frame["Volume"], errors="coerce").dropna().tail(max(1, int(lookback)))
+    if volumes.empty:
+        return None
+    return int(round(float(volumes.mean())))
+
+
+def _relative_volume(frame: Any, lookback: int) -> float | None:
+    if frame is None or frame.empty:
+        return None
+    latest_volume = _finite_float(frame.iloc[-1].get("Volume"))
+    avg_volume = _avg_volume(frame, lookback)
+    if latest_volume is None or avg_volume is None or avg_volume <= 0:
+        return None
+    return round(latest_volume / avg_volume, 2)
 
 
 def _finite_float(value: object) -> float | None:

@@ -2077,9 +2077,6 @@ class WatchlistService:
         if vcp_score is None:
             vcp_score = _coerce_optional_float(entry.get("vcp_score"))
         vcp_rating = _coalesce_text(bucket.get("vcp_rating"), entry.get("vcp_rating"), entry.get("score_label"))
-        industry_group_rs_rank = bucket.get("industry_group_rs_rank")
-        if industry_group_rs_rank is None:
-            industry_group_rs_rank = _coerce_optional_float(entry.get("industry_group_rs_rank"))
         growth_acceleration_score = bucket.get("growth_acceleration_score")
         if growth_acceleration_score is None:
             growth_acceleration_score = _coerce_optional_float(entry.get("growth_acceleration_score") or entry.get("acceleration_score"))
@@ -2104,7 +2101,6 @@ class WatchlistService:
         bucket["canslim_max_score"] = canslim_max_score
         bucket["vcp_score"] = vcp_score
         bucket["vcp_rating"] = vcp_rating
-        bucket["industry_group_rs_rank"] = industry_group_rs_rank
         bucket["growth_acceleration_score"] = growth_acceleration_score
         bucket["growth_acceleration_label"] = growth_acceleration_label
         bucket["technical_indicator_ratings"] = technical_indicator_ratings
@@ -2229,7 +2225,6 @@ class WatchlistService:
             row["daily_rs_rating"] = _coerce_optional_float(technical.get("daily_rs_rating"))
             row["weekly_rs_rating"] = _coerce_optional_float(technical.get("weekly_rs_rating"))
             row["industry_group"] = _coalesce_text(technical.get("industry_group"))
-            row["industry_group_rs_rank"] = _coerce_optional_float(technical.get("industry_group_rs_rank"))
             row["industry_group_member_count"] = _coerce_optional_int(technical.get("industry_group_member_count"))
             row["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))
             row["canslim_max_score"] = _coerce_optional_int(canslim.get("canslim_max_score"))
@@ -2309,7 +2304,6 @@ class WatchlistService:
             entry["daily_rs_rating"] = _coerce_optional_float(technical.get("daily_rs_rating"))
             entry["weekly_rs_rating"] = _coerce_optional_float(technical.get("weekly_rs_rating"))
             entry["industry_group"] = _coalesce_text(technical.get("industry_group"))
-            entry["industry_group_rs_rank"] = _coerce_optional_float(technical.get("industry_group_rs_rank"))
             entry["industry_group_member_count"] = _coerce_optional_int(technical.get("industry_group_member_count"))
             entry["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))
             entry["canslim_max_score"] = _coerce_optional_int(canslim.get("canslim_max_score"))
