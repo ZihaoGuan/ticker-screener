@@ -1034,7 +1034,8 @@ class WatchlistServiceTests(unittest.TestCase):
                         "sector": "Information Technology",
                         "industry": "Software",
                         "scanner_count": 2,
-                        "scanner_labels": ["RS New High Before Price", "Fearzone"],
+                        "scanner_labels": ["RS New High Before Price", "RS Phase"],
+                        "rs_phase_active_days": 8,
                         "scanners": [],
                     },
                 }
@@ -1064,6 +1065,25 @@ class WatchlistServiceTests(unittest.TestCase):
             return_value=persisted_detail,
         ) as get_run_mock, patch.object(
             service,
+            "_attach_latest_market_snapshots",
+            side_effect=lambda rows_by_ticker, tickers: rows_by_ticker["PLTR"].update(
+                {
+                    "rs_days_21d": 17,
+                    "rs_days_21d_pct": 81.0,
+                    "up_on_down_days_21d": 5,
+                    "up_on_down_days_21d_pct": 71.4,
+                }
+            ),
+        ), patch.object(
+            service,
+            "_attach_latest_rating_snapshots",
+            side_effect=lambda rows_by_ticker, tickers: rows_by_ticker["PLTR"].update({"daily_rs_rating": 96.0}),
+        ), patch.object(
+            service,
+            "_load_sector_momentum_map",
+            return_value={},
+        ), patch.object(
+            service,
             "_select_scanner_top_hit_live_cards",
         ) as live_cards_mock:
             payload = service.get_scanner_top_hits_payload(
@@ -1072,6 +1092,11 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["rows"][0]["ticker"], "PLTR")
         self.assertEqual(payload["total_unique_tickers"], 5)
+        self.assertEqual(payload["rows"][0]["rs_evidence_score"], 7)
+        self.assertEqual(payload["rows"][0]["rs_days_21d_pct"], 81.0)
+        self.assertEqual(payload["rows"][0]["rs_phase_active_days"], 8)
+        self.assertEqual(payload["rows"][0]["relative_strength_evidence"]["rs_phase_active_days"], 8)
+        self.assertIn("RS Phase active", payload["rows"][0]["relative_strength_evidence"]["reasons"])
         list_runs_mock.assert_called_once()
         get_run_mock.assert_called_once_with(901, include_hits=True, hit_limit=5000)
         live_cards_mock.assert_not_called()

@@ -87,6 +87,7 @@ _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
+_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "rs-evidence-v2"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
 _SCANNER_BOARD_CUTOFF_HOUR = 20
@@ -98,7 +99,7 @@ _chart_gex_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _chart_gex_cache_lock = threading.Lock()
 _chart_overlay_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
 _chart_overlay_cache_lock = threading.Lock()
-_scanner_top_hits_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_scanner_top_hits_cache: dict[tuple[str, ...], tuple[float, dict[str, Any]]] = {}
 _scanner_top_hits_cache_lock = threading.Lock()
 _sector_momentum_cache: dict[tuple[str, str, str, str], tuple[float, dict[str, dict[str, Any]]]] = {}
 _sector_momentum_cache_lock = threading.Lock()
@@ -779,6 +780,7 @@ class WatchlistService:
         cache_key = (
             str(board_payload.get("target_trading_date") or ""),
             str(board_payload.get("manual_override_target_date") or ""),
+            _SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION,
         )
         cached_payload = _read_scanner_top_hits_cache(cache_key)
         if cached_payload is not None:
@@ -921,8 +923,23 @@ class WatchlistService:
                 if isinstance(item, dict) and normalize_ticker_symbol(str(item.get("ticker") or ""))
             }
             if rows_by_ticker:
+                sorted_tickers = sorted(rows_by_ticker)
+                self._attach_latest_market_snapshots(rows_by_ticker, sorted_tickers)
                 self._attach_latest_rating_snapshots(rows_by_ticker, sorted(rows_by_ticker))
-                self._attach_latest_position_actions(rows_by_ticker, sorted(rows_by_ticker), as_of_date=run_date)
+                self._attach_relative_strength_evidence(rows_by_ticker, sorted_tickers)
+                self._attach_latest_position_actions(rows_by_ticker, sorted_tickers, as_of_date=run_date)
+            sector_momentum_map = self._load_sector_momentum_map(None) if rows_by_ticker else {}
+            for row_payload in rows_payload:
+                if not isinstance(row_payload, dict):
+                    continue
+                sector_key = _coalesce_text(row_payload.get("sector"))
+                row_payload["sector_momentum"] = copy.deepcopy(sector_momentum_map.get(sector_key) or None) if sector_key else None
+                if not isinstance(row_payload.get("scanner_labels"), list):
+                    row_payload["scanner_labels"] = [
+                        str(item.get("label") or "")
+                        for item in row_payload.get("scanners", [])
+                        if isinstance(item, dict) and str(item.get("label") or "").strip()
+                    ]
             _sanitize_scanner_top_hit_company_names(rows_payload)
             return {
                 "generated_at": str(summary_payload.get("generated_at") or ""),
@@ -2761,7 +2778,7 @@ def _write_chart_payload_cache(key: tuple[str, str, str, str, str, str], payload
         _chart_payload_cache[key] = (time.time() + _CHART_PAYLOAD_CACHE_TTL_SECONDS, copy.deepcopy(payload))
 
 
-def _read_scanner_top_hits_cache(key: tuple[str, str]) -> dict[str, Any] | None:
+def _read_scanner_top_hits_cache(key: tuple[str, ...]) -> dict[str, Any] | None:
     now = time.time()
     with _scanner_top_hits_cache_lock:
         cached_entry = _scanner_top_hits_cache.get(key)
@@ -2774,7 +2791,7 @@ def _read_scanner_top_hits_cache(key: tuple[str, str]) -> dict[str, Any] | None:
         return copy.deepcopy(payload)
 
 
-def _write_scanner_top_hits_cache(key: tuple[str, str], payload: dict[str, Any]) -> None:
+def _write_scanner_top_hits_cache(key: tuple[str, ...], payload: dict[str, Any]) -> None:
     with _scanner_top_hits_cache_lock:
         _scanner_top_hits_cache[key] = (time.time() + _SCANNER_TOP_HITS_CACHE_TTL_SECONDS, copy.deepcopy(payload))
 
@@ -3774,6 +3791,7 @@ def _build_relative_strength_evidence(row: dict[str, Any]) -> dict[str, Any]:
         for scanner in row.get("scanners", [])
         if isinstance(scanner, dict)
     }
+    scanner_ids.update(_scanner_ids_from_labels(row.get("scanner_labels")))
     score = 0
     max_score = 9
     reasons: list[str] = []
@@ -3818,6 +3836,23 @@ def _build_relative_strength_evidence(row: dict[str, Any]) -> dict[str, Any]:
         "daily_rs_rating": daily_rs_rating,
         "reasons": reasons,
     }
+
+
+def _scanner_ids_from_labels(labels: object) -> set[str]:
+    if not isinstance(labels, list):
+        return set()
+    ids: set[str] = set()
+    for label in labels:
+        normalized = re.sub(r"\s+", " ", str(label or "").strip().lower())
+        if normalized == "rs phase":
+            ids.add("rs_phase")
+        elif normalized == "rs new high before price":
+            ids.add("rs")
+        elif normalized == "daily rs new high":
+            ids.add("daily_rs_new_high")
+        elif normalized in {"hve", "high volume event"}:
+            ids.add("hve")
+    return ids
 
 
 def _build_chart_relative_strength_evidence(
