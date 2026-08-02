@@ -20,7 +20,7 @@ import type {
   WatchlistDetailResponse,
 } from "../lib/types";
 
-type SortKey = "als" | "ta" | "fa" | "ars" | "ticker" | "company" | "sector" | "volume" | "change";
+type SortKey = "als" | "ta" | "fa" | "ars" | "rsPhaseDays" | "ticker" | "company" | "sector" | "volume" | "change";
 type SortDirection = "asc" | "desc";
 type ScannerViewMode = "charts" | "list";
 type ChartColumnCount = 2 | 3;
@@ -44,6 +44,7 @@ type ScannerRow = {
   accelScore: number | null;
   accelLabel: string;
   arsScore: number | null;
+  rsPhaseActiveDays: number | null;
   dailyRsRating: number | null;
   alsScore: number | null;
   technicalIndicator1d: string;
@@ -546,6 +547,7 @@ export function ScannerResultPage() {
                       <th>CANSLIM</th>
                       <th>Accel</th>
                       <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>{renderSortHeader("RS Phase", "rsPhaseDays", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                       <th>Daily RS</th>
                       <th>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     </tr>
@@ -588,6 +590,7 @@ export function ScannerResultPage() {
                         <td data-label="CANSLIM">{formatCanslimScore(row.canslimScore, row.canslimMaxScore)}</td>
                         <td data-label="Accel">{formatAccelerationScore(row.accelScore, row.accelLabel)}</td>
                         <td data-label="ARS">{formatPercentScore(row.arsScore)}</td>
+                        <td data-label="RS Phase">{formatPhaseDays(row.rsPhaseActiveDays)}</td>
                         <td data-label="Daily RS">{formatPercentScore(row.dailyRsRating)}</td>
                         <td data-label="ALS Score" className="scanner-result-als-cell">
                           {formatIntegerScore(row.alsScore)}
@@ -676,6 +679,7 @@ function buildScannerRow(
     taScore: technicalOverall != null ? technicalOverall / 10 : null,
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,
+    rsPhaseActiveDays: resolveRsPhaseActiveDays(entry),
     dailyRsRating: directDailyRsRating ?? technical?.daily_rs_rating ?? null,
     alsScore: averagePresent([technicalOverall, fundamentalOverall, leadershipOverall]),
     technicalIndicator1d: dailyIndicator?.rating_label ?? "",
@@ -738,6 +742,24 @@ function resolveDisplayVolume(entry: Record<string, unknown> | null | undefined)
   return null;
 }
 
+function resolveRsPhaseActiveDays(entry: Record<string, unknown> | null | undefined): number | null {
+  const directValue = coerceOptionalNumber(entry?.rs_phase_active_days);
+  if (directValue != null) {
+    return directValue;
+  }
+  const badges = entry?.signal_badges;
+  if (!Array.isArray(badges)) {
+    return null;
+  }
+  for (const badge of badges) {
+    const match = String(badge ?? "").match(/\bRS\s+Phase\s+(\d+)D\b/i);
+    if (match) {
+      return Number(match[1]);
+    }
+  }
+  return null;
+}
+
 function compareScannerRows(left: ScannerRow, right: ScannerRow, sortBy: SortKey, sortDirection: SortDirection) {
   if (sortBy === "ticker") {
     return compareText(left.ticker, right.ticker, sortDirection);
@@ -762,6 +784,9 @@ function compareScannerRows(left: ScannerRow, right: ScannerRow, sortBy: SortKey
   }
   if (sortBy === "ars") {
     return compareNullableNumber(left.arsScore, right.arsScore, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "rsPhaseDays") {
+    return compareNullableNumber(left.rsPhaseActiveDays, right.rsPhaseActiveDays, sortDirection) || left.ticker.localeCompare(right.ticker);
   }
   return compareNullableNumber(left.alsScore, right.alsScore, sortDirection) || left.ticker.localeCompare(right.ticker);
 }
@@ -815,6 +840,10 @@ function formatPercentScore(value: number | null) {
   return value == null ? "--" : `${Math.round(value)}%`;
 }
 
+function formatPhaseDays(value: number | null) {
+  return value == null ? "--" : `${Math.round(value)}D`;
+}
+
 function formatIntegerScore(value: number | null) {
   return value == null ? "--" : `${Math.round(value)}`;
 }
@@ -862,6 +891,8 @@ function labelForSort(sortBy: SortKey) {
       return "FA";
     case "ars":
       return "ARS";
+    case "rsPhaseDays":
+      return "RS Phase";
     case "ticker":
       return "Ticker";
     default:

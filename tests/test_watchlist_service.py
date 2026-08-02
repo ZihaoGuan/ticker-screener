@@ -500,6 +500,22 @@ class WatchlistServiceTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        (watchlists_dir / "rs_phase_2026-06-12.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "PLTR",
+                        "company_name": "Palantir",
+                        "sector": "Information Technology",
+                        "industry": "Software",
+                        "current_price": 132.45,
+                        "daily_change_pct": 2.1,
+                        "signal_badges": ["RS Phase 8D"],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
         (watchlists_dir / "wyckoff_sell_signal_2026-06-12.json").write_text(
             json.dumps(
                 [
@@ -531,8 +547,12 @@ class WatchlistServiceTests(unittest.TestCase):
             (dt.datetime(2026, 6, 12, 23, 40, tzinfo=dt.timezone.utc).timestamp(),) * 2,
         )
         os.utime(
-            watchlists_dir / "wyckoff_sell_signal_2026-06-12.json",
+            watchlists_dir / "rs_phase_2026-06-12.json",
             (dt.datetime(2026, 6, 12, 23, 41, tzinfo=dt.timezone.utc).timestamp(),) * 2,
+        )
+        os.utime(
+            watchlists_dir / "wyckoff_sell_signal_2026-06-12.json",
+            (dt.datetime(2026, 6, 12, 23, 42, tzinfo=dt.timezone.utc).timestamp(),) * 2,
         )
 
         class _FakeRrgService:
@@ -594,11 +614,11 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["total_unique_tickers"], 3)
         self.assertEqual(payload["overlapping_ticker_count"], 1)
-        self.assertEqual(payload["total_live_scanners"], 2)
+        self.assertEqual(payload["total_live_scanners"], 3)
         pltr = payload["rows"][0]
         self.assertEqual(pltr["ticker"], "PLTR")
-        self.assertEqual(pltr["scanner_count"], 2)
-        self.assertEqual(pltr["scanner_labels"], ["RS New High Before Price", "Fearzone"])
+        self.assertEqual(pltr["scanner_count"], 3)
+        self.assertEqual(pltr["scanner_labels"], ["RS New High Before Price", "RS Phase", "Fearzone"])
         self.assertEqual(pltr["day_close"], 132.45)
         self.assertEqual(pltr["change_pct"], 2.1)
         self.assertIsInstance(pltr["change_from_52wk_low_pct"], float)
@@ -607,9 +627,12 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["daily_rs_rating"], 96.0)
         self.assertEqual(pltr["rs_days_21d"], 19)
         self.assertEqual(pltr["rs_days_21d_pct"], 90.5)
+        self.assertEqual(pltr["rs_phase_active_days"], 8)
+        self.assertEqual(pltr["relative_strength_evidence"]["rs_phase_active_days"], 8)
         self.assertEqual(pltr["up_on_down_days_21d"], 19)
         self.assertEqual(pltr["up_on_down_days_21d_pct"], 90.5)
-        self.assertEqual(pltr["rs_evidence_score"], 5)
+        self.assertEqual(pltr["rs_evidence_score"], 7)
+        self.assertIn("RS Phase active", pltr["relative_strength_evidence"]["reasons"])
         self.assertIn("RS new high before price", pltr["relative_strength_evidence"]["reasons"])
         self.assertIn("Daily RS 96.0 >= 90", pltr["relative_strength_evidence"]["reasons"])
         self.assertEqual(pltr["ta_rating"], 95.0)

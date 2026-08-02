@@ -241,6 +241,7 @@ export type ScannerTopHitRow = {
   rs_evidence_max_score?: number | null;
   rs_days_21d?: number | null;
   rs_days_21d_pct?: number | null;
+  rs_phase_active_days?: number | null;
   up_on_down_days_21d?: number | null;
   up_on_down_days_21d_pct?: number | null;
   relative_strength_evidence?: RelativeStrengthEvidence | null;
@@ -279,6 +280,7 @@ export type RelativeStrengthEvidence = {
   max_score: number;
   rs_days_21d: number | null;
   rs_days_21d_pct: number | null;
+  rs_phase_active_days?: number | null;
   up_on_down_days_21d: number | null;
   up_on_down_days_21d_pct: number | null;
   rs_phase_active: boolean;

@@ -983,6 +983,7 @@ class WatchlistService:
                         "rs_evidence_max_score": None,
                         "rs_days_21d": None,
                         "rs_days_21d_pct": None,
+                        "rs_phase_active_days": None,
                         "up_on_down_days_21d": None,
                         "up_on_down_days_21d_pct": None,
                         "relative_strength_evidence": None,
@@ -2109,6 +2110,10 @@ class WatchlistService:
         rs_rating = bucket.get("rs_rating")
         if rs_rating is None:
             rs_rating = _coerce_optional_float(entry.get("rs_rating"))
+        rs_phase_active_days = _coerce_optional_int(bucket.get("rs_phase_active_days"))
+        entry_rs_phase_active_days = _resolve_rs_phase_active_days(entry)
+        if entry_rs_phase_active_days is not None:
+            rs_phase_active_days = max(rs_phase_active_days or 0, entry_rs_phase_active_days)
         ta_rating = bucket.get("ta_rating")
         if ta_rating is None:
             ta_rating = _coerce_optional_float(entry.get("ta_rating"))
@@ -2143,6 +2148,7 @@ class WatchlistService:
         bucket["perf_year_pct"] = perf_year_pct
         bucket["perf_ytd_pct"] = perf_ytd_pct
         bucket["rs_rating"] = rs_rating
+        bucket["rs_phase_active_days"] = rs_phase_active_days
         bucket["ta_rating"] = ta_rating
         bucket["fa_rating"] = fa_rating
         bucket["canslim_score"] = canslim_score
@@ -3802,6 +3808,7 @@ def _build_relative_strength_evidence(row: dict[str, Any]) -> dict[str, Any]:
         "max_score": max_score,
         "rs_days_21d": _coerce_optional_int(row.get("rs_days_21d")),
         "rs_days_21d_pct": rs_days_pct,
+        "rs_phase_active_days": _coerce_optional_int(row.get("rs_phase_active_days")),
         "up_on_down_days_21d": up_on_down_days,
         "up_on_down_days_21d_pct": _coerce_optional_float(row.get("up_on_down_days_21d_pct")),
         "rs_phase_active": "rs_phase" in scanner_ids,
@@ -4486,6 +4493,20 @@ def _resolve_entry_change_pct(entry: dict[str, Any]) -> float | None:
         value = _coerce_optional_float(entry.get(key))
         if value is not None:
             return value
+    return None
+
+
+def _resolve_rs_phase_active_days(entry: dict[str, Any]) -> int | None:
+    direct_value = _coerce_optional_int(entry.get("rs_phase_active_days"))
+    if direct_value is not None:
+        return direct_value
+    badges = entry.get("signal_badges")
+    if not isinstance(badges, list):
+        return None
+    for badge in badges:
+        match = re.search(r"\bRS\s+Phase\s+(\d+)D\b", str(badge or ""), flags=re.IGNORECASE)
+        if match:
+            return int(match.group(1))
     return None
 
 

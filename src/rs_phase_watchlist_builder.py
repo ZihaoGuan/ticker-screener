@@ -36,6 +36,7 @@ def build_rs_phase_watchlist(hits: list[RsPhaseHit]) -> list[dict[str, object]]:
                 "entry_timeframe": "daily",
                 "signal_rs_rating": round(hit.rs_rating, 2),
                 "signal_rs_score": round(hit.rs_score, 4),
+                "rs_phase_active_days": hit.rs_phase_active_days,
                 "signal_badges": badges,
             }
         )

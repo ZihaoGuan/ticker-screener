@@ -8,7 +8,7 @@ import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type { CandlePoint, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
-type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "upOnDownDays" | "rs" | "ta" | "fa" | "decision" | "decisionScore";
+type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
 type ViewMode = "list" | "charts";
 const LIST_PAGE_SIZE = 50;
@@ -511,6 +511,7 @@ export function ScannerTopHitsPage() {
                     <th>{renderSortButton("Bollinger", "bollinger", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("RS Evidence", "rsEvidence", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("RS Days", "rsDays", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("RS Phase", "rsPhaseDays", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("Up/Down", "upOnDownDays", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>1Y %</th>
                     <th>YTD %</th>
@@ -583,6 +584,7 @@ export function ScannerTopHitsPage() {
                       <td data-label="Bollinger">{renderBollingerBandStatus(row.bollinger_band_status)}</td>
                       <td data-label="RS Evidence">{renderRsEvidenceCell(row)}</td>
                       <td data-label="RS Days">{formatCountWithPercent(row.rs_days_21d, row.rs_days_21d_pct)}</td>
+                      <td data-label="RS Phase">{formatPhaseDays(resolveRsPhaseActiveDays(row))}</td>
                       <td data-label="Up/Down">{formatCountWithPercent(row.up_on_down_days_21d, row.up_on_down_days_21d_pct)}</td>
                       <td data-label="1Y %">{renderChange(row.perf_year_pct)}</td>
                       <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
@@ -694,6 +696,7 @@ function ScannerTopHitChartCard({
         {row.rs_evidence_score != null ? (
           <span className={`scanner-score-pill ${toneForRating(row.rs_evidence_score, 5)}`}>Evidence {row.rs_evidence_score}/{row.rs_evidence_max_score ?? 9}</span>
         ) : null}
+        {resolveRsPhaseActiveDays(row) != null ? <span className="scanner-score-pill">RS Phase {formatPhaseDays(resolveRsPhaseActiveDays(row))}</span> : null}
         <span className={`scanner-score-pill ${toneForRating(row.daily_rs_rating ?? row.rs_rating, 90)}`}>RS {formatRating(row.daily_rs_rating ?? row.rs_rating)}</span>
         <span className={`scanner-score-pill ${toneForRating(row.ta_rating, 80)}`}>TA {formatRating(row.ta_rating)}</span>
         <span className={`scanner-score-pill ${toneForRating(row.fa_rating, 80)}`}>FA {formatRating(row.fa_rating)}</span>
@@ -822,6 +825,9 @@ function compareRows(
   if (sortBy === "rsDays") {
     return compareNullableNumber(left.rs_days_21d_pct ?? null, right.rs_days_21d_pct ?? null, sortDirection) || left.ticker.localeCompare(right.ticker);
   }
+  if (sortBy === "rsPhaseDays") {
+    return compareNullableNumber(resolveRsPhaseActiveDays(left), resolveRsPhaseActiveDays(right), sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
   if (sortBy === "upOnDownDays") {
     return compareNullableNumber(left.up_on_down_days_21d ?? null, right.up_on_down_days_21d ?? null, sortDirection) || left.ticker.localeCompare(right.ticker);
   }
@@ -863,6 +869,14 @@ function formatPrice(value: number | null) {
 
 function formatRating(value: number | null) {
   return value == null ? "--" : value.toFixed(1);
+}
+
+function formatPhaseDays(value: number | null | undefined) {
+  return value == null ? "--" : `${Math.round(value)}D`;
+}
+
+function resolveRsPhaseActiveDays(row: ScannerTopHitRow): number | null {
+  return row.rs_phase_active_days ?? row.relative_strength_evidence?.rs_phase_active_days ?? null;
 }
 
 function formatCountWithPercent(count: number | null | undefined, pct: number | null | undefined) {
