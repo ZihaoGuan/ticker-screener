@@ -21,6 +21,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("daily_rs_new_high_{date_label}.json",),
         "legacy_summary_templates": ("daily_rs_new_high_run_summary_{date_label}.json",),
     },
+    "rs_phase": {
+        "stem_template": "rs_phase_{date_label}",
+        "legacy_watchlist_templates": ("rs_phase_{date_label}.json",),
+        "legacy_raw_templates": ("rs_phase_{date_label}.json",),
+        "legacy_summary_templates": ("rs_phase_run_summary_{date_label}.json",),
+    },
     "weekly_rs": {
         "stem_template": "weekly_rs_new_high_{date_label}",
         "legacy_watchlist_templates": ("weekly_rs_new_high_{date_label}.json",),
@@ -493,6 +499,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("weekly_rs_new_high_all", "weekly_rs_new_high"),
     ("weekly_rs_new_high", "weekly_rs"),
     ("daily_rs_new_high", "daily_rs_new_high"),
+    ("rs_phase", "rs_phase"),
     ("rs_new_high_before_price", "rs"),
     ("legacy_peg_earnings_gap", "legacy_peg"),
     ("sean_gap_up_earnings_gap", "sean_gap_up"),

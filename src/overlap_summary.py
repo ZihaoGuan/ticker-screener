@@ -17,6 +17,11 @@ PIPELINES = (
         "filename": "rs_new_high_before_price_{date}.json",
     },
     {
+        "id": "rs_phase",
+        "label": "RS Phase",
+        "filename": "rs_phase_{date}.json",
+    },
+    {
         "id": "weekly_rs",
         "label": "Weekly RS New High Before Price",
         "filename": "weekly_rs_new_high_{date}.json",

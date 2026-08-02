@@ -2839,6 +2839,14 @@ a {
   box-shadow: 0 0 0 1px rgba(191, 219, 254, 0.4);
 }
 
+.legend-marker-support {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 1px rgba(251, 113, 133, 0.65);
+}
+
 .chart-toolbar {
   display: grid;
   gap: 10px 14px;

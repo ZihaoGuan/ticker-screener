@@ -138,6 +138,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "rs_phase",
+        "strategy_id": "rs_phase",
+        "label": "RS Phase",
+        "description": "Daily RS line holds above its 21 EMA, highlighting leaders with sustained relative-strength sponsorship.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+    },
+    {
         "id": "weekly_vcp",
         "strategy_id": "weekly_vcp",
         "label": "Weekly VCP",
@@ -1332,6 +1340,10 @@ class WatchlistService:
         rs_line: pd.Series | None = None
         rs_new_high: pd.Series | None = None
         rs_new_high_before_price: pd.Series | None = None
+        rs_ema21: pd.Series | None = None
+        rs_phase_active: pd.Series | None = None
+        rs_phase_reclaim: pd.Series | None = None
+        rs_phase_loss: pd.Series | None = None
         daily_rs_rating: pd.Series | None = None
         weekly_rs_rating: pd.Series | None = None
         fearzone_panel = _filter_fearzone_panel(
@@ -1356,6 +1368,8 @@ class WatchlistService:
             benchmark_frame = benchmark_frame.sort_index()
             benchmark_frame = benchmark_frame.loc[benchmark_frame.index <= pd.Timestamp(resolved_as_of_date)].copy()
             rs_line = _compute_rs_line(frame["Close"], benchmark_frame["Close"])
+            rs_ema21 = _compute_rs_ema(rs_line, 21)
+            rs_phase_active, rs_phase_reclaim, rs_phase_loss = _compute_rs_phase_flags(rs_line, rs_ema21)
             daily_rs_rating = _compute_rs_rating_series(frame["Close"], benchmark_frame["Close"])
             if daily_rs_rating is not None and not daily_rs_rating.empty:
                 weekly_rs_rating = daily_rs_rating.resample("W-FRI").last().dropna()
@@ -1376,9 +1390,11 @@ class WatchlistService:
         position_action = self._load_latest_position_action(normalized_ticker, resolved_as_of_date)
 
         rs_points: list[dict[str, Any]] = []
+        rs_ema21_points: list[dict[str, Any]] = []
         daily_rs_rating_points: list[dict[str, Any]] = []
         weekly_rs_rating_points: list[dict[str, Any]] = []
         rs_markers: list[dict[str, Any]] = []
+        rs_phase_markers: list[dict[str, Any]] = []
         visible_index_set = set(visible_frame.index)
         if rs_line is not None and benchmark_frame is not None and not benchmark_frame.empty:
             rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
@@ -1399,6 +1415,12 @@ class WatchlistService:
                             "kind": "daily_new_high_before_price" if rs_new_high_before_price is not None and bool(rs_new_high_before_price.loc[index]) else "daily_new_high",
                         }
                     )
+            if rs_ema21 is not None and index in rs_ema21.index and pd.notna(rs_ema21.loc[index]):
+                rs_ema21_points.append({"time": time_value, "value": float(rs_ema21.loc[index])})
+            if rs_phase_reclaim is not None and index in rs_phase_reclaim.index and bool(rs_phase_reclaim.loc[index]):
+                rs_phase_markers.append({"time": time_value, "kind": "reclaim"})
+            elif rs_phase_loss is not None and index in rs_phase_loss.index and bool(rs_phase_loss.loc[index]):
+                rs_phase_markers.append({"time": time_value, "kind": "loss"})
             if daily_rs_rating is not None and index in daily_rs_rating.index and pd.notna(daily_rs_rating.loc[index]):
                 daily_rs_rating_points.append({"time": time_value, "value": float(daily_rs_rating.loc[index])})
 
@@ -1420,9 +1442,12 @@ class WatchlistService:
             "data_source": data_source,
             "market_extension": market_extension,
             "rs_line": rs_points,
+            "rs_ema21": rs_ema21_points,
+            "rs_phase": _build_rs_phase_snapshot(rs_line, rs_ema21, rs_phase_active, rs_phase_reclaim, rs_phase_loss),
             "daily_rs_rating": daily_rs_rating_points,
             "weekly_rs_rating": weekly_rs_rating_points,
             "rs_markers": rs_markers,
+            "rs_phase_markers": rs_phase_markers,
             "setup_markers": setup_markers,
             "position_action": position_action,
             "danger_signals": danger_signals,
@@ -2485,9 +2510,12 @@ def _empty_chart_payload(
         "anchored_vwap_52w_low": [],
         "market_extension": _empty_market_extension_overlay(),
         "rs_line": [],
+        "rs_ema21": [],
+        "rs_phase": None,
         "daily_rs_rating": [],
         "weekly_rs_rating": [],
         "rs_markers": [],
+        "rs_phase_markers": [],
         "setup_markers": [],
         "position_action": _empty_position_action_snapshot(),
         "danger_signals": {"as_of_date": resolved_as_of_date.isoformat() if resolved_as_of_date else None, "active_count": 0, "highest_severity": None, "signals": []},
@@ -2517,9 +2545,12 @@ def _empty_chart_overlay_payload(
         "data_source": data_source,
         "market_extension": _empty_market_extension_overlay(),
         "rs_line": [],
+        "rs_ema21": [],
+        "rs_phase": None,
         "daily_rs_rating": [],
         "weekly_rs_rating": [],
         "rs_markers": [],
+        "rs_phase_markers": [],
         "setup_markers": [],
         "position_action": _empty_position_action_snapshot(),
         "danger_signals": {"as_of_date": resolved_as_of_date.isoformat() if resolved_as_of_date else None, "active_count": 0, "highest_severity": None, "signals": []},
@@ -3367,6 +3398,8 @@ def _strategy_id_for_watchlist_meta(item: dict[str, Any]) -> str:
         return "weekly_rs"
     if stem.startswith("daily_rs_new_high_"):
         return "daily_rs_new_high"
+    if stem.startswith("rs_phase_"):
+        return "rs_phase"
     if stem.startswith("fearzone_zeiierman_"):
         return "fearzone_zeiierman"
     return _normalize_scanner_strategy_id(_stem_strategy_id(stem))
@@ -3559,6 +3592,68 @@ def _compute_rs_line(stock: pd.Series, benchmark: pd.Series) -> pd.Series:
     aligned = pd.concat([stock, benchmark], axis=1, join="inner").dropna()
     aligned.columns = ["stock", "benchmark"]
     return aligned["stock"] / aligned["benchmark"]
+
+
+def _compute_rs_ema(rs_line: pd.Series, period: int) -> pd.Series:
+    clean = rs_line.dropna().sort_index()
+    if clean.empty:
+        return pd.Series(dtype=float)
+    return clean.ewm(span=max(1, int(period)), adjust=False).mean()
+
+
+def _compute_rs_phase_flags(rs_line: pd.Series, rs_ema: pd.Series) -> tuple[pd.Series, pd.Series, pd.Series]:
+    aligned = pd.concat([rs_line, rs_ema], axis=1, join="inner").dropna()
+    aligned.columns = ["rs_line", "rs_ema"]
+    if aligned.empty:
+        empty = pd.Series(dtype=bool)
+        return empty, empty, empty
+    phase_active = aligned["rs_line"] > aligned["rs_ema"]
+    reclaim = phase_active & ~phase_active.shift(1, fill_value=False)
+    loss = ~phase_active & phase_active.shift(1, fill_value=False)
+    return (
+        phase_active.reindex(rs_line.index, fill_value=False),
+        reclaim.reindex(rs_line.index, fill_value=False),
+        loss.reindex(rs_line.index, fill_value=False),
+    )
+
+
+def _build_rs_phase_snapshot(
+    rs_line: pd.Series | None,
+    rs_ema: pd.Series | None,
+    phase_active: pd.Series | None,
+    reclaim: pd.Series | None,
+    loss: pd.Series | None,
+) -> dict[str, Any] | None:
+    if rs_line is None or rs_ema is None or phase_active is None or rs_line.empty or rs_ema.empty or phase_active.empty:
+        return None
+    aligned = pd.concat([rs_line, rs_ema, phase_active], axis=1, join="inner").dropna()
+    aligned.columns = ["rs_line", "rs_ema21", "active"]
+    if aligned.empty:
+        return None
+    active_values = [bool(value) for value in aligned["active"].tolist()]
+    active_days = 0
+    for value in reversed(active_values):
+        if not value:
+            break
+        active_days += 1
+    latest_index = aligned.index[-1]
+    recent_reclaim_days_ago = None
+    if reclaim is not None and bool(reclaim.any()):
+        recent_reclaim_index = reclaim[reclaim].index[-1]
+        recent_reclaim_days_ago = len(reclaim.loc[recent_reclaim_index:]) - 1
+    recent_loss_days_ago = None
+    if loss is not None and bool(loss.any()):
+        recent_loss_index = loss[loss].index[-1]
+        recent_loss_days_ago = len(loss.loc[recent_loss_index:]) - 1
+    return {
+        "active": bool(aligned["active"].iloc[-1]),
+        "active_days": int(active_days),
+        "current_rs_line": float(aligned["rs_line"].iloc[-1]),
+        "current_rs_ema21": float(aligned["rs_ema21"].iloc[-1]),
+        "as_of_date": pd.Timestamp(latest_index).date().isoformat(),
+        "recent_reclaim_days_ago": int(recent_reclaim_days_ago) if recent_reclaim_days_ago is not None else None,
+        "recent_loss_days_ago": int(recent_loss_days_ago) if recent_loss_days_ago is not None else None,
+    }
 
 
 def _compute_rs_rating_series(stock: pd.Series, benchmark: pd.Series) -> pd.Series:

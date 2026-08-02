@@ -277,6 +277,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("monster_peg", "monster_peg", "Monster Peg"),
         ("weekly_rs", "weekly_rs", "Weekly RS"),
         ("daily_rs_new_high", "daily_rs_new_high", "Daily RS New High"),
+        ("rs_phase", "rs_phase", "RS Phase"),
         ("rs_new_high_before_price", "rs", "RS"),
         ("cup_handle", "cup_handle", "Cup Handle"),
         ("gap_fill", "gap_fill", "Gap Fill"),

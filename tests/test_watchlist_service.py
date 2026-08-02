@@ -210,6 +210,11 @@ class WatchlistServiceTests(unittest.TestCase):
             modified_at=dt.datetime(2026, 6, 12, 0, 46, tzinfo=dt.timezone.utc),
         )
         self._write_watchlist(
+            "rs_phase_2026-06-11",
+            tickers=["NVDA", "PLTR"],
+            modified_at=dt.datetime(2026, 6, 12, 0, 47, tzinfo=dt.timezone.utc),
+        )
+        self._write_watchlist(
             "sean_peg_earnings_gap_2026-06-11",
             tickers=["APP", "NVDA"],
             modified_at=dt.datetime(2026, 6, 12, 0, 30, tzinfo=dt.timezone.utc),
@@ -271,6 +276,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["rs"]["entry_count"], 2)
         self.assertEqual(cards["daily_rs_new_high"]["stem"], "daily_rs_new_high_2026-06-11")
         self.assertEqual(cards["daily_rs_new_high"]["entry_count"], 3)
+        self.assertEqual(cards["rs_phase"]["stem"], "rs_phase_2026-06-11")
+        self.assertEqual(cards["rs_phase"]["entry_count"], 2)
         self.assertEqual(cards["canslim"]["stem"], "canslim_2026-06-11")
         self.assertEqual(cards["canslim"]["entry_count"], 3)
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-11")

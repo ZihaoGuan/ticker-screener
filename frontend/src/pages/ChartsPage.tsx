@@ -350,6 +350,7 @@ export function ChartsPage() {
       ? ((lastCandle.close - previousCandle.close) / previousCandle.close) * 100
       : null;
   const latestRsMarker = chartPayload?.rs_markers?.[chartPayload.rs_markers.length - 1] ?? null;
+  const rsPhase = chartPayload?.rs_phase ?? null;
   const dailyRsRatingSeries = chartPayload?.daily_rs_rating ?? [];
   const adr14Pct = useMemo(() => computeAdrPercent(chartData, 14), [chartData]);
   const adr14InRange = adr14Pct != null ? adr14Pct >= 3 && adr14Pct <= 10 : null;
@@ -1411,6 +1412,8 @@ export function ChartsPage() {
               <span>RS NH</span>
               <span className="legend-marker legend-marker-rs-before" aria-hidden="true" />
               <span>RS NH before price</span>
+              <span className="legend-marker legend-marker-support" aria-hidden="true" />
+              <span>RS reclaim/loss</span>
             </div>
             <Link className="ghost-button" to="/guide">
               Open Guide
@@ -1458,6 +1461,13 @@ export function ChartsPage() {
                   {latestRsMarker.kind === "daily_new_high_before_price" ? "RS new high before price" : "RS new high"}
                 </span>
               ) : null}
+              {rsPhase ? (
+                <span className={`chart-pill ${rsPhase.active ? "chart-pill-rs" : "chart-pill-event"}`}>
+                  {rsPhase.active ? `RS Phase ${rsPhase.active_days}D` : "RS Phase lost"}
+                </span>
+              ) : null}
+              {rsPhase?.recent_reclaim_days_ago === 0 ? <span className="chart-pill chart-pill-rs">RS reclaim today</span> : null}
+              {rsPhase?.recent_loss_days_ago === 0 ? <span className="chart-pill chart-pill-event">RS phase lost today</span> : null}
               {chartPayload?.data_source ? <span className="chart-pill chart-pill-setup">Source {chartPayload.data_source}</span> : null}
               {latestMarketExtension ? (
                 <span className={`chart-pill ${marketExtensionChartPillClass(latestMarketExtension.state)}`}>

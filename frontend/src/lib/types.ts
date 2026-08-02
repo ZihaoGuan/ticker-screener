@@ -849,9 +849,20 @@ export type WatchlistChartResponse = {
     } | null;
   };
   rs_line: Array<{ time: string; value: number }>;
+  rs_ema21?: Array<{ time: string; value: number }>;
+  rs_phase?: {
+    active: boolean;
+    active_days: number;
+    current_rs_line: number;
+    current_rs_ema21: number;
+    as_of_date: string;
+    recent_reclaim_days_ago: number | null;
+    recent_loss_days_ago: number | null;
+  } | null;
   daily_rs_rating?: Array<{ time: string; value: number }>;
   weekly_rs_rating?: Array<{ time: string; value: number }>;
   rs_markers: Array<{ time: string; kind: "daily_new_high" | "daily_new_high_before_price" }>;
+  rs_phase_markers?: Array<{ time: string; kind: "reclaim" | "loss" }>;
   setup_markers?: Array<{ time: string; kind: string; label?: string }>;
   fearzone_panel: {
     rows: Array<{
@@ -961,9 +972,12 @@ export type ChartOverlaysResponse = Pick<
   | "data_source"
   | "market_extension"
   | "rs_line"
+  | "rs_ema21"
+  | "rs_phase"
   | "daily_rs_rating"
   | "weekly_rs_rating"
   | "rs_markers"
+  | "rs_phase_markers"
   | "setup_markers"
   | "danger_signals"
   | "fearzone_panel"

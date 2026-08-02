@@ -34,7 +34,7 @@ type PriceChartProps = {
   candles: CandlePoint[];
   overlays?: Pick<
     WatchlistChartResponse,
-    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "anchored_vwap_52w_low" | "market_extension" | "rs_line" | "rs_markers" | "setup_markers" | "benchmark_ticker" | "fearzone_panel"
+    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "anchored_vwap_52w_low" | "market_extension" | "rs_line" | "rs_ema21" | "rs_phase" | "rs_markers" | "rs_phase_markers" | "setup_markers" | "benchmark_ticker" | "fearzone_panel"
   >;
   annotations?: ChartAnnotations;
   extraAnnotations?: ChartAnnotations[];
@@ -196,7 +196,9 @@ export function PriceChart({
     [overlays?.market_extension],
   );
   const rsLine = useMemo(() => overlays?.rs_line ?? [], [overlays?.rs_line]);
+  const rsEma21 = useMemo(() => overlays?.rs_ema21 ?? [], [overlays?.rs_ema21]);
   const rsMarkers = useMemo(() => overlays?.rs_markers ?? [], [overlays?.rs_markers]);
+  const rsPhaseMarkers = useMemo(() => overlays?.rs_phase_markers ?? [], [overlays?.rs_phase_markers]);
   const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
   const fibOverlay = useMemo(() => (options.fibOverlay ? buildStructuralFibOverlay(candles) : null), [candles, options.fibOverlay]);
@@ -378,6 +380,7 @@ export function PriceChart({
       crosshairMarkerVisible: false,
     });
     const rsSeries = rsChart.addLineSeries({ color: "#60a5fa", lineWidth: 2, priceLineVisible: false });
+    const rsEma21Series = rsChart.addLineSeries({ color: "rgba(251, 191, 36, 0.92)", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false });
     candleSeriesRef.current = candleSeries;
     const annotationSeries = annotationLines.map((line) =>
       priceChart.addLineSeries({
@@ -510,6 +513,7 @@ export function PriceChart({
     bollingerLowerSeries.setData(options.bollingerBands ? bollingerBands.lower : []);
     fibImpulseSeries.setData(showFibPane ? fibOverlay?.impulseLine ?? [] : []);
     rsSeries.setData(showRsPane ? rsLine : []);
+    rsEma21Series.setData(showRsPane ? rsEma21 : []);
     flexResistanceSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.backfit ?? [] : []);
     flexResistanceProjectionSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.projection ?? [] : []);
     flexSupportSeries.setData(options.flexSr ? flexibleSrOverlay?.support?.backfit ?? [] : []);
@@ -580,6 +584,14 @@ export function PriceChart({
           position: "belowBar" as const,
           color: marker.kind === "daily_new_high_before_price" ? "#bfdbfe" : "#60a5fa",
           shape: marker.kind === "daily_new_high_before_price" ? "circle" as const : "square" as const,
+        });
+      }
+      for (const marker of rsPhaseMarkers) {
+        priceMarkers.push({
+          time: marker.time,
+          position: marker.kind === "reclaim" ? "belowBar" as const : "aboveBar" as const,
+          color: marker.kind === "reclaim" ? "#22c55e" : "#fb7185",
+          shape: "circle" as const,
         });
       }
     }
@@ -660,14 +672,22 @@ export function PriceChart({
       }
     }
 
-    if (options.rsSignals && rsMarkers.length > 0) {
+    if (options.rsSignals && (rsMarkers.length > 0 || rsPhaseMarkers.length > 0)) {
       rsSeries.setMarkers(
-        rsMarkers.map((marker) => ({
-          time: marker.time,
-          position: "aboveBar" as const,
-          color: marker.kind === "daily_new_high_before_price" ? "#bfdbfe" : "#60a5fa",
-          shape: marker.kind === "daily_new_high_before_price" ? "circle" as const : "square" as const,
-        })),
+        [
+          ...rsMarkers.map((marker) => ({
+            time: marker.time,
+            position: "aboveBar" as const,
+            color: marker.kind === "daily_new_high_before_price" ? "#bfdbfe" : "#60a5fa",
+            shape: marker.kind === "daily_new_high_before_price" ? "circle" as const : "square" as const,
+          })),
+          ...rsPhaseMarkers.map((marker) => ({
+            time: marker.time,
+            position: marker.kind === "reclaim" ? "belowBar" as const : "aboveBar" as const,
+            color: marker.kind === "reclaim" ? "#22c55e" : "#fb7185",
+            shape: "circle" as const,
+          })),
+        ],
       );
     }
 
@@ -803,7 +823,9 @@ export function PriceChart({
     bollingerBands,
     fibOverlay,
     rsLine,
+    rsEma21,
     rsMarkers,
+    rsPhaseMarkers,
     ticker,
     options.ema8,
     options.ema21,
@@ -908,7 +930,7 @@ export function PriceChart({
         <div ref={fibRootRef} className="chart-card chart-card-rs" />
         {showFibPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
-      {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker}</div> : null}
+      {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker} · 21 EMA</div> : null}
       <div className="chart-pane">
         <div ref={rsRootRef} className="chart-card chart-card-rs" />
         {showRsPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}

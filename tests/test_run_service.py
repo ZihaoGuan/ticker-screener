@@ -762,6 +762,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("wyckoff_buy_signal", action_ids)
         self.assertNotIn("wyckoff_sell_signal", action_ids)
         self.assertIn("daily_rs_new_high", action_ids)
+        self.assertIn("rs_phase", action_ids)
         self.assertIn("weekly_rs_new_high", action_ids)
         self.assertIn("weekly_rs_before_price", action_ids)
         self.assertNotIn("weekly_rs", action_ids)
