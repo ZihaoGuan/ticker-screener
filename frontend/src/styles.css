@@ -4759,6 +4759,10 @@ a {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.scanner-result-range-row-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .scanner-result-check {
   align-items: center;
   color: #f4f4f5;
@@ -5197,7 +5201,7 @@ a {
 }
 
 .sector-leaderboard-table {
-  min-width: 1680px;
+  min-width: 1980px;
 }
 
 .sector-leaderboard-table td {
@@ -5347,7 +5351,7 @@ a {
 }
 
 .sector-holdings-table {
-  min-width: 1180px;
+  min-width: 1580px;
 }
 
 .sector-holdings-panel-head {

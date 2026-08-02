@@ -61,13 +61,27 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["rs_momentum_score"], 100.0)
         self.assertEqual(payload["rows"][0]["rs_days_21d"], 21)
         self.assertEqual(payload["rows"][0]["rs_days_21d_pct"], 100.0)
+        self.assertEqual(payload["rows"][0]["red_rs_days_21d"], 0)
+        self.assertEqual(payload["rows"][0]["red_rs_days_21d_pct"], 0.0)
+        self.assertEqual(payload["rows"][0]["rs_new_high_63d"], True)
         self.assertEqual(payload["rows"][0]["avg_volume_20d"], 1_000_260)
         self.assertEqual(payload["rows"][0]["relative_volume_20d"], 1.0)
+        self.assertEqual(payload["rows"][0]["avg_dcr_21d"], 50.0)
+        self.assertEqual(payload["rows"][0]["strong_close_days_21d"], 0)
+        self.assertEqual(payload["rows"][0]["hv63"], True)
+        self.assertEqual(payload["rows"][0]["volume_confirmation"], False)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["day_change_pct"], 9.09)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["avg_volume_20d"], 1_000_001)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["relative_volume_20d"], 1.0)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["rs_days_21d"], 2)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["rs_days_21d_pct"], 100.0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["red_rs_days_21d"], 0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["red_rs_days_21d_pct"], 0.0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["rs_new_high_63d"], True)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["avg_dcr_21d"], 50.0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["strong_close_days_21d"], 0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["hv63"], True)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["volume_confirmation"], False)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["daily_rs_rating"], 91.0)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["weekly_rs_rating"], 87.0)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["leadership_score"], 94.0)
@@ -102,10 +116,17 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
                     "rs_momentum_score": None,
                     "rs_days_21d": None,
                     "rs_days_21d_pct": None,
+                    "red_rs_days_21d": None,
+                    "red_rs_days_21d_pct": None,
+                    "rs_new_high_63d": None,
                     "atr_pct": None,
                     "volume": None,
                     "avg_volume_20d": None,
                     "relative_volume_20d": None,
+                    "avg_dcr_21d": None,
+                    "strong_close_days_21d": None,
+                    "hv63": None,
+                    "volume_confirmation": None,
                     "latest_date": None,
                     "top_holdings": [
                         {
@@ -118,6 +139,13 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
                             "relative_volume_20d": None,
                             "rs_days_21d": None,
                             "rs_days_21d_pct": None,
+                            "red_rs_days_21d": None,
+                            "red_rs_days_21d_pct": None,
+                            "rs_new_high_63d": None,
+                            "avg_dcr_21d": None,
+                            "strong_close_days_21d": None,
+                            "hv63": None,
+                            "volume_confirmation": None,
                             "daily_rs_rating": None,
                             "weekly_rs_rating": None,
                             "leadership_score": None,

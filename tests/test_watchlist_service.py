@@ -548,6 +548,10 @@ class WatchlistServiceTests(unittest.TestCase):
                     ]
                 }
 
+        pltr_market_frame = self._long_price_frame()
+        spy_market_frame = pltr_market_frame.copy()
+        spy_market_frame["Close"] = [260.0 - (idx * 0.2) for idx in range(len(spy_market_frame.index))]
+
         with patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()), patch(
             "src.webapp.services.watchlist_service.load_universe",
             return_value=[],
@@ -559,7 +563,7 @@ class WatchlistServiceTests(unittest.TestCase):
             return_value={},
         ), patch(
             "src.webapp.services.watchlist_service.load_many_ticker_windows",
-            return_value={"PLTR": self._long_price_frame()},
+            return_value={"PLTR": pltr_market_frame, "SPY": spy_market_frame},
         ), patch(
             "src.ratings.repository.RatingsRepository.load_latest_rating_snapshots_for_tickers",
             return_value={
@@ -570,7 +574,7 @@ class WatchlistServiceTests(unittest.TestCase):
         ), patch(
             "src.ratings.repository.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
             return_value={
-                "PLTR": {"overall_rating": 95.0, "leadership_score": 97.0, "sector": "Information Technology", "industry": "Software"},
+                "PLTR": {"overall_rating": 95.0, "leadership_score": 97.0, "daily_rs_rating": 96.0, "sector": "Information Technology", "industry": "Software"},
                 "CRWD": {"overall_rating": 90.0, "leadership_score": 92.0, "sector": "Information Technology", "industry": "Software"},
                 "TSLA": {"overall_rating": 68.0, "leadership_score": 71.0, "sector": "Consumer Discretionary", "industry": "Auto Manufacturers"},
             },
@@ -600,6 +604,14 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertIsInstance(pltr["change_from_52wk_low_pct"], float)
         self.assertGreater(pltr["change_from_52wk_low_pct"], 0.0)
         self.assertEqual(pltr["rs_rating"], 97.0)
+        self.assertEqual(pltr["daily_rs_rating"], 96.0)
+        self.assertEqual(pltr["rs_days_21d"], 19)
+        self.assertEqual(pltr["rs_days_21d_pct"], 90.5)
+        self.assertEqual(pltr["up_on_down_days_21d"], 19)
+        self.assertEqual(pltr["up_on_down_days_21d_pct"], 90.5)
+        self.assertEqual(pltr["rs_evidence_score"], 5)
+        self.assertIn("RS new high before price", pltr["relative_strength_evidence"]["reasons"])
+        self.assertIn("Daily RS 96.0 >= 90", pltr["relative_strength_evidence"]["reasons"])
         self.assertEqual(pltr["ta_rating"], 95.0)
         self.assertEqual(pltr["fa_rating"], 91.0)
         self.assertEqual(pltr["fa_current_rank"], 7)

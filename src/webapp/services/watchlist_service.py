@@ -104,6 +104,10 @@ _sector_momentum_cache: dict[tuple[str, str, str, str], tuple[float, dict[str, d
 _sector_momentum_cache_lock = threading.Lock()
 _SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID = "scanner_top_hits_snapshot"
 _IPO_VWAP_MIN_SUPPORTED_DATE = dt.date(2020, 1, 1)
+_RS_EVIDENCE_LOOKBACK_DAYS = 21
+_RS_EVIDENCE_RS_DAYS_THRESHOLD_PCT = 60.0
+_RS_EVIDENCE_UP_ON_DOWN_DAYS_THRESHOLD = 3
+_RS_EVIDENCE_DAILY_RS_THRESHOLD = 90.0
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
         "id": "weekly_rs_new_high",
@@ -975,6 +979,13 @@ class WatchlistService:
                         "perf_year_pct": None,
                         "perf_ytd_pct": None,
                         "rs_rating": None,
+                        "rs_evidence_score": None,
+                        "rs_evidence_max_score": None,
+                        "rs_days_21d": None,
+                        "rs_days_21d_pct": None,
+                        "up_on_down_days_21d": None,
+                        "up_on_down_days_21d_pct": None,
+                        "relative_strength_evidence": None,
                         "ta_rating": None,
                         "fa_rating": None,
                         "fa_current_rank": None,
@@ -1000,6 +1011,7 @@ class WatchlistService:
         if top_hit_tickers:
             self._attach_latest_market_snapshots(aggregated, top_hit_tickers)
             self._attach_latest_rating_snapshots(aggregated, top_hit_tickers)
+            self._attach_relative_strength_evidence(aggregated, top_hit_tickers)
             target_trading_date = _coerce_optional_date(board_payload.get("target_trading_date")) or _coerce_optional_date(board_payload.get("latest_signal_date"))
             self._attach_latest_position_actions(aggregated, top_hit_tickers, as_of_date=target_trading_date)
         sector_momentum_map = self._load_sector_momentum_map(rrg_service) if top_hit_tickers else {}
@@ -1432,6 +1444,16 @@ class WatchlistService:
                 if pd.notna(value):
                     weekly_rs_rating_points.append({"time": week_date.isoformat(), "value": float(value)})
 
+        rs_phase_snapshot = _build_rs_phase_snapshot(rs_line, rs_ema21, rs_phase_active, rs_phase_reclaim, rs_phase_loss)
+        relative_strength_evidence = _build_chart_relative_strength_evidence(
+            frame=frame,
+            benchmark_frame=benchmark_frame,
+            rs_new_high=rs_new_high,
+            rs_new_high_before_price=rs_new_high_before_price,
+            daily_rs_rating=daily_rs_rating,
+            rs_phase_snapshot=rs_phase_snapshot,
+        )
+
         payload = {
             "ticker": normalized_ticker,
             "benchmark_ticker": self.benchmark_ticker,
@@ -1443,7 +1465,8 @@ class WatchlistService:
             "market_extension": market_extension,
             "rs_line": rs_points,
             "rs_ema21": rs_ema21_points,
-            "rs_phase": _build_rs_phase_snapshot(rs_line, rs_ema21, rs_phase_active, rs_phase_reclaim, rs_phase_loss),
+            "rs_phase": rs_phase_snapshot,
+            "relative_strength_evidence": relative_strength_evidence,
             "daily_rs_rating": daily_rs_rating_points,
             "weekly_rs_rating": weekly_rs_rating_points,
             "rs_markers": rs_markers,
@@ -2192,9 +2215,11 @@ class WatchlistService:
     def _attach_latest_market_snapshots(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
         if not self.database_url or not tickers:
             return
+        benchmark_ticker = str(self.benchmark_ticker or "SPY").strip().upper() or "SPY"
+        query_tickers = sorted(set(tickers + [benchmark_ticker]))
         try:
             frames = load_many_ticker_windows(
-                tickers,
+                query_tickers,
                 dt.date.today(),
                 _ANCHORED_VWAP_52W_LOOKBACK_DAYS,
                 database_url=self.database_url,
@@ -2216,8 +2241,25 @@ class WatchlistService:
             row["change_from_52wk_low_pct"] = _compute_pct_from_52wk_low(frame, latest_close)
             bollinger_snapshot = compute_latest_bollinger_snapshot(frame)
             row["bollinger_band_status"] = bollinger_snapshot.status if bollinger_snapshot is not None else None
+            benchmark_frame = frames.get(benchmark_ticker)
+            if benchmark_frame is not None and not benchmark_frame.empty:
+                metrics = _compute_relative_strength_days_metrics(frame, benchmark_frame, lookback=_RS_EVIDENCE_LOOKBACK_DAYS)
+                row["rs_days_21d"] = metrics["rs_days"]
+                row["rs_days_21d_pct"] = metrics["rs_days_pct"]
+                row["up_on_down_days_21d"] = metrics["up_on_down_days"]
+                row["up_on_down_days_21d_pct"] = metrics["up_on_down_days_pct"]
             if change_pct is None and latest_close is not None and previous_close is not None and previous_close > 0:
                 row["change_pct"] = ((latest_close / previous_close) - 1.0) * 100.0
+
+    def _attach_relative_strength_evidence(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
+        for ticker in tickers:
+            row = rows_by_ticker.get(ticker)
+            if row is None:
+                continue
+            evidence = _build_relative_strength_evidence(row)
+            row["relative_strength_evidence"] = evidence
+            row["rs_evidence_score"] = evidence["score"]
+            row["rs_evidence_max_score"] = evidence["max_score"]
 
     def _attach_latest_rating_snapshots(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
         if not self.database_url or not tickers:
@@ -2512,6 +2554,7 @@ def _empty_chart_payload(
         "rs_line": [],
         "rs_ema21": [],
         "rs_phase": None,
+        "relative_strength_evidence": None,
         "daily_rs_rating": [],
         "weekly_rs_rating": [],
         "rs_markers": [],
@@ -2547,6 +2590,7 @@ def _empty_chart_overlay_payload(
         "rs_line": [],
         "rs_ema21": [],
         "rs_phase": None,
+        "relative_strength_evidence": None,
         "daily_rs_rating": [],
         "weekly_rs_rating": [],
         "rs_markers": [],
@@ -3673,6 +3717,134 @@ def _compute_rs_new_high_flags(rs_line: pd.Series, price_reference: pd.Series, l
     new_high = aligned["rs_line"] >= (rolling_rs_high - tolerance)
     new_high_before_price = new_high & (aligned["price_reference"] < (rolling_price_high - tolerance))
     return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
+
+
+def _compute_relative_strength_days_metrics(stock_frame: pd.DataFrame, benchmark_frame: pd.DataFrame, *, lookback: int) -> dict[str, int | float | None]:
+    if stock_frame.empty or benchmark_frame.empty or "Close" not in stock_frame.columns or "Close" not in benchmark_frame.columns:
+        return {
+            "rs_days": None,
+            "rs_days_pct": None,
+            "up_on_down_days": None,
+            "up_on_down_days_pct": None,
+        }
+    aligned = pd.concat(
+        [
+            stock_frame["Close"].astype(float),
+            benchmark_frame["Close"].astype(float),
+        ],
+        axis=1,
+        join="inner",
+    ).dropna()
+    aligned.columns = ["stock_close", "benchmark_close"]
+    if len(aligned) < 2:
+        return {
+            "rs_days": None,
+            "rs_days_pct": None,
+            "up_on_down_days": None,
+            "up_on_down_days_pct": None,
+        }
+    returns = aligned.pct_change().dropna()
+    window = returns.tail(max(1, int(lookback)))
+    if window.empty:
+        return {
+            "rs_days": None,
+            "rs_days_pct": None,
+            "up_on_down_days": None,
+            "up_on_down_days_pct": None,
+        }
+    rs_days = int((window["stock_close"] > window["benchmark_close"]).sum())
+    up_on_down_days = int(((window["stock_close"] > 0.0) & (window["benchmark_close"] < 0.0)).sum())
+    return {
+        "rs_days": rs_days,
+        "rs_days_pct": round((rs_days / len(window)) * 100.0, 1),
+        "up_on_down_days": up_on_down_days,
+        "up_on_down_days_pct": round((up_on_down_days / len(window)) * 100.0, 1),
+    }
+
+
+def _build_relative_strength_evidence(row: dict[str, Any]) -> dict[str, Any]:
+    scanner_ids = {
+        _normalize_scanner_strategy_id(str(scanner.get("id") or scanner.get("strategy_id") or ""))
+        for scanner in row.get("scanners", [])
+        if isinstance(scanner, dict)
+    }
+    score = 0
+    max_score = 9
+    reasons: list[str] = []
+
+    if "rs_phase" in scanner_ids:
+        score += 2
+        reasons.append("RS Phase active")
+    if "rs" in scanner_ids:
+        score += 2
+        reasons.append("RS new high before price")
+    if "daily_rs_new_high" in scanner_ids:
+        score += 1
+        reasons.append("RS line new high")
+    rs_days_pct = _coerce_optional_float(row.get("rs_days_21d_pct"))
+    if rs_days_pct is not None and rs_days_pct >= _RS_EVIDENCE_RS_DAYS_THRESHOLD_PCT:
+        score += 1
+        reasons.append(f"RS days {rs_days_pct:.1f}% >= {_RS_EVIDENCE_RS_DAYS_THRESHOLD_PCT:.0f}%")
+    up_on_down_days = _coerce_optional_int(row.get("up_on_down_days_21d"))
+    if up_on_down_days is not None and up_on_down_days >= _RS_EVIDENCE_UP_ON_DOWN_DAYS_THRESHOLD:
+        score += 1
+        reasons.append(f"Up on down days {up_on_down_days} >= {_RS_EVIDENCE_UP_ON_DOWN_DAYS_THRESHOLD}")
+    if "hve" in scanner_ids:
+        score += 1
+        reasons.append("Recent HVE/HV1 scanner hit")
+    daily_rs_rating = _coerce_optional_float(row.get("daily_rs_rating"))
+    if daily_rs_rating is not None and daily_rs_rating >= _RS_EVIDENCE_DAILY_RS_THRESHOLD:
+        score += 1
+        reasons.append(f"Daily RS {daily_rs_rating:.1f} >= {_RS_EVIDENCE_DAILY_RS_THRESHOLD:.0f}")
+
+    return {
+        "score": score,
+        "max_score": max_score,
+        "rs_days_21d": _coerce_optional_int(row.get("rs_days_21d")),
+        "rs_days_21d_pct": rs_days_pct,
+        "up_on_down_days_21d": up_on_down_days,
+        "up_on_down_days_21d_pct": _coerce_optional_float(row.get("up_on_down_days_21d_pct")),
+        "rs_phase_active": "rs_phase" in scanner_ids,
+        "rs_new_high": "daily_rs_new_high" in scanner_ids,
+        "rs_new_high_before_price": "rs" in scanner_ids,
+        "hve_recent": "hve" in scanner_ids,
+        "daily_rs_rating": daily_rs_rating,
+        "reasons": reasons,
+    }
+
+
+def _build_chart_relative_strength_evidence(
+    *,
+    frame: pd.DataFrame,
+    benchmark_frame: pd.DataFrame | None,
+    rs_new_high: pd.Series | None,
+    rs_new_high_before_price: pd.Series | None,
+    daily_rs_rating: pd.Series | None,
+    rs_phase_snapshot: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if benchmark_frame is None or benchmark_frame.empty:
+        return None
+    metrics = _compute_relative_strength_days_metrics(frame, benchmark_frame, lookback=_RS_EVIDENCE_LOOKBACK_DAYS)
+    scanners: list[dict[str, str]] = []
+    if rs_phase_snapshot and bool(rs_phase_snapshot.get("active")):
+        scanners.append({"id": "rs_phase"})
+    latest_index = frame.index[-1] if not frame.empty else None
+    if latest_index is not None and rs_new_high_before_price is not None and latest_index in rs_new_high_before_price.index and bool(rs_new_high_before_price.loc[latest_index]):
+        scanners.append({"id": "rs"})
+    elif latest_index is not None and rs_new_high is not None and latest_index in rs_new_high.index and bool(rs_new_high.loc[latest_index]):
+        scanners.append({"id": "daily_rs_new_high"})
+    latest_daily_rs = None
+    if daily_rs_rating is not None and not daily_rs_rating.empty:
+        latest_daily_rs = _coerce_optional_float(daily_rs_rating.dropna().iloc[-1]) if not daily_rs_rating.dropna().empty else None
+    row = {
+        "scanners": scanners,
+        "daily_rs_rating": latest_daily_rs,
+        "rs_days_21d": metrics["rs_days"],
+        "rs_days_21d_pct": metrics["rs_days_pct"],
+        "up_on_down_days_21d": metrics["up_on_down_days"],
+        "up_on_down_days_21d_pct": metrics["up_on_down_days_pct"],
+    }
+    return _build_relative_strength_evidence(row)
 
 
 def _compute_ftd_sweep_markers(

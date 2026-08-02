@@ -3,13 +3,16 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
+import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell } from "../lib/types";
+import type { CandlePoint, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
-type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rs" | "ta" | "fa" | "decision" | "decisionScore";
+type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "upOnDownDays" | "rs" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
-const PAGE_SIZE = 50;
+type ViewMode = "list" | "charts";
+const LIST_PAGE_SIZE = 50;
+const CHART_PAGE_SIZE = 9;
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "sean_breakout", "venu_scanner"]);
 
 export function ScannerTopHitsPage() {
@@ -26,12 +29,20 @@ export function ScannerTopHitsPage() {
   const [leaderRsOnly, setLeaderRsOnly] = useState(false);
   const [leaderRsMin, setLeaderRsMin] = useState("90");
   const [leaderRsMax, setLeaderRsMax] = useState("");
+  const [rsEvidenceOnly, setRsEvidenceOnly] = useState(false);
+  const [rsEvidenceMin, setRsEvidenceMin] = useState("5");
+  const [rsDaysMinPct, setRsDaysMinPct] = useState("60");
+  const [upOnDownDaysMin, setUpOnDownDaysMin] = useState("3");
   const [selectedScannerIds, setSelectedScannerIds] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<SortKey>("hits");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [currentPage, setCurrentPage] = useState(1);
   const [myPickTickers, setMyPickTickers] = useState<Set<string>>(new Set());
   const [savingMyPickTickers, setSavingMyPickTickers] = useState<Record<string, boolean>>({});
+  const [chartPayloads, setChartPayloads] = useState<Record<string, WatchlistChartResponse | null | undefined>>({});
+  const [chartErrors, setChartErrors] = useState<Record<string, string>>({});
+  const [chartLoadingTickers, setChartLoadingTickers] = useState<Record<string, boolean>>({});
   const canManageMyPicks = auth.hasCapability("manage_exclusions");
 
   useEffect(() => {
@@ -81,6 +92,9 @@ export function ScannerTopHitsPage() {
       .sort((left, right) => left.label.localeCompare(right.label));
   }, [rows]);
   const normalizedLeaderRsRange = useMemo(() => normalizeRsRatingRange(leaderRsMin, leaderRsMax), [leaderRsMin, leaderRsMax]);
+  const normalizedRsEvidenceMin = useMemo(() => normalizeBoundedInteger(rsEvidenceMin, 0, 9, 5), [rsEvidenceMin]);
+  const normalizedRsDaysMinPct = useMemo(() => normalizeBoundedInteger(rsDaysMinPct, 0, 100, 60), [rsDaysMinPct]);
+  const normalizedUpOnDownDaysMin = useMemo(() => normalizeBoundedInteger(upOnDownDaysMin, 0, 21, 3), [upOnDownDaysMin]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -105,6 +119,15 @@ export function ScannerTopHitsPage() {
     if (leaderRsOnly) {
       nextRows = nextRows.filter((row) => hasDailyRsRatingInRange(row, normalizedLeaderRsRange.min, normalizedLeaderRsRange.max));
     }
+    if (rsEvidenceOnly) {
+      nextRows = nextRows.filter((row) =>
+        hasRsEvidenceProfile(row, {
+          minScore: normalizedRsEvidenceMin,
+          minRsDaysPct: normalizedRsDaysMinPct,
+          minUpOnDownDays: normalizedUpOnDownDaysMin,
+        }),
+      );
+    }
     if (selectedScannerIds.length > 0) {
       nextRows = nextRows.filter((row) => hasSelectedScannerSignals(row, selectedScannerIds));
     }
@@ -112,18 +135,20 @@ export function ScannerTopHitsPage() {
       sectorLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeSectorKey(item.sector)) : new Map<string, string>(),
       industryLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeIndustryKey(item.industry)) : new Map<string, string>(),
     }));
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, normalizedLeaderRsRange, rows, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, normalizedLeaderRsRange, normalizedRsDaysMinPct, normalizedRsEvidenceMin, normalizedUpOnDownDaysMin, rows, rsEvidenceOnly, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, rsDaysMinPct, rsEvidenceMin, rsEvidenceOnly, search, sectorFilter, selectedScannerIds, sortBy, sortDirection, upOnDownDaysMin, viewMode]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE : LIST_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const normalizedPage = Math.min(currentPage, totalPages);
   const pagedRows = useMemo(() => {
-    const startIndex = (normalizedPage - 1) * PAGE_SIZE;
-    return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [filteredRows, normalizedPage]);
+    const startIndex = (normalizedPage - 1) * pageSize;
+    return filteredRows.slice(startIndex, startIndex + pageSize);
+  }, [filteredRows, normalizedPage, pageSize]);
+  const pagedTickerKey = useMemo(() => pagedRows.map((row) => row.ticker).join("|"), [pagedRows]);
 
   const eliteIndustryLeaders = useMemo(() => {
     if (!eliteOnly) {
@@ -144,6 +169,69 @@ export function ScannerTopHitsPage() {
       setCurrentPage(normalizedPage);
     }
   }, [currentPage, normalizedPage]);
+
+  useEffect(() => {
+    if (viewMode !== "charts" || pagedRows.length === 0) {
+      return;
+    }
+    const missingTickers = pagedRows
+      .map((row) => row.ticker)
+      .filter((ticker) => chartPayloads[ticker] === undefined && !chartLoadingTickers[ticker]);
+    if (missingTickers.length === 0) {
+      return;
+    }
+    let ignore = false;
+    setChartLoadingTickers((current) => {
+      const next = { ...current };
+      for (const ticker of missingTickers) {
+        next[ticker] = true;
+      }
+      return next;
+    });
+    void Promise.allSettled(
+      missingTickers.map(async (ticker) => {
+        const payload = await fetchJson<WatchlistChartResponse>(`/api/charts/${ticker}?period=18mo`);
+        return { ticker, payload };
+      }),
+    ).then((results) => {
+      if (ignore) {
+        return;
+      }
+      setChartPayloads((current) => {
+        const next = { ...current };
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            next[result.value.ticker] = result.value.payload;
+            return;
+          }
+          next[missingTickers[index]] = null;
+        });
+        return next;
+      });
+      setChartErrors((current) => {
+        const next = { ...current };
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            delete next[result.value.ticker];
+            return;
+          }
+          const failedTicker = missingTickers[index];
+          next[failedTicker] = result.reason instanceof Error ? result.reason.message : "Failed to load chart.";
+        });
+        return next;
+      });
+      setChartLoadingTickers((current) => {
+        const next = { ...current };
+        for (const ticker of missingTickers) {
+          delete next[ticker];
+        }
+        return next;
+      });
+    });
+    return () => {
+      ignore = true;
+    };
+  }, [chartLoadingTickers, chartPayloads, pagedRows, pagedTickerKey, viewMode]);
 
   const handleAddToMyPicks = async (ticker: string) => {
     const normalizedTicker = ticker.trim().toUpperCase();
@@ -278,6 +366,43 @@ export function ScannerTopHitsPage() {
           <span className="panel-copy">Uses `daily_rs_rating`; blank max means up to 99.</span>
         </label>
         <label className="scanner-result-filter panel">
+          <span>RS Evidence</span>
+          <span className="scanner-result-check">
+            <input type="checkbox" checked={rsEvidenceOnly} onChange={(event) => setRsEvidenceOnly(event.target.checked)} />
+            <span>Use evidence stack filters</span>
+          </span>
+          <div className="scanner-result-range-row scanner-result-range-row-three">
+            <input
+              type="number"
+              min={0}
+              max={9}
+              value={rsEvidenceMin}
+              onChange={(event) => setRsEvidenceMin(event.target.value)}
+              placeholder="Score"
+              aria-label="Minimum RS evidence score"
+            />
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={rsDaysMinPct}
+              onChange={(event) => setRsDaysMinPct(event.target.value)}
+              placeholder="RS Days %"
+              aria-label="Minimum RS days percent"
+            />
+            <input
+              type="number"
+              min={0}
+              max={21}
+              value={upOnDownDaysMin}
+              onChange={(event) => setUpOnDownDaysMin(event.target.value)}
+              placeholder="Up/Down"
+              aria-label="Minimum up on down days"
+            />
+          </div>
+          <span className="panel-copy">Score combines RS Phase, RS highs, RS days, up-on-down days, HVE, and Daily RS.</span>
+        </label>
+        <label className="scanner-result-filter panel">
           <span>Scanners</span>
           <div className="scanner-top-hit-filter-list">
             {scannerOptions.map((scanner) => {
@@ -312,6 +437,26 @@ export function ScannerTopHitsPage() {
           </div>
           <span className="panel-copy">Updated {formatLocalDateTime(payload?.latest_update_at)}.</span>
         </div>
+        <div className="scanner-result-filter panel scanner-result-filter-actions">
+          <span className="eyebrow">View</span>
+          <div className="scanner-result-view-actions" role="tablist" aria-label="Scanner top hits view">
+            <button
+              className={`scanner-result-view-chip${viewMode === "list" ? " is-active" : ""}`}
+              type="button"
+              onClick={() => setViewMode("list")}
+            >
+              List
+            </button>
+            <button
+              className={`scanner-result-view-chip${viewMode === "charts" ? " is-active" : ""}`}
+              type="button"
+              onClick={() => setViewMode("charts")}
+            >
+              Charts
+            </button>
+          </div>
+          <span className="panel-copy">Chart mode loads visible names only.</span>
+        </div>
       </section>
 
       <section className="scanner-result-table-shell panel">
@@ -329,9 +474,27 @@ export function ScannerTopHitsPage() {
               currentPage={normalizedPage}
               totalItems={filteredRows.length}
               totalPages={totalPages}
-              pageSize={PAGE_SIZE}
+              pageSize={pageSize}
               onPageChange={setCurrentPage}
             />
+            {viewMode === "charts" ? (
+              <div className="scanner-result-chart-grid is-3-col">
+                {pagedRows.map((row) => (
+                  <ScannerTopHitChartCard
+                    key={row.ticker}
+                    row={row}
+                    boardSignalDate={payload?.latest_signal_date}
+                    canManageMyPicks={canManageMyPicks}
+                    alreadyMyPick={myPickTickers.has(row.ticker)}
+                    savingMyPick={Boolean(savingMyPickTickers[row.ticker])}
+                    chartPayload={chartPayloads[row.ticker]}
+                    chartError={chartErrors[row.ticker]}
+                    isChartLoading={Boolean(chartLoadingTickers[row.ticker])}
+                    onAddToMyPicks={handleAddToMyPicks}
+                  />
+                ))}
+              </div>
+            ) : (
             <div className="data-table-responsive scanner-result-table-wrap">
               <table className="data-table scanner-result-table scanner-top-hits-table">
                 <thead>
@@ -346,6 +509,9 @@ export function ScannerTopHitsPage() {
                     <th>{renderSortButton("Change", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("From 52W Low %", "from52wLow", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("Bollinger", "bollinger", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("RS Evidence", "rsEvidence", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("RS Days", "rsDays", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("Up/Down", "upOnDownDays", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>1Y %</th>
                     <th>YTD %</th>
                     <th>CAN V2</th>
@@ -415,6 +581,9 @@ export function ScannerTopHitsPage() {
                       <td data-label="Change">{renderChange(row.change_pct)}</td>
                       <td data-label="From 52W Low %">{renderChange(row.change_from_52wk_low_pct)}</td>
                       <td data-label="Bollinger">{renderBollingerBandStatus(row.bollinger_band_status)}</td>
+                      <td data-label="RS Evidence">{renderRsEvidenceCell(row)}</td>
+                      <td data-label="RS Days">{formatCountWithPercent(row.rs_days_21d, row.rs_days_21d_pct)}</td>
+                      <td data-label="Up/Down">{formatCountWithPercent(row.up_on_down_days_21d, row.up_on_down_days_21d_pct)}</td>
                       <td data-label="1Y %">{renderChange(row.perf_year_pct)}</td>
                       <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
                       <td data-label="CAN V2">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
@@ -452,17 +621,110 @@ export function ScannerTopHitsPage() {
                 </tbody>
               </table>
             </div>
+            )}
             <PaginationControls
               currentPage={normalizedPage}
               totalItems={filteredRows.length}
               totalPages={totalPages}
-              pageSize={PAGE_SIZE}
+              pageSize={pageSize}
               onPageChange={setCurrentPage}
             />
           </>
         ) : null}
       </section>
     </div>
+  );
+}
+
+function ScannerTopHitChartCard({
+  row,
+  boardSignalDate,
+  canManageMyPicks,
+  alreadyMyPick,
+  savingMyPick,
+  chartPayload,
+  chartError,
+  isChartLoading,
+  onAddToMyPicks,
+}: {
+  row: ScannerTopHitRow;
+  boardSignalDate: string | null | undefined;
+  canManageMyPicks: boolean;
+  alreadyMyPick: boolean;
+  savingMyPick: boolean;
+  chartPayload: WatchlistChartResponse | null | undefined;
+  chartError: string | undefined;
+  isChartLoading: boolean;
+  onAddToMyPicks: (ticker: string) => Promise<void>;
+}) {
+  const chartCandles = buildMiniChartCandles(chartPayload);
+  const latestCandle = chartCandles[chartCandles.length - 1] ?? null;
+  return (
+    <article className="scanner-chart-card scanner-top-hit-chart-card">
+      <div className="scanner-chart-card-header">
+        <div className="scanner-chart-card-heading">
+          <div className="scanner-chart-card-symbol-row">
+            {canManageMyPicks ? (
+              <input
+                type="checkbox"
+                checked={alreadyMyPick}
+                disabled={alreadyMyPick || savingMyPick}
+                aria-label={alreadyMyPick ? `${row.ticker} already in My Picks` : `Add ${row.ticker} to My Picks`}
+                onChange={(event) => {
+                  if (event.target.checked) {
+                    void onAddToMyPicks(row.ticker);
+                  }
+                }}
+              />
+            ) : null}
+            <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)}>
+              <span>{row.ticker}</span>
+            </Link>
+          </div>
+          <strong>{row.company || row.industry || "Scanner hit"}</strong>
+          <span>{[row.sector, row.industry].filter(Boolean).join(" / ") || "Unknown group"}</span>
+        </div>
+        <div className="scanner-chart-card-price">
+          <strong>{latestCandle ? formatPrice(latestCandle.close) : formatPrice(row.day_close)}</strong>
+          {renderChange(row.change_pct)}
+        </div>
+      </div>
+      <div className="scanner-chart-card-score-row">
+        <span className="scanner-score-pill is-strong">{formatCount(row.scanner_count)} hits</span>
+        {row.rs_evidence_score != null ? (
+          <span className={`scanner-score-pill ${toneForRating(row.rs_evidence_score, 5)}`}>Evidence {row.rs_evidence_score}/{row.rs_evidence_max_score ?? 9}</span>
+        ) : null}
+        <span className={`scanner-score-pill ${toneForRating(row.daily_rs_rating ?? row.rs_rating, 90)}`}>RS {formatRating(row.daily_rs_rating ?? row.rs_rating)}</span>
+        <span className={`scanner-score-pill ${toneForRating(row.ta_rating, 80)}`}>TA {formatRating(row.ta_rating)}</span>
+        <span className={`scanner-score-pill ${toneForRating(row.fa_rating, 80)}`}>FA {formatRating(row.fa_rating)}</span>
+        <span className={`scanner-score-pill ${toneForPositionAction(row.position_action?.action)}`}>{humanizePositionAction(row.position_action?.action)}</span>
+      </div>
+      <div className="scanner-top-hit-pills">
+        {row.scanners.slice(0, 4).map((scanner) => (
+          <Link key={`${row.ticker}-chart-${scanner.id}`} className="scanner-card-pill" to={`/scanner/${encodeURIComponent(scanner.id)}`}>
+            {scanner.label}
+          </Link>
+        ))}
+        {row.scanners.length > 4 ? <span className="scanner-card-pill muted">+{row.scanners.length - 4}</span> : null}
+      </div>
+      <div className="scanner-chart-card-body">
+        {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
+        {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
+        {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
+        {!isChartLoading && !chartError && chartCandles.length > 0 ? (
+          <ScannerMiniChart
+            ticker={row.ticker}
+            candles={chartCandles}
+            ema9={buildExponentialMovingAverage(chartCandles, 9)}
+            ema21={chartPayload?.ema21 ?? buildExponentialMovingAverage(chartCandles, 21)}
+          />
+        ) : null}
+      </div>
+      <div className="scanner-chart-card-footer">
+        <span>{chartPayload?.resolved_as_of_date ? `As of ${chartPayload.resolved_as_of_date}` : `Signal ${formatLocalDate(boardSignalDate)}`}</span>
+        <Link to={buildChartHref(row.ticker)}>Analyze Full Chart</Link>
+      </div>
+    </article>
   );
 }
 
@@ -554,6 +816,15 @@ function compareRows(
   if (sortBy === "bollinger") {
     return compareText(left.bollinger_band_status ?? "", right.bollinger_band_status ?? "", sortDirection) || left.ticker.localeCompare(right.ticker);
   }
+  if (sortBy === "rsEvidence") {
+    return compareNullableNumber(left.rs_evidence_score ?? null, right.rs_evidence_score ?? null, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "rsDays") {
+    return compareNullableNumber(left.rs_days_21d_pct ?? null, right.rs_days_21d_pct ?? null, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "upOnDownDays") {
+    return compareNullableNumber(left.up_on_down_days_21d ?? null, right.up_on_down_days_21d ?? null, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
   if (sortBy === "rs") {
     return compareNullableNumber(left.rs_rating, right.rs_rating, sortDirection) || left.ticker.localeCompare(right.ticker);
   }
@@ -592,6 +863,33 @@ function formatPrice(value: number | null) {
 
 function formatRating(value: number | null) {
   return value == null ? "--" : value.toFixed(1);
+}
+
+function formatCountWithPercent(count: number | null | undefined, pct: number | null | undefined) {
+  if (count == null && pct == null) {
+    return "--";
+  }
+  if (count == null) {
+    return `${pct?.toFixed(1)}%`;
+  }
+  if (pct == null) {
+    return `${formatCount(count)}`;
+  }
+  return `${formatCount(count)} / ${pct.toFixed(1)}%`;
+}
+
+function renderRsEvidenceCell(row: ScannerTopHitRow) {
+  const score = row.rs_evidence_score ?? row.relative_strength_evidence?.score ?? null;
+  const maxScore = row.rs_evidence_max_score ?? row.relative_strength_evidence?.max_score ?? null;
+  if (score == null) {
+    return <span className="panel-copy">--</span>;
+  }
+  const reasons = row.relative_strength_evidence?.reasons ?? [];
+  return (
+    <span className={`scanner-score-pill ${toneForRating(score, 5)}`} title={reasons.length > 0 ? reasons.join(" | ") : undefined}>
+      {score}/{maxScore ?? 9}
+    </span>
+  );
 }
 
 function formatCanslimScore(score: number | null | undefined, maxScore: number | null | undefined) {
@@ -737,6 +1035,23 @@ function hasDailyRsRatingInRange(row: ScannerTopHitRow, minimumDailyRsRating: nu
   return row.daily_rs_rating != null && row.daily_rs_rating >= minimumDailyRsRating && row.daily_rs_rating <= maximumDailyRsRating;
 }
 
+function hasRsEvidenceProfile(
+  row: ScannerTopHitRow,
+  filters: { minScore: number; minRsDaysPct: number; minUpOnDownDays: number },
+) {
+  const score = row.rs_evidence_score ?? row.relative_strength_evidence?.score ?? null;
+  const rsDaysPct = row.rs_days_21d_pct ?? row.relative_strength_evidence?.rs_days_21d_pct ?? null;
+  const upOnDownDays = row.up_on_down_days_21d ?? row.relative_strength_evidence?.up_on_down_days_21d ?? null;
+  return (
+    score != null &&
+    score >= filters.minScore &&
+    rsDaysPct != null &&
+    rsDaysPct >= filters.minRsDaysPct &&
+    upOnDownDays != null &&
+    upOnDownDays >= filters.minUpOnDownDays
+  );
+}
+
 function normalizeRsRatingRange(minValue: string, maxValue: string) {
   const minParsed = Number.parseInt(minValue, 10);
   const maxParsed = Number.parseInt(maxValue, 10);
@@ -746,6 +1061,14 @@ function normalizeRsRatingRange(minValue: string, maxValue: string) {
     return { min: max, max: min };
   }
   return { min, max };
+}
+
+function normalizeBoundedInteger(value: string, minValue: number, maxValue: number, fallback: number) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(minValue, Math.min(maxValue, parsed));
 }
 
 function hasSelectedScannerSignals(row: ScannerTopHitRow, selectedScannerIds: string[]) {
@@ -829,4 +1152,42 @@ function toneForQuadrant(value: string) {
     return "is-warm";
   }
   return "is-neutral";
+}
+
+function toneForRating(value: number | null | undefined, strongThreshold: number) {
+  if (value == null || Number.isNaN(value)) {
+    return "is-neutral";
+  }
+  if (value >= strongThreshold) {
+    return "is-strong";
+  }
+  if (value >= strongThreshold - 20) {
+    return "is-caution";
+  }
+  return "is-weak";
+}
+
+function buildMiniChartCandles(payload: WatchlistChartResponse | null | undefined): CandlePoint[] {
+  if (!payload) {
+    return [];
+  }
+  const volumeByTime = new Map((payload.volume ?? []).map((item) => [item.time, item.value]));
+  return (payload.candles ?? []).map((item) => ({
+    ...item,
+    volume: volumeByTime.get(item.time) ?? 0,
+  }));
+}
+
+function buildExponentialMovingAverage(candles: CandlePoint[], length: number): Array<{ time: string; value: number }> {
+  if (candles.length === 0 || length <= 0) {
+    return [];
+  }
+  const alpha = 2 / (length + 1);
+  let ema = candles[0].close;
+  const points = [{ time: candles[0].time, value: Number(ema.toFixed(2)) }];
+  for (let index = 1; index < candles.length; index += 1) {
+    ema = candles[index].close * alpha + ema * (1 - alpha);
+    points.push({ time: candles[index].time, value: Number(ema.toFixed(2)) });
+  }
+  return points;
 }

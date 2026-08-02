@@ -10,7 +10,7 @@ import type { CandlePoint, SectorLeaderboardHolding, SectorLeaderboardResponse, 
 
 type ViewMode = "list" | "chart";
 type HoldingViewMode = "list" | "chart";
-type HoldingSortKey = "weight" | "dailyRs" | "weeklyRs" | "leadership" | "rsDays" | "relVol" | "ticker" | "change";
+type HoldingSortKey = "weight" | "dailyRs" | "weeklyRs" | "leadership" | "rsDays" | "redRsDays" | "dcr" | "relVol" | "ticker" | "change";
 type SortDirection = "asc" | "desc";
 
 const BENCHMARK_TICKER = "SPY";
@@ -307,6 +307,10 @@ function SectorLeaderboardTable({ rows }: { rows: SectorLeaderboardRow[] }) {
               <th>RS 3M</th>
               <th>RS Mom</th>
               <th>RS Days</th>
+              <th>Red RS</th>
+              <th>DCR</th>
+              <th>RS NH</th>
+              <th>Vol+</th>
               <th>ATR%</th>
               <th>Avg Vol</th>
               <th>Rel Vol</th>
@@ -333,6 +337,14 @@ function SectorLeaderboardTable({ rows }: { rows: SectorLeaderboardRow[] }) {
                   <span className={`scanner-score-pill ${toneForMomentumScore(row.rs_momentum_score)}`}>{formatRating(row.rs_momentum_score)}</span>
                 </td>
                 <td data-label="RS Days">{formatCountWithPercent(row.rs_days_21d, row.rs_days_21d_pct)}</td>
+                <td data-label="Red RS">{formatCountWithPercent(row.red_rs_days_21d, row.red_rs_days_21d_pct)}</td>
+                <td data-label="DCR">{formatPercent(row.avg_dcr_21d, { signed: false })}</td>
+                <td data-label="RS NH">
+                  <span className={`scanner-score-pill ${toneForBoolean(row.rs_new_high_63d)}`}>{formatFlag(row.rs_new_high_63d)}</span>
+                </td>
+                <td data-label="Vol+">
+                  <span className={`scanner-score-pill ${toneForBoolean(row.volume_confirmation)}`}>{formatFlag(row.volume_confirmation)}</span>
+                </td>
                 <td data-label="ATR%">{formatPercent(row.atr_pct, { signed: false })}</td>
                 <td data-label="Avg Vol">{formatVolume(row.avg_volume_20d)}</td>
                 <td data-label="Rel Vol">{formatMultiple(row.relative_volume_20d)}</td>
@@ -392,6 +404,8 @@ function SectorChartGrid({
               <div className="scanner-chart-card-score-row">
                 <span className="scanner-score-pill">WK {formatPercent(row.week_change_pct)}</span>
                 <span className="scanner-score-pill">MO {formatPercent(row.month_change_pct)}</span>
+                <span className={`scanner-score-pill ${toneForBoolean(row.rs_new_high_63d)}`}>RS NH {formatFlag(row.rs_new_high_63d)}</span>
+                <span className="scanner-score-pill">DCR {formatPercent(row.avg_dcr_21d, { signed: false })}</span>
                 <span className="scanner-chart-card-volume">Rel Vol {formatMultiple(row.relative_volume_20d)}</span>
               </div>
               <div className="scanner-chart-card-body">
@@ -511,24 +525,28 @@ function SectorDetailPage({
 
       <section className="scanner-result-metrics">
         <div className="scanner-result-metric">
+          <span className="eyebrow">Leader Weight</span>
+          <strong>{formatPercent(holdingBreadth.leaderWeightPct, { signed: false })}</strong>
+        </div>
+        <div className="scanner-result-metric">
           <span className="eyebrow">Daily RS &gt; 80</span>
           <strong>{holdingBreadth.dailyRs80} / {holdingBreadth.total}</strong>
         </div>
         <div className="scanner-result-metric">
-          <span className="eyebrow">Daily RS &gt; 90</span>
-          <strong>{holdingBreadth.dailyRs90} / {holdingBreadth.total}</strong>
+          <span className="eyebrow">Red RS Avg</span>
+          <strong>{formatPercent(holdingBreadth.avgRedRsDaysPct, { signed: false })}</strong>
         </div>
         <div className="scanner-result-metric">
-          <span className="eyebrow">Avg Daily RS</span>
-          <strong>{formatRating(holdingBreadth.avgDailyRs)}</strong>
+          <span className="eyebrow">Avg DCR</span>
+          <strong>{formatPercent(holdingBreadth.avgDcr, { signed: false })}</strong>
         </div>
         <div className="scanner-result-metric">
-          <span className="eyebrow">RS Days Avg</span>
-          <strong>{formatPercent(holdingBreadth.avgRsDaysPct, { signed: false })}</strong>
+          <span className="eyebrow">Vol Confirmed</span>
+          <strong>{holdingBreadth.volumeConfirmed} / {holdingBreadth.total}</strong>
         </div>
         <div className="scanner-result-metric">
-          <span className="eyebrow">Rel Vol &gt; 1.5x</span>
-          <strong>{holdingBreadth.relVol15} / {holdingBreadth.total}</strong>
+          <span className="eyebrow">RS NH 63D</span>
+          <strong>{holdingBreadth.rsNewHigh63} / {holdingBreadth.total}</strong>
         </div>
       </section>
 
@@ -618,7 +636,7 @@ function SectorHoldingsControls({
       <div className="sector-holdings-control-group">
         <span className="eyebrow">Sort</span>
         <div className="sector-holdings-sort-actions">
-          {(["weight", "dailyRs", "weeklyRs", "leadership", "rsDays", "relVol", "change", "ticker"] as HoldingSortKey[]).map((key) => (
+          {(["weight", "dailyRs", "weeklyRs", "leadership", "rsDays", "redRsDays", "dcr", "relVol", "change", "ticker"] as HoldingSortKey[]).map((key) => (
             <button className={`scanner-result-view-chip${sortBy === key ? " is-active" : ""}`} key={key} type="button" onClick={() => onSort(key)}>
               {labelForHoldingSort(key)}{sortBy === key ? ` ${sortDirection === "asc" ? "Asc" : "Desc"}` : ""}
             </button>
@@ -655,6 +673,11 @@ function SectorHoldingsTable({
             <th>{renderHoldingSortHeader("Weekly RS", "weeklyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>{renderHoldingSortHeader("Leader", "leadership", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>{renderHoldingSortHeader("RS Days", "rsDays", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("Red RS", "redRsDays", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("DCR", "dcr", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>RS NH</th>
+            <th>HV63</th>
+            <th>Vol+</th>
             <th>Avg Vol</th>
             <th>{renderHoldingSortHeader("Rel Vol", "relVol", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>Chart</th>
@@ -675,6 +698,17 @@ function SectorHoldingsTable({
               <td data-label="Weekly RS">{formatRating(holding.weekly_rs_rating)}</td>
               <td data-label="Leader">{formatRating(holding.leadership_score)}</td>
               <td data-label="RS Days">{formatCountWithPercent(holding.rs_days_21d, holding.rs_days_21d_pct)}</td>
+              <td data-label="Red RS">{formatCountWithPercent(holding.red_rs_days_21d, holding.red_rs_days_21d_pct)}</td>
+              <td data-label="DCR">{formatPercent(holding.avg_dcr_21d, { signed: false })}</td>
+              <td data-label="RS NH">
+                <span className={`scanner-score-pill ${toneForBoolean(holding.rs_new_high_63d)}`}>{formatFlag(holding.rs_new_high_63d)}</span>
+              </td>
+              <td data-label="HV63">
+                <span className={`scanner-score-pill ${toneForBoolean(holding.hv63)}`}>{formatFlag(holding.hv63)}</span>
+              </td>
+              <td data-label="Vol+">
+                <span className={`scanner-score-pill ${toneForBoolean(holding.volume_confirmation)}`}>{formatFlag(holding.volume_confirmation)}</span>
+              </td>
               <td data-label="Avg Vol">{formatVolume(holding.avg_volume_20d)}</td>
               <td data-label="Rel Vol">{formatMultiple(holding.relative_volume_20d)}</td>
               <td data-label="Chart">
@@ -738,6 +772,9 @@ function SectorHoldingsChartGrid({
                 <span className={`scanner-score-pill ${toneForMomentumScore(holding.daily_rs_rating)}`}>RS {formatRating(holding.daily_rs_rating)}</span>
                 <span className={`scanner-score-pill ${toneForMomentumScore(holding.weekly_rs_rating)}`}>WRS {formatRating(holding.weekly_rs_rating)}</span>
                 <span className="scanner-score-pill">RS Days {formatPercent(holding.rs_days_21d_pct, { signed: false })}</span>
+                <span className="scanner-score-pill">Red RS {formatPercent(holding.red_rs_days_21d_pct, { signed: false })}</span>
+                <span className="scanner-score-pill">DCR {formatPercent(holding.avg_dcr_21d, { signed: false })}</span>
+                <span className={`scanner-score-pill ${toneForBoolean(holding.volume_confirmation)}`}>Vol+ {formatFlag(holding.volume_confirmation)}</span>
                 <span className="scanner-chart-card-volume">Rel Vol {formatMultiple(holding.relative_volume_20d)}</span>
                 <span className="scanner-chart-card-volume">Weight {formatPercent(holding.weight, { signed: false })}</span>
               </div>
@@ -776,13 +813,23 @@ function HoldingPills({ row }: { row: SectorLeaderboardRow }) {
 function buildHoldingBreadth(holdings: SectorLeaderboardHolding[]) {
   const dailyRsValues = holdings.map((holding) => holding.daily_rs_rating).filter(isFiniteNumber);
   const rsDaysValues = holdings.map((holding) => holding.rs_days_21d_pct).filter(isFiniteNumber);
+  const redRsDaysValues = holdings.map((holding) => holding.red_rs_days_21d_pct).filter(isFiniteNumber);
+  const dcrValues = holdings.map((holding) => holding.avg_dcr_21d).filter(isFiniteNumber);
+  const leaderWeightPct = holdings
+    .filter((holding) => isFiniteNumber(holding.daily_rs_rating) && holding.daily_rs_rating > 80)
+    .reduce((sum, holding) => sum + holding.weight, 0);
   return {
     total: holdings.length,
     dailyRs80: holdings.filter((holding) => isFiniteNumber(holding.daily_rs_rating) && holding.daily_rs_rating > 80).length,
     dailyRs90: holdings.filter((holding) => isFiniteNumber(holding.daily_rs_rating) && holding.daily_rs_rating > 90).length,
     avgDailyRs: average(dailyRsValues),
     avgRsDaysPct: average(rsDaysValues),
+    avgRedRsDaysPct: average(redRsDaysValues),
+    avgDcr: average(dcrValues),
+    leaderWeightPct,
     relVol15: holdings.filter((holding) => isFiniteNumber(holding.relative_volume_20d) && holding.relative_volume_20d > 1.5).length,
+    volumeConfirmed: holdings.filter((holding) => holding.volume_confirmation === true).length,
+    rsNewHigh63: holdings.filter((holding) => holding.rs_new_high_63d === true).length,
   };
 }
 
@@ -820,6 +867,12 @@ function holdingSortValue(holding: SectorLeaderboardHolding, key: HoldingSortKey
   if (key === "rsDays") {
     return holding.rs_days_21d_pct;
   }
+  if (key === "redRsDays") {
+    return holding.red_rs_days_21d_pct;
+  }
+  if (key === "dcr") {
+    return holding.avg_dcr_21d;
+  }
   if (key === "relVol") {
     return holding.relative_volume_20d;
   }
@@ -852,6 +905,12 @@ function labelForHoldingSort(key: HoldingSortKey): string {
   if (key === "rsDays") {
     return "RS Days";
   }
+  if (key === "redRsDays") {
+    return "Red RS";
+  }
+  if (key === "dcr") {
+    return "DCR";
+  }
   if (key === "relVol") {
     return "Rel Vol";
   }
@@ -870,13 +929,23 @@ function renderChange(value: number | null | undefined) {
 
 function toneForMomentumScore(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) {
-    return "is-muted";
+    return "is-neutral";
   }
   if (value >= 65) {
     return "is-strong";
   }
   if (value >= 50) {
     return "is-warm";
+  }
+  return "is-neutral";
+}
+
+function toneForBoolean(value: boolean | null | undefined): string {
+  if (value === true) {
+    return "is-strong";
+  }
+  if (value === false) {
+    return "is-neutral";
   }
   return "is-neutral";
 }
@@ -902,6 +971,13 @@ function formatRating(value: number | null | undefined): string {
     return "-";
   }
   return value.toFixed(1);
+}
+
+function formatFlag(value: boolean | null | undefined): string {
+  if (value == null) {
+    return "-";
+  }
+  return value ? "Yes" : "No";
 }
 
 function formatMultiple(value: number | null | undefined): string {

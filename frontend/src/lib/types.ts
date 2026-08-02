@@ -237,6 +237,13 @@ export type ScannerTopHitRow = {
   perf_year_pct: number | null;
   perf_ytd_pct: number | null;
   rs_rating: number | null;
+  rs_evidence_score?: number | null;
+  rs_evidence_max_score?: number | null;
+  rs_days_21d?: number | null;
+  rs_days_21d_pct?: number | null;
+  up_on_down_days_21d?: number | null;
+  up_on_down_days_21d_pct?: number | null;
+  relative_strength_evidence?: RelativeStrengthEvidence | null;
   ta_rating: number | null;
   fa_rating: number | null;
   daily_rs_rating?: number | null;
@@ -267,6 +274,21 @@ export type ScannerTopHitRow = {
   position_action?: PositionActionSnapshot | null;
 };
 
+export type RelativeStrengthEvidence = {
+  score: number;
+  max_score: number;
+  rs_days_21d: number | null;
+  rs_days_21d_pct: number | null;
+  up_on_down_days_21d: number | null;
+  up_on_down_days_21d_pct: number | null;
+  rs_phase_active: boolean;
+  rs_new_high: boolean;
+  rs_new_high_before_price: boolean;
+  hve_recent: boolean;
+  daily_rs_rating: number | null;
+  reasons: string[];
+};
+
 export type ScannerTopHitsResponse = ScannerBoardResponse & {
   total_live_scanners: number;
   total_unique_tickers: number;
@@ -284,6 +306,13 @@ export type SectorLeaderboardHolding = {
   relative_volume_20d: number | null;
   rs_days_21d: number | null;
   rs_days_21d_pct: number | null;
+  red_rs_days_21d: number | null;
+  red_rs_days_21d_pct: number | null;
+  rs_new_high_63d: boolean | null;
+  avg_dcr_21d: number | null;
+  strong_close_days_21d: number | null;
+  hv63: boolean | null;
+  volume_confirmation: boolean | null;
   daily_rs_rating: number | null;
   weekly_rs_rating: number | null;
   leadership_score: number | null;
@@ -304,10 +333,17 @@ export type SectorLeaderboardRow = {
   rs_momentum_score: number | null;
   rs_days_21d: number | null;
   rs_days_21d_pct: number | null;
+  red_rs_days_21d: number | null;
+  red_rs_days_21d_pct: number | null;
+  rs_new_high_63d: boolean | null;
   atr_pct: number | null;
   volume: number | null;
   avg_volume_20d: number | null;
   relative_volume_20d: number | null;
+  avg_dcr_21d: number | null;
+  strong_close_days_21d: number | null;
+  hv63: boolean | null;
+  volume_confirmation: boolean | null;
   latest_date: string | null;
   top_holdings: SectorLeaderboardHolding[];
 };
@@ -859,6 +895,7 @@ export type WatchlistChartResponse = {
     recent_reclaim_days_ago: number | null;
     recent_loss_days_ago: number | null;
   } | null;
+  relative_strength_evidence?: RelativeStrengthEvidence | null;
   daily_rs_rating?: Array<{ time: string; value: number }>;
   weekly_rs_rating?: Array<{ time: string; value: number }>;
   rs_markers: Array<{ time: string; kind: "daily_new_high" | "daily_new_high_before_price" }>;
@@ -974,6 +1011,7 @@ export type ChartOverlaysResponse = Pick<
   | "rs_line"
   | "rs_ema21"
   | "rs_phase"
+  | "relative_strength_evidence"
   | "daily_rs_rating"
   | "weekly_rs_rating"
   | "rs_markers"

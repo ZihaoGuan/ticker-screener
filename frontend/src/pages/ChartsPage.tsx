@@ -351,6 +351,7 @@ export function ChartsPage() {
       : null;
   const latestRsMarker = chartPayload?.rs_markers?.[chartPayload.rs_markers.length - 1] ?? null;
   const rsPhase = chartPayload?.rs_phase ?? null;
+  const rsEvidence = chartPayload?.relative_strength_evidence ?? null;
   const dailyRsRatingSeries = chartPayload?.daily_rs_rating ?? [];
   const adr14Pct = useMemo(() => computeAdrPercent(chartData, 14), [chartData]);
   const adr14InRange = adr14Pct != null ? adr14Pct >= 3 && adr14Pct <= 10 : null;
@@ -1468,6 +1469,9 @@ export function ChartsPage() {
               ) : null}
               {rsPhase?.recent_reclaim_days_ago === 0 ? <span className="chart-pill chart-pill-rs">RS reclaim today</span> : null}
               {rsPhase?.recent_loss_days_ago === 0 ? <span className="chart-pill chart-pill-event">RS phase lost today</span> : null}
+              {rsEvidence ? <span className="chart-pill chart-pill-rs">RS Evidence {rsEvidence.score}/{rsEvidence.max_score}</span> : null}
+              {rsEvidence?.rs_days_21d_pct != null ? <span className="chart-pill chart-pill-setup">RS Days {rsEvidence.rs_days_21d_pct.toFixed(1)}%</span> : null}
+              {rsEvidence?.up_on_down_days_21d != null ? <span className="chart-pill chart-pill-setup">Up/Down {rsEvidence.up_on_down_days_21d}</span> : null}
               {chartPayload?.data_source ? <span className="chart-pill chart-pill-setup">Source {chartPayload.data_source}</span> : null}
               {latestMarketExtension ? (
                 <span className={`chart-pill ${marketExtensionChartPillClass(latestMarketExtension.state)}`}>
