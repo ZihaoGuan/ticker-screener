@@ -24,7 +24,8 @@ export function ScannerTopHitsPage() {
   const [hasLeadershipScannerOnly, setHasLeadershipScannerOnly] = useState(false);
   const [hasFundamentalQualityOnly, setHasFundamentalQualityOnly] = useState(false);
   const [leaderRsOnly, setLeaderRsOnly] = useState(false);
-  const [leaderRsThreshold, setLeaderRsThreshold] = useState("90");
+  const [leaderRsMin, setLeaderRsMin] = useState("90");
+  const [leaderRsMax, setLeaderRsMax] = useState("");
   const [selectedScannerIds, setSelectedScannerIds] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<SortKey>("hits");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -79,13 +80,7 @@ export function ScannerTopHitsPage() {
       .map(([id, label]) => ({ id, label }))
       .sort((left, right) => left.label.localeCompare(right.label));
   }, [rows]);
-  const normalizedLeaderRsThreshold = useMemo(() => {
-    const parsed = Number.parseInt(leaderRsThreshold, 10);
-    if (!Number.isFinite(parsed)) {
-      return 90;
-    }
-    return Math.max(1, Math.min(99, parsed));
-  }, [leaderRsThreshold]);
+  const normalizedLeaderRsRange = useMemo(() => normalizeRsRatingRange(leaderRsMin, leaderRsMax), [leaderRsMin, leaderRsMax]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -108,7 +103,7 @@ export function ScannerTopHitsPage() {
       nextRows = nextRows.filter(hasFundamentalQualitySignal);
     }
     if (leaderRsOnly) {
-      nextRows = nextRows.filter((row) => hasLeaderRsRating(row, normalizedLeaderRsThreshold));
+      nextRows = nextRows.filter((row) => hasDailyRsRatingInRange(row, normalizedLeaderRsRange.min, normalizedLeaderRsRange.max));
     }
     if (selectedScannerIds.length > 0) {
       nextRows = nextRows.filter((row) => hasSelectedScannerSignals(row, selectedScannerIds));
@@ -117,11 +112,11 @@ export function ScannerTopHitsPage() {
       sectorLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeSectorKey(item.sector)) : new Map<string, string>(),
       industryLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeIndustryKey(item.industry)) : new Map<string, string>(),
     }));
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, normalizedLeaderRsThreshold, rows, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, normalizedLeaderRsRange, rows, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsThreshold, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const normalizedPage = Math.min(currentPage, totalPages);
@@ -260,17 +255,27 @@ export function ScannerTopHitsPage() {
           <span>RS Leader</span>
           <span className="scanner-result-check">
             <input type="checkbox" checked={leaderRsOnly} onChange={(event) => setLeaderRsOnly(event.target.checked)} />
-            <span>Daily RS above threshold</span>
+            <span>Daily RS within range</span>
           </span>
-          <input
-            type="number"
-            min={1}
-            max={99}
-            value={leaderRsThreshold}
-            onChange={(event) => setLeaderRsThreshold(event.target.value)}
-            placeholder="90"
-          />
-          <span className="panel-copy">Uses `daily_rs_rating`, with a threshold from 1 to 99.</span>
+          <div className="scanner-result-range-row">
+            <input
+              type="number"
+              min={1}
+              max={99}
+              value={leaderRsMin}
+              onChange={(event) => setLeaderRsMin(event.target.value)}
+              placeholder="Min"
+            />
+            <input
+              type="number"
+              min={1}
+              max={99}
+              value={leaderRsMax}
+              onChange={(event) => setLeaderRsMax(event.target.value)}
+              placeholder="Max"
+            />
+          </div>
+          <span className="panel-copy">Uses `daily_rs_rating`; blank max means up to 99.</span>
         </label>
         <label className="scanner-result-filter panel">
           <span>Scanners</span>
@@ -728,8 +733,19 @@ function hasFundamentalQualitySignal(row: ScannerTopHitRow) {
   return row.scanners.some((scanner) => normalizeScannerId(scanner.id) === "fundamental_quality");
 }
 
-function hasLeaderRsRating(row: ScannerTopHitRow, minimumDailyRsRating: number) {
-  return row.daily_rs_rating != null && row.daily_rs_rating > minimumDailyRsRating;
+function hasDailyRsRatingInRange(row: ScannerTopHitRow, minimumDailyRsRating: number, maximumDailyRsRating: number) {
+  return row.daily_rs_rating != null && row.daily_rs_rating >= minimumDailyRsRating && row.daily_rs_rating <= maximumDailyRsRating;
+}
+
+function normalizeRsRatingRange(minValue: string, maxValue: string) {
+  const minParsed = Number.parseInt(minValue, 10);
+  const maxParsed = Number.parseInt(maxValue, 10);
+  const min = Number.isFinite(minParsed) ? Math.max(1, Math.min(99, minParsed)) : 1;
+  const max = Number.isFinite(maxParsed) ? Math.max(1, Math.min(99, maxParsed)) : 99;
+  if (min > max) {
+    return { min: max, max: min };
+  }
+  return { min, max };
 }
 
 function hasSelectedScannerSignals(row: ScannerTopHitRow, selectedScannerIds: string[]) {
