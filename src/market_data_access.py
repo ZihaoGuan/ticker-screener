@@ -311,9 +311,18 @@ def load_ticker_metadata_map(
         return {}
 
     sql = """
-        SELECT ticker, exchange, sector, industry, ipo_date, is_active, currency, source
-        FROM ticker_metadata
-        WHERE ticker = ANY(%s)
+        SELECT tm.ticker, tm.exchange, tm.sector, tm.industry, tm.ipo_date, tm.is_active, tm.currency, tm.source,
+               latest_fundamentals.market_cap
+        FROM ticker_metadata tm
+        LEFT JOIN LATERAL (
+            SELECT market_cap
+            FROM ticker_fundamentals_snapshots fs
+            WHERE fs.ticker = tm.ticker
+              AND fs.market_cap IS NOT NULL
+            ORDER BY fs.as_of_date DESC
+            LIMIT 1
+        ) latest_fundamentals ON TRUE
+        WHERE tm.ticker = ANY(%s)
     """
     with connection:
         with connection.cursor() as cursor:
@@ -321,7 +330,7 @@ def load_ticker_metadata_map(
             rows = cursor.fetchall()
 
     payload: dict[str, dict[str, object]] = {}
-    for ticker, exchange, sector, industry, ipo_date, is_active, currency, source in rows:
+    for ticker, exchange, sector, industry, ipo_date, is_active, currency, source, market_cap in rows:
         payload[str(ticker).upper()] = {
             "ticker": str(ticker).upper(),
             "exchange": exchange,
@@ -331,7 +340,50 @@ def load_ticker_metadata_map(
             "is_active": is_active,
             "currency": currency,
             "source": source,
+            "market_cap": float(market_cap) if market_cap is not None else None,
         }
+    return payload
+
+
+def load_latest_market_caps(
+    tickers: Iterable[str],
+    *,
+    as_of_date: dt.date | None = None,
+    database_url: str | None = None,
+) -> dict[str, float]:
+    normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
+    if not normalized:
+        return {}
+
+    connection = _connect(database_url)
+    if connection is None:
+        return {}
+
+    params: list[object] = [normalized]
+    date_clause = ""
+    if as_of_date is not None:
+        date_clause = "AND as_of_date <= %s"
+        params.append(as_of_date)
+
+    sql = f"""
+        SELECT DISTINCT ON (ticker) ticker, market_cap
+        FROM ticker_fundamentals_snapshots
+        WHERE ticker = ANY(%s)
+          AND market_cap IS NOT NULL
+          {date_clause}
+        ORDER BY ticker ASC, as_of_date DESC
+    """
+    with connection:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, tuple(params))
+            rows = cursor.fetchall()
+
+    payload: dict[str, float] = {}
+    for ticker, market_cap in rows:
+        try:
+            payload[str(ticker).upper()] = float(market_cap)
+        except (TypeError, ValueError):
+            continue
     return payload
 
 

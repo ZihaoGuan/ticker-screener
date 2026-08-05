@@ -351,6 +351,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("trend_template_{date_label}.json",),
         "legacy_summary_templates": ("trend_template_run_summary_{date_label}.json",),
     },
+    "kai_s2": {
+        "stem_template": "kai_s2_{date_label}",
+        "legacy_watchlist_templates": ("kai_s2_{date_label}.json",),
+        "legacy_raw_templates": ("kai_s2_{date_label}.json",),
+        "legacy_summary_templates": ("kai_s2_run_summary_{date_label}.json",),
+    },
     "market_correction_resilience": {
         "stem_template": "market_correction_resilience_{date_label}",
         "legacy_watchlist_templates": ("market_correction_resilience_{date_label}.json",),
@@ -527,6 +533,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("near_52wk_high", "near_52wk_high"),
     ("lost_21ema", "lost_21ema"),
     ("trend_template", "trend_template"),
+    ("kai_s2", "kai_s2"),
     ("market_correction_resilience", "market_correction_resilience"),
     ("stockbee_momentum_burst", "stockbee_momentum_burst"),
     ("weekly_vcp_spec", "weekly_vcp_spec"),

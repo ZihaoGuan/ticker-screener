@@ -747,6 +747,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("sean_breakout", action_ids)
         self.assertIn("sean_gap_up", action_ids)
         self.assertIn("trend_template", action_ids)
+        self.assertIn("kai_s2", action_ids)
         self.assertIn("canslim", action_ids)
         self.assertIn("vcs_setup_stage", action_ids)
         self.assertIn("vcs_critical_tightness", action_ids)

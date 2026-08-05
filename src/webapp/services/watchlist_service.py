@@ -602,6 +602,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "lime",
     },
     {
+        "id": "kai_s2",
+        "strategy_id": "kai_s2",
+        "label": "Kai S2",
+        "description": "Liquid high-beta trend leaders with price above 20/50/200 SMA, 150D SMA above 200D SMA, market cap above $1B, avg volume above 2M, and close x 30D avg volume above $100M.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+    },
+    {
         "id": "vcs_critical_tightness",
         "strategy_id": "vcs_critical_tightness",
         "label": "VCS Critical Tightness",

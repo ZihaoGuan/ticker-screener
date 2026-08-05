@@ -25,6 +25,7 @@ from .hve_screen import find_recent_hve_hit
 from .htf_runup_screen import run_htf_runup_screen
 from .inside_dryup_screen import find_recent_inside_dryup_hit
 from .inside_dryup_v2_screen import HISTORY_DAYS as INSIDE_DRYUP_V2_HISTORY_DAYS, find_recent_inside_dryup_v2_hit
+from .kai_s2_screen import KAI_S2_HISTORY_DAYS, find_kai_s2_hit
 from .leif_high_tight_flag_screen import LEIF_HTF_LOOKBACK_DAYS, find_leif_high_tight_flag_hit
 from .lost_21ema_screen import run_lost_21ema_screen
 from .macd_screen import find_recent_macd_hit
@@ -1096,6 +1097,37 @@ def _run_stockbee_momentum_burst(bundle: ScreenerInputBundle) -> ScreenerEvaluat
     )
 
 
+def _run_kai_s2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    metadata = dict(bundle.metadata or {})
+    market_cap = metadata.get("market_cap")
+    try:
+        coerced_market_cap = float(market_cap) if market_cap is not None else None
+    except (TypeError, ValueError):
+        coerced_market_cap = None
+    hit = find_kai_s2_hit(
+        bundle.bars,
+        bundle.benchmark_bars,
+        ticker=_ticker_from_bundle(bundle),
+        market_cap=coerced_market_cap,
+        signal_date=bundle.as_of_date,
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "market_cap": payload["market_cap"],
+            "beta_1y": payload["beta_1y"],
+            "price_times_avg_volume_30": payload["price_times_avg_volume_30"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_vcp_spec(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     hit = find_recent_vcp_spec_hit(
         bundle.bars,
@@ -1710,5 +1742,12 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=STOCKBEE_MOMENTUM_BURST_HISTORY_DAYS,
             warmup_trading_days=10,
             evaluator=_run_stockbee_momentum_burst,
+        ),
+        "kai_s2": ScreenerSpec(
+            id="kai_s2",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=KAI_S2_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_kai_s2,
         ),
     }
