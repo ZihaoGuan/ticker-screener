@@ -380,7 +380,7 @@ function SectorChartGrid({
   const benchmarkCandles = buildChartCandles(benchmarkPayload);
   return (
     <section className="scanner-result-table-shell panel">
-      <div className="scanner-result-chart-grid is-2-col sector-all-chart-grid">
+      <div className="scanner-result-chart-grid is-3-col sector-all-chart-grid">
         {rows.map((row) => {
           const chartPayload = chartPayloads[row.ticker];
           const chartCandles = buildChartCandles(chartPayload);

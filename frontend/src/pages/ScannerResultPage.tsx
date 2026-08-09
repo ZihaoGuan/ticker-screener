@@ -23,7 +23,6 @@ import type {
 type SortKey = "als" | "ta" | "fa" | "ars" | "rsPhaseDays" | "ticker" | "company" | "sector" | "volume" | "change";
 type SortDirection = "asc" | "desc";
 type ScannerViewMode = "charts" | "list";
-type ChartColumnCount = 2 | 3;
 
 type ScannerRow = {
   ticker: string;
@@ -54,10 +53,7 @@ type ScannerRow = {
 
 const MAX_RATINGS_ROWS = 500;
 const LIST_PAGE_SIZE = 50;
-const CHART_PAGE_SIZE_BY_COLUMN: Record<ChartColumnCount, number> = {
-  2: 10,
-  3: 12,
-};
+const CHART_PAGE_SIZE = 12;
 
 export function ScannerResultPage() {
   const { scannerId = "" } = useParams();
@@ -75,7 +71,6 @@ export function ScannerResultPage() {
   const [sortBy, setSortBy] = useState<SortKey>("als");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [viewMode, setViewMode] = useState<ScannerViewMode>("list");
-  const [chartColumns, setChartColumns] = useState<ChartColumnCount>(2);
   const [currentPage, setCurrentPage] = useState(1);
   const [chartPayloads, setChartPayloads] = useState<Record<string, WatchlistChartResponse | null | undefined>>({});
   const [chartErrors, setChartErrors] = useState<Record<string, string>>({});
@@ -219,9 +214,9 @@ export function ScannerResultPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [scannerId, search, sectorFilter, industryFilter, sortBy, sortDirection, viewMode, chartColumns]);
+  }, [scannerId, search, sectorFilter, industryFilter, sortBy, sortDirection, viewMode]);
 
-  const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE_BY_COLUMN[chartColumns] : LIST_PAGE_SIZE;
+  const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE : LIST_PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const normalizedPage = Math.min(currentPage, totalPages);
   const pagedRows = useMemo(() => {
@@ -432,25 +427,6 @@ export function ScannerResultPage() {
             </button>
           </div>
         </div>
-        <div className="scanner-result-filter panel scanner-result-filter-actions">
-          <span className="eyebrow">Chart Density</span>
-          <div className="scanner-result-view-actions">
-            <button
-              type="button"
-              className={`scanner-result-view-chip${chartColumns === 2 ? " is-active" : ""}`}
-              onClick={() => setChartColumns(2)}
-            >
-              2 per line
-            </button>
-            <button
-              type="button"
-              className={`scanner-result-view-chip${chartColumns === 3 ? " is-active" : ""}`}
-              onClick={() => setChartColumns(3)}
-            >
-              3 per line
-            </button>
-          </div>
-        </div>
       </section>
 
       <section className="scanner-result-toolbar">
@@ -481,7 +457,7 @@ export function ScannerResultPage() {
               onPageChange={setCurrentPage}
             />
             {viewMode === "charts" ? (
-              <div className={`scanner-result-chart-grid is-${chartColumns}-col`}>
+              <div className="scanner-result-chart-grid is-3-col">
                 {pagedRows.map((row, index) => {
                   const chartPayload = chartPayloads[row.ticker];
                   const chartCandles = buildMiniChartCandles(chartPayload);
