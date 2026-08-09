@@ -251,6 +251,8 @@ CREATE TABLE IF NOT EXISTS ticker_technical_rating_snapshots (
   divergence_health_score NUMERIC(18,6),
   daily_rs_rating NUMERIC(18,6),
   weekly_rs_rating NUMERIC(18,6),
+  rs_rating_3m NUMERIC(18,6),
+  rs_rating_6m NUMERIC(18,6),
   leadership_score NUMERIC(18,6),
   structure_volume_score NUMERIC(18,6),
   industry_group TEXT,
@@ -275,6 +277,8 @@ CREATE INDEX IF NOT EXISTS idx_ticker_technical_rating_snapshots_date_overall
 ALTER TABLE ticker_technical_rating_snapshots
   ADD COLUMN IF NOT EXISTS daily_rs_rating NUMERIC(18,6),
   ADD COLUMN IF NOT EXISTS weekly_rs_rating NUMERIC(18,6),
+  ADD COLUMN IF NOT EXISTS rs_rating_3m NUMERIC(18,6),
+  ADD COLUMN IF NOT EXISTS rs_rating_6m NUMERIC(18,6),
   ADD COLUMN IF NOT EXISTS industry_group TEXT,
   ADD COLUMN IF NOT EXISTS industry_group_rs_rank NUMERIC(18,6),
   ADD COLUMN IF NOT EXISTS industry_group_member_count INTEGER;

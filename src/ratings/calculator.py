@@ -321,6 +321,8 @@ def build_technical_rating(snapshot: TechnicalSnapshotInput) -> TechnicalRatingS
     rating.divergence_health_score = _build_divergence_health_score(snapshot)
     rating.daily_rs_rating = snapshot.daily_rs_rating
     rating.weekly_rs_rating = snapshot.weekly_rs_rating
+    rating.rs_rating_3m = snapshot.rs_rating_3m
+    rating.rs_rating_6m = snapshot.rs_rating_6m
     rating.leadership_score = _build_leadership_score(snapshot)
     rating.structure_volume_score = _build_structure_volume_score(snapshot)
     rating.flags = _build_technical_flags(snapshot)

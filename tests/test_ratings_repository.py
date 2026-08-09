@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import unittest
 
-from src.ratings.models import FundamentalsSnapshot
+from src.ratings.models import FundamentalsSnapshot, TechnicalRatingSnapshot
 from src.ratings.repository import RatingsRepository
 
 
@@ -88,6 +88,31 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
                     shares_outstanding=24_220_000_000.0,
                 )
             ]
+        )
+
+        self.assertEqual(written, 1)
+        self.assertTrue(connection.commit_called)
+
+    def test_replace_technical_rating_snapshots_matches_placeholder_count(self) -> None:
+        cursor = _FakeCursor([{"fetchall": []}])
+        connection = _FakeConnection(cursor)
+        repository = RatingsRepository()
+        repository._connect = lambda: connection
+
+        written = repository.replace_technical_rating_snapshots(
+            dt.date(2026, 6, 22),
+            [
+                TechnicalRatingSnapshot(
+                    ticker="NVDA",
+                    as_of_date=dt.date(2026, 6, 22),
+                    daily_rs_rating=96.0,
+                    weekly_rs_rating=93.0,
+                    rs_rating_3m=98.0,
+                    rs_rating_6m=95.0,
+                    technical_status="ok",
+                )
+            ],
+            tickers=["NVDA"],
         )
 
         self.assertEqual(written, 1)
@@ -370,8 +395,8 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
                 {"fetchall": [("ok", 2)]},
                 {
                     "fetchall": [
-                        ("TSLA", dt.date(2026, 6, 13), "Consumer Cyclical", "Auto Manufacturers", 91.5, 18.0, 17.0, 16.0, 15.0, 14.0, "Leading", "ok", None, ["tight"], 1),
-                        ("META", dt.date(2026, 6, 13), "Communication Services", "Internet Content", 90.4, 18.0, 17.0, 16.0, 15.0, 14.0, "Leading", "ok", None, [], 2),
+                        ("TSLA", dt.date(2026, 6, 13), "Consumer Cyclical", "Auto Manufacturers", 91.5, 18.0, 17.0, 16.0, 95.0, 92.0, 98.0, 96.0, 15.0, 14.0, "Auto", 12.0, 42, "Leading", "ok", None, ["tight"], 1),
+                        ("META", dt.date(2026, 6, 13), "Communication Services", "Internet Content", 90.4, 18.0, 17.0, 16.0, 88.0, 84.0, 91.0, 89.0, 15.0, 14.0, "Internet", 18.0, 55, "Leading", "ok", None, [], 2),
                     ]
                 },
                 {"fetchall": [("TSLA", 1), ("META", 2)]},
@@ -387,6 +412,8 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
         self.assertEqual(payload["sector_options"], ["Communication Services", "Consumer Cyclical"])
         self.assertEqual(payload["rows"][0]["rank_change"], "same")
         self.assertEqual(payload["rows"][0]["rank_delta"], 0)
+        self.assertEqual(payload["rows"][0]["rs_rating_3m"], 98.0)
+        self.assertEqual(payload["rows"][0]["rs_rating_6m"], 96.0)
         self.assertEqual(payload["rows"][1]["rank_change"], "same")
         self.assertEqual(payload["rows"][1]["flags"], [])
         previous_rank_sql = cursor.executed_sql[-1]

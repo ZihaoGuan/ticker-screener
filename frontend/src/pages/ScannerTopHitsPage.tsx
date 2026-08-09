@@ -6,9 +6,10 @@ import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
+import { resolveRsMomentumSignal } from "../lib/rsMomentum";
 import type { CandlePoint, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
-type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "ta" | "fa" | "decision" | "decisionScore";
+type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
 type ViewMode = "list" | "charts";
 const LIST_PAGE_SIZE = 50;
@@ -513,7 +514,10 @@ export function ScannerTopHitsPage() {
                     <th>VCP</th>
                     <th>Accel</th>
                     <th>{renderSortButton("RS", "rs", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                    <th>Daily RS</th>
+                    <th>{renderSortButton("Daily RS", "dailyRs", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("3M RS", "rs3m", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("6M RS", "rs6m", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    <th>{renderSortButton("RS Momentum", "rsMomentum", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>1D</th>
                     <th>1W</th>
@@ -587,6 +591,9 @@ export function ScannerTopHitsPage() {
                       <td data-label="Accel">{formatAccelerationScore(row.growth_acceleration_score, row.growth_acceleration_label)}</td>
                       <td data-label="RS">{formatRating(row.rs_rating)}</td>
                       <td data-label="Daily RS">{formatRating(row.daily_rs_rating ?? null)}</td>
+                      <td data-label="3M RS">{formatRating(row.rs_rating_3m ?? null)}</td>
+                      <td data-label="6M RS">{formatRating(row.rs_rating_6m ?? null)}</td>
+                      <td data-label="RS Momentum">{renderRsMomentumCell(row)}</td>
                       <td data-label="TA">{formatRating(row.ta_rating)}</td>
                       <td data-label="1D">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1d"])}</td>
                       <td data-label="1W">{formatTechnicalIndicatorLabel(row.technical_indicator_ratings?.["1w"])}</td>
@@ -828,6 +835,21 @@ function compareRows(
   if (sortBy === "rs") {
     return compareNullableNumber(left.rs_rating, right.rs_rating, sortDirection) || left.ticker.localeCompare(right.ticker);
   }
+  if (sortBy === "dailyRs") {
+    return compareNullableNumber(left.daily_rs_rating ?? null, right.daily_rs_rating ?? null, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "rs3m") {
+    return compareNullableNumber(left.rs_rating_3m ?? null, right.rs_rating_3m ?? null, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "rs6m") {
+    return compareNullableNumber(left.rs_rating_6m ?? null, right.rs_rating_6m ?? null, sortDirection) || left.ticker.localeCompare(right.ticker);
+  }
+  if (sortBy === "rsMomentum") {
+    return (
+      compareNullableNumber(resolveRsMomentumRank(left), resolveRsMomentumRank(right), sortDirection) ||
+      left.ticker.localeCompare(right.ticker)
+    );
+  }
   if (sortBy === "ta") {
     return compareNullableNumber(left.ta_rating, right.ta_rating, sortDirection) || left.ticker.localeCompare(right.ticker);
   }
@@ -898,6 +920,19 @@ function renderRsEvidenceCell(row: ScannerTopHitRow) {
       {score}/{maxScore ?? 9}
     </span>
   );
+}
+
+function renderRsMomentumCell(row: ScannerTopHitRow) {
+  const signal = resolveRsMomentumSignal(row.rs_rating_3m, row.rs_rating_6m, row.daily_rs_rating);
+  return (
+    <span className={`scanner-score-pill ${signal.toneClass}`} title={signal.title}>
+      {signal.label}
+    </span>
+  );
+}
+
+function resolveRsMomentumRank(row: ScannerTopHitRow) {
+  return resolveRsMomentumSignal(row.rs_rating_3m, row.rs_rating_6m, row.daily_rs_rating).rank;
 }
 
 function formatCanslimScore(score: number | null | undefined, maxScore: number | null | undefined) {

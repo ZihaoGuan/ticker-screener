@@ -32,6 +32,8 @@ class TechnicalRatingsCalculatorTests(unittest.TestCase):
             sma50_20d_ago=124.0,
             daily_rs_rating=96.0,
             weekly_rs_rating=93.0,
+            rs_rating_3m=98.0,
+            rs_rating_6m=95.0,
             rs_line=1.35,
             rs_line_sma50=1.23,
             rs_line_3m_high=1.35,
@@ -48,6 +50,8 @@ class TechnicalRatingsCalculatorTests(unittest.TestCase):
         rating = build_technical_rating(snapshot)
         self.assertEqual(rating.technical_status, "ok")
         self.assertGreaterEqual(rating.overall_rating or 0.0, 95.0)
+        self.assertEqual(rating.rs_rating_3m, 98.0)
+        self.assertEqual(rating.rs_rating_6m, 95.0)
         self.assertEqual(rating.rating_band, "elite")
         self.assertIn("ma_stack_bullish", rating.flags)
         self.assertIn("rs_leader", rating.flags)

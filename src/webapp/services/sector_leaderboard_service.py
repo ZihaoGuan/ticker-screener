@@ -410,6 +410,8 @@ class SectorLeaderboardService:
                     "volume_confirmation": holding_metrics["volume_confirmation"],
                     "daily_rs_rating": _finite_float(technical.get("daily_rs_rating")),
                     "weekly_rs_rating": _finite_float(technical.get("weekly_rs_rating")),
+                    "rs_rating_3m": _finite_float(technical.get("rs_rating_3m")),
+                    "rs_rating_6m": _finite_float(technical.get("rs_rating_6m")),
                     "leadership_score": _finite_float(technical.get("leadership_score")),
                 }
             )

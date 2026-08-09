@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import math
 from pathlib import Path
 import sys
 
@@ -121,6 +122,60 @@ def _compute_rs_rating_series(stock_close: pd.Series, benchmark_close: pd.Series
     return score_series.apply(_approximate_rs_rating).dropna().astype(float)
 
 
+def _compute_exponential_return_score(close: pd.Series, lookback_days: int) -> float | None:
+    import pandas as pd
+
+    clean = pd.to_numeric(close, errors="coerce").dropna()
+    if len(clean) < lookback_days + 1:
+        return None
+    window = clean.tail(lookback_days + 1)
+    log_returns = (window / window.shift(1)).apply(lambda value: math.log(float(value)) if pd.notna(value) and float(value) > 0 else math.nan).dropna()
+    if len(log_returns) < lookback_days:
+        return None
+    count = len(log_returns)
+    if count == 1:
+        weights = [1.0]
+    else:
+        weights = [math.exp(-3.0 * float(count - 1 - index) / float(count - 1)) for index in range(count)]
+    weight_sum = sum(weights)
+    weighted_log_return = sum(float(value) * weight for value, weight in zip(log_returns, weights)) / weight_sum
+    return weighted_log_return * float(count) * 100.0
+
+
+def _percentile_rank_scores(score_by_ticker: dict[str, float | None]) -> dict[str, float]:
+    finite_items = sorted(
+        ((ticker, float(score)) for ticker, score in score_by_ticker.items() if score is not None and math.isfinite(float(score))),
+        key=lambda item: (item[1], item[0]),
+    )
+    if not finite_items:
+        return {}
+    if len(finite_items) == 1:
+        return {finite_items[0][0]: 99.0}
+
+    ratings: dict[str, float] = {}
+    index = 0
+    last_index = len(finite_items) - 1
+    while index < len(finite_items):
+        score = finite_items[index][1]
+        end = index
+        while end + 1 < len(finite_items) and finite_items[end + 1][1] == score:
+            end += 1
+        average_rank = (index + end) / 2.0
+        rating = 1.0 + (average_rank / float(last_index)) * 98.0
+        for item_index in range(index, end + 1):
+            ratings[finite_items[item_index][0]] = round(rating, 2)
+        index = end + 1
+    return ratings
+
+
+def _attach_rs_horizon_ratings(snapshots: list[TechnicalSnapshotInput]) -> None:
+    rating_3m_by_ticker = _percentile_rank_scores({snapshot.ticker: snapshot.rs_rating_3m_score for snapshot in snapshots})
+    rating_6m_by_ticker = _percentile_rank_scores({snapshot.ticker: snapshot.rs_rating_6m_score for snapshot in snapshots})
+    for snapshot in snapshots:
+        snapshot.rs_rating_3m = rating_3m_by_ticker.get(snapshot.ticker)
+        snapshot.rs_rating_6m = rating_6m_by_ticker.get(snapshot.ticker)
+
+
 def _build_technical_snapshot_input(
     ticker: str,
     frame: pd.DataFrame | None,
@@ -178,6 +233,8 @@ def _build_technical_snapshot_input(
     snapshot.sma200_20d_ago = float(sma200.shift(20).iloc[-1]) if pd.notna(sma200.shift(20).iloc[-1]) else None
     snapshot.daily_rs_rating = float(daily_rs_rating.iloc[-1]) if not daily_rs_rating.empty else None
     snapshot.weekly_rs_rating = float(weekly_rs_rating.iloc[-1]) if not weekly_rs_rating.empty else None
+    snapshot.rs_rating_3m_score = _compute_exponential_return_score(close, 63)
+    snapshot.rs_rating_6m_score = _compute_exponential_return_score(close, 126)
     snapshot.rs_line = float(rs_line.iloc[-1]) if not rs_line.empty else None
     snapshot.rs_line_sma50 = float(rs_line.rolling(50).mean().iloc[-1]) if not rs_line.empty and pd.notna(rs_line.rolling(50).mean().iloc[-1]) else None
     snapshot.rs_line_3m_high = float(rs_line.tail(63).max()) if len(rs_line) >= 63 else None
@@ -239,17 +296,28 @@ def main() -> int:
     benchmark_frame = frame_map.get(benchmark_ticker)
     if benchmark_frame is None or benchmark_frame.empty:
         raise RuntimeError(f"No benchmark daily_bars coverage found for {benchmark_ticker} on or before {as_of_date.isoformat()}.")
-    ratings = []
-    ok_count = 0
+    snapshots = []
     total = len(target_tickers)
     for index, ticker in enumerate(target_tickers, start=1):
         frame = frame_map.get(ticker)
         snapshot = _build_technical_snapshot_input(ticker, frame, benchmark_frame, as_of_date=as_of_date)
+        snapshots.append(snapshot)
+        print(f"[{index}/{total}] technical_snapshot {ticker}", flush=True)
+
+    _attach_rs_horizon_ratings(snapshots)
+
+    ratings = []
+    ok_count = 0
+    for index, snapshot in enumerate(snapshots, start=1):
         rating = build_technical_rating(snapshot)
         ratings.append(rating)
         if rating.technical_status == "ok":
             ok_count += 1
-        print(f"[{index}/{total}] technical_rating {ticker} status={rating.technical_status}", flush=True)
+        print(
+            f"[{index}/{total}] technical_rating {snapshot.ticker} "
+            f"status={rating.technical_status} rs3m={rating.rs_rating_3m} rs6m={rating.rs_rating_6m}",
+            flush=True,
+        )
 
     count = repository.replace_technical_rating_snapshots(
         as_of_date,

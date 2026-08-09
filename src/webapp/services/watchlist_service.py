@@ -2441,6 +2441,8 @@ class WatchlistService:
             row["rs_rating"] = _coerce_optional_float(technical.get("leadership_score"))
             row["daily_rs_rating"] = _coerce_optional_float(technical.get("daily_rs_rating"))
             row["weekly_rs_rating"] = _coerce_optional_float(technical.get("weekly_rs_rating"))
+            row["rs_rating_3m"] = _coerce_optional_float(technical.get("rs_rating_3m"))
+            row["rs_rating_6m"] = _coerce_optional_float(technical.get("rs_rating_6m"))
             row["industry_group"] = _coalesce_text(technical.get("industry_group"))
             row["industry_group_member_count"] = _coerce_optional_int(technical.get("industry_group_member_count"))
             row["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))

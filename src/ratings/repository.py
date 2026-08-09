@@ -567,12 +567,13 @@ class RatingsRepository:
                         """
                         INSERT INTO ticker_technical_rating_snapshots (
                           ticker, as_of_date, trend_regime_score, dma_speed_score, divergence_health_score,
-                          daily_rs_rating, weekly_rs_rating, leadership_score, structure_volume_score,
+                          daily_rs_rating, weekly_rs_rating, rs_rating_3m, rs_rating_6m,
+                          leadership_score, structure_volume_score,
                           industry_group, industry_group_rs_rank, industry_group_member_count,
                           overall_rating, rating_band, technical_status,
                           technical_status_reason, flags, missing_metric_names
                         ) VALUES (
-                          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb
+                          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb
                         )
                         """,
                         [
@@ -584,6 +585,8 @@ class RatingsRepository:
                                 item.divergence_health_score,
                                 item.daily_rs_rating,
                                 item.weekly_rs_rating,
+                                item.rs_rating_3m,
+                                item.rs_rating_6m,
                                 item.leadership_score,
                                 item.structure_volume_score,
                                 item.industry_group,
@@ -1456,6 +1459,8 @@ class RatingsRepository:
               r.overall_rating,
               r.daily_rs_rating,
               r.weekly_rs_rating,
+              r.rs_rating_3m,
+              r.rs_rating_6m,
               r.leadership_score,
               r.industry_group,
               r.industry_group_rs_rank,
@@ -1486,6 +1491,8 @@ class RatingsRepository:
             overall_rating,
             daily_rs_rating,
             weekly_rs_rating,
+            rs_rating_3m,
+            rs_rating_6m,
             leadership_score,
             industry_group,
             industry_group_rs_rank,
@@ -1502,6 +1509,8 @@ class RatingsRepository:
                 "overall_rating": float(overall_rating) if overall_rating is not None else None,
                 "daily_rs_rating": float(daily_rs_rating) if daily_rs_rating is not None else None,
                 "weekly_rs_rating": float(weekly_rs_rating) if weekly_rs_rating is not None else None,
+                "rs_rating_3m": float(rs_rating_3m) if rs_rating_3m is not None else None,
+                "rs_rating_6m": float(rs_rating_6m) if rs_rating_6m is not None else None,
                 "leadership_score": float(leadership_score) if leadership_score is not None else None,
                 "industry_group": industry_group,
                 "industry_group_rs_rank": float(industry_group_rs_rank) if industry_group_rs_rank is not None else None,
@@ -1869,6 +1878,8 @@ class RatingsRepository:
                         r.divergence_health_score,
                         r.daily_rs_rating,
                         r.weekly_rs_rating,
+                        r.rs_rating_3m,
+                        r.rs_rating_6m,
                         r.leadership_score,
                         r.structure_volume_score,
                         r.industry_group,
@@ -1904,6 +1915,8 @@ class RatingsRepository:
                       ranked.divergence_health_score,
                       ranked.daily_rs_rating,
                       ranked.weekly_rs_rating,
+                      ranked.rs_rating_3m,
+                      ranked.rs_rating_6m,
                       ranked.leadership_score,
                       ranked.structure_volume_score,
                       ranked.industry_group,
@@ -1967,6 +1980,8 @@ class RatingsRepository:
                     "divergence_health_score": float(divergence_health_score) if divergence_health_score is not None else None,
                     "daily_rs_rating": float(daily_rs_rating) if daily_rs_rating is not None else None,
                     "weekly_rs_rating": float(weekly_rs_rating) if weekly_rs_rating is not None else None,
+                    "rs_rating_3m": float(rs_rating_3m) if rs_rating_3m is not None else None,
+                    "rs_rating_6m": float(rs_rating_6m) if rs_rating_6m is not None else None,
                     "leadership_score": float(leadership_score) if leadership_score is not None else None,
                     "structure_volume_score": float(structure_volume_score) if structure_volume_score is not None else None,
                     "industry_group": industry_group,
@@ -1990,6 +2005,8 @@ class RatingsRepository:
                 divergence_health_score,
                 daily_rs_rating,
                 weekly_rs_rating,
+                rs_rating_3m,
+                rs_rating_6m,
                 leadership_score,
                 structure_volume_score,
                 industry_group,

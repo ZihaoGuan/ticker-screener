@@ -5079,6 +5079,12 @@ a {
   color: #d4d4d8;
 }
 
+.scanner-score-pill.is-negative {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
 .scanner-result-als-cell {
   color: #fdba74;
   font-weight: 700;

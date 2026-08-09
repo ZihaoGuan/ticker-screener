@@ -594,7 +594,15 @@ class WatchlistServiceTests(unittest.TestCase):
         ), patch(
             "src.ratings.repository.RatingsRepository.load_latest_technical_rating_snapshots_for_tickers",
             return_value={
-                "PLTR": {"overall_rating": 95.0, "leadership_score": 97.0, "daily_rs_rating": 96.0, "sector": "Information Technology", "industry": "Software"},
+                "PLTR": {
+                    "overall_rating": 95.0,
+                    "leadership_score": 97.0,
+                    "daily_rs_rating": 96.0,
+                    "rs_rating_3m": 98.0,
+                    "rs_rating_6m": 94.0,
+                    "sector": "Information Technology",
+                    "industry": "Software",
+                },
                 "CRWD": {"overall_rating": 90.0, "leadership_score": 92.0, "sector": "Information Technology", "industry": "Software"},
                 "TSLA": {"overall_rating": 68.0, "leadership_score": 71.0, "sector": "Consumer Discretionary", "industry": "Auto Manufacturers"},
             },
@@ -625,6 +633,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertGreater(pltr["change_from_52wk_low_pct"], 0.0)
         self.assertEqual(pltr["rs_rating"], 97.0)
         self.assertEqual(pltr["daily_rs_rating"], 96.0)
+        self.assertEqual(pltr["rs_rating_3m"], 98.0)
+        self.assertEqual(pltr["rs_rating_6m"], 94.0)
         self.assertEqual(pltr["rs_days_21d"], 19)
         self.assertEqual(pltr["rs_days_21d_pct"], 90.5)
         self.assertEqual(pltr["rs_phase_active_days"], 8)

@@ -249,6 +249,8 @@ export type ScannerTopHitRow = {
   fa_rating: number | null;
   daily_rs_rating?: number | null;
   weekly_rs_rating?: number | null;
+  rs_rating_3m?: number | null;
+  rs_rating_6m?: number | null;
   industry_group?: string | null;
   industry_group_member_count?: number | null;
   growth_acceleration_score?: number | null;
@@ -317,6 +319,8 @@ export type SectorLeaderboardHolding = {
   volume_confirmation: boolean | null;
   daily_rs_rating: number | null;
   weekly_rs_rating: number | null;
+  rs_rating_3m: number | null;
+  rs_rating_6m: number | null;
   leadership_score: number | null;
 };
 
@@ -1141,6 +1145,8 @@ export type ChartFundamentalsResponse = {
     overall_rating: number | null;
     daily_rs_rating?: number | null;
     weekly_rs_rating?: number | null;
+    rs_rating_3m?: number | null;
+    rs_rating_6m?: number | null;
     leadership_score?: number | null;
     industry_group?: string | null;
     industry_group_member_count?: number | null;
@@ -1267,6 +1273,8 @@ export type TopTechnicalRatingEntry = {
   divergence_health_score: number | null;
   daily_rs_rating?: number | null;
   weekly_rs_rating?: number | null;
+  rs_rating_3m?: number | null;
+  rs_rating_6m?: number | null;
   leadership_score: number | null;
   structure_volume_score: number | null;
   industry_group?: string | null;

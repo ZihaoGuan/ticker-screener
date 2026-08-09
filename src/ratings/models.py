@@ -136,6 +136,10 @@ class TechnicalSnapshotInput:
     sma200_20d_ago: float | None = None
     daily_rs_rating: float | None = None
     weekly_rs_rating: float | None = None
+    rs_rating_3m_score: float | None = None
+    rs_rating_6m_score: float | None = None
+    rs_rating_3m: float | None = None
+    rs_rating_6m: float | None = None
     rs_line: float | None = None
     rs_line_sma50: float | None = None
     rs_line_3m_high: float | None = None
@@ -162,6 +166,8 @@ class TechnicalRatingSnapshot:
     divergence_health_score: float | None = None
     daily_rs_rating: float | None = None
     weekly_rs_rating: float | None = None
+    rs_rating_3m: float | None = None
+    rs_rating_6m: float | None = None
     leadership_score: float | None = None
     structure_volume_score: float | None = None
     industry_group: str | None = None

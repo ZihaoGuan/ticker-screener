@@ -47,8 +47,8 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
             SectorLeaderboardService,
             "_load_technical_rating_map",
             return_value={
-                "ONE": {"daily_rs_rating": 91.0, "weekly_rs_rating": 87.0, "leadership_score": 94.0},
-                "TWO": {"daily_rs_rating": 42.0, "weekly_rs_rating": 38.0, "leadership_score": 41.0},
+                "ONE": {"daily_rs_rating": 91.0, "weekly_rs_rating": 87.0, "rs_rating_3m": 96.0, "rs_rating_6m": 93.0, "leadership_score": 94.0},
+                "TWO": {"daily_rs_rating": 42.0, "weekly_rs_rating": 38.0, "rs_rating_3m": 45.0, "rs_rating_6m": 40.0, "leadership_score": 41.0},
             },
         ):
             payload = SectorLeaderboardService(database_url="postgres://example", etfs=etfs).get_payload(as_of_date=dt.date(2026, 7, 30))
@@ -84,6 +84,8 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["volume_confirmation"], False)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["daily_rs_rating"], 91.0)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["weekly_rs_rating"], 87.0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["rs_rating_3m"], 96.0)
+        self.assertEqual(payload["rows"][0]["top_holdings"][0]["rs_rating_6m"], 93.0)
         self.assertEqual(payload["rows"][0]["top_holdings"][0]["leadership_score"], 94.0)
         self.assertEqual(payload["rows"][1]["ticker"], "BBB")
         self.assertEqual(payload["rows"][1]["top_holdings"][0]["day_change_pct"], -11.11)

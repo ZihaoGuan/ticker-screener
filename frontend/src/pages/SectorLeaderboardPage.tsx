@@ -6,11 +6,12 @@ import { RebasedComparisonChart } from "../components/RebasedComparisonChart";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { formatLocalDate, formatLocalDateTime } from "../lib/format";
+import { resolveRsMomentumSignal } from "../lib/rsMomentum";
 import type { CandlePoint, SectorLeaderboardHolding, SectorLeaderboardResponse, SectorLeaderboardRow, WatchlistChartResponse } from "../lib/types";
 
 type ViewMode = "list" | "chart";
 type HoldingViewMode = "list" | "chart";
-type HoldingSortKey = "weight" | "dailyRs" | "weeklyRs" | "leadership" | "rsDays" | "redRsDays" | "dcr" | "relVol" | "ticker" | "change";
+type HoldingSortKey = "weight" | "dailyRs" | "weeklyRs" | "rs3m" | "rs6m" | "rsMomentum" | "leadership" | "rsDays" | "redRsDays" | "dcr" | "relVol" | "ticker" | "change";
 type SortDirection = "asc" | "desc";
 
 const BENCHMARK_TICKER = "SPY";
@@ -636,7 +637,7 @@ function SectorHoldingsControls({
       <div className="sector-holdings-control-group">
         <span className="eyebrow">Sort</span>
         <div className="sector-holdings-sort-actions">
-          {(["weight", "dailyRs", "weeklyRs", "leadership", "rsDays", "redRsDays", "dcr", "relVol", "change", "ticker"] as HoldingSortKey[]).map((key) => (
+          {(["weight", "dailyRs", "rs3m", "rs6m", "rsMomentum", "weeklyRs", "leadership", "rsDays", "redRsDays", "dcr", "relVol", "change", "ticker"] as HoldingSortKey[]).map((key) => (
             <button className={`scanner-result-view-chip${sortBy === key ? " is-active" : ""}`} key={key} type="button" onClick={() => onSort(key)}>
               {labelForHoldingSort(key)}{sortBy === key ? ` ${sortDirection === "asc" ? "Asc" : "Desc"}` : ""}
             </button>
@@ -670,6 +671,9 @@ function SectorHoldingsTable({
             <th>{renderHoldingSortHeader("Weight", "weight", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>{renderHoldingSortHeader("DY%", "change", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>{renderHoldingSortHeader("Daily RS", "dailyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("3M RS", "rs3m", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("6M RS", "rs6m", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
+            <th>{renderHoldingSortHeader("RS Momentum", "rsMomentum", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>{renderHoldingSortHeader("Weekly RS", "weeklyRs", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>{renderHoldingSortHeader("Leader", "leadership", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
             <th>{renderHoldingSortHeader("RS Days", "rsDays", holdingSortBy, holdingSortDirection, onSortHoldings)}</th>
@@ -695,6 +699,9 @@ function SectorHoldingsTable({
               <td data-label="Weight">{formatPercent(holding.weight, { signed: false })}</td>
               <td data-label="DY%" className={valueClass(holding.day_change_pct)}>{formatPercent(holding.day_change_pct)}</td>
               <td data-label="Daily RS">{formatRating(holding.daily_rs_rating)}</td>
+              <td data-label="3M RS">{formatRating(holding.rs_rating_3m)}</td>
+              <td data-label="6M RS">{formatRating(holding.rs_rating_6m)}</td>
+              <td data-label="RS Momentum">{renderRsMomentumCell(holding)}</td>
               <td data-label="Weekly RS">{formatRating(holding.weekly_rs_rating)}</td>
               <td data-label="Leader">{formatRating(holding.leadership_score)}</td>
               <td data-label="RS Days">{formatCountWithPercent(holding.rs_days_21d, holding.rs_days_21d_pct)}</td>
@@ -770,6 +777,8 @@ function SectorHoldingsChartGrid({
               </div>
               <div className="scanner-chart-card-score-row">
                 <span className={`scanner-score-pill ${toneForMomentumScore(holding.daily_rs_rating)}`}>RS {formatRating(holding.daily_rs_rating)}</span>
+                <span className={`scanner-score-pill ${toneForMomentumScore(holding.rs_rating_3m)}`}>3M {formatRating(holding.rs_rating_3m)}</span>
+                <span className={`scanner-score-pill ${toneForMomentumScore(holding.rs_rating_6m)}`}>6M {formatRating(holding.rs_rating_6m)}</span>
                 <span className={`scanner-score-pill ${toneForMomentumScore(holding.weekly_rs_rating)}`}>WRS {formatRating(holding.weekly_rs_rating)}</span>
                 <span className="scanner-score-pill">RS Days {formatPercent(holding.rs_days_21d_pct, { signed: false })}</span>
                 <span className="scanner-score-pill">Red RS {formatPercent(holding.red_rs_days_21d_pct, { signed: false })}</span>
@@ -858,6 +867,15 @@ function holdingSortValue(holding: SectorLeaderboardHolding, key: HoldingSortKey
   if (key === "dailyRs") {
     return holding.daily_rs_rating;
   }
+  if (key === "rs3m") {
+    return holding.rs_rating_3m;
+  }
+  if (key === "rs6m") {
+    return holding.rs_rating_6m;
+  }
+  if (key === "rsMomentum") {
+    return resolveHoldingRsMomentumRank(holding);
+  }
   if (key === "weeklyRs") {
     return holding.weekly_rs_rating;
   }
@@ -902,6 +920,15 @@ function labelForHoldingSort(key: HoldingSortKey): string {
   if (key === "weeklyRs") {
     return "Weekly RS";
   }
+  if (key === "rs3m") {
+    return "3M RS";
+  }
+  if (key === "rs6m") {
+    return "6M RS";
+  }
+  if (key === "rsMomentum") {
+    return "RS Momentum";
+  }
   if (key === "rsDays") {
     return "RS Days";
   }
@@ -925,6 +952,19 @@ function labelForHoldingSort(key: HoldingSortKey): string {
 
 function renderChange(value: number | null | undefined) {
   return <span className={valueClass(value)}>{formatPercent(value)}</span>;
+}
+
+function renderRsMomentumCell(holding: SectorLeaderboardHolding) {
+  const signal = resolveRsMomentumSignal(holding.rs_rating_3m, holding.rs_rating_6m, holding.daily_rs_rating);
+  return (
+    <span className={`scanner-score-pill ${signal.toneClass}`} title={signal.title}>
+      {signal.label}
+    </span>
+  );
+}
+
+function resolveHoldingRsMomentumRank(holding: SectorLeaderboardHolding) {
+  return resolveRsMomentumSignal(holding.rs_rating_3m, holding.rs_rating_6m, holding.daily_rs_rating).rank;
 }
 
 function toneForMomentumScore(value: number | null | undefined): string {
