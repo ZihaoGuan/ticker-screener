@@ -27,6 +27,9 @@ def _frame(closes: list[float]) -> pd.DataFrame:
 
 
 class SectorLeaderboardServiceTest(unittest.TestCase):
+    def test_default_sector_catalog_excludes_xweb(self):
+        self.assertNotIn("XWEB", {item.ticker for item in module.DEFAULT_SECTOR_ETFS})
+
     def test_ranks_rows_and_attaches_holding_direction(self):
         etfs = (
             SectorEtf("AAA", "Alpha", "Test", "https://example.test/aaa", (SectorHolding("ONE", 10.0),)),
@@ -150,6 +153,8 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
                             "volume_confirmation": None,
                             "daily_rs_rating": None,
                             "weekly_rs_rating": None,
+                            "rs_rating_3m": None,
+                            "rs_rating_6m": None,
                             "leadership_score": None,
                         }
                     ],

@@ -11,6 +11,27 @@ import type { CandlePoint, SectorLeaderboardHolding, SectorLeaderboardResponse, 
 
 type ViewMode = "list" | "chart";
 type HoldingViewMode = "list" | "chart";
+type SectorSortKey =
+  | "ticker"
+  | "description"
+  | "price"
+  | "dayChange"
+  | "weekChange"
+  | "monthChange"
+  | "yearChange"
+  | "rs1m"
+  | "rs3m"
+  | "rsTrend"
+  | "rsMomentum"
+  | "rsDays"
+  | "redRsDays"
+  | "dcr"
+  | "rsNewHigh"
+  | "volumeConfirmation"
+  | "atr"
+  | "avgVolume"
+  | "relVol"
+  | "topHoldings";
 type HoldingSortKey = "weight" | "dailyRs" | "weeklyRs" | "rs3m" | "rs6m" | "rsMomentum" | "leadership" | "rsDays" | "redRsDays" | "dcr" | "relVol" | "ticker" | "change";
 type SortDirection = "asc" | "desc";
 
@@ -49,6 +70,8 @@ export function SectorLeaderboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [sectorSortBy, setSectorSortBy] = useState<SectorSortKey>("dayChange");
+  const [sectorSortDirection, setSectorSortDirection] = useState<SortDirection>("desc");
   const [holdingViewMode, setHoldingViewMode] = useState<HoldingViewMode>("list");
   const [holdingSortBy, setHoldingSortBy] = useState<HoldingSortKey>("weight");
   const [holdingSortDirection, setHoldingSortDirection] = useState<SortDirection>("desc");
@@ -66,6 +89,7 @@ export function SectorLeaderboardPage() {
   }, []);
 
   const rows = payload?.rows ?? [];
+  const sortedRows = useMemo(() => [...rows].sort((left, right) => compareSectorRows(left, right, sectorSortBy, sectorSortDirection)), [rows, sectorSortBy, sectorSortDirection]);
   const detailRow = requestedTicker ? rows.find((row) => row.ticker === requestedTicker) ?? null : null;
   const chartTickers = useMemo(() => {
     if (requestedTicker && detailRow) {
@@ -78,10 +102,10 @@ export function SectorLeaderboardPage() {
       return [detailRow.ticker, ...holdingChartTickers];
     }
     if (!requestedTicker && viewMode === "chart") {
-      return [...rows.map((row) => row.ticker), BENCHMARK_TICKER];
+      return [...sortedRows.map((row) => row.ticker), BENCHMARK_TICKER];
     }
     return [];
-  }, [detailRow, holdingSortBy, holdingSortDirection, holdingViewMode, requestedTicker, rows, viewMode]);
+  }, [detailRow, holdingSortBy, holdingSortDirection, holdingViewMode, requestedTicker, sortedRows, viewMode]);
   const chartTickerKey = chartTickers.join("|");
 
   useEffect(() => {
@@ -181,10 +205,22 @@ export function SectorLeaderboardPage() {
       {notice ? <div className="notice-banner">{notice}</div> : null}
 
       {viewMode === "list" ? (
-        <SectorLeaderboardTable rows={rows} />
+        <SectorLeaderboardTable
+          rows={sortedRows}
+          sortBy={sectorSortBy}
+          sortDirection={sectorSortDirection}
+          onSort={(key) => {
+            if (sectorSortBy === key) {
+              setSectorSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+            } else {
+              setSectorSortBy(key);
+              setSectorSortDirection(key === "ticker" || key === "description" || key === "topHoldings" ? "asc" : "desc");
+            }
+          }}
+        />
       ) : (
         <SectorChartGrid
-          rows={rows}
+          rows={sortedRows}
           chartPayloads={chartPayloads}
           chartErrors={chartErrors}
           chartLoadingTickers={chartLoadingTickers}
@@ -290,32 +326,43 @@ function SectorMetricStrip({ payload, rows }: { payload: SectorLeaderboardRespon
   );
 }
 
-function SectorLeaderboardTable({ rows }: { rows: SectorLeaderboardRow[] }) {
+function SectorLeaderboardTable({
+  rows,
+  sortBy,
+  sortDirection,
+  onSort,
+}: {
+  rows: SectorLeaderboardRow[];
+  sortBy: SectorSortKey;
+  sortDirection: SortDirection;
+  onSort: (key: SectorSortKey) => void;
+}) {
   return (
     <section className="scanner-result-table-shell panel">
       <div className="data-table-responsive sector-table-wrap">
         <table className="data-table sector-leaderboard-table">
           <thead>
             <tr>
-              <th>Ticker</th>
-              <th>Description</th>
-              <th>Price</th>
-              <th>DY%</th>
-              <th>WK%</th>
-              <th>MO%</th>
-              <th>1Y%</th>
-              <th>RS 1M</th>
-              <th>RS 3M</th>
-              <th>RS Mom</th>
-              <th>RS Days</th>
-              <th>Red RS</th>
-              <th>DCR</th>
-              <th>RS NH</th>
-              <th>Vol+</th>
-              <th>ATR%</th>
-              <th>Avg Vol</th>
-              <th>Rel Vol</th>
-              <th>Top Holdings</th>
+              <th>{renderSectorSortHeader("Ticker", "ticker", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("Description", "description", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("Price", "price", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("DY%", "dayChange", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("WK%", "weekChange", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("MO%", "monthChange", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("1Y%", "yearChange", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("RS 1M", "rs1m", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("RS 3M", "rs3m", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("RS Trend", "rsTrend", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("RS Mom", "rsMomentum", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("RS Days", "rsDays", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("Red RS", "redRsDays", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("DCR", "dcr", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("RS NH", "rsNewHigh", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("Vol+", "volumeConfirmation", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("ATR%", "atr", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("Avg Vol", "avgVolume", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("Rel Vol", "relVol", sortBy, sortDirection, onSort)}</th>
+              <th>{renderSectorSortHeader("Top Holdings", "topHoldings", sortBy, sortDirection, onSort)}</th>
             </tr>
           </thead>
           <tbody>
@@ -334,6 +381,7 @@ function SectorLeaderboardTable({ rows }: { rows: SectorLeaderboardRow[] }) {
                 <td data-label="1Y%" className={valueClass(row.year_change_pct)}>{formatPercent(row.year_change_pct)}</td>
                 <td data-label="RS 1M" className={valueClass(row.rs_vs_spy_1m_pct)}>{formatPercent(row.rs_vs_spy_1m_pct)}</td>
                 <td data-label="RS 3M" className={valueClass(row.rs_vs_spy_3m_pct)}>{formatPercent(row.rs_vs_spy_3m_pct)}</td>
+                <td data-label="RS Trend">{renderSectorTrendCell(row)}</td>
                 <td data-label="RS Mom">
                   <span className={`scanner-score-pill ${toneForMomentumScore(row.rs_momentum_score)}`}>{formatRating(row.rs_momentum_score)}</span>
                 </td>
@@ -840,6 +888,166 @@ function buildHoldingBreadth(holdings: SectorLeaderboardHolding[]) {
     volumeConfirmed: holdings.filter((holding) => holding.volume_confirmation === true).length,
     rsNewHigh63: holdings.filter((holding) => holding.rs_new_high_63d === true).length,
   };
+}
+
+function compareSectorRows(left: SectorLeaderboardRow, right: SectorLeaderboardRow, key: SectorSortKey, direction: SortDirection): number {
+  if (key === "ticker") {
+    return compareText(left.ticker, right.ticker, direction);
+  }
+  if (key === "description") {
+    return compareText(left.description, right.description, direction) || left.ticker.localeCompare(right.ticker);
+  }
+  if (key === "topHoldings") {
+    return compareText(formatTopHoldingSortValue(left), formatTopHoldingSortValue(right), direction) || left.ticker.localeCompare(right.ticker);
+  }
+  return compareNullableNumber(sectorSortValue(left, key), sectorSortValue(right, key), direction) || left.ticker.localeCompare(right.ticker);
+}
+
+function sectorSortValue(row: SectorLeaderboardRow, key: SectorSortKey): number | null | undefined {
+  if (key === "price") {
+    return row.price;
+  }
+  if (key === "dayChange") {
+    return row.day_change_pct;
+  }
+  if (key === "weekChange") {
+    return row.week_change_pct;
+  }
+  if (key === "monthChange") {
+    return row.month_change_pct;
+  }
+  if (key === "yearChange") {
+    return row.year_change_pct;
+  }
+  if (key === "rs1m") {
+    return row.rs_vs_spy_1m_pct;
+  }
+  if (key === "rs3m") {
+    return row.rs_vs_spy_3m_pct;
+  }
+  if (key === "rsTrend") {
+    return resolveSectorRsTrend(row).rank;
+  }
+  if (key === "rsMomentum") {
+    return row.rs_momentum_score;
+  }
+  if (key === "rsDays") {
+    return row.rs_days_21d_pct;
+  }
+  if (key === "redRsDays") {
+    return row.red_rs_days_21d_pct;
+  }
+  if (key === "dcr") {
+    return row.avg_dcr_21d;
+  }
+  if (key === "rsNewHigh") {
+    return booleanSortValue(row.rs_new_high_63d);
+  }
+  if (key === "volumeConfirmation") {
+    return booleanSortValue(row.volume_confirmation);
+  }
+  if (key === "atr") {
+    return row.atr_pct;
+  }
+  if (key === "avgVolume") {
+    return row.avg_volume_20d;
+  }
+  if (key === "relVol") {
+    return row.relative_volume_20d;
+  }
+  return null;
+}
+
+function renderSectorSortHeader(
+  label: string,
+  key: SectorSortKey,
+  activeKey: SectorSortKey,
+  direction: SortDirection,
+  onSort: (key: SectorSortKey) => void,
+) {
+  const isActive = key === activeKey;
+  return (
+    <button className={`sector-sort-button${isActive ? " is-active" : ""}`} type="button" onClick={() => onSort(key)}>
+      {label}
+      {isActive ? <span>{direction === "asc" ? " Asc" : " Desc"}</span> : null}
+    </button>
+  );
+}
+
+function renderSectorTrendCell(row: SectorLeaderboardRow) {
+  const signal = resolveSectorRsTrend(row);
+  return (
+    <span className={`scanner-score-pill ${signal.toneClass}`} title={signal.title}>
+      {signal.label}
+    </span>
+  );
+}
+
+function resolveSectorRsTrend(row: SectorLeaderboardRow) {
+  const rs3m = row.rs_vs_spy_3m_pct;
+  const momentum = row.rs_momentum_score;
+  if (!isFiniteNumber(rs3m) || !isFiniteNumber(momentum)) {
+    return {
+      label: "-",
+      rank: 0,
+      toneClass: "is-neutral",
+      title: "Needs 3M RS versus SPY and RS momentum score.",
+    };
+  }
+  if (rs3m >= 0 && momentum >= 50) {
+    return {
+      label: "Leading",
+      rank: 4,
+      toneClass: "is-strong",
+      title: `3M RS ${formatPercent(rs3m)} with RS Mom ${formatRating(momentum)}.`,
+    };
+  }
+  if (rs3m < 0 && momentum >= 50) {
+    return {
+      label: "Improving",
+      rank: 3,
+      toneClass: "is-warm",
+      title: `3M RS ${formatPercent(rs3m)} but RS Mom ${formatRating(momentum)} is positive.`,
+    };
+  }
+  if (rs3m >= 0 && momentum < 50) {
+    return {
+      label: "Weakening",
+      rank: 2,
+      toneClass: "is-neutral",
+      title: `3M RS ${formatPercent(rs3m)} but RS Mom ${formatRating(momentum)} is fading.`,
+    };
+  }
+  return {
+    label: "Lagging",
+    rank: 1,
+    toneClass: "is-negative",
+    title: `3M RS ${formatPercent(rs3m)} with RS Mom ${formatRating(momentum)}.`,
+  };
+}
+
+function formatTopHoldingSortValue(row: SectorLeaderboardRow): string {
+  return row.top_holdings.map((holding) => holding.ticker).join(" ");
+}
+
+function booleanSortValue(value: boolean | null | undefined): number | null {
+  if (value == null) {
+    return null;
+  }
+  return value ? 1 : 0;
+}
+
+function compareNullableNumber(left: number | null | undefined, right: number | null | undefined, direction: SortDirection): number {
+  const missingSentinel = direction === "asc" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  const normalizedLeft = isFiniteNumber(left) ? left : missingSentinel;
+  const normalizedRight = isFiniteNumber(right) ? right : missingSentinel;
+  return direction === "asc" ? normalizedLeft - normalizedRight : normalizedRight - normalizedLeft;
+}
+
+function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection): number {
+  const normalizedLeft = left || "";
+  const normalizedRight = right || "";
+  return direction === "asc" ? normalizedLeft.localeCompare(normalizedRight) : normalizedRight.localeCompare(normalizedLeft);
 }
 
 function buildChartCandles(chartPayload: WatchlistChartResponse | null | undefined): CandlePoint[] {

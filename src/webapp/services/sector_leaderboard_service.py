@@ -318,13 +318,6 @@ DEFAULT_SECTOR_ETFS: tuple[SectorEtf, ...] = (
         source_url=f"{_SSGA_BASE_URL}/spdr-nyse-technology-etf-xntk",
         holdings=(SectorHolding("NVDA", 4.0), SectorHolding("AAPL", 4.0), SectorHolding("MSFT", 4.0), SectorHolding("AVGO", 4.0), SectorHolding("ORCL", 4.0)),
     ),
-    SectorEtf(
-        ticker="XWEB",
-        description="Internet",
-        provider="State Street",
-        source_url=f"{_SSGA_BASE_URL}/spdr-sp-internet-etf-xweb",
-        holdings=(SectorHolding("META", 4.0), SectorHolding("GOOGL", 4.0), SectorHolding("NFLX", 4.0), SectorHolding("DASH", 4.0), SectorHolding("SHOP", 4.0)),
-    ),
 )
 
 
