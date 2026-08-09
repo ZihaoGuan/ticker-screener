@@ -1389,6 +1389,34 @@ class WatchlistService:
         _write_chart_preview_cache(cache_key, payload)
         return payload
 
+    def get_chart_preview_payload(
+        self,
+        ticker: str,
+        period: str = "18mo",
+        *,
+        as_of_date: dt.date | None = None,
+    ) -> dict[str, Any]:
+        normalized_ticker = normalize_ticker_symbol(str(ticker or ""))
+        if not normalized_ticker:
+            return _empty_chart_payload(
+                "",
+                period=period,
+                requested_as_of_date=as_of_date,
+                benchmark_ticker=self.benchmark_ticker,
+                data_source=self.market_data_source,
+            )
+        payload = self.get_chart_preview_payloads([normalized_ticker], period=period, as_of_date=as_of_date)
+        row = payload.get("rows", {}).get(normalized_ticker)
+        if isinstance(row, dict):
+            return row
+        return _empty_chart_payload(
+            normalized_ticker,
+            period=period,
+            requested_as_of_date=as_of_date,
+            benchmark_ticker=self.benchmark_ticker,
+            data_source=self.market_data_source,
+        )
+
     def get_chart_gex_payload(self, ticker: str) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
         cached_payload = _read_chart_gex_cache(normalized_ticker)

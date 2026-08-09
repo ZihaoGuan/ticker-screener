@@ -6,7 +6,7 @@ import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { CandlePoint, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartPreviewResponse, WatchlistChartResponse } from "../lib/types";
+import type { CandlePoint, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
@@ -188,49 +188,36 @@ export function ScannerTopHitsPage() {
       }
       return next;
     });
-    const query = new URLSearchParams({ period: "18mo", tickers: missingTickers.join(",") });
-    void fetchJson<WatchlistChartPreviewResponse>(`/api/charts/preview?${query.toString()}`).then((response) => {
+    void Promise.allSettled(
+      missingTickers.map(async (ticker) => {
+        const payload = await fetchJson<WatchlistChartResponse>(`/api/charts/${encodeURIComponent(ticker)}/preview?period=18mo`);
+        return { ticker, payload };
+      }),
+    ).then((results) => {
       if (ignore) {
         return;
       }
       setChartPayloads((current) => {
         const next = { ...current };
-        for (const ticker of missingTickers) {
-          next[ticker] = response.rows[ticker] ?? null;
-        }
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            next[result.value.ticker] = result.value.payload;
+            return;
+          }
+          next[missingTickers[index]] = null;
+        });
         return next;
       });
       setChartErrors((current) => {
         const next = { ...current };
-        for (const ticker of missingTickers) {
-          delete next[ticker];
-        }
-        return next;
-      });
-      setChartLoadingTickers((current) => {
-        const next = { ...current };
-        for (const ticker of missingTickers) {
-          delete next[ticker];
-        }
-        return next;
-      });
-    }).catch((error) => {
-      if (ignore) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : "Failed to load chart.";
-      setChartPayloads((current) => {
-        const next = { ...current };
-        for (const ticker of missingTickers) {
-          next[ticker] = null;
-        }
-        return next;
-      });
-      setChartErrors((current) => {
-        const next = { ...current };
-        for (const ticker of missingTickers) {
-          next[ticker] = message;
-        }
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            delete next[result.value.ticker];
+            return;
+          }
+          const failedTicker = missingTickers[index];
+          next[failedTicker] = result.reason instanceof Error ? result.reason.message : "Failed to load chart.";
+        });
         return next;
       });
       setChartLoadingTickers((current) => {

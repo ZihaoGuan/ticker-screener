@@ -1176,6 +1176,32 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"]["NVDA"]["data_source"], "database")
         self.assertEqual(payload["resolved_as_of_date"], latest_date.isoformat())
 
+    def test_get_chart_preview_payload_returns_single_lightweight_chart(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = self._long_price_frame()
+        latest_date = frame.index[-1].date()
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
+            return_value={"NVDA": frame.copy()},
+        ) as bulk_load_mock, patch(
+            "src.webapp.services.watchlist_service._download_history_frame",
+        ) as download_mock:
+            payload = service.get_chart_preview_payload("nvda", period="6mo", as_of_date=latest_date)
+
+        bulk_load_mock.assert_called_once()
+        self.assertEqual(bulk_load_mock.call_args.args[0], ["NVDA"])
+        download_mock.assert_not_called()
+        self.assertEqual(payload["ticker"], "NVDA")
+        self.assertEqual(payload["candles"][-1]["time"], latest_date.isoformat())
+        self.assertTrue(payload["ema21"])
+        self.assertEqual(payload["rs_line"], [])
+        self.assertIsNone(payload["vcs"])
+
     def test_get_watchlist_detail_prefers_db_previous_scan_comparison(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         db_rows = [

@@ -529,23 +529,14 @@ class _FakeWatchlistService:
             "sepa_dashboard": None,
         }
 
-    def get_chart_preview_payloads(
+    def get_chart_preview_payload(
         self,
-        tickers: list[str],
+        ticker: str,
         period: str = "18mo",
         *,
         as_of_date: dt.date | None = None,
     ):
-        rows = {
-            ticker.upper(): self.get_chart_payload(ticker, period=period, as_of_date=as_of_date)
-            for ticker in tickers
-        }
-        return {
-            "period": period,
-            "requested_as_of_date": as_of_date.isoformat() if as_of_date else None,
-            "resolved_as_of_date": "2026-05-30" if rows else None,
-            "rows": rows,
-        }
+        return self.get_chart_payload(ticker, period=period, as_of_date=as_of_date)
 
     def get_chart_overlays_payload(
         self,
@@ -1185,14 +1176,14 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["requested_as_of_date"], "2026-05-31")
         self.assertEqual(payload["resolved_as_of_date"], "2026-05-30")
 
-    def test_get_chart_previews(self) -> None:
-        response = self.client.get("/api/charts/preview?tickers=nvda,aapl,nvda&period=6mo&asOfDate=2026-05-31")
+    def test_get_chart_preview(self) -> None:
+        response = self.client.get("/api/charts/nvda/preview?period=6mo&asOfDate=2026-05-31")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["ticker"], "NVDA")
         self.assertEqual(payload["period"], "6mo")
         self.assertEqual(payload["requested_as_of_date"], "2026-05-31")
-        self.assertEqual(set(payload["rows"]), {"NVDA", "AAPL"})
-        self.assertEqual(payload["rows"]["NVDA"]["ticker"], "NVDA")
+        self.assertEqual(payload["resolved_as_of_date"], "2026-05-30")
 
     def test_get_chart_overlays(self) -> None:
         response = self.client.get("/api/chart-overlays/nvda?asOfDate=2026-05-31&includeSetupMarkers=true")
