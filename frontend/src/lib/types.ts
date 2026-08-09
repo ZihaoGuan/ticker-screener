@@ -1000,6 +1000,13 @@ export type WatchlistChartResponse = {
   };
 };
 
+export type WatchlistChartPreviewResponse = {
+  period: string;
+  requested_as_of_date?: string | null;
+  resolved_as_of_date?: string | null;
+  rows: Record<string, WatchlistChartResponse>;
+};
+
 export type ChartOverlaysResponse = Pick<
   WatchlistChartResponse,
   | "ticker"

@@ -1145,6 +1145,37 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertIn("market_extension", payload)
         self.assertIn("vcs", payload)
 
+    def test_get_chart_preview_payloads_uses_one_bulk_database_load(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = self._long_price_frame()
+        latest_date = frame.index[-1].date()
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
+            return_value={"NVDA": frame.copy(), "AAPL": frame.copy()},
+        ) as bulk_load_mock, patch(
+            "src.webapp.services.watchlist_service._download_history_frame",
+        ) as download_mock:
+            payload = service.get_chart_preview_payloads(
+                ["nvda", "aapl", "nvda"],
+                period="6mo",
+                as_of_date=latest_date,
+            )
+
+        bulk_load_mock.assert_called_once()
+        self.assertEqual(bulk_load_mock.call_args.args[0], ["NVDA", "AAPL"])
+        download_mock.assert_not_called()
+        self.assertEqual(set(payload["rows"]), {"NVDA", "AAPL"})
+        self.assertEqual(payload["rows"]["NVDA"]["candles"][-1]["time"], latest_date.isoformat())
+        self.assertEqual(payload["rows"]["NVDA"]["volume"][-1]["value"], 1_200_000)
+        self.assertTrue(payload["rows"]["NVDA"]["ema21"])
+        self.assertEqual(payload["rows"]["NVDA"]["data_source"], "database")
+        self.assertEqual(payload["resolved_as_of_date"], latest_date.isoformat())
+
     def test_get_watchlist_detail_prefers_db_previous_scan_comparison(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         db_rows = [

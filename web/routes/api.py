@@ -1031,6 +1031,23 @@ def watchlist_chart_data(
     )
 
 
+@router.get("/charts/preview", response_class=JSONResponse)
+def ticker_chart_preview_data(
+    tickers: str = Query(default=""),
+    period: str = Query(default="18mo"),
+    as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
+    service: WatchlistService = Depends(get_chart_watchlist_service),
+) -> JSONResponse:
+    parsed_tickers = [item.strip() for item in tickers.split(",") if item.strip()]
+    return JSONResponse(
+        service.get_chart_preview_payloads(
+            parsed_tickers,
+            period=period,
+            as_of_date=as_of_date,
+        )
+    )
+
+
 @router.get("/charts/{ticker}", response_class=JSONResponse)
 def ticker_chart_data(
     ticker: str,

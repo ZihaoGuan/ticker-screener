@@ -95,6 +95,8 @@ _SCANNER_BOARD_CUTOFF_MINUTE = 30
 _ANCHORED_VWAP_52W_LOOKBACK_DAYS = 252
 _chart_payload_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
 _chart_payload_cache_lock = threading.Lock()
+_chart_preview_cache: dict[tuple[tuple[str, ...], str, str, str, str], tuple[float, dict[str, Any]]] = {}
+_chart_preview_cache_lock = threading.Lock()
 _chart_gex_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _chart_gex_cache_lock = threading.Lock()
 _chart_overlay_cache: dict[tuple[str, str, str, str, str, str], tuple[float, dict[str, Any]]] = {}
@@ -1296,6 +1298,95 @@ class WatchlistService:
         payload["position_action"] = self._load_latest_position_action(normalized_ticker, resolved_as_of_date)
         if payload["candles"]:
             _write_chart_payload_cache(cache_key, payload)
+        return payload
+
+    def get_chart_preview_payloads(
+        self,
+        tickers: list[str],
+        period: str = "18mo",
+        *,
+        as_of_date: dt.date | None = None,
+    ) -> dict[str, Any]:
+        normalized_tickers = _normalize_chart_preview_tickers(tickers)
+        requested_as_of_date = as_of_date
+        cache_key = _build_chart_preview_cache_key(
+            tickers=normalized_tickers,
+            period=period,
+            as_of_date=as_of_date,
+            market_data_source=self.market_data_source,
+            database_url=self.database_url,
+        )
+        cached_payload = _read_chart_preview_cache(cache_key)
+        if cached_payload is not None:
+            return cached_payload
+
+        chart_request = _resolve_chart_request(period=period, as_of_date=as_of_date)
+        rows: dict[str, dict[str, Any]] = {}
+        if normalized_tickers:
+            if self.market_data_source == "database-first" and self.database_url:
+                try:
+                    frames = load_many_ticker_windows_for_range(
+                        normalized_tickers,
+                        start_date=chart_request.fetch_start_date,
+                        end_date=chart_request.fetch_end_date,
+                        trading_days_needed=chart_request.warmup_trading_days,
+                        database_url=self.database_url,
+                    )
+                except Exception:
+                    frames = {}
+                for ticker in normalized_tickers:
+                    frame = _normalize_download_frame(frames.get(ticker))
+                    if _frame_covers_requested_window(
+                        frame,
+                        start_date=chart_request.visible_start_date,
+                        end_date=chart_request.fetch_end_date,
+                    ):
+                        rows[ticker] = _build_chart_preview_payload(
+                            ticker=ticker,
+                            period=period,
+                            requested_as_of_date=requested_as_of_date,
+                            benchmark_ticker=self.benchmark_ticker,
+                            chart_request=chart_request,
+                            frame=frame,
+                            data_source="database",
+                        )
+                    else:
+                        rows[ticker] = _empty_chart_payload(
+                            ticker,
+                            period=period,
+                            requested_as_of_date=requested_as_of_date,
+                            benchmark_ticker=self.benchmark_ticker,
+                            data_source="database-miss",
+                        )
+            else:
+                for ticker in normalized_tickers:
+                    frame = _download_history_frame(
+                        ticker=ticker,
+                        start_date=chart_request.fetch_start_date,
+                        end_date=chart_request.fetch_end_date,
+                    )
+                    rows[ticker] = _build_chart_preview_payload(
+                        ticker=ticker,
+                        period=period,
+                        requested_as_of_date=requested_as_of_date,
+                        benchmark_ticker=self.benchmark_ticker,
+                        chart_request=chart_request,
+                        frame=frame,
+                        data_source="internet",
+                    )
+
+        resolved_dates = [
+            str(row.get("resolved_as_of_date"))
+            for row in rows.values()
+            if isinstance(row, dict) and row.get("resolved_as_of_date")
+        ]
+        payload = {
+            "period": period,
+            "requested_as_of_date": requested_as_of_date.isoformat() if requested_as_of_date else None,
+            "resolved_as_of_date": max(resolved_dates) if resolved_dates else None,
+            "rows": rows,
+        }
+        _write_chart_preview_cache(cache_key, payload)
         return payload
 
     def get_chart_gex_payload(self, ticker: str) -> dict[str, Any]:
@@ -2600,6 +2691,100 @@ def _empty_chart_payload(
     }
 
 
+def _normalize_chart_preview_tickers(tickers: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_ticker in tickers:
+        ticker = normalize_ticker_symbol(str(raw_ticker or ""))
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        normalized.append(ticker)
+        if len(normalized) >= 50:
+            break
+    return normalized
+
+
+def _build_chart_preview_payload(
+    *,
+    ticker: str,
+    period: str,
+    requested_as_of_date: dt.date | None,
+    benchmark_ticker: str,
+    chart_request: _ChartRequest,
+    frame: pd.DataFrame | None,
+    data_source: str,
+) -> dict[str, Any]:
+    normalized_frame = _normalize_download_frame(frame)
+    if normalized_frame is None or normalized_frame.empty:
+        return _empty_chart_payload(
+            ticker,
+            period=period,
+            requested_as_of_date=requested_as_of_date,
+            benchmark_ticker=benchmark_ticker,
+            data_source=data_source,
+        )
+
+    normalized_frame = normalized_frame.sort_index()
+    resolved_as_of_timestamp = normalized_frame.index.max()
+    resolved_as_of_date = pd.Timestamp(resolved_as_of_timestamp).date()
+    visible_frame = normalized_frame.loc[
+        (normalized_frame.index.date >= chart_request.visible_start_date)
+        & (normalized_frame.index.date <= resolved_as_of_date)
+    ].copy()
+    if visible_frame.empty:
+        return _empty_chart_payload(
+            ticker,
+            period=period,
+            requested_as_of_date=requested_as_of_date,
+            resolved_as_of_date=resolved_as_of_date,
+            benchmark_ticker=benchmark_ticker,
+            data_source=data_source,
+        )
+
+    normalized_frame["ema8"] = normalized_frame["Close"].ewm(span=8, adjust=False).mean()
+    normalized_frame["ema21"] = normalized_frame["Close"].ewm(span=21, adjust=False).mean()
+    visible_index_set = set(visible_frame.index)
+    candles: list[dict[str, Any]] = []
+    volume: list[dict[str, Any]] = []
+    ema8: list[dict[str, Any]] = []
+    ema21: list[dict[str, Any]] = []
+    for index, row in normalized_frame.iterrows():
+        if index not in visible_index_set:
+            continue
+        time_value = pd.Timestamp(index).date().isoformat()
+        open_value = float(row["Open"])
+        close_value = float(row["Close"])
+        candles.append(
+            {
+                "time": time_value,
+                "open": open_value,
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": close_value,
+            }
+        )
+        volume.append({"time": time_value, "value": int(row["Volume"])})
+        if pd.notna(row["ema8"]):
+            ema8.append({"time": time_value, "value": float(row["ema8"])})
+        if pd.notna(row["ema21"]):
+            ema21.append({"time": time_value, "value": float(row["ema21"])})
+
+    payload = _empty_chart_payload(
+        ticker,
+        period=period,
+        requested_as_of_date=requested_as_of_date,
+        resolved_as_of_date=resolved_as_of_date,
+        benchmark_ticker=benchmark_ticker,
+        data_source=data_source,
+    )
+    payload["candles"] = candles
+    payload["volume"] = volume
+    payload["ema8"] = ema8
+    payload["ema21"] = ema21
+    return payload
+
+
 def _empty_chart_overlay_payload(
     ticker: str,
     *,
@@ -2750,6 +2935,23 @@ def _build_chart_payload_cache_key(
     )
 
 
+def _build_chart_preview_cache_key(
+    *,
+    tickers: list[str],
+    period: str,
+    as_of_date: dt.date | None,
+    market_data_source: str,
+    database_url: str | None,
+) -> tuple[tuple[str, ...], str, str, str, str]:
+    return (
+        tuple(sorted(str(ticker or "").strip().upper() for ticker in tickers if ticker)),
+        str(period or "18mo").strip().lower() or "18mo",
+        as_of_date.isoformat() if as_of_date else "latest",
+        str(market_data_source or "").strip().lower() or "internet",
+        "database" if database_url else "no-database",
+    )
+
+
 def _read_chart_gex_cache(ticker: str) -> dict[str, Any] | None:
     now = time.time()
     with _chart_gex_cache_lock:
@@ -2784,6 +2986,24 @@ def _read_chart_payload_cache(key: tuple[str, str, str, str, str, str]) -> dict[
 def _write_chart_payload_cache(key: tuple[str, str, str, str, str, str], payload: dict[str, Any]) -> None:
     with _chart_payload_cache_lock:
         _chart_payload_cache[key] = (time.time() + _CHART_PAYLOAD_CACHE_TTL_SECONDS, copy.deepcopy(payload))
+
+
+def _read_chart_preview_cache(key: tuple[tuple[str, ...], str, str, str, str]) -> dict[str, Any] | None:
+    now = time.time()
+    with _chart_preview_cache_lock:
+        cached_entry = _chart_preview_cache.get(key)
+        if cached_entry is None:
+            return None
+        expires_at, payload = cached_entry
+        if expires_at <= now:
+            _chart_preview_cache.pop(key, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _write_chart_preview_cache(key: tuple[tuple[str, ...], str, str, str, str], payload: dict[str, Any]) -> None:
+    with _chart_preview_cache_lock:
+        _chart_preview_cache[key] = (time.time() + _CHART_PAYLOAD_CACHE_TTL_SECONDS, copy.deepcopy(payload))
 
 
 def _read_scanner_top_hits_cache(key: tuple[str, ...]) -> dict[str, Any] | None:
@@ -2827,6 +3047,8 @@ def _clear_chart_payload_cache() -> None:
         _chart_gex_cache.clear()
     with _chart_payload_cache_lock:
         _chart_payload_cache.clear()
+    with _chart_preview_cache_lock:
+        _chart_preview_cache.clear()
     with _chart_overlay_cache_lock:
         _chart_overlay_cache.clear()
     with _scanner_top_hits_cache_lock:
