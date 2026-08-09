@@ -188,50 +188,44 @@ export function ScannerTopHitsPage() {
       }
       return next;
     });
-    void Promise.allSettled(
-      missingTickers.map(async (ticker) => {
-        const payload = await fetchJson<WatchlistChartResponse>(`/api/charts/${encodeURIComponent(ticker)}/preview?period=18mo`);
-        return { ticker, payload };
-      }),
-    ).then((results) => {
-      if (ignore) {
-        return;
-      }
-      setChartPayloads((current) => {
-        const next = { ...current };
-        results.forEach((result, index) => {
-          if (result.status === "fulfilled") {
-            next[result.value.ticker] = result.value.payload;
+    for (const ticker of missingTickers) {
+      void fetchJson<WatchlistChartResponse>(`/api/charts/${encodeURIComponent(ticker)}/preview?period=18mo`)
+        .then((payload) => {
+          if (ignore) {
             return;
           }
-          next[missingTickers[index]] = null;
-        });
-        return next;
-      });
-      setChartErrors((current) => {
-        const next = { ...current };
-        results.forEach((result, index) => {
-          if (result.status === "fulfilled") {
-            delete next[result.value.ticker];
+          setChartPayloads((current) => ({ ...current, [ticker]: payload }));
+          setChartErrors((current) => {
+            const next = { ...current };
+            delete next[ticker];
+            return next;
+          });
+        })
+        .catch((error) => {
+          if (ignore) {
             return;
           }
-          const failedTicker = missingTickers[index];
-          next[failedTicker] = result.reason instanceof Error ? result.reason.message : "Failed to load chart.";
+          setChartPayloads((current) => ({ ...current, [ticker]: null }));
+          setChartErrors((current) => ({
+            ...current,
+            [ticker]: error instanceof Error ? error.message : "Failed to load chart.",
+          }));
+        })
+        .finally(() => {
+          if (ignore) {
+            return;
+          }
+          setChartLoadingTickers((current) => {
+            const next = { ...current };
+            delete next[ticker];
+            return next;
+          });
         });
-        return next;
-      });
-      setChartLoadingTickers((current) => {
-        const next = { ...current };
-        for (const ticker of missingTickers) {
-          delete next[ticker];
-        }
-        return next;
-      });
-    });
+    }
     return () => {
       ignore = true;
     };
-  }, [chartLoadingTickers, chartPayloads, pagedRows, pagedTickerKey, viewMode]);
+  }, [pagedRows, pagedTickerKey, viewMode]);
 
   const handleAddToMyPicks = async (ticker: string) => {
     const normalizedTicker = ticker.trim().toUpperCase();
