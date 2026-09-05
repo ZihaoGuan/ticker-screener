@@ -12,7 +12,8 @@ Build a single-user or small-team web app on top of the existing `ticker-screene
 
 This spec is intentionally grounded in the current repo shape:
 
-- FastAPI app shell in `web/`
+- React frontend in `frontend/`, served by Caddy in production
+- FastAPI JSON API in `web/`
 - service layer in `src/webapp/`
 - existing CLI screeners in `scripts/`
 - artifact outputs in `artifacts/`
@@ -256,39 +257,15 @@ The app should evolve toward a database-backed model:
 
 ## API requirements
 
-## Existing routes
+## Route ownership
 
-The app currently exposes:
-
-- `/`
-- `/runs`
-- `/watchlists`
-- `/watchlists/{stem}`
-- `/watchlists/api/chart/{ticker}`
-- `/backtests`
-- `/admin/exclusions`
-- `/healthz`
-
-## Required new or expanded routes
-
-### HTML routes
-
-1. `/overlap`
-2. `/overlap/{date_label}` or equivalent detail route
-3. `/runs/{job_id}` optional dedicated job detail page
-
-### JSON routes
-
-1. `GET /api/jobs`
-2. `GET /api/jobs/{job_id}`
-3. `POST /api/runs/{action_id}`
-4. `GET /api/watchlists/{stem}`
-5. `GET /api/overlap/latest`
-6. `GET /api/overlap/{date_label}`
+- Caddy serves the React application for browser routes such as `/`, `/screeners`, `/watchlists`, `/report`, and `/backtests`.
+- FastAPI serves `/api/*` and `/healthz`.
+- Chart consumers use `/api/charts/{ticker}` or `/api/charts/{ticker}/preview`.
 
 ## UI requirements
 
-The long-term UI direction may move from the current Jinja templates to a React frontend. A migration scaffold and plan now live in:
+The UI is implemented as a React frontend. Its architecture notes live in:
 
 - [docs/react-migration-plan.md](/Users/Zihao.Guan/Personal/ticker-screener/docs/react-migration-plan.md)
 - [frontend/](/Users/Zihao.Guan/Personal/ticker-screener/frontend)
@@ -342,7 +319,7 @@ The long-term UI direction may move from the current Jinja templates to a React 
 
 ## Security
 
-1. Do not expose secrets in templates or client-side JS.
+1. Do not expose secrets in the frontend bundle or client-side JS.
 2. Restrict browser-triggered commands to a curated allowlist of screeners/backtests.
 3. Reject arbitrary shell execution from the UI.
 

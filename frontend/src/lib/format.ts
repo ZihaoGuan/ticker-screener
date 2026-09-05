@@ -28,3 +28,41 @@ export function formatLocalDate(value: string | null | undefined): string {
 export function formatCount(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
+
+export function humanizePositionAction(value: string | null | undefined): string {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "add_position": return "Add";
+    case "hold_position": return "Hold";
+    case "trim_reduce": return "Trim";
+    case "avoid_new": return "Avoid";
+    default: return "--";
+  }
+}
+
+export function humanizePositionTrend(value: string | null | undefined): string {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "healthy": return "Healthy";
+    case "weakening": return "Weakening";
+    case "broken": return "Broken";
+    default: return "--";
+  }
+}
+
+export function humanizePositionExtension(value: string | null | undefined): string {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "normal": return "Normal";
+    case "stretched": return "Stretched";
+    case "extreme": return "Extreme";
+    default: return "--";
+  }
+}
+
+export function toneForPositionAction(value: string | null | undefined): string {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "add_position": return "is-strong";
+    case "hold_position": return "is-neutral";
+    case "trim_reduce": return "is-warning";
+    case "avoid_new": return "is-weak";
+    default: return "";
+  }
+}

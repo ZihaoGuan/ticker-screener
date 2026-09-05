@@ -4,8 +4,9 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
-import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { CandlePoint, FundamentalChecklistItem, MyPickRow, MyPicksContextResponse, WatchlistChartResponse } from "../lib/types";
+import { buildChartCandles, buildExponentialMovingAverage } from "../lib/chartData";
+import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
+import type { FundamentalChecklistItem, MyPickRow, MyPicksContextResponse, WatchlistChartResponse } from "../lib/types";
 
 const EMPTY_CONTEXT: MyPicksContextResponse = {
   database_configured: false,
@@ -469,7 +470,7 @@ export function MyPicksPage() {
           <div className="scanner-result-chart-grid is-3-col">
             {pagedRows.map((row) => {
               const chartPayload = chartPayloads[row.ticker];
-              const chartCandles = buildMiniChartCandles(chartPayload);
+              const chartCandles = buildChartCandles(chartPayload);
               const isChartLoading = Boolean(chartLoadingTickers[row.ticker]);
               const chartError = chartErrors[row.ticker];
               const latestCandle = chartCandles[chartCandles.length - 1] ?? null;
@@ -938,62 +939,6 @@ function renderBollingerBandStatus(status: string | null | undefined) {
   }
 }
 
-function humanizePositionAction(value: string | null | undefined) {
-  switch (String(value || "").trim().toLowerCase()) {
-    case "add_position":
-      return "Add";
-    case "hold_position":
-      return "Hold";
-    case "trim_reduce":
-      return "Trim";
-    case "avoid_new":
-      return "Avoid";
-    default:
-      return "--";
-  }
-}
-
-function humanizePositionTrend(value: string | null | undefined) {
-  switch (String(value || "").trim().toLowerCase()) {
-    case "healthy":
-      return "Healthy";
-    case "weakening":
-      return "Weakening";
-    case "broken":
-      return "Broken";
-    default:
-      return "--";
-  }
-}
-
-function humanizePositionExtension(value: string | null | undefined) {
-  switch (String(value || "").trim().toLowerCase()) {
-    case "normal":
-      return "Normal";
-    case "stretched":
-      return "Stretched";
-    case "extreme":
-      return "Extreme";
-    default:
-      return "--";
-  }
-}
-
-function toneForPositionAction(value: string | null | undefined) {
-  switch (String(value || "").trim().toLowerCase()) {
-    case "add_position":
-      return "is-strong";
-    case "hold_position":
-      return "is-neutral";
-    case "trim_reduce":
-      return "is-warning";
-    case "avoid_new":
-      return "is-weak";
-    default:
-      return "";
-  }
-}
-
 function formatSignedPercent(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) {
     return "--";
@@ -1077,28 +1022,4 @@ function toneForScore(value: number | null | undefined, maxValue: number) {
     return "is-warm";
   }
   return "is-neutral";
-}
-
-function buildMiniChartCandles(payload: WatchlistChartResponse | null | undefined): CandlePoint[] {
-  if (!payload) {
-    return [];
-  }
-  return (payload.candles ?? []).map((item, index) => ({
-    ...item,
-    volume: payload.volume[index]?.value ?? 0,
-  }));
-}
-
-function buildExponentialMovingAverage(candles: CandlePoint[], length: number): Array<{ time: string; value: number }> {
-  if (candles.length === 0 || length <= 0) {
-    return [];
-  }
-  const alpha = 2 / (length + 1);
-  let ema = candles[0].close;
-  const points = [{ time: candles[0].time, value: Number(ema.toFixed(2)) }];
-  for (let index = 1; index < candles.length; index += 1) {
-    ema = (candles[index].close * alpha) + (ema * (1 - alpha));
-    points.push({ time: candles[index].time, value: Number(ema.toFixed(2)) });
-  }
-  return points;
 }

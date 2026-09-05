@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException, Request, Response, status
-from fastapi.templating import Jinja2Templates
 
 from src.webapp.access_control import (
     CAP_MANAGE_EXCLUSIONS,
@@ -37,8 +36,6 @@ from src.webapp.services.sector_leaderboard_service import SectorLeaderboardServ
 from src.webapp.services.tiger_positions_service import TigerPositionsService
 from src.webapp.services.watchlist_service import WatchlistService
 
-
-templates = Jinja2Templates(directory=str(PROJECT_ROOT / "web" / "templates"))
 config = load_webapp_config()
 auth_repository = AuthRepository(database_url=config.database_url)
 audit_repository = AuditRepository(database_url=config.database_url)

@@ -2,7 +2,6 @@ import { Suspense, lazy, type ComponentType } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
-import { RoleRoute } from "./auth/RoleRoute";
 import { useAuth } from "./auth/AuthContext";
 import { LoadingBlock } from "./components/LoadingBlock";
 
@@ -86,9 +85,9 @@ export default function App() {
           <Route
             path="/guide"
             element={
-              <RoleRoute allowedRoles={["premium", "admin"]}>
+              <ProtectedRoute allowedRoles={["premium", "admin"]}>
                 <GuidePage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route path="/charts" element={<ChartsPage />} />
@@ -122,58 +121,58 @@ export default function App() {
           <Route
             path="/screeners"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <RunsPage mode="screeners" />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route
             path="/screeners/schedules"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <RunsPage mode="schedules" />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route
             path="/warmup"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <WarmupPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route
             path="/backtests"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <BacktestsPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route path="/runs" element={<Navigate to="/screeners" replace />} />
           <Route
             path="/watchlists/weekly"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <WeeklyWatchlistPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route
             path="/watchlists"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <WatchlistsPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route
             path="/pair-trades"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <PairTradesPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route
@@ -189,34 +188,34 @@ export default function App() {
           <Route
             path="/report"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <OverlapPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route path="/overlap" element={<Navigate to="/report" replace />} />
           <Route
             path="/my-picks"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <MyPicksPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route
             path="/portfolio"
             element={
-              <RoleRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin"]}>
                 <PortfolioPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route
             path="/tiger-positions"
             element={
-              <RoleRoute allowedRoles={["premium", "admin"]}>
+              <ProtectedRoute allowedRoles={["premium", "admin"]}>
                 <TigerPositionsPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           <Route

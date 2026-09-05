@@ -1,78 +1,32 @@
-# Web app MVP plan
+# Web app
 
-This repo can grow into a single-process Python web app without throwing away the current script workflows.
+The application has one React frontend and one FastAPI backend.
 
-## Recommended stack
+## Architecture
 
-- FastAPI for web routes and JSON APIs
-- Jinja templates for the first UI pass
-- Postgres for application state and market data
-- Existing `artifacts/` output remains the report handoff surface
+- React, TypeScript, and Vite provide the browser UI in `frontend/`.
+- Caddy serves the production build from `frontend/dist`.
+- FastAPI exposes `/api/*` and `/healthz` from `web/app.py`.
+- Postgres stores application state and market data.
+- Existing `artifacts/` outputs remain available to backend services and the reports host.
 
-## Schema
+The database schema lives in `sql/postgres_app_schema.sql`.
 
-The initial Postgres schema lives in:
+## Local development
 
-- [sql/postgres_app_schema.sql](/Users/Zihao.Guan/Personal/ticker-screener/sql/postgres_app_schema.sql)
-
-It covers two layers:
-
-1. market data
-   - `ticker_metadata`
-   - `daily_bars`
-   - `earnings_events`
-2. app state
-   - `job_runs`
-   - `screen_runs`
-   - `backtest_runs`
-   - `report_artifacts`
-
-## App shell
-
-The first app shell lives in:
-
-- [web/app.py](/Users/Zihao.Guan/Personal/ticker-screener/web/app.py)
-
-The fuller product spec lives in:
-
-- [docs/web-app-spec.md](/Users/Zihao.Guan/Personal/ticker-screener/docs/web-app-spec.md)
-
-Routes included:
-
-- `/`
-- `/runs`
-- `/watchlists`
-- `/watchlists/{stem}`
-- `/backtests`
-- `/admin/exclusions`
-- `/healthz`
-
-The current shell is intentionally thin:
-
-- dashboard reads local artifact metadata
-- watchlists load existing watchlist JSON files
-- admin exclusions reuses the current exclusion-file loader
-- backtests and runs pages are placeholders for job-launch UI
-
-## Local dev
-
-Install the optional web dependencies:
+Install backend dependencies and run FastAPI:
 
 ```bash
-python3 -m pip install -r /Users/Zihao.Guan/Personal/ticker-screener/requirements-web.txt
-```
-
-Run the app:
-
-```bash
+python3 -m pip install -r requirements.txt -r requirements-web.txt
 uvicorn web.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## Migration path
+Run the frontend from a second terminal:
 
-The intended next steps are:
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-1. move CLI business logic behind service-layer functions
-2. add real Postgres repositories for `job_runs`, `screen_runs`, and `backtest_runs`
-3. let `/runs` submit jobs instead of only showing commands
-4. link rendered reports and raw artifacts directly from the watchlist detail pages
+Use `npm run build` for production frontend validation. Backend changes should use focused unit/API tests for the affected services and routes.

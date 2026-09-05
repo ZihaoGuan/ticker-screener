@@ -1010,32 +1010,6 @@ def pair_trade_report_detail_data(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/watchlists/{stem}/chart/{ticker}", response_class=JSONResponse)
-def watchlist_chart_data(
-    stem: str,
-    ticker: str,
-    period: str = Query(default="18mo"),
-    as_of_date: dt.date | None = Query(default=None, alias="asOfDate"),
-    include_setup_markers: bool = Query(default=False, alias="includeSetupMarkers"),
-    service: WatchlistService = Depends(get_chart_watchlist_service),
-    _: Principal = Depends(require_member_access),
-) -> JSONResponse:
-    _ = stem
-    return JSONResponse(
-        service.get_chart_payload(
-            ticker=ticker.upper(),
-            period=period,
-            as_of_date=as_of_date,
-            include_setup_markers=include_setup_markers,
-        )
-    )
-
-
-@router.get("/charts/preview", response_class=JSONResponse)
-def deprecated_chart_preview_data() -> JSONResponse:
-    raise HTTPException(status_code=400, detail="Chart previews are per ticker. Use /api/charts/{ticker}/preview.")
-
-
 @router.get("/charts/{ticker}/preview", response_class=JSONResponse)
 def ticker_chart_preview_data(
     ticker: str,

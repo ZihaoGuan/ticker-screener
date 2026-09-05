@@ -5,9 +5,10 @@ import { PriceChart, type ChartVisibility } from "../components/PriceChart";
 import { RebasedComparisonChart } from "../components/RebasedComparisonChart";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
+import { buildChartCandles } from "../lib/chartData";
 import { formatLocalDate, formatLocalDateTime } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
-import type { CandlePoint, SectorLeaderboardHolding, SectorLeaderboardResponse, SectorLeaderboardRow, WatchlistChartResponse } from "../lib/types";
+import type { SectorLeaderboardHolding, SectorLeaderboardResponse, SectorLeaderboardRow, WatchlistChartResponse } from "../lib/types";
 
 type ViewMode = "list" | "chart";
 type HoldingViewMode = "list" | "chart";
@@ -1048,14 +1049,6 @@ function compareText(left: string | null | undefined, right: string | null | und
   const normalizedLeft = left || "";
   const normalizedRight = right || "";
   return direction === "asc" ? normalizedLeft.localeCompare(normalizedRight) : normalizedRight.localeCompare(normalizedLeft);
-}
-
-function buildChartCandles(chartPayload: WatchlistChartResponse | null | undefined): CandlePoint[] {
-  const volumeByTime = new Map((chartPayload?.volume ?? []).map((item) => [item.time, item.value]));
-  return (chartPayload?.candles ?? []).map((item) => ({
-    ...item,
-    volume: volumeByTime.get(item.time) ?? 0,
-  }));
 }
 
 function compareHoldings(left: SectorLeaderboardHolding, right: SectorLeaderboardHolding, key: HoldingSortKey, direction: SortDirection): number {

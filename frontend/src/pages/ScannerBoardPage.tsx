@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { ScannerBoardCard, ScannerBoardResponse } from "../lib/types";
+import type { ScannerBoardResponse } from "../lib/types";
 
 const CARD_ART: Record<string, string> = {
   weekly_rs: "M24 110 L78 82 L118 92 L166 58 L220 72 L276 36",

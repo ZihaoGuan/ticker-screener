@@ -5,9 +5,10 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
-import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
+import { buildChartCandles, buildExponentialMovingAverage } from "../lib/chartData";
+import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
-import type { CandlePoint, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
+import type { MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
@@ -660,7 +661,7 @@ function ScannerTopHitChartCard({
   isChartLoading: boolean;
   onAddToMyPicks: (ticker: string) => Promise<void>;
 }) {
-  const chartCandles = buildMiniChartCandles(chartPayload);
+  const chartCandles = buildChartCandles(chartPayload);
   const latestCandle = chartCandles[chartCandles.length - 1] ?? null;
   return (
     <article className="scanner-chart-card scanner-top-hit-chart-card">
@@ -1003,62 +1004,6 @@ function renderPositionActionCell(positionAction: ScannerTopHitRow["position_act
   );
 }
 
-function humanizePositionAction(value: string | null | undefined) {
-  switch (String(value || "").trim().toLowerCase()) {
-    case "add_position":
-      return "Add";
-    case "hold_position":
-      return "Hold";
-    case "trim_reduce":
-      return "Trim";
-    case "avoid_new":
-      return "Avoid";
-    default:
-      return "--";
-  }
-}
-
-function humanizePositionTrend(value: string | null | undefined) {
-  switch (String(value || "").trim().toLowerCase()) {
-    case "healthy":
-      return "Healthy";
-    case "weakening":
-      return "Weakening";
-    case "broken":
-      return "Broken";
-    default:
-      return "--";
-  }
-}
-
-function humanizePositionExtension(value: string | null | undefined) {
-  switch (String(value || "").trim().toLowerCase()) {
-    case "normal":
-      return "Normal";
-    case "stretched":
-      return "Stretched";
-    case "extreme":
-      return "Extreme";
-    default:
-      return "--";
-  }
-}
-
-function toneForPositionAction(value: string | null | undefined) {
-  switch (String(value || "").trim().toLowerCase()) {
-    case "add_position":
-      return "is-strong";
-    case "hold_position":
-      return "is-neutral";
-    case "trim_reduce":
-      return "is-warning";
-    case "avoid_new":
-      return "is-weak";
-    default:
-      return "";
-  }
-}
-
 function isElitePick(row: ScannerTopHitRow) {
   const dailyLabel = normalizeIndicatorLabel(row.technical_indicator_ratings?.["1d"]);
   const weeklyLabel = normalizeIndicatorLabel(row.technical_indicator_ratings?.["1w"]);
@@ -1208,29 +1153,4 @@ function toneForRating(value: number | null | undefined, strongThreshold: number
     return "is-caution";
   }
   return "is-weak";
-}
-
-function buildMiniChartCandles(payload: WatchlistChartResponse | null | undefined): CandlePoint[] {
-  if (!payload) {
-    return [];
-  }
-  const volumeByTime = new Map((payload.volume ?? []).map((item) => [item.time, item.value]));
-  return (payload.candles ?? []).map((item) => ({
-    ...item,
-    volume: volumeByTime.get(item.time) ?? 0,
-  }));
-}
-
-function buildExponentialMovingAverage(candles: CandlePoint[], length: number): Array<{ time: string; value: number }> {
-  if (candles.length === 0 || length <= 0) {
-    return [];
-  }
-  const alpha = 2 / (length + 1);
-  let ema = candles[0].close;
-  const points = [{ time: candles[0].time, value: Number(ema.toFixed(2)) }];
-  for (let index = 1; index < candles.length; index += 1) {
-    ema = candles[index].close * alpha + ema * (1 - alpha);
-    points.push({ time: candles[index].time, value: Number(ema.toFixed(2)) });
-  }
-  return points;
 }

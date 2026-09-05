@@ -4,6 +4,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
+import { buildChartCandles } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
 import type {
   CandlePoint,
@@ -460,7 +461,7 @@ export function ScannerResultPage() {
               <div className="scanner-result-chart-grid is-3-col">
                 {pagedRows.map((row, index) => {
                   const chartPayload = chartPayloads[row.ticker];
-                  const chartCandles = buildMiniChartCandles(chartPayload);
+                  const chartCandles = buildChartCandles(chartPayload);
                   const isChartLoading = Boolean(chartLoadingTickers[row.ticker]);
                   const chartError = chartErrors[row.ticker];
                   const latestCandle = chartCandles[chartCandles.length - 1] ?? null;
@@ -911,16 +912,6 @@ function csvValue(value: string) {
     return normalized;
   }
   return `"${normalized.split('"').join('""')}"`;
-}
-
-function buildMiniChartCandles(payload: WatchlistChartResponse | null | undefined): CandlePoint[] {
-  if (!payload) {
-    return [];
-  }
-  return payload.candles.map((item, index) => ({
-    ...item,
-    volume: payload.volume[index]?.value ?? 0,
-  }));
 }
 
 function computeDayChangePct(candles: CandlePoint[]) {
