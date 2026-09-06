@@ -15,7 +15,7 @@ type SortDirection = "asc" | "desc";
 type ViewMode = "list" | "charts";
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
-const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "sean_breakout", "venu_scanner"]);
+const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "sean_breakout", "venu_scanner"]);
 
 export function ScannerTopHitsPage() {
   const auth = useAuth();

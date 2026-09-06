@@ -45,6 +45,7 @@ const CARD_ART: Record<string, string> = {
   double_bottom_detection: "M24 74 L76 108 L128 60 L176 106 L228 68 L276 46",
   ema21_pullback_buy: "M24 102 L74 72 L122 50 L164 74 L206 96 L248 70 L276 40",
   trend_template: "M24 112 L76 100 L120 82 L164 70 L212 52 L276 34",
+  weekly_candidate_pool: "M24 118 L76 108 L118 92 L158 96 L202 66 L242 52 L276 30",
   kai_s2: "M24 120 L74 104 L118 92 L162 74 L206 54 L248 42 L276 28",
   fearzone: "M24 60 C72 20, 116 20, 156 62 S236 116, 276 92",
   td9_bullish: "M24 98 L82 122 L126 112 L178 78 L222 88 L276 50",

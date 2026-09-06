@@ -35,6 +35,7 @@ from .rti_screen import find_recent_rti_hit
 from .sean_breakout_screen import find_recent_sean_breakout_hit
 from .rsi_ma_bb_screen import find_recent_rsi_ma_bb_hit
 from .rs_screen import run_rs_screen
+from .ratings.repository import RatingsRepository
 from .rs_phase_screen import RS_PHASE_HISTORY_DAYS, find_recent_rs_phase_hit
 from .sma200_pullback_buy_screen import find_recent_sma200_pullback_buy_hit
 from .sepa_vcp_screen import SEPA_HISTORY_DAYS, find_recent_sepa_vcp_hit
@@ -65,6 +66,7 @@ from .weekly_vcp_scored_screen import score_weekly_vcp_hit
 from .weekly_vcp_spec_screen import WEEKLY_VCP_SPEC_HISTORY_DAYS, find_weekly_vcp_spec_hit
 from .weekly_vcp_v3_screen import WEEKLY_VCP_V3_HISTORY_DAYS, find_weekly_vcp_v3_hit
 from .weekly_htf_pullback_screen import run_weekly_htf_pullback_screen
+from .weekly_candidate_pool_screen import PRICE_HISTORY_DAYS as WEEKLY_CANDIDATE_POOL_HISTORY_DAYS, find_weekly_candidate_pool_hit
 from .wyckoff_analysis import WYCKOFF_HISTORY_DAYS, find_recent_wyckoff_signal_hit
 
 
@@ -509,6 +511,34 @@ def _run_weekly_sepa_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResul
             "buy_risk_status": payload["buy_risk_status"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_weekly_candidate_pool(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    database_url = str(bundle.extras.get("database_url") or "")
+    technical = RatingsRepository(database_url).load_latest_technical_rating_snapshots_for_tickers(
+        [bundle.ticker],
+        as_of_date=bundle.as_of_date,
+        allow_older_as_of_date=True,
+    ).get(bundle.ticker.upper(), {})
+    hit = find_weekly_candidate_pool_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        daily_rs_rating=technical.get("daily_rs_rating"),
+        signal_date=bundle.as_of_date,
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "daily_rs_rating": payload["daily_rs_rating"],
+            "adr_pct_20": payload["adr_pct_20"],
+        },
+        reasons=tuple(str(item) for item in payload["reasons"]),
         hit=payload,
     )
 
@@ -1616,6 +1646,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=90,
             warmup_trading_days=20,
             evaluator=_run_sean_breakout,
+        ),
+        "weekly_candidate_pool": ScreenerSpec(
+            id="weekly_candidate_pool",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=WEEKLY_CANDIDATE_POOL_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_weekly_candidate_pool,
         ),
         "vcs_setup_stage": ScreenerSpec(
             id="vcs_setup_stage",

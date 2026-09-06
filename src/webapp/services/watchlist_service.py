@@ -604,6 +604,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "lime",
     },
     {
+        "id": "weekly_candidate_pool",
+        "strategy_id": "weekly_candidate_pool",
+        "label": "Weekly Candidate Pool",
+        "description": "Weekly candidate pool: price above $10 and 50 EMA, ADR20 above 4%, Daily RS above 90, 10 EMA above 20 EMA, and at least 70% above the 52-week low. Review structure and wait for a setup before acting.",
+        "timeframe": "Daily",
+        "accent": "violet",
+        "bias_group": "bullish",
+    },
+    {
         "id": "kai_s2",
         "strategy_id": "kai_s2",
         "label": "Kai S2",

@@ -78,7 +78,7 @@ class AdHocScreenService:
             bars=bars,
             benchmark_bars=benchmark_bars,
             metadata=metadata_map.get(normalized_ticker, {"ticker": normalized_ticker}),
-            extras={"config": self.app_config},
+            extras={"config": self.app_config, "database_url": self.database_url},
         )
 
         started = time.perf_counter()
