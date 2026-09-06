@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import asdict, dataclass, field
 
 
@@ -38,6 +39,7 @@ class Principal:
     role: RoleName = ROLE_VISITOR
     capabilities: tuple[CapabilityName, ...] = field(default_factory=lambda: ROLE_CAPABILITIES[ROLE_VISITOR])
     is_active: bool = False
+    trial_ends_at: dt.datetime | None = None
 
     def can(self, capability: CapabilityName) -> bool:
         return capability in self.capabilities
@@ -61,7 +63,14 @@ def anonymous_principal() -> Principal:
     return Principal(authenticated=False)
 
 
-def principal_for_user(*, user_id: int, email: str, role: RoleName, is_active: bool) -> Principal:
+def principal_for_user(
+    *,
+    user_id: int,
+    email: str,
+    role: RoleName,
+    is_active: bool,
+    trial_ends_at: dt.datetime | None = None,
+) -> Principal:
     normalized_role = normalize_role(role)
     return Principal(
         authenticated=bool(is_active),
@@ -70,4 +79,5 @@ def principal_for_user(*, user_id: int, email: str, role: RoleName, is_active: b
         role=normalized_role,
         capabilities=capabilities_for_role(normalized_role) if is_active else ROLE_CAPABILITIES[ROLE_VISITOR],
         is_active=bool(is_active),
+        trial_ends_at=trial_ends_at,
     )

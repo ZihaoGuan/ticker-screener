@@ -31,6 +31,7 @@ export function AppLayout({ children }: PropsWithChildren) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const showInfraStatus = auth.role === "admin";
   const infraSummary = showInfraStatus ? "INFRA: WEB HEALTHY / DB CONNECTED / ARTIFACTS REACHABLE" : null;
+  const trialLabel = formatTrialLabel(auth.user?.trial_ends_at);
 
   useEffect(() => {
     setIsMobileNavOpen(false);
@@ -55,6 +56,10 @@ export function AppLayout({ children }: PropsWithChildren) {
     await auth.logout();
     navigate("/", { replace: true });
   };
+
+  if (!auth.isLoading && !auth.authenticated && location.pathname === "/") {
+    return <>{children}</>;
+  }
 
   return (
     <div className="app-shell">
@@ -127,12 +132,13 @@ export function AppLayout({ children }: PropsWithChildren) {
             <div className="topbar-brand">Ticker Screener</div>
           </div>
           <div className="topbar-status topbar-status-compact">
-            <span className="status-chip status-chip-compact">{infraSummary ?? (auth.authenticated ? `ROLE: ${auth.role.toUpperCase()}` : "ROLE: VISITOR")}</span>
+            <span className="status-chip status-chip-compact">{infraSummary ?? trialLabel ?? (auth.authenticated ? `ROLE: ${auth.role.toUpperCase()}` : "ROLE: VISITOR")}</span>
           </div>
           <div className="topbar-status topbar-status-full">
             {showInfraStatus ? <span className="status-chip">WEB: HEALTHY</span> : null}
             {showInfraStatus ? <span className="status-chip">DB: CONNECTED</span> : null}
             {showInfraStatus ? <span className="status-chip">ARTIFACTS: REACHABLE</span> : null}
+            {trialLabel ? <span className="status-chip">{trialLabel}</span> : null}
             <span className="status-chip">{auth.authenticated ? `ROLE: ${auth.role.toUpperCase()}` : "ROLE: VISITOR"}</span>
           </div>
         </header>
@@ -140,4 +146,10 @@ export function AppLayout({ children }: PropsWithChildren) {
       </div>
     </div>
   );
+}
+
+function formatTrialLabel(value?: string | null) {
+  if (!value) return null;
+  const daysLeft = Math.ceil((new Date(value).getTime() - Date.now()) / 86_400_000);
+  return daysLeft > 0 ? `TRIAL: ${daysLeft}D LEFT` : "TRIAL ENDED";
 }

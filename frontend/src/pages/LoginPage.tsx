@@ -30,17 +30,16 @@ export function LoginPage() {
   return (
     <div className="page-grid">
       <Panel title="Sign In" aside={<span className="eyebrow">Google OAuth</span>}>
-        <p className="panel-copy">Use approved Google account to sign in. Visitors can still browse results without logging in.</p>
+        <p className="panel-copy">Continue with Google to start a 14-day free trial or return to your account.</p>
         <div className="button-row">
           <a className="primary-button" href={`/api/auth/google/start?next=${encodeURIComponent(nextPath)}`}>
-            Sign In With Google
+            Continue With Google
           </a>
         </div>
         {loginError ? <p className="panel-copy">{loginError}</p> : null}
-        <p className="panel-copy">Admin setup: add your Google email to `WEBAPP_AUTH_BOOTSTRAP_ADMIN_EMAILS` or create active user record in Admin, then sign in with same Google email.</p>
       </Panel>
-      <Panel title="Request Premium Access" aside={<span className="eyebrow">Visitor</span>}>
-        <p className="panel-copy">Visitors can browse results. Request premium access here if you want screener run permissions, then sign in with same Google email after approval.</p>
+      <Panel title="Continue After Your Trial" aside={<span className="eyebrow">Full Access</span>}>
+        <p className="panel-copy">Request ongoing screener access after your free trial ends.</p>
         <form className="run-toolbar" onSubmit={(event) => void handlePremiumRequest(event)}>
           <div className="run-params-grid">
             <label className="field">
@@ -56,11 +55,11 @@ export function LoginPage() {
           </div>
           <div className="button-row">
             <button className="primary-button" type="submit" disabled={isSubmittingPremium}>
-              {isSubmittingPremium ? "Submitting..." : "Request Premium"}
+              {isSubmittingPremium ? "Submitting…" : "Request Full Access"}
             </button>
           </div>
         </form>
-        {premiumMessage ? <p className="panel-copy">{premiumMessage}</p> : null}
+        {premiumMessage ? <p className="panel-copy" aria-live="polite">{premiumMessage}</p> : null}
       </Panel>
     </div>
   );

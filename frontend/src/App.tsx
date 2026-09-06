@@ -1,5 +1,5 @@
 import { Suspense, lazy, type ComponentType } from "react";
-import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { useAuth } from "./auth/AuthContext";
@@ -43,6 +43,7 @@ function lazyPage<TModule extends Record<string, unknown>, TKey extends keyof TM
 }
 
 const DashboardPage = lazyPage(() => import("./pages/DashboardPage"), "DashboardPage");
+const LandingPage = lazyPage(() => import("./pages/LandingPage"), "LandingPage");
 const LoginPage = lazyPage(() => import("./pages/LoginPage"), "LoginPage");
 const GuidePage = lazyPage(() => import("./pages/GuidePage"), "GuidePage");
 const ChartsPage = lazyPage(() => import("./pages/ChartsPage"), "ChartsPage");
@@ -71,8 +72,9 @@ const AdminDiscordPage = lazyPage(() => import("./pages/AdminDiscordPage"), "Adm
 
 export default function App() {
   const auth = useAuth();
+  const location = useLocation();
 
-  if (auth.isMaintenance) {
+  if (auth.isMaintenance && location.pathname !== "/") {
     return <MaintenancePage />;
   }
 
@@ -287,7 +289,7 @@ function HomeRoute() {
   if (auth.isLoading) {
     return <LoadingBlock label="Checking access…" />;
   }
-  return <DashboardPage />;
+  return auth.authenticated ? <DashboardPage /> : <LandingPage />;
 }
 
 function LegacyRrgRedirect() {

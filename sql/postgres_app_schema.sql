@@ -491,10 +491,13 @@ CREATE TABLE IF NOT EXISTS app_users (
   email TEXT NOT NULL UNIQUE,
   role TEXT NOT NULL DEFAULT 'visitor',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  trial_ends_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_login_at TIMESTAMPTZ
 );
+
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_app_users_role_active
   ON app_users(role, is_active);

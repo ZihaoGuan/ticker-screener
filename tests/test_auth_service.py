@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import unittest
+from unittest.mock import patch
 
 from src.webapp.config import WebAppConfig
 from src.webapp.services.auth_service import AuthService, UserAdminService
@@ -15,6 +16,7 @@ class _FakeAuthRepository:
                 "email": "admin@example.com",
                 "role": "admin",
                 "is_active": True,
+                "trial_ends_at": None,
                 "created_at": None,
                 "updated_at": None,
                 "last_login_at": None,
@@ -22,16 +24,18 @@ class _FakeAuthRepository:
         }
         self.magic_links: dict[str, dict[str, object]] = {}
         self.sessions: dict[str, dict[str, object]] = {}
+        self.identities: dict[tuple[str, str], dict[str, object]] = {}
         self.access_requests: dict[int, dict[str, object]] = {}
 
     def is_configured(self) -> bool:
         return True
 
-    def upsert_user(self, *, email: str, role: str, is_active: bool = True):
+    def upsert_user(self, *, email: str, role: str, is_active: bool = True, trial_ends_at: dt.datetime | None = None):
         existing = self.users.get(email)
         if existing:
             existing["role"] = role
             existing["is_active"] = is_active
+            existing["trial_ends_at"] = trial_ends_at
             return dict(existing)
         next_id = len(self.users) + 1
         self.users[email] = {
@@ -39,6 +43,7 @@ class _FakeAuthRepository:
             "email": email,
             "role": role,
             "is_active": is_active,
+            "trial_ends_at": trial_ends_at,
             "created_at": None,
             "updated_at": None,
             "last_login_at": None,
@@ -58,11 +63,21 @@ class _FakeAuthRepository:
     def list_users(self):
         return [dict(user) for user in sorted(self.users.values(), key=lambda item: item["email"])]
 
+    def update_user_email(self, *, user_id: int, email: str):
+        user = self.get_user_by_id(user_id)
+        if not user:
+            return None
+        self.users.pop(user["email"])
+        user["email"] = email
+        self.users[email] = user
+        return dict(user)
+
     def update_user_role(self, *, user_id: int, role: str):
         user = self.get_user_by_id(user_id)
         if not user:
             return None
         user["role"] = role
+        user["trial_ends_at"] = None
         self.users[user["email"]] = user
         return dict(user)
 
@@ -73,6 +88,21 @@ class _FakeAuthRepository:
         user["is_active"] = is_active
         self.users[user["email"]] = user
         return dict(user)
+
+    def get_user_identity(self, *, provider: str, provider_subject: str):
+        identity = self.identities.get((provider, provider_subject))
+        return dict(identity) if identity else None
+
+    def upsert_user_identity(self, *, user_id: int, provider: str, provider_subject: str, provider_email: str):
+        identity = {
+            "id": len(self.identities) + 1,
+            "user_id": user_id,
+            "provider": provider,
+            "provider_subject": provider_subject,
+            "provider_email": provider_email,
+        }
+        self.identities[(provider, provider_subject)] = identity
+        return dict(identity)
 
     def revoke_magic_links_for_user(self, *, user_id: int):
         for item in self.magic_links.values():
@@ -208,6 +238,9 @@ class AuthServiceTests(unittest.TestCase):
         self.config = WebAppConfig(
             app_base_url="https://app.example.com",
             auth_secret_key="secret-key",
+            google_client_id="google-client",
+            google_client_secret="google-secret",
+            google_redirect_uri="https://app.example.com/api/auth/google/callback",
             smtp_host="smtp.example.com",
             smtp_port=587,
             smtp_from_address="noreply@example.com",
@@ -215,47 +248,19 @@ class AuthServiceTests(unittest.TestCase):
             smtp_use_ssl=False,
             auth_bootstrap_admin_emails_raw="admin@example.com",
         )
-        self._original_send_email = AuthService._send_email
-        AuthService._send_email = lambda *_, **__: None  # type: ignore[method-assign]
         self.service = AuthService(config=self.config, repository=self.repo)  # type: ignore[arg-type]
         self.user_admin = UserAdminService(repository=self.repo, config=self.config)  # type: ignore[arg-type]
 
-    def tearDown(self) -> None:
-        AuthService._send_email = self._original_send_email  # type: ignore[assignment]
-
-    def test_request_and_verify_magic_link_creates_authenticated_principal(self) -> None:
-        request_result = self.service.request_magic_link(
-            email="admin@example.com",
-            request_ip="127.0.0.1",
-            request_user_agent="unit-test",
-        )
-
-        self.assertTrue(request_result["ok"])
-        token_hash = next(iter(self.repo.magic_links.keys()))
-        raw_token = "missing"
-        for candidate in ("x",):
-            _ = candidate
-        # recreate from stored hash impossible, so verify through direct service helpers
-        # by generating a fresh token path deterministically.
-        self.repo.magic_links.clear()
-        raw_token = "test-token"
-        self.repo.create_magic_link(
+    def test_signed_session_creates_authenticated_principal(self) -> None:
+        self.repo.create_session(
             user_id=1,
-            token_hash=self.service._hash_token(raw_token),
-            expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10),
-            request_ip="127.0.0.1",
-            request_user_agent="unit-test",
+            session_id="admin-session",
+            expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1),
+            created_ip="127.0.0.1",
+            created_user_agent="unit-test",
         )
 
-        verified = self.service.verify_magic_link(
-            token=raw_token,
-            request_ip="127.0.0.1",
-            request_user_agent="unit-test",
-        )
-
-        self.assertIn("session_cookie_value", verified)
-        self.assertEqual(verified["principal"]["role"], "admin")
-        principal = self.service.principal_from_signed_session(verified["session_cookie_value"])
+        principal = self.service.principal_from_signed_session(self.service.sign_session_cookie("admin-session"))
         self.assertTrue(principal.authenticated)
         self.assertTrue(principal.can("manage_users"))
 
@@ -299,7 +304,70 @@ class AuthServiceTests(unittest.TestCase):
         user = self.repo.get_user_by_email("visitor@example.com")
         self.assertIsNotNone(user)
         self.assertEqual(user["role"], "premium")
-        self.assertTrue(self.repo.magic_links)
+        self.assertIsNone(user["trial_ends_at"])
+
+    def test_first_google_login_starts_trial(self) -> None:
+        self.service._verify_google_oauth_state = lambda **_: {"next_path": "/"}  # type: ignore[method-assign]
+        self.service._exchange_google_auth_code = lambda _: {"id_token": "token"}  # type: ignore[method-assign]
+
+        with patch(
+            "src.webapp.services.auth_service.google_id_token.verify_oauth2_token",
+            return_value={"email": "new@example.com", "sub": "google-1", "email_verified": True},
+        ):
+            result = self.service.complete_google_oauth(
+                code="code",
+                state="state",
+                signed_state_cookie="cookie",
+                request_ip="127.0.0.1",
+                request_user_agent="unit-test",
+            )
+
+        user = self.repo.get_user_by_email("new@example.com")
+        self.assertEqual(result["principal"]["role"], "premium")
+        self.assertTrue(result["principal"]["trial_ends_at"])
+        self.assertGreater(user["trial_ends_at"], dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=13))
+
+    def test_expired_trial_keeps_session_but_loses_run_access(self) -> None:
+        user = self.repo.upsert_user(
+            email="expired@example.com",
+            role="premium",
+            trial_ends_at=dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=1),
+        )
+        self.repo.create_session(
+            user_id=user["id"],
+            session_id="expired-trial",
+            expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1),
+            created_ip="127.0.0.1",
+            created_user_agent="unit-test",
+        )
+
+        principal = self.service.principal_from_signed_session(self.service.sign_session_cookie("expired-trial"))
+
+        self.assertTrue(principal.authenticated)
+        self.assertEqual(principal.role, "visitor")
+        self.assertFalse(principal.can("run_screeners"))
+
+    def test_expired_trial_can_request_full_access(self) -> None:
+        self.repo.upsert_user(
+            email="expired@example.com",
+            role="premium",
+            trial_ends_at=dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=1),
+        )
+
+        result = self.service.request_premium_access(email="expired@example.com")
+
+        self.assertEqual(result["status"], "pending")
+
+    def test_manual_role_update_clears_trial_expiry(self) -> None:
+        user = self.repo.upsert_user(
+            email="trial@example.com",
+            role="premium",
+            trial_ends_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=7),
+        )
+
+        updated = self.user_admin.update_role(user_id=user["id"], role="premium")
+
+        self.assertIsNone(updated["trial_ends_at"])
 
 
 if __name__ == "__main__":

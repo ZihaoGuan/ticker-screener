@@ -17,6 +17,8 @@ from src.webapp.access_control import Principal, anonymous_principal, normalize_
 from src.webapp.config import WebAppConfig
 from src.webapp.repositories.auth_repository import AuthRepository
 
+TRIAL_DAYS = 14
+
 
 class AuthService:
     def __init__(self, *, config: WebAppConfig, repository: AuthRepository | None = None) -> None:
@@ -45,7 +47,9 @@ class AuthService:
             if not bool(user.get("is_active")):
                 raise ValueError("Account is inactive.")
             role = normalize_role(user.get("role"))
-            if role in {"premium", "admin"}:
+            trial_ends_at = user.get("trial_ends_at")
+            trial_is_active = not isinstance(trial_ends_at, dt.datetime) or trial_ends_at > self._now()
+            if role == "admin" or (role == "premium" and trial_is_active):
                 return {"ok": True, "email": clean_email, "status": "already_granted", "message": "This email already has access."}
         existing = self.repository.get_pending_access_request_by_email(clean_email)
         if existing is not None:
@@ -130,7 +134,14 @@ class AuthService:
         if user is None:
             user = self.repository.get_user_by_email(email)
         if user is None:
-            raise ValueError("No approved account found for this Google email. Ask an admin to add your email or request premium access first.")
+            user = self.repository.upsert_user(
+                email=email,
+                role="premium",
+                is_active=True,
+                trial_ends_at=self._now() + dt.timedelta(days=TRIAL_DAYS),
+            )
+            if user is None:
+                raise ValueError("Unable to start your free trial.")
         if not bool(user.get("is_active")):
             raise ValueError("Account is inactive.")
 
@@ -158,12 +169,7 @@ class AuthService:
             created_user_agent=request_user_agent,
         )
         self.repository.update_last_login(user_id=app_user_id)
-        principal = principal_for_user(
-            user_id=app_user_id,
-            email=str(user["email"]),
-            role=str(user["role"]),
-            is_active=bool(user["is_active"]),
-        )
+        principal = self._principal_for_user(user)
         return {
             "session_cookie_value": self.sign_session_cookie(session_id),
             "principal": principal.to_dict(),
@@ -192,12 +198,7 @@ class AuthService:
         if not bool(record.get("is_active")):
             return anonymous_principal()
         self.repository.touch_session(session_id=session_id)
-        return principal_for_user(
-            user_id=int(record["user_id"]),
-            email=str(record["email"]),
-            role=str(record["role"]),
-            is_active=bool(record["is_active"]),
-        )
+        return self._principal_for_user(record)
 
     def sign_session_cookie(self, session_id: str) -> str:
         signature = self._sign_value(session_id)
@@ -305,6 +306,19 @@ class AuthService:
         if not candidate.startswith("/") or candidate.startswith("//"):
             return "/"
         return candidate
+
+    def _principal_for_user(self, user: dict[str, Any]) -> Principal:
+        trial_ends_at = user.get("trial_ends_at")
+        role = normalize_role(user.get("role"))
+        if role == "premium" and isinstance(trial_ends_at, dt.datetime) and trial_ends_at <= self._now():
+            role = "visitor"
+        return principal_for_user(
+            user_id=int(user.get("user_id") or user["id"]),
+            email=str(user["email"]),
+            role=role,
+            is_active=bool(user["is_active"]),
+            trial_ends_at=trial_ends_at if isinstance(trial_ends_at, dt.datetime) else None,
+        )
 
     def _now(self) -> dt.datetime:
         return dt.datetime.now(dt.timezone.utc)
@@ -426,6 +440,7 @@ class UserAdminService:
             "email": str(user["email"]),
             "role": normalize_role(user["role"]),
             "is_active": bool(user["is_active"]),
+            "trial_ends_at": user.get("trial_ends_at"),
             "created_at": user.get("created_at"),
             "updated_at": user.get("updated_at"),
             "last_login_at": user.get("last_login_at"),

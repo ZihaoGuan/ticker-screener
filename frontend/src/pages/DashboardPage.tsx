@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
 import type { DashboardResponse } from "../lib/types";
@@ -48,6 +49,14 @@ export function DashboardPage() {
 
   return (
     <div className="page-grid dashboard-page">
+      <section className="dashboard-first-step">
+        <div>
+          <span className="eyebrow">Start Here</span>
+          <strong>Find stocks confirmed by multiple scanners.</strong>
+          <p>Top Hits is the fastest path from market data to a focused watchlist.</p>
+        </div>
+        <Link className="primary-button" to="/scanner/top-hits">Open Top Hits</Link>
+      </section>
       <section className="dashboard-command-shell">
         <div className="dashboard-command-head">
           <div className="dashboard-command-copy">

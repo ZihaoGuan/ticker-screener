@@ -25,6 +25,7 @@ export type UserSummary = {
   role: RoleName;
   capabilities: CapabilityName[];
   is_active: boolean;
+  trial_ends_at?: string | null;
 };
 
 export type AuthMeResponse = {

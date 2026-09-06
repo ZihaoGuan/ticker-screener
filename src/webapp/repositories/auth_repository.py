@@ -43,23 +43,31 @@ class AuthRepository:
         columns = [item.name if hasattr(item, "name") else item[0] for item in cursor.description or []]
         return [dict(zip(columns, row)) for row in rows]
 
-    def upsert_user(self, *, email: str, role: str, is_active: bool = True) -> dict[str, Any] | None:
+    def upsert_user(
+        self,
+        *,
+        email: str,
+        role: str,
+        is_active: bool = True,
+        trial_ends_at: dt.datetime | None = None,
+    ) -> dict[str, Any] | None:
         connection = self._connect()
         if connection is None:
             return None
         sql = """
-            INSERT INTO app_users (email, role, is_active)
-            VALUES (%s, %s, %s)
+            INSERT INTO app_users (email, role, is_active, trial_ends_at)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT (email)
             DO UPDATE SET
                 role = EXCLUDED.role,
                 is_active = EXCLUDED.is_active,
+                trial_ends_at = EXCLUDED.trial_ends_at,
                 updated_at = NOW()
-            RETURNING id, email, role, is_active, created_at, updated_at, last_login_at
+            RETURNING id, email, role, is_active, trial_ends_at, created_at, updated_at, last_login_at
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (email.lower(), role, is_active))
+                cursor.execute(sql, (email.lower(), role, is_active, trial_ends_at))
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
             connection.commit()
         return rows[0] if rows else None
@@ -67,7 +75,7 @@ class AuthRepository:
     def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         return self._fetch_one(
             """
-            SELECT id, email, role, is_active, created_at, updated_at, last_login_at
+            SELECT id, email, role, is_active, trial_ends_at, created_at, updated_at, last_login_at
             FROM app_users
             WHERE email = %s
             """,
@@ -77,7 +85,7 @@ class AuthRepository:
     def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         return self._fetch_one(
             """
-            SELECT id, email, role, is_active, created_at, updated_at, last_login_at
+            SELECT id, email, role, is_active, trial_ends_at, created_at, updated_at, last_login_at
             FROM app_users
             WHERE id = %s
             """,
@@ -89,7 +97,7 @@ class AuthRepository:
         if connection is None:
             return []
         sql = """
-            SELECT id, email, role, is_active, created_at, updated_at, last_login_at
+            SELECT id, email, role, is_active, trial_ends_at, created_at, updated_at, last_login_at
             FROM app_users
             ORDER BY email ASC
         """
@@ -99,7 +107,7 @@ class AuthRepository:
                 return self._rows_to_dicts(cursor, cursor.fetchall())
 
     def update_user_role(self, *, user_id: int, role: str) -> dict[str, Any] | None:
-        return self._update_user(user_id=user_id, field_sql="role = %s", value=role)
+        return self._update_user(user_id=user_id, field_sql="role = %s, trial_ends_at = NULL", value=role)
 
     def update_user_active(self, *, user_id: int, is_active: bool) -> dict[str, Any] | None:
         return self._update_user(user_id=user_id, field_sql="is_active = %s", value=is_active)
@@ -223,7 +231,8 @@ class AuthRepository:
         return self._fetch_one(
             """
             SELECT sessions.id, sessions.user_id, sessions.session_id, sessions.expires_at, sessions.revoked_at,
-                   sessions.created_at, sessions.last_seen_at, users.email, users.role, users.is_active
+                   sessions.created_at, sessions.last_seen_at, users.email, users.role, users.is_active,
+                   users.trial_ends_at
             FROM app_sessions sessions
             JOIN app_users users ON users.id = sessions.user_id
             WHERE sessions.session_id = %s
@@ -365,7 +374,7 @@ class AuthRepository:
             SET email = %s,
                 updated_at = NOW()
             WHERE id = %s
-            RETURNING id, email, role, is_active, created_at, updated_at, last_login_at
+            RETURNING id, email, role, is_active, trial_ends_at, created_at, updated_at, last_login_at
         """
         with connection:
             with connection.cursor() as cursor:
@@ -383,7 +392,7 @@ class AuthRepository:
             SET {field_sql},
                 updated_at = NOW()
             WHERE id = %s
-            RETURNING id, email, role, is_active, created_at, updated_at, last_login_at
+            RETURNING id, email, role, is_active, trial_ends_at, created_at, updated_at, last_login_at
         """
         with connection:
             with connection.cursor() as cursor:

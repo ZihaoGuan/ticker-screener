@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { RunAction } from "../lib/types";
 import "./ScreenerConfigModal.css";
 
@@ -18,6 +18,18 @@ export function ScreenerConfigModal({
   isLoading,
 }: ScreenerConfigModalProps) {
   const [fieldValues, setFieldValues] = useState<Record<string, string | string[]>>({});
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    if (!isOpen || !action) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+    return () => {
+      if (dialog?.open) dialog.close();
+      previousFocus?.focus();
+    };
+  }, [action, isOpen]);
 
   if (!isOpen || !action) {
     return null;
@@ -30,7 +42,8 @@ export function ScreenerConfigModal({
     }));
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     await onSubmit(fieldValues);
     setFieldValues({});
     onClose();
@@ -42,11 +55,22 @@ export function ScreenerConfigModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={handleCancel}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+    <dialog
+      ref={dialogRef}
+      className="modal-overlay"
+      aria-labelledby="screener-config-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        handleCancel();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) handleCancel();
+      }}
+    >
+      <form className="modal-content" onSubmit={(event) => void handleSubmit(event)}>
         <div className="modal-header">
-          <h2>{action.label} Configuration</h2>
-          <button className="modal-close" onClick={handleCancel} type="button">
+          <h2 id="screener-config-title">{action.label} Configuration</h2>
+          <button className="modal-close" onClick={handleCancel} type="button" aria-label="Close screener configuration">
             ✕
           </button>
         </div>
@@ -116,14 +140,13 @@ export function ScreenerConfigModal({
           </button>
           <button
             className="modal-button modal-button-primary"
-            onClick={() => void handleSubmit()}
-            type="button"
+            type="submit"
             disabled={isLoading}
           >
-            {isLoading ? "RUNNING..." : "RUN SCREENER"}
+            {isLoading ? "RUNNING…" : "RUN SCREENER"}
           </button>
         </div>
-      </div>
-    </div>
+      </form>
+    </dialog>
   );
 }

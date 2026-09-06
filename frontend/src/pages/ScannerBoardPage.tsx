@@ -117,12 +117,12 @@ export function ScannerBoardPage() {
       <section className="panel scanner-board-console">
         <div className="scanner-board-console-row">
           <div>
-            <span className="eyebrow">Board logic</span>
-            <p className="panel-copy">Weekly RS New High, Weekly RS New High Before Price, Daily RS New High, RS New High Before Price, RS Phase, VCP Scored, VCP v3, VCP Spec, Sean Gap Up, Gap Fill, CANSLIM High Score, CANSLIM V2, Fundamental Quality, Venu Scanner, Finviz Target +50%, Finviz Analyst Strong Buy, Finviz Small+ Sales Growth Trend, bullish Finviz pattern cards, Inside Day + Extreme Dry-Up, Wyckoff Buy, Wyckoff Sell, FTD Successful Sweep, SEPA VCP, Cup Detection, 8 Week Run Up (Doubler), Three Weeks Tight, Range Tightness Index, Double Bottom, EMA21 Pullback Buy, Trend Template, Kai S2, Fearzone, and TD9 Bullish.</p>
+            <span className="eyebrow">What You Get</span>
+            <p className="panel-copy">Fresh candidates across relative strength, breakouts, tight consolidations, earnings momentum, and fundamental quality.</p>
           </div>
           <div>
-            <span className="eyebrow">Navigation</span>
-            <p className="panel-copy">Open scanner cards for raw artifacts, or jump to the top-ratings leaderboard for strongest rated names.</p>
+            <span className="eyebrow">Best First Step</span>
+            <p className="panel-copy">Start with Top Hits to find stocks confirmed by multiple independent signals.</p>
           </div>
         </div>
         <div className="weekly-watchlist-actions">
@@ -151,7 +151,7 @@ export function ScannerBoardPage() {
             {payload.manual_override_requested_at ? ` Requested ${formatLocalDateTime(payload.manual_override_requested_at)}.` : ""}
           </p>
         ) : null}
-        {notice ? <p className="panel-copy earnings-console-note">{notice}</p> : null}
+        {notice ? <p className="panel-copy earnings-console-note" aria-live="polite">{notice}</p> : null}
       </section>
 
       <section className="scanner-board-grid">

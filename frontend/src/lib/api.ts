@@ -28,5 +28,8 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     }
     throw new ApiError(response.status, message);
   }
+  if (!response.headers.get("content-type")?.includes("application/json")) {
+    throw new ApiError(502, "Live data is temporarily unavailable. Please try again shortly.");
+  }
   return (await response.json()) as T;
 }
