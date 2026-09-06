@@ -16,6 +16,7 @@ type ViewMode = "list" | "charts";
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "sean_breakout", "venu_scanner"]);
+const PINNED_SCANNER_OPTIONS = [{ id: "weekly_candidate_pool", label: "Weekly Candidate Pool" }];
 
 export function ScannerTopHitsPage() {
   const auth = useAuth();
@@ -79,7 +80,7 @@ export function ScannerTopHitsPage() {
     [rows],
   );
   const scannerOptions = useMemo(() => {
-    const options = new Map<string, string>();
+    const options = new Map(PINNED_SCANNER_OPTIONS.map((scanner) => [scanner.id, scanner.label]));
     for (const row of rows) {
       for (const scanner of row.scanners) {
         const normalizedId = normalizeScannerId(scanner.id);
