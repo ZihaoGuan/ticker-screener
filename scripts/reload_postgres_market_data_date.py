@@ -96,7 +96,7 @@ def _delete_trade_date(connection, trade_date: dt.date) -> int:
 
 
 def _should_auto_exclude_delisted(outcome: TickerSyncOutcome) -> bool:
-    return outcome.status in {"failed_no_history_available", "skipped_delisted_before_window"}
+    return outcome.status == "skipped_delisted_before_window"
 
 
 def _auto_exclude_delisted_tickers(outcomes: list[TickerSyncOutcome]) -> int:

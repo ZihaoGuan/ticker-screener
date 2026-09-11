@@ -9,7 +9,7 @@ from scripts.sync_postgres_market_data import TickerSyncOutcome
 
 class ReloadPostgresMarketDataDateTests(unittest.TestCase):
     def test_should_auto_exclude_delisted_only_for_delisted_like_outcomes(self) -> None:
-        self.assertTrue(_should_auto_exclude_delisted(TickerSyncOutcome(ticker="AAPL", status="failed_no_history_available", reason="none")))
+        self.assertFalse(_should_auto_exclude_delisted(TickerSyncOutcome(ticker="AAPL", status="failed_no_history_available", reason="none")))
         self.assertTrue(_should_auto_exclude_delisted(TickerSyncOutcome(ticker="MSFT", status="skipped_delisted_before_window", reason="old")))
         self.assertFalse(_should_auto_exclude_delisted(TickerSyncOutcome(ticker="NVDA", status="failed_rate_limited", reason="429")))
         self.assertFalse(_should_auto_exclude_delisted(TickerSyncOutcome(ticker="ARM", status="skipped_listed_after_requested_end", reason="new")))
@@ -20,6 +20,7 @@ class ReloadPostgresMarketDataDateTests(unittest.TestCase):
             TickerSyncOutcome(ticker="AAPL", status="failed_no_history_available", reason="none"),
             TickerSyncOutcome(ticker="AAPL", status="skipped_delisted_before_window", reason="old"),
             TickerSyncOutcome(ticker="MSFT", status="skipped_delisted_before_window", reason="old"),
+            TickerSyncOutcome(ticker="GOOG", status="failed_no_history_available", reason="none"),
             TickerSyncOutcome(ticker="NVDA", status="failed_rate_limited", reason="429"),
         ]
 
