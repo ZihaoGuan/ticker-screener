@@ -622,6 +622,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "one_year_winners",
+        "strategy_id": "one_year_winners",
+        "label": "1Y Winners > $10B",
+        "description": "Rolling 1-year winners above 30% with market cap above $10B, positive TTM revenue growth, beta above 1, monthly dollar liquidity above $900M, price above $20 and 100 EMA, and 21 EMA above 50 SMA.",
+        "timeframe": "Daily",
+        "accent": "lime",
+        "bias_group": "bullish",
+    },
+    {
         "id": "vcs_critical_tightness",
         "strategy_id": "vcs_critical_tightness",
         "label": "VCS Critical Tightness",

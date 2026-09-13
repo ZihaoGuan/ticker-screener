@@ -1996,6 +1996,8 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
       "Weekly candidate universe only, not an entry signal: price above $10 and 50 EMA, ADR20 above 4%, Daily RS above 90, 10 EMA above 20 EMA, and at least 70% above the 52-week low. Review charts, mark bases, then wait for a setup.",
     kai_s2:
       "Liquid high-beta trend leaders with price above 20/50/200 SMA, 150D SMA above 200D SMA, market cap above $1B, avg volume above 2M, and close x 30D avg volume above $100M.",
+    one_year_winners:
+      "Rolling 1-year winners above 30% with market cap above $10B, positive TTM revenue growth, beta above 1, monthly dollar liquidity above $900M, price above $20 and 100 EMA, and 21 EMA above 50 SMA.",
     gap_fill: "Post-earnings gap reversal candidates with reclaim or fill behavior.",
     macd_golden_cross: "Fresh bullish MACD crossovers where the MACD line has recently moved above the signal line.",
     inside_dryup_v2: "Latest inside day plus extreme price-volume dry-up, without requiring breakout follow-through.",

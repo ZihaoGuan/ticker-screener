@@ -31,6 +31,7 @@ from .lost_21ema_screen import run_lost_21ema_screen
 from .macd_screen import find_recent_macd_hit
 from .near_52wk_high_screen import PRICE_HISTORY_DAYS as NEAR_52WK_HIGH_HISTORY_DAYS, run_near_52wk_high_screen
 from .near_200ma_screen import run_near_200ma_screen
+from .one_year_winners_screen import ONE_YEAR_WINNERS_HISTORY_DAYS, find_one_year_winners_hit
 from .rti_screen import find_recent_rti_hit
 from .sean_breakout_screen import find_recent_sean_breakout_hit
 from .rsi_ma_bb_screen import find_recent_rsi_ma_bb_hit
@@ -1158,6 +1159,37 @@ def _run_kai_s2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     )
 
 
+def _run_one_year_winners(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    database_url = str(bundle.extras.get("database_url") or "")
+    fundamentals = RatingsRepository(database_url).load_latest_fundamentals_snapshots_for_tickers(
+        [bundle.ticker],
+        as_of_date=bundle.as_of_date,
+    ).get(bundle.ticker.upper(), {})
+    hit = find_one_year_winners_hit(
+        bundle.bars,
+        bundle.benchmark_bars,
+        ticker=_ticker_from_bundle(bundle),
+        market_cap=fundamentals.get("market_cap"),
+        revenue_growth_ttm_yoy_pct=fundamentals.get("sales_yoy_ttm_pct"),
+        signal_date=bundle.as_of_date,
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "one_year_return_pct": payload["one_year_return_pct"],
+            "market_cap": payload["market_cap"],
+            "beta_1y": payload["beta_1y"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_vcp_spec(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     hit = find_recent_vcp_spec_hit(
         bundle.bars,
@@ -1653,6 +1685,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=WEEKLY_CANDIDATE_POOL_HISTORY_DAYS,
             warmup_trading_days=20,
             evaluator=_run_weekly_candidate_pool,
+        ),
+        "one_year_winners": ScreenerSpec(
+            id="one_year_winners",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=ONE_YEAR_WINNERS_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_one_year_winners,
         ),
         "vcs_setup_stage": ScreenerSpec(
             id="vcs_setup_stage",

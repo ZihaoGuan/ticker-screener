@@ -402,6 +402,19 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["stem"], "kai_s2_2026-06-06")
         self.assertEqual(rows[0]["group_key"], "kai_s2")
 
+    def test_group_key_supports_one_year_winners(self) -> None:
+        self._write_new_watchlist(
+            date_folder="2026-06-06",
+            strategy_id="one_year_winners",
+            date_label="2026-06-06",
+            tickers=["NVDA"],
+        )
+
+        rows = self.repository.list_recent_watchlists()
+
+        self.assertEqual(rows[0]["stem"], "one_year_winners_2026-06-06")
+        self.assertEqual(rows[0]["group_key"], "one_year_winners")
+
     def test_group_key_supports_leif_high_tight_flag(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",

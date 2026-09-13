@@ -363,6 +363,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("kai_s2_{date_label}.json",),
         "legacy_summary_templates": ("kai_s2_run_summary_{date_label}.json",),
     },
+    "one_year_winners": {
+        "stem_template": "one_year_winners_{date_label}",
+        "legacy_watchlist_templates": ("one_year_winners_{date_label}.json",),
+        "legacy_raw_templates": ("one_year_winners_{date_label}.json",),
+        "legacy_summary_templates": ("one_year_winners_run_summary_{date_label}.json",),
+    },
     "market_correction_resilience": {
         "stem_template": "market_correction_resilience_{date_label}",
         "legacy_watchlist_templates": ("market_correction_resilience_{date_label}.json",),
@@ -541,6 +547,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("trend_template", "trend_template"),
     ("weekly_candidate_pool", "weekly_candidate_pool"),
     ("kai_s2", "kai_s2"),
+    ("one_year_winners", "one_year_winners"),
     ("market_correction_resilience", "market_correction_resilience"),
     ("stockbee_momentum_burst", "stockbee_momentum_burst"),
     ("weekly_vcp_spec", "weekly_vcp_spec"),
