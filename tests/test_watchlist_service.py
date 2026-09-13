@@ -1126,6 +1126,39 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["target_trading_date"], "2026-06-12")
         persist_mock.assert_called_once()
 
+    def test_top_hits_snapshot_read_does_not_reenrich_rows(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        run = {
+            "id": 902,
+            "run_date": dt.date(2026, 6, 12),
+            "result_summary_json": {
+                "generated_at": "2026-06-13T00:40:00Z",
+                "target_trading_date": "2026-06-12",
+                "total_live_scanners": 2,
+                "total_unique_tickers": 2,
+                "overlapping_ticker_count": 1,
+                "cards": [{"id": "rs", "label": "RS"}],
+            },
+        }
+        detail = {
+            **run,
+            "hits": [{"hit_payload_json": {"ticker": "PLTR", "scanner_count": 2, "daily_rs_rating": 96}}],
+        }
+        with patch.object(service.screener_history_service, "is_configured", return_value=True), patch.object(
+            service.screener_history_service, "list_runs", return_value=[run]
+        ), patch.object(
+            service.screener_history_service, "get_run", return_value=detail
+        ), patch.object(service, "_attach_latest_market_snapshots", side_effect=AssertionError("must not enrich on GET")), patch.object(
+            service, "_attach_latest_rating_snapshots", side_effect=AssertionError("must not enrich on GET")
+        ):
+            payload = service.get_scanner_top_hits_snapshot_payload(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+            )
+
+        self.assertEqual(payload["rows"], [{"ticker": "PLTR", "scanner_count": 2, "daily_rs_rating": 96}])
+        self.assertEqual(payload["snapshot"]["snapshot_run_id"], 902)
+        self.assertEqual(payload["snapshot"]["freshness"], "fresh")
+
     def test_get_chart_payload_snaps_to_latest_available_trading_day(self) -> None:
         frame = pd.DataFrame(
             {

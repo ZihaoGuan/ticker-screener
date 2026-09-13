@@ -46,7 +46,11 @@ const DashboardPage = lazyPage(() => import("./pages/DashboardPage"), "Dashboard
 const LandingPage = lazyPage(() => import("./pages/LandingPage"), "LandingPage");
 const LoginPage = lazyPage(() => import("./pages/LoginPage"), "LoginPage");
 const GuidePage = lazyPage(() => import("./pages/GuidePage"), "GuidePage");
-const ChartsPage = lazyPage(() => import("./pages/ChartsPage"), "ChartsPage");
+const loadChartsPage = () => import("./pages/ChartsPage");
+export function preloadChartsPage() {
+  void loadChartsPage();
+}
+const ChartsPage = lazyPage(loadChartsPage, "ChartsPage");
 const EarningsPage = lazyPage(() => import("./pages/EarningsPage"), "EarningsPage");
 const ScannerBoardPage = lazyPage(() => import("./pages/ScannerBoardPage"), "ScannerBoardPage");
 const ScannerTopHitsPage = lazyPage(() => import("./pages/ScannerTopHitsPage"), "ScannerTopHitsPage");

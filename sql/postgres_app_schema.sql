@@ -401,6 +401,9 @@ CREATE INDEX IF NOT EXISTS idx_screen_run_hits_strategy_signal_passed
 CREATE INDEX IF NOT EXISTS idx_screen_run_hits_ticker_signal_date
   ON screen_run_hits(ticker, signal_date DESC);
 
+CREATE INDEX IF NOT EXISTS idx_screen_run_hits_run_rank
+  ON screen_run_hits(screen_run_id, rank NULLS LAST, ticker);
+
 CREATE TABLE IF NOT EXISTS backtest_runs (
   id BIGSERIAL PRIMARY KEY,
   strategy_id TEXT NOT NULL,
@@ -794,6 +797,10 @@ CREATE INDEX IF NOT EXISTS idx_screen_runs_strategy_run_date
 
 CREATE INDEX IF NOT EXISTS idx_screen_runs_not_deleted
   ON screen_runs(strategy_id, deleted_at, run_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_screen_runs_board_latest
+  ON screen_runs(strategy_id, run_date DESC, id DESC)
+  WHERE deleted_at IS NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_screen_runs_unique_scope
   ON screen_runs(strategy_id, run_date, config_hash, scope_hash);

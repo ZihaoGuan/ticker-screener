@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
-import type { DashboardResponse } from "../lib/types";
+import type { DashboardMarketHealthResponse, DashboardResponse, DashboardSummaryResponse } from "../lib/types";
 
 type MarketRegime =
   | "healthy_chaos"
@@ -13,36 +13,47 @@ type MarketRegime =
 type WatchlistRow = DashboardResponse["recent_watchlists"][number];
 
 export function DashboardPage() {
-  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [summary, setSummary] = useState<DashboardSummaryResponse | null>(null);
+  const [marketHealth, setMarketHealth] = useState<DashboardResponse["market_health"] | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(true);
+  const [isMarketHealthLoading, setIsMarketHealthLoading] = useState(true);
 
   useEffect(() => {
-    fetchJson<DashboardResponse>("/api/dashboard").then(setDashboard).catch(() => setDashboard(null)).finally(() => setIsLoading(false));
+    const controller = new AbortController();
+    void fetchJson<DashboardSummaryResponse>("/api/dashboard/summary", { signal: controller.signal })
+      .then(setSummary)
+      .catch(() => setSummary(null))
+      .finally(() => setIsSummaryLoading(false));
+    void fetchJson<DashboardMarketHealthResponse>("/api/dashboard/market-health", { signal: controller.signal })
+      .then((response) => setMarketHealth(response.market_health))
+      .catch(() => setMarketHealth(null))
+      .finally(() => setIsMarketHealthLoading(false));
+    return () => controller.abort();
   }, []);
 
-  const overview = dashboard?.overview ?? null;
-  const regime = dashboard?.market_health?.regime ?? null;
+  const overview = summary?.overview ?? null;
+  const regime = marketHealth?.regime ?? null;
   const regimeLatest = regime?.latest ?? null;
-  const rsiDivergence = dashboard?.market_health?.rsi_divergence ?? null;
+  const rsiDivergence = marketHealth?.rsi_divergence ?? null;
   const rsiLatest = rsiDivergence?.latest ?? null;
-  const bearishTd9 = dashboard?.market_health?.bearish_td9 ?? null;
+  const bearishTd9 = marketHealth?.bearish_td9 ?? null;
   const td9Latest = bearishTd9?.latest ?? null;
-  const optionsPositioning = dashboard?.market_health?.options_positioning ?? null;
+  const optionsPositioning = marketHealth?.options_positioning ?? null;
   const optionsLatest = optionsPositioning?.latest ?? null;
-  const spyExtension = dashboard?.market_health?.spy_extension ?? null;
+  const spyExtension = marketHealth?.spy_extension ?? null;
   const spyLatest = spyExtension?.latest ?? null;
-  const breadthScore = dashboard?.market_health?.breadth_score ?? null;
+  const breadthScore = marketHealth?.breadth_score ?? null;
   const breadthLatest = breadthScore?.latest ?? null;
-  const uptrendScore = dashboard?.market_health?.uptrend_score ?? null;
+  const uptrendScore = marketHealth?.uptrend_score ?? null;
   const uptrendLatest = uptrendScore?.latest ?? null;
-  const ibdDistribution = dashboard?.market_health?.ibd_distribution ?? null;
+  const ibdDistribution = marketHealth?.ibd_distribution ?? null;
   const ibdLatest = ibdDistribution?.latest ?? null;
-  const exposurePosture = dashboard?.market_health?.exposure_posture ?? null;
+  const exposurePosture = marketHealth?.exposure_posture ?? null;
   const exposureLatest = exposurePosture?.latest ?? null;
-  const themeDetector = dashboard?.market_health?.theme_detector ?? null;
+  const themeDetector = marketHealth?.theme_detector ?? null;
   const themeLatest = themeDetector?.latest ?? null;
-  const recentWatchlists = dashboard?.recent_watchlists ?? [];
-  const strategyCards = dashboard?.strategy_cards ?? [];
+  const recentWatchlists = summary?.recent_watchlists ?? [];
+  const strategyCards = summary?.strategy_cards ?? [];
 
   const systemStatus = buildSystemStatus(overview);
   const gexPlot = optionsLatest?.plots?.v2 ?? optionsLatest?.plots?.profile ?? optionsLatest?.plots?.absolute ?? null;
@@ -78,7 +89,8 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {isLoading ? <LoadingBlock label="Loading command board..." compact /> : null}
+        {isSummaryLoading ? <LoadingBlock label="Loading command board..." compact /> : null}
+        {isMarketHealthLoading ? <p className="panel-copy" aria-live="polite">Loading market-health snapshot…</p> : null}
 
         <div className="dashboard-grid">
           <article className="dashboard-tile dashboard-span-4 dashboard-regime-tile">

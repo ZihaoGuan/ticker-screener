@@ -299,6 +299,16 @@ export type ScannerTopHitsResponse = ScannerBoardResponse & {
   total_unique_tickers: number;
   overlapping_ticker_count: number;
   rows: ScannerTopHitRow[];
+  snapshot?: SnapshotMetadata;
+};
+
+export type SnapshotMetadata = {
+  snapshot_run_id: number | null;
+  snapshot_generated_at: string | null;
+  source_data_as_of: string | null;
+  age_seconds?: number | null;
+  freshness: "fresh" | "stale" | "missing" | string;
+  refresh_status?: "idle" | "queued" | "running" | "failed" | string;
 };
 
 export type SectorLeaderboardHolding = {
@@ -669,6 +679,13 @@ export type DashboardResponse = {
   };
   recent_watchlists: WatchlistFile[];
   strategy_cards: StrategyCard[];
+};
+
+export type DashboardSummaryResponse = Pick<DashboardResponse, "overview" | "recent_watchlists" | "strategy_cards">;
+
+export type DashboardMarketHealthResponse = {
+  market_health: DashboardResponse["market_health"];
+  snapshot: SnapshotMetadata;
 };
 
 export type RunAction = {

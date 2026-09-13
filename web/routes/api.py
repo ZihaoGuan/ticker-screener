@@ -315,6 +315,22 @@ def dashboard_data(
     return JSONResponse(service.get_dashboard_context(include_deprecated_watchlists=principal.role == "admin"))
 
 
+@router.get("/dashboard/summary", response_class=JSONResponse)
+def dashboard_summary_data(
+    service: DashboardService = Depends(get_dashboard_service),
+    principal: Principal = Depends(get_current_principal),
+) -> JSONResponse:
+    return JSONResponse(service.get_dashboard_summary(include_deprecated_watchlists=principal.role == "admin"))
+
+
+@router.get("/dashboard/market-health", response_class=JSONResponse)
+def dashboard_market_health_data(
+    service: DashboardService = Depends(get_dashboard_service),
+    _: Principal = Depends(get_current_principal),
+) -> JSONResponse:
+    return JSONResponse(service.get_dashboard_market_health_snapshot())
+
+
 @router.get("/earnings-calendar", response_class=JSONResponse)
 def earnings_calendar_data(
     reference_date: dt.date | None = Query(default=None, alias="referenceDate"),
@@ -952,10 +968,9 @@ def scanner_board_refresh_data(
 @router.get("/scanner-board/top-hits", response_class=JSONResponse)
 def scanner_top_hits_data(
     service: WatchlistService = Depends(get_watchlist_service),
-    rrg_service: RrgService = Depends(get_rrg_service),
     _: Principal = Depends(get_current_principal),
 ) -> JSONResponse:
-    return JSONResponse(service.get_scanner_top_hits_payload(rrg_service=rrg_service))
+    return JSONResponse(service.get_scanner_top_hits_snapshot_payload())
 
 
 @router.get("/sector-leaderboard", response_class=JSONResponse)

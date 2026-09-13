@@ -5,6 +5,7 @@ import json
 import math
 from pathlib import Path
 from time import sleep
+import threading
 from typing import Any
 
 from src.market_data_access import resolve_database_url
@@ -29,6 +30,14 @@ class HistoryRepository:
     _SCHEMA_ADVISORY_LOCK_KEY = 8_146_237
     _DEADLOCK_RETRY_ATTEMPTS = 3
     _DEADLOCK_RETRY_SLEEP_SECONDS = 0.2
+    _PERFORMANCE_INDEXES = (
+        "CREATE INDEX IF NOT EXISTS idx_screen_run_hits_run_rank "
+        "ON screen_run_hits(screen_run_id, rank NULLS LAST, ticker)",
+        "CREATE INDEX IF NOT EXISTS idx_screen_runs_board_latest "
+        "ON screen_runs(strategy_id, run_date DESC, id DESC) WHERE deleted_at IS NULL",
+    )
+    _performance_indexes_ready_for_urls: set[str] = set()
+    _performance_indexes_lock = threading.Lock()
     _REQUIRED_HISTORY_SCHEMA_COLUMNS = {
         "job_runs": {
             "id",
@@ -88,6 +97,7 @@ class HistoryRepository:
         with psycopg.connect(self.database_url) as connection:
             connection.autocommit = True
             if self._history_schema_is_ready(connection):
+                self._ensure_performance_indexes(connection)
                 self._schema_ready = True
                 return
             with connection.cursor() as cursor:
@@ -97,11 +107,22 @@ class HistoryRepository:
                     with connection.transaction():
                         with connection.cursor() as cursor:
                             cursor.execute(schema_path.read_text(encoding="utf-8"))
+                self._ensure_performance_indexes(connection)
                 self._schema_ready = True
             finally:
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT pg_advisory_unlock(%s)", (self._SCHEMA_ADVISORY_LOCK_KEY,))
         self._schema_ready = True
+
+    def _ensure_performance_indexes(self, connection: Any) -> None:
+        """Apply additive indexes to existing installations exactly once per process."""
+        with self._performance_indexes_lock:
+            if self.database_url in self._performance_indexes_ready_for_urls:
+                return
+            with connection.cursor() as cursor:
+                for statement in self._PERFORMANCE_INDEXES:
+                    cursor.execute(statement)
+            self._performance_indexes_ready_for_urls.add(self.database_url)
 
     def _history_schema_is_ready(self, connection: Any) -> bool:
         table_names = list(self._REQUIRED_HISTORY_SCHEMA_COLUMNS)
@@ -852,6 +873,84 @@ class HistoryRepository:
                 cursor.execute(sql, tuple(params))
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
         return rows
+
+    def list_latest_screen_runs_by_strategy(
+        self,
+        *,
+        strategy_ids: list[str],
+        target_date: dt.date,
+    ) -> list[dict[str, Any]] | None:
+        """Return one latest successful run per strategy without loading artifacts.
+
+        ``None`` deliberately means the database is unavailable; an empty list means
+        the database was queried successfully but has no matching runs.  Callers can
+        therefore keep the legacy artifact fallback for local development without
+        silently falling back to file scans in production.
+        """
+        normalized_ids = sorted({str(value or "").strip() for value in strategy_ids if str(value or "").strip()})
+        if not normalized_ids:
+            return []
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            SELECT DISTINCT ON (strategy_id)
+                   id, strategy_id, run_date, hit_count, watchlist_artifact_path,
+                   result_summary_json, created_at
+            FROM screen_runs
+            WHERE deleted_at IS NULL
+              AND strategy_id = ANY(%s)
+              AND run_date <= %s
+            ORDER BY strategy_id, run_date DESC, id DESC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized_ids, target_date))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def list_screen_run_preview_tickers(
+        self,
+        *,
+        screen_run_ids: list[int],
+        excluded_tickers: set[str] | None = None,
+        per_run_limit: int = 6,
+    ) -> dict[int, list[str]] | None:
+        """Return a bounded ticker preview for every requested screen run in one query."""
+        normalized_ids = sorted({int(value) for value in screen_run_ids if int(value) > 0})
+        if not normalized_ids:
+            return {}
+        connection = self._connect()
+        if connection is None:
+            return None
+        excluded = sorted({str(value or "").strip().upper() for value in (excluded_tickers or set()) if str(value or "").strip()})
+        sql = """
+            WITH ranked AS (
+              SELECT screen_run_id, ticker,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY screen_run_id
+                       ORDER BY rank NULLS LAST, ticker ASC
+                     ) AS row_number
+              FROM screen_run_hits
+              WHERE screen_run_id = ANY(%s)
+                AND passed = TRUE
+                AND NOT (ticker = ANY(%s))
+            )
+            SELECT screen_run_id, ticker
+            FROM ranked
+            WHERE row_number <= %s
+            ORDER BY screen_run_id, row_number
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized_ids, excluded, max(1, int(per_run_limit))))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+        result: dict[int, list[str]] = {run_id: [] for run_id in normalized_ids}
+        for row in rows:
+            run_id = int(row.get("screen_run_id") or 0)
+            ticker = str(row.get("ticker") or "").strip().upper()
+            if run_id and ticker:
+                result.setdefault(run_id, []).append(ticker)
+        return result
 
     def get_screen_run(self, run_id: int, *, include_hits: bool = False, hit_limit: int = 200, hit_offset: int = 0) -> dict[str, Any] | None:
         connection = self._connect()

@@ -16,33 +16,93 @@ from ...td_sequential_screen import find_recent_td_sequential_hit
 from ...universe import UniverseTicker
 from ..repositories.dashboard_repository import DashboardRepository
 from ..repositories.watchlist_repository import WatchlistRepository
+from .screener_history_service import ScreenerHistoryService
+
+
+_DASHBOARD_MARKET_HEALTH_SNAPSHOT_STRATEGY_ID = "dashboard_market_health_snapshot"
 
 
 class DashboardService:
     def __init__(self, database_url: str, artifacts_dir: Path) -> None:
         self.dashboard_repository = DashboardRepository(database_url=database_url, artifacts_dir=artifacts_dir)
         self.watchlist_repository = WatchlistRepository(artifacts_dir=artifacts_dir)
+        self.screener_history_service = ScreenerHistoryService(
+            database_url=database_url,
+            artifacts_dir=artifacts_dir,
+            repository=self.dashboard_repository.history_repository,
+        )
+
+    def get_dashboard_summary(self, *, include_deprecated_watchlists: bool = True) -> dict[str, Any]:
+        return {
+            "overview": self.dashboard_repository.get_overview(),
+            "recent_watchlists": self.watchlist_repository.list_recent_watchlists(
+                limit=8,
+                include_deprecated=include_deprecated_watchlists,
+            ),
+            "strategy_cards": _dashboard_strategy_cards(),
+        }
 
     def get_dashboard_context(self, *, include_deprecated_watchlists: bool = True) -> dict[str, Any]:
-        overview = self.dashboard_repository.get_overview()
-        recent_watchlists = self.watchlist_repository.list_recent_watchlists(limit=8, include_deprecated=include_deprecated_watchlists)
+        summary = self.get_dashboard_summary(include_deprecated_watchlists=include_deprecated_watchlists)
         try:
             market_health = self._build_market_health()
         except Exception:
             benchmark = load_app_config().benchmark_ticker.upper()
             market_health = _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
         return {
-            "overview": overview,
+            **summary,
             "market_health": market_health,
-            "recent_watchlists": recent_watchlists,
-            "strategy_cards": [
-                {"id": "rs", "label": "RS", "description": "Daily RS new high before price."},
-                {"id": "vcp", "label": "VCP", "description": "Volatility contraction pattern scan."},
-                {"id": "weekly_vcp", "label": "Weekly VCP", "description": "Weekly volatility contraction pattern scan."},
-                {"id": "cup_handle", "label": "Cup and Handle", "description": "Breakout candidate scan."},
-                {"id": "ftd_sweep", "label": "FTD Sweep", "description": "Recent FTD sweep breakout within the lookback window."},
-                {"id": "overlap", "label": "Report", "description": "Daily cross-strategy overlap report."},
-            ],
+        }
+
+    def persist_dashboard_market_health_snapshot(self, *, now: dt.datetime | None = None) -> dict[str, Any] | None:
+        """Build market health off the request path and persist the complete payload."""
+        if not self.screener_history_service.is_configured():
+            return None
+        reference_now = now or dt.datetime.now(dt.timezone.utc)
+        market_health = self._build_market_health()
+        generated_at = reference_now.astimezone(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        summary = {
+            "snapshot_schema_version": "dashboard-market-health-v1",
+            "snapshot_generated_at": generated_at,
+            "source_data_as_of": _market_health_as_of_date(market_health),
+            "market_health": market_health,
+        }
+        self.screener_history_service.persist_snapshot_run(
+            strategy_id=_DASHBOARD_MARKET_HEALTH_SNAPSHOT_STRATEGY_ID,
+            run_date=reference_now.date(),
+            summary_payload=summary,
+            hit_rows=[],
+            config_json={"kind": _DASHBOARD_MARKET_HEALTH_SNAPSHOT_STRATEGY_ID},
+            scope_json={},
+            source_kind="dashboard-snapshot",
+            notes="Dashboard market-health snapshot",
+        )
+        return summary
+
+    def get_dashboard_market_health_snapshot(self) -> dict[str, Any]:
+        """Read the latest successful dashboard snapshot; never compute or fetch remotely."""
+        benchmark = load_app_config().benchmark_ticker.upper()
+        unavailable = _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
+        if not self.screener_history_service.is_configured():
+            return {"market_health": unavailable, "snapshot": _missing_snapshot_metadata()}
+        rows = self.screener_history_service.list_runs(strategy_id=_DASHBOARD_MARKET_HEALTH_SNAPSHOT_STRATEGY_ID, limit=1)
+        if not rows:
+            return {"market_health": unavailable, "snapshot": _missing_snapshot_metadata()}
+        run_id = int(rows[0].get("id") or 0)
+        payload = self.screener_history_service.get_run(run_id, include_hits=False) if run_id > 0 else None
+        summary = payload.get("result_summary_json") if isinstance(payload, dict) else None
+        market_health = summary.get("market_health") if isinstance(summary, dict) else None
+        if not isinstance(market_health, dict):
+            return {"market_health": unavailable, "snapshot": _missing_snapshot_metadata()}
+        generated_at = str(summary.get("snapshot_generated_at") or payload.get("created_at") or "")
+        return {
+            "market_health": market_health,
+            "snapshot": {
+                "snapshot_run_id": run_id,
+                "snapshot_generated_at": generated_at or None,
+                "source_data_as_of": str(summary.get("source_data_as_of") or "") or None,
+                "freshness": "fresh",
+            },
         }
 
     def _build_market_health(self) -> dict[str, Any]:
@@ -68,24 +128,6 @@ class DashboardService:
             db_payload["theme_detector"] = theme_detector
             return db_payload
 
-        internet_frame = _download_history_frame(benchmark, start_date, end_date)
-        internet_payload = _build_payload_if_possible(frame=internet_frame, ticker=benchmark, data_source="internet", repository=self.dashboard_repository)
-        if internet_payload is not None and not _market_health_payload_has_no_latest(internet_payload):
-            internet_payload["breadth_score"] = breadth_score
-            internet_payload["uptrend_score"] = uptrend_score
-            internet_payload["ibd_distribution"] = ibd_distribution
-            internet_payload["exposure_posture"] = exposure_posture
-            internet_payload["theme_detector"] = theme_detector
-            return internet_payload
-
-        if db_payload is not None and not _market_health_payload_has_no_latest(db_payload):
-            db_payload["breadth_score"] = breadth_score
-            db_payload["uptrend_score"] = uptrend_score
-            db_payload["ibd_distribution"] = ibd_distribution
-            db_payload["exposure_posture"] = exposure_posture
-            db_payload["theme_detector"] = theme_detector
-            return db_payload
-
         payload = _build_unavailable_market_health(benchmark=benchmark, data_source="unavailable")
         payload["breadth_score"] = breadth_score
         payload["uptrend_score"] = uptrend_score
@@ -93,6 +135,26 @@ class DashboardService:
         payload["exposure_posture"] = exposure_posture
         payload["theme_detector"] = theme_detector
         return payload
+
+
+def _dashboard_strategy_cards() -> list[dict[str, str]]:
+    return [
+        {"id": "rs", "label": "RS", "description": "Daily RS new high before price."},
+        {"id": "vcp", "label": "VCP", "description": "Volatility contraction pattern scan."},
+        {"id": "weekly_vcp", "label": "Weekly VCP", "description": "Weekly volatility contraction pattern scan."},
+        {"id": "cup_handle", "label": "Cup and Handle", "description": "Breakout candidate scan."},
+        {"id": "ftd_sweep", "label": "FTD Sweep", "description": "Recent FTD sweep breakout within the lookback window."},
+        {"id": "overlap", "label": "Report", "description": "Daily cross-strategy overlap report."},
+    ]
+
+
+def _missing_snapshot_metadata() -> dict[str, Any]:
+    return {"snapshot_run_id": None, "snapshot_generated_at": None, "source_data_as_of": None, "freshness": "missing"}
+
+
+def _market_health_as_of_date(payload: dict[str, Any]) -> str:
+    latest = ((payload.get("regime") or {}).get("latest") or {}) if isinstance(payload.get("regime"), dict) else {}
+    return str(latest.get("date") or "")
 
 
 def _build_market_health_payload(*, frame: pd.DataFrame, ticker: str, data_source: str, repository: DashboardRepository) -> dict[str, Any]:

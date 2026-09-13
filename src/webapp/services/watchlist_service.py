@@ -21,6 +21,7 @@ import requests
 import yfinance as yf
 
 from ...config import AppConfig
+from ...artifact_paths import watchlist_stem_from_path
 from ...canslim_screen import CANSLIM_HISTORY_DAYS, CANSLIM_INSIDER_LOOKBACK_DAYS, compute_canslim_frame_metrics, evaluate_canslim_ticker
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
@@ -690,8 +691,6 @@ class WatchlistService:
         reference_now = _normalize_scanner_now(now)
         default_target_trading_date = _latest_completed_trading_day(reference_now)
         latest_manual_refresh_day = _latest_manual_refresh_day(reference_now)
-        recent_watchlists = self.repository.list_recent_watchlists(limit=400)
-        latest_available_watchlist_date = _latest_watchlist_sort_date(recent_watchlists) or default_target_trading_date
         override_payload = self._load_scanner_board_override()
         override_target_date_text = _coerce_iso_date(override_payload.get("target_trading_date"))
         override_target_date = dt.date.fromisoformat(override_target_date_text) if override_target_date_text else None
@@ -701,10 +700,27 @@ class WatchlistService:
             override_target_date is not None
             and override_target_date >= default_target_trading_date
             and override_target_date <= latest_manual_refresh_day
-            and override_target_date <= latest_available_watchlist_date
         ):
             target_trading_date = override_target_date
             manual_override_active = override_target_date != default_target_trading_date
+
+        database_payload = self._get_scanner_board_from_database(
+            reference_now=reference_now,
+            target_trading_date=target_trading_date,
+            manual_override_active=manual_override_active,
+            override_target_date=override_target_date,
+            override_payload=override_payload,
+        )
+        if database_payload is not None:
+            return database_payload
+
+        # The file implementation remains intentionally limited to environments
+        # without a reachable database (for local development and recovery only).
+        recent_watchlists = self.repository.list_recent_watchlists(limit=400)
+        latest_available_watchlist_date = _latest_watchlist_sort_date(recent_watchlists) or default_target_trading_date
+        if override_target_date is not None and override_target_date > latest_available_watchlist_date:
+            target_trading_date = default_target_trading_date
+            manual_override_active = False
         cards: list[dict[str, Any]] = []
 
         for config in _SCANNER_BOARD_CONFIG:
@@ -754,6 +770,73 @@ class WatchlistService:
             "cutoff_time_label": "20:30 America/New_York",
             "latest_update_at": latest_update_at,
             "latest_signal_date": latest_signal_date,
+            "manual_override_active": manual_override_active,
+            "manual_override_target_date": override_target_date.isoformat() if override_target_date is not None else "",
+            "manual_override_requested_at": str(override_payload.get("requested_at") or ""),
+            "cards": cards,
+        }
+
+    def _get_scanner_board_from_database(
+        self,
+        *,
+        reference_now: dt.datetime,
+        target_trading_date: dt.date,
+        manual_override_active: bool,
+        override_target_date: dt.date | None,
+        override_payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        strategy_ids = [str(config["strategy_id"]) for config in _SCANNER_BOARD_CONFIG]
+        runs = self.repository.history_repository.list_latest_screen_runs_by_strategy(
+            strategy_ids=strategy_ids,
+            target_date=target_trading_date,
+        )
+        if runs is None:
+            return None
+        runs_by_strategy = {str(item.get("strategy_id") or ""): item for item in runs}
+        run_ids = [int(item.get("id") or 0) for item in runs if int(item.get("id") or 0) > 0]
+        previews = self.repository.history_repository.list_screen_run_preview_tickers(
+            screen_run_ids=run_ids,
+            excluded_tickers=self._get_excluded_tickers(),
+        )
+        if previews is None:
+            return None
+
+        cards: list[dict[str, Any]] = []
+        for config in _SCANNER_BOARD_CONFIG:
+            run = runs_by_strategy.get(str(config["strategy_id"]))
+            run_id = int(run.get("id") or 0) if isinstance(run, dict) else 0
+            preview_tickers = previews.get(run_id, [])
+            run_date = str(run.get("run_date") or "") if isinstance(run, dict) else ""
+            captured_at = str(run.get("created_at") or "") if isinstance(run, dict) else ""
+            artifact_path = str(run.get("watchlist_artifact_path") or "") if isinstance(run, dict) else ""
+            stem = watchlist_stem_from_path(artifact_path) if artifact_path else ""
+            entry_count = int(run.get("hit_count") or 0) if isinstance(run, dict) else 0
+            cards.append(
+                {
+                    "id": config["id"],
+                    "strategy_id": config["strategy_id"],
+                    "label": config["label"],
+                    "description": config["description"],
+                    "timeframe": config["timeframe"],
+                    "accent": config["accent"],
+                    "available": bool(run_id and entry_count > 0),
+                    "stem": stem,
+                    "group_label": "Database snapshot" if run_id else "",
+                    "captured_at": captured_at,
+                    "sort_date": run_date,
+                    "entry_count": entry_count,
+                    "preview_tickers": preview_tickers,
+                    "list_href": f"/watchlists?stem={stem}" if stem else None,
+                }
+            )
+        available_cards = [item for item in cards if item["available"]]
+        return {
+            "generated_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "reference_now_new_york": reference_now.astimezone(_NEW_YORK_TZ).isoformat(),
+            "target_trading_date": target_trading_date.isoformat(),
+            "cutoff_time_label": "20:30 America/New_York",
+            "latest_update_at": max((str(item["captured_at"] or "") for item in available_cards), default=""),
+            "latest_signal_date": max((str(item["sort_date"] or "") for item in available_cards), default=""),
             "manual_override_active": manual_override_active,
             "manual_override_target_date": override_target_date.isoformat() if override_target_date is not None else "",
             "manual_override_requested_at": str(override_payload.get("requested_at") or ""),
@@ -822,6 +905,52 @@ class WatchlistService:
         _write_scanner_top_hits_cache(cache_key, payload)
         return payload
 
+    def get_scanner_top_hits_snapshot_payload(self, *, now: dt.datetime | None = None) -> dict[str, Any]:
+        """Read the latest completed Top Hits snapshot without doing enrichment.
+
+        This is the request-path API.  Expensive universe, market and rating work is
+        intentionally confined to ``persist_scanner_top_hits_snapshot``.
+        """
+        reference_now = _normalize_scanner_now(now)
+        target_date = _latest_completed_trading_day(reference_now)
+        persisted = self._load_latest_persisted_scanner_top_hits_payload()
+        if persisted is None:
+            return {
+                "generated_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "reference_now_new_york": reference_now.astimezone(_NEW_YORK_TZ).isoformat(),
+                "target_trading_date": target_date.isoformat(),
+                "cutoff_time_label": "20:30 America/New_York",
+                "latest_update_at": "",
+                "latest_signal_date": "",
+                "manual_override_active": False,
+                "manual_override_target_date": "",
+                "manual_override_requested_at": "",
+                "cards": [],
+                "total_live_scanners": 0,
+                "total_unique_tickers": 0,
+                "overlapping_ticker_count": 0,
+                "rows": [],
+                "snapshot": {
+                    "snapshot_run_id": None,
+                    "snapshot_generated_at": None,
+                    "source_data_as_of": None,
+                    "age_seconds": None,
+                    "freshness": "missing",
+                    "refresh_status": "idle",
+                },
+            }
+        snapshot_date = _coerce_optional_date(persisted.get("target_trading_date"))
+        age_seconds = _snapshot_age_seconds(persisted.get("snapshot_generated_at"), reference_now)
+        persisted["snapshot"] = {
+            "snapshot_run_id": persisted.pop("_snapshot_run_id", None),
+            "snapshot_generated_at": persisted.pop("_snapshot_generated_at", persisted.get("generated_at") or None),
+            "source_data_as_of": persisted.get("target_trading_date") or None,
+            "age_seconds": age_seconds,
+            "freshness": "fresh" if snapshot_date == target_date else "stale",
+            "refresh_status": "idle",
+        }
+        return persisted
+
     def persist_scanner_top_hits_snapshot(
         self,
         *,
@@ -842,6 +971,7 @@ class WatchlistService:
             return payload
         run_date = dt.date.fromisoformat(target_trading_date_text)
         summary_payload = {
+            "snapshot_schema_version": "top-hits-v3",
             "generated_at": payload.get("generated_at"),
             "reference_now_new_york": payload.get("reference_now_new_york"),
             "target_trading_date": payload.get("target_trading_date"),
@@ -854,6 +984,7 @@ class WatchlistService:
             "total_live_scanners": int(payload.get("total_live_scanners") or 0),
             "total_unique_tickers": int(payload.get("total_unique_tickers") or 0),
             "overlapping_ticker_count": int(payload.get("overlapping_ticker_count") or 0),
+            "cards": copy.deepcopy(payload.get("cards") or []),
         }
         config_json = {
             "kind": "scanner_top_hits_snapshot",
@@ -896,6 +1027,52 @@ class WatchlistService:
             notes="Scanner top hits snapshot",
         )
         return payload
+
+    def _load_latest_persisted_scanner_top_hits_payload(self) -> dict[str, Any] | None:
+        """Load a full, immutable snapshot for the API response path."""
+        if not self.screener_history_service.is_configured():
+            return None
+        rows = self.screener_history_service.list_runs(
+            strategy_id=_SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID,
+            limit=1,
+        )
+        if not rows:
+            return None
+        run_id = int(rows[0].get("id") or 0)
+        if run_id <= 0:
+            return None
+        payload = self.screener_history_service.get_run(run_id, include_hits=True, hit_limit=5000)
+        if not isinstance(payload, dict):
+            return None
+        summary = payload.get("result_summary_json")
+        if not isinstance(summary, dict):
+            return None
+        hit_rows = payload.get("hits") if isinstance(payload.get("hits"), list) else []
+        snapshot_rows = [
+            copy.deepcopy(item.get("hit_payload_json"))
+            for item in hit_rows
+            if isinstance(item, dict) and isinstance(item.get("hit_payload_json"), dict)
+        ]
+        snapshot_rows.sort(key=lambda item: (-int(item.get("scanner_count") or 0), str(item.get("ticker") or "")))
+        generated_at = str(summary.get("generated_at") or payload.get("created_at") or "")
+        return {
+            "generated_at": generated_at,
+            "reference_now_new_york": str(summary.get("reference_now_new_york") or ""),
+            "target_trading_date": str(summary.get("target_trading_date") or payload.get("run_date") or ""),
+            "cutoff_time_label": str(summary.get("cutoff_time_label") or "20:30 America/New_York"),
+            "latest_update_at": str(summary.get("latest_update_at") or generated_at),
+            "latest_signal_date": str(summary.get("latest_signal_date") or payload.get("run_date") or ""),
+            "manual_override_active": bool(summary.get("manual_override_active")),
+            "manual_override_target_date": str(summary.get("manual_override_target_date") or ""),
+            "manual_override_requested_at": str(summary.get("manual_override_requested_at") or ""),
+            "cards": copy.deepcopy(summary.get("cards") or []),
+            "total_live_scanners": int(summary.get("total_live_scanners") or 0),
+            "total_unique_tickers": int(summary.get("total_unique_tickers") or 0),
+            "overlapping_ticker_count": int(summary.get("overlapping_ticker_count") or len(snapshot_rows)),
+            "rows": snapshot_rows,
+            "_snapshot_run_id": run_id,
+            "_snapshot_generated_at": generated_at,
+        }
 
     def _load_persisted_scanner_top_hits_payload(self, *, board_payload: dict[str, Any]) -> dict[str, Any] | None:
         if not self.screener_history_service.is_configured():
@@ -3056,6 +3233,19 @@ def _read_scanner_top_hits_cache(key: tuple[str, ...]) -> dict[str, Any] | None:
             _scanner_top_hits_cache.pop(key, None)
             return None
         return copy.deepcopy(payload)
+
+
+def _snapshot_age_seconds(value: object, reference_now: dt.datetime) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return max(0, int((reference_now - parsed.astimezone(dt.timezone.utc)).total_seconds()))
 
 
 def _write_scanner_top_hits_cache(key: tuple[str, ...], payload: dict[str, Any]) -> None:

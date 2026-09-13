@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { preloadChartsPage } from "../App";
 import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
@@ -22,6 +23,7 @@ export function ScannerTopHitsPage() {
   const auth = useAuth();
   const [payload, setPayload] = useState<ScannerTopHitsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
   const [notice, setNotice] = useState("");
   const [myPicksNotice, setMyPicksNotice] = useState("");
   const [search, setSearch] = useState("");
@@ -49,16 +51,20 @@ export function ScannerTopHitsPage() {
   const canManageMyPicks = auth.hasCapability("manage_exclusions");
 
   useEffect(() => {
+    const controller = new AbortController();
     setIsLoading(true);
     setNotice("");
-    void fetchJson<ScannerTopHitsResponse>("/api/scanner-board/top-hits")
+    void fetchJson<ScannerTopHitsResponse>("/api/scanner-board/top-hits", { signal: controller.signal })
       .then(setPayload)
       .catch((error) => {
-        setPayload(null);
+        if (controller.signal.aborted) return;
         setNotice(error instanceof Error ? error.message : "Failed to load scanner top hits.");
       })
-      .finally(() => setIsLoading(false));
-  }, []);
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoading(false);
+      });
+    return () => controller.abort();
+  }, [reloadKey]);
 
   useEffect(() => {
     if (!canManageMyPicks) {
@@ -75,6 +81,7 @@ export function ScannerTopHitsPage() {
   }, [canManageMyPicks]);
 
   const rows = payload?.rows ?? [];
+  const snapshot = payload?.snapshot;
   const sectors = useMemo(
     () => Array.from(new Set(rows.map((row) => row.sector).filter((sector) => sector && sector !== "Unknown sector"))).sort(),
     [rows],
@@ -433,6 +440,8 @@ export function ScannerTopHitsPage() {
             </Link>
           </div>
           <span className="panel-copy">Updated {formatLocalDateTime(payload?.latest_update_at)}.</span>
+          {snapshot?.freshness === "stale" ? <span className="panel-copy earnings-console-note">Showing the latest completed snapshot while a newer market day is pending.</span> : null}
+          {snapshot?.freshness === "missing" ? <span className="panel-copy earnings-console-note">No completed Top Hits snapshot is available yet. Run “Build Top Hits Snapshot” after the scanner batch.</span> : null}
         </div>
         <div className="scanner-result-filter panel scanner-result-filter-actions">
           <span className="eyebrow">View</span>
@@ -457,11 +466,11 @@ export function ScannerTopHitsPage() {
       </section>
 
       <section className="scanner-result-table-shell panel">
-        {isLoading ? <LoadingBlock label="Loading scanner top hits…" /> : null}
-        {notice ? <p className="panel-copy">{notice}</p> : null}
+        {isLoading && !payload ? <LoadingBlock label="Loading scanner top hits…" /> : null}
+        {notice ? <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></p> : null}
         {!notice && myPicksNotice ? <p className="panel-copy earnings-console-note">{myPicksNotice}</p> : null}
         {!isLoading && !notice && filteredRows.length === 0 ? <p className="panel-copy">No tickers match current filters.</p> : null}
-        {!isLoading && !notice && filteredRows.length > 0 ? (
+        {filteredRows.length > 0 ? (
           <>
             <div className="scanner-top-hits-toolbar">
               <span>{formatCount(filteredRows.length)} names</span>
@@ -551,7 +560,7 @@ export function ScannerTopHitsPage() {
                       ) : null}
                       <td data-label="Ticker">
                         <div className="scanner-result-company">
-                          <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)}>
+                          <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>
                             {row.ticker}
                           </Link>
                           <span>{row.company || row.industry || "-"}</span>
@@ -682,7 +691,7 @@ function ScannerTopHitChartCard({
                 }}
               />
             ) : null}
-            <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)}>
+            <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>
               <span>{row.ticker}</span>
             </Link>
           </div>
@@ -728,7 +737,7 @@ function ScannerTopHitChartCard({
       </div>
       <div className="scanner-chart-card-footer">
         <span>{chartPayload?.resolved_as_of_date ? `As of ${chartPayload.resolved_as_of_date}` : `Signal ${formatLocalDate(boardSignalDate)}`}</span>
-        <Link to={buildChartHref(row.ticker)}>Analyze Full Chart</Link>
+        <Link to={buildChartHref(row.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>Analyze Full Chart</Link>
       </div>
     </article>
   );
