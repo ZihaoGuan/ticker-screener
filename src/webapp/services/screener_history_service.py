@@ -166,15 +166,16 @@ class ScreenerHistoryService:
         scope_hash = stable_json_hash(scope_json)
         signal_date = self._resolve_run_date(summary_payload, options)
         failed_ticker_count = self._coerce_failure_count(summary_payload.get("failed_tickers"))
+        rows = self._build_hit_rows(strategy_id=strategy_id, signal_date=signal_date, raw_payload=raw_payload)
+        passed_ticker_count = sum(1 for row in rows if row.get("passed"))
         result_summary = {
             "date_label": summary_payload.get("date_label"),
             "as_of_date": summary_payload.get("as_of_date"),
             "total_tickers": int(summary_payload.get("total_tickers") or 0),
-            "passed_tickers": int(summary_payload.get("passed_tickers") or 0),
+            "passed_tickers": passed_ticker_count,
             "failed_tickers": failed_ticker_count,
         }
         source_kind = str(summary_payload.get("source") or ("manual-tickers" if scope_json["tickers"] else "exchange-universe"))
-        rows = self._build_hit_rows(strategy_id=strategy_id, signal_date=signal_date, raw_payload=raw_payload)
         return self.repository.upsert_screen_run_and_replace_hits(
             strategy_id=strategy_id,
             run_date=signal_date,
@@ -185,7 +186,7 @@ class ScreenerHistoryService:
             scope_hash=scope_hash,
             market_data_mode=str(options.get("market_data_source") or "internet"),
             source_kind=source_kind,
-            hit_count=int(summary_payload.get("passed_tickers") or 0),
+            hit_count=passed_ticker_count,
             failure_count=failed_ticker_count,
             result_summary_json=result_summary,
             raw_artifact_path=str(summary_payload.get("raw_results_file") or ""),

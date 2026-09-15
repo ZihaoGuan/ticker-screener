@@ -119,6 +119,34 @@ class ScreenerHistoryServiceTests(unittest.TestCase):
         self.assertEqual(self.repository.screen_run_payload["failure_count"], 1)
         self.assertEqual((self.repository.screen_run_payload["result_summary_json"] or {})["failed_tickers"], 1)
 
+    def test_persist_screen_run_derives_hit_count_from_persisted_rows(self) -> None:
+        summary_payload = {
+            "date_label": "2026-09-14",
+            "source": "finviz.screener",
+            "total_candidates": 2,
+            "returned_candidates": 2,
+            "raw_results_file": "/tmp/raw.json",
+            "watchlist_file": "/tmp/watch.json",
+        }
+        raw_payload = {
+            "hits": [
+                {"ticker": "AAPL"},
+                {"ticker": "NVDA"},
+            ],
+        }
+
+        self.service.persist_screen_run(
+            strategy_id="finviz_pattern_wedgeresistance2",
+            options={"market_data_source": "internet", "tickers": []},
+            summary_payload=summary_payload,
+            raw_payload=raw_payload,
+        )
+
+        assert self.repository.screen_run_payload is not None
+        self.assertEqual(self.repository.screen_run_payload["hit_count"], 2)
+        self.assertEqual((self.repository.screen_run_payload["result_summary_json"] or {})["passed_tickers"], 2)
+        self.assertEqual(len(self.repository.hit_rows or []), 2)
+
     def test_json_dumps_normalizes_non_finite_numbers(self) -> None:
         payload = {
             "revenue_3y_cagr_pct": math.nan,
