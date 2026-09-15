@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import datetime as dt
-from pathlib import Path
-import sys
 from typing import Any, Protocol, Sequence
 
 from .earnings_growth_screen import AKShareGrowthClient, YFinanceGrowthClient
+from .finviz_screener_rows import SafeFinvizScreener
 from .ratings.finviz_parser import _coerce_number
 
 
@@ -69,27 +68,7 @@ class FundamentalQualityScreenResult:
 
 
 def _load_finviz_screener() -> type[Any]:
-    try:
-        from finviz.screener import Screener
-    except ImportError:
-        project_root = Path(__file__).resolve().parents[1]
-        vendored_root = project_root / "finviz"
-        if vendored_root.exists():
-            vendored_path = str(vendored_root)
-            if vendored_path not in sys.path:
-                sys.path.insert(0, vendored_path)
-            sys.modules.pop("finviz", None)
-            try:
-                from finviz.screener import Screener
-            except ImportError as exc:
-                raise RuntimeError(
-                    "finviz dependency missing. Install requirements-finviz.txt or requirements.txt before running screen."
-                ) from exc
-        else:
-            raise RuntimeError(
-                "finviz dependency missing. Install requirements-finviz.txt or requirements.txt before running screen."
-            )
-    return Screener
+    return SafeFinvizScreener
 
 
 def _normalize_ticker_list(tickers: Sequence[str] | None) -> set[str]:

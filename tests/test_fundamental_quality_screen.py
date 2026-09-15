@@ -9,10 +9,12 @@ import pandas as pd
 from src.earnings_growth_screen import _extract_annual_fundamentals_from_frame
 from src.fundamental_quality_screen import (
     FUNDAMENTAL_QUALITY_FILTERS,
+    _load_finviz_screener,
     compute_diluted_eps_1y_growth_pct,
     compute_revenue_3y_cagr_pct,
     run_fundamental_quality_screen,
 )
+from src.finviz_screener_rows import SafeFinvizScreener
 
 
 class _FakeAnnualClient:
@@ -55,6 +57,9 @@ class _FakeScreener(list):
 
 
 class FundamentalQualityScreenTests(unittest.TestCase):
+    def test_prefilter_uses_safe_link_aware_finviz_parser(self) -> None:
+        self.assertIs(_load_finviz_screener(), SafeFinvizScreener)
+
     def test_extract_annual_fundamentals_from_frame_keeps_revenue_and_diluted_eps(self) -> None:
         frame = pd.DataFrame(
             {
