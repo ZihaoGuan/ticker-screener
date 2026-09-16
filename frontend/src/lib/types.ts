@@ -1613,7 +1613,7 @@ export type ScreenerRunsResponse = {
   available_strategies: Array<{ id: string; label: string }>;
 };
 
-export type ScheduledJobStatus = "running" | "success" | "failed" | "unknown";
+export type ScheduledJobStatus = "queued" | "running" | "waiting" | "success" | "failed" | "unknown";
 
 export type ScheduledJobSummary = {
   job_id: string;

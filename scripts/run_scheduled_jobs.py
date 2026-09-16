@@ -28,6 +28,7 @@ STATE_FILE = STATUS_DIR / "scheduler-state.json"
 DEPLOY_DIR = PROJECT_ROOT / "deploy"
 WRAPPER_SCRIPT = PROJECT_ROOT / "scripts" / "run_with_status.sh"
 _PERSISTED_SCREEN_RUN_PATTERN = re.compile(r"Persisted screen run id=(\d+)")
+_SNAPSHOT_WAITING_PATTERN = re.compile(r"^SNAPSHOT_WAITING:\s*(.+)$", re.MULTILINE)
 
 
 def _load_state() -> dict[str, str]:
@@ -131,6 +132,23 @@ def _sync_scheduler_persistence_from_status(job_id: str) -> None:
             persistence_message="Persistence pending.",
         )
         return
+    log_file = str(payload.get("log_file") or "").strip()
+    if status == "success" and log_file:
+        try:
+            log_text = Path(log_file).read_text(encoding="utf-8")
+        except Exception:
+            log_text = ""
+        waiting_match = _SNAPSHOT_WAITING_PATTERN.search(log_text)
+        if waiting_match:
+            payload["status"] = "waiting"
+            payload["message"] = waiting_match.group(1).strip()
+            payload["persisted_to_db"] = None
+            payload["screen_run_id"] = None
+            payload["persistence_message"] = "Snapshot build deferred; prior completed snapshot remains active."
+            tmp_path = status_path.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            tmp_path.replace(status_path)
+            return
     if status != "success":
         _update_scheduler_persistence_status(
             job_id=job_id,

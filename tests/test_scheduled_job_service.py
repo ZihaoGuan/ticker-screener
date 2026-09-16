@@ -128,6 +128,22 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertEqual(job["options"], {})
         self.assertEqual(self.service.list_jobs()[0]["options"], {})
 
+    def test_snapshot_schedule_preserves_required_job_ids_and_passes_them_to_the_script(self) -> None:
+        job = self.service.upsert_job(
+            job_id="top_hits_snapshot",
+            job_label="Build Top Hits Snapshot",
+            action_id="build_scanner_top_hits_snapshot",
+            cron_expr="20 20 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            options={"required_job_ids": "daily_rs, technical_ratings"},
+        )
+
+        command = self.run_service.build_command(job["action_id"], job["options"])
+
+        self.assertEqual(job["options"]["required_job_ids"], ["daily_rs", "technical_ratings"])
+        self.assertEqual(command[-4:], ["--required-job-id", "daily_rs", "--required-job-id", "technical_ratings"])
+
     def test_template_resolution_expands_date_tokens(self) -> None:
         local_now = dt.datetime(2026, 6, 6, 8, 15)
 

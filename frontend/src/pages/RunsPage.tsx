@@ -734,6 +734,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     if (status === "queued" || status === "running" || status === "success" || status === "failed") {
       return <StatusPill status={status} />;
     }
+    if (status === "waiting") {
+      return <span className="schedule-chip schedule-chip-soft">Waiting for prerequisites</span>;
+    }
     return <span className="status-pill status-unknown">{status || "unknown"}</span>;
   };
 

@@ -309,6 +309,13 @@ class RunService:
         help_text="Choose the exact Finviz chart pattern filter to run.",
         options=FINVIZ_PATTERN_OPTIONS,
     )
+    _required_job_ids_field = RunField(
+        "required_job_ids",
+        "Required Scheduled Jobs",
+        "text",
+        placeholder="daily_rs, technical_ratings",
+        help_text="Comma-separated scheduler job IDs that must complete successfully for today's New York market date before this snapshot is rebuilt.",
+    )
     _actions = {
         "screener_history_batch": RunAction(
             "screener_history_batch",
@@ -322,12 +329,14 @@ class RunService:
             "Build Top Hits Snapshot",
             "scripts/build_scanner_top_hits_snapshot.py",
             supports_limit=False,
+            fields=(_required_job_ids_field,),
         ),
         "build_dashboard_market_health_snapshot": RunAction(
             "build_dashboard_market_health_snapshot",
             "Build Dashboard Market Snapshot",
             "scripts/build_dashboard_market_health_snapshot.py",
             supports_limit=False,
+            fields=(_required_job_ids_field,),
         ),
         "signal_warm_batch": RunAction(
             "signal_warm_batch",
@@ -2701,6 +2710,9 @@ class RunService:
             command.extend(["--market-data-mode", str(normalized_options["market_data_mode"])])
         if normalized_options.get("pattern"):
             command.extend(["--pattern", str(normalized_options["pattern"])])
+        if action_id in {"build_scanner_top_hits_snapshot", "build_dashboard_market_health_snapshot"}:
+            for job_id in normalized_options.get("required_job_ids") or []:
+                command.extend(["--required-job-id", str(job_id)])
         if action_id in {"screener_history_batch", "signal_warm_batch"} and normalized_options.get("market_data_source"):
             command.extend(["--market-data-source", str(normalized_options["market_data_source"])])
         if action_id in {"screener_history_batch", "signal_warm_batch", "overlap_backtest_v1"} and normalized_options.get("job_run_id") is not None:
@@ -2841,6 +2853,14 @@ class RunService:
         if strategy_ids:
             normalized["strategy_ids"] = strategy_ids
             normalized["strategy_ids_json"] = json.dumps(strategy_ids)
+
+        required_job_ids = options.get("required_job_ids")
+        if isinstance(required_job_ids, str):
+            required_job_ids = re.split(r"[\s,]+", required_job_ids.strip())
+        if isinstance(required_job_ids, list):
+            normalized_ids = list(dict.fromkeys(str(item).strip() for item in required_job_ids if str(item).strip()))
+            if normalized_ids:
+                normalized["required_job_ids"] = normalized_ids
 
         hold_periods_json = options.get("hold_periods_json")
         if isinstance(hold_periods_json, str) and hold_periods_json.strip():

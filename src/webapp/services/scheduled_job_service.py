@@ -81,7 +81,11 @@ class ScheduledJobService:
         action = self.run_service._actions.get(clean_action_id)
         if action is None:
             raise ValueError(f"Unknown action_id: {clean_action_id}")
-        self.run_service._normalize_options(action, clean_options)
+        normalized_options = self.run_service._normalize_options(action, clean_options)
+        # Preserve action-specific schedule options verbatim (some are not CLI
+        # fields), while storing this scheduler-owned list in its canonical form.
+        if "required_job_ids" in normalized_options:
+            clean_options["required_job_ids"] = normalized_options["required_job_ids"]
 
         payload = self._load_jobs()
         jobs = [item for item in payload.get("jobs", []) if isinstance(item, dict)]
