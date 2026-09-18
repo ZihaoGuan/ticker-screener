@@ -37,7 +37,7 @@ const CHART_PAGE_SIZE = 9;
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "sean_breakout", "venu_scanner"]);
 const PINNED_SCANNER_OPTIONS = [{ id: "weekly_candidate_pool", label: "Weekly Candidate Pool" }];
 const FILTER_PRESETS_STORAGE_KEY = "top-hits-filter-presets";
-const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
+const EMPTY_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   sectorFilter: "all",
   eliteOnly: false,
   hasLeadershipScannerOnly: false,
@@ -53,6 +53,13 @@ const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   sortBy: "hits",
   sortDirection: "desc",
   viewMode: "list",
+};
+const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
+  ...EMPTY_TOP_HITS_FILTERS,
+  scannerGroups: [
+    ["weekly_candidate_pool", "kai_s2"],
+    ["venu_scanner", "trend_template", "one_year_winners", "finviz_smallover_sales_growth_trend", "sean_breakout"],
+  ],
 };
 
 export function ScannerTopHitsPage() {
@@ -414,7 +421,7 @@ export function ScannerTopHitsPage() {
             const name = event.target.value;
             setSelectedPresetName(name);
             applyFilterPreset(name ? presetStore.presets[name] : DEFAULT_TOP_HITS_FILTERS);
-            setPresetNotice(name ? `${name} loaded.` : "Filters cleared.");
+            setPresetNotice(name ? `${name} loaded.` : "Built-in default loaded.");
           }}>
             <option value="">No preset</option>
             {Object.keys(presetStore.presets).sort().map((name) => (
@@ -440,11 +447,11 @@ export function ScannerTopHitsPage() {
             };
             updatePresetStore(nextStore, `${selectedPresetName} deleted.`);
             setSelectedPresetName("");
-            applyFilterPreset(DEFAULT_TOP_HITS_FILTERS);
+            applyFilterPreset(EMPTY_TOP_HITS_FILTERS);
           }}>Delete</button> : null}
           <button type="button" className="ghost-button" onClick={() => {
             setSelectedPresetName("");
-            applyFilterPreset(DEFAULT_TOP_HITS_FILTERS);
+            applyFilterPreset(EMPTY_TOP_HITS_FILTERS);
             setPresetNotice("Filters cleared.");
           }}>Clear filters</button>
         </div>

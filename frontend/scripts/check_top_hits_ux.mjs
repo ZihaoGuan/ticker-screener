@@ -19,6 +19,13 @@ try {
   });
   await page.goto(process.env.TOP_HITS_URL || 'http://127.0.0.1:5173/scanner/top-hits');
   const cells = page.locator('td[data-label="Scanners"]');
+  await page.getByText('No tickers match current filters.', { exact: true }).waitFor();
+  assert.match(
+    await page.getByLabel('Scanner filter expression').innerText(),
+    /Weekly Candidate Pool[\s\S]*kai_s2[\s\S]*AND Group 2[\s\S]*one_year_winners/i,
+    'Built-in scanner groups load by default',
+  );
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
   await cells.first().waitFor();
   assert.equal(await cells.first().locator('a').count(), 3);
   await cells.first().getByRole('button', { name: '+9 more', exact: true }).click();
@@ -67,8 +74,10 @@ try {
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
   assert.equal(await cells.count(), 2);
   await page.reload();
-  await cells.first().waitFor();
+  await page.getByText('No tickers match current filters.', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('My momentum', { exact: true }).count(), 1, 'Alias persists');
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await cells.first().waitFor();
   await page.getByLabel('My momentum', { exact: true }).check();
   await page.getByRole('button', { name: 'Charts', exact: true }).click();
   assert.match(await page.locator('.scanner-top-hit-chart-card').first().innerText(), /My momentum/i);
@@ -80,6 +89,7 @@ try {
   await page.screenshot({ path: '/tmp/top-hits-desktop.png', fullPage: true });
   admin = false;
   await page.reload();
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
   await cells.first().waitFor();
   assert.equal(await page.locator('.pinned-pick').count(), 0);
   const visitorBefore = await pinned.boundingBox();
