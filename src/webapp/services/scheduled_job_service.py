@@ -84,8 +84,9 @@ class ScheduledJobService:
         normalized_options = self.run_service._normalize_options(action, clean_options)
         # Preserve action-specific schedule options verbatim (some are not CLI
         # fields), while storing this scheduler-owned list in its canonical form.
-        if "required_job_ids" in normalized_options:
-            clean_options["required_job_ids"] = normalized_options["required_job_ids"]
+        for option_key in ("required_job_ids", "required_job_groups"):
+            if option_key in normalized_options:
+                clean_options[option_key] = normalized_options[option_key]
 
         payload = self._load_jobs()
         jobs = [item for item in payload.get("jobs", []) if isinstance(item, dict)]

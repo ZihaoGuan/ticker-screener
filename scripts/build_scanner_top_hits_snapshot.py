@@ -19,11 +19,15 @@ from src.webapp.services.snapshot_preflight import check_required_scheduled_jobs
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the Top Hits snapshot after its scheduled prerequisites complete.")
     parser.add_argument("--required-job-id", action="append", default=[], help="Scheduled job ID required to finish successfully today (repeatable).")
+    parser.add_argument("--required-job-group", action="append", default=[], help="Scheduled prerequisite group (repeatable).")
+    parser.add_argument("--skip-if-current", action="store_true", help="Do not rebuild when today's completed snapshot already exists.")
     args = parser.parse_args(argv)
     config = load_webapp_config()
     preflight = check_required_scheduled_jobs(
         status_dir=config.artifacts_dir / "status",
         required_job_ids=args.required_job_id,
+        required_job_groups=args.required_job_group,
+        project_root=PROJECT_ROOT,
     )
     if not preflight.ready:
         print(
@@ -36,6 +40,10 @@ def main(argv: list[str] | None = None) -> int:
         database_url=config.database_url,
         market_data_source=config.market_data_source,
     )
+    existing = service.get_scanner_top_hits_snapshot_payload()
+    if args.skip_if_current and (existing.get("snapshot") or {}).get("freshness") == "fresh":
+        print("SNAPSHOT_CURRENT: Top Hits already has a completed snapshot for the current market date.")
+        return 0
     payload = service.persist_scanner_top_hits_snapshot()
     if payload is None:
         print("Top Hits snapshot skipped: database is not configured.")

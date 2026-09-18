@@ -29,6 +29,7 @@ DEPLOY_DIR = PROJECT_ROOT / "deploy"
 WRAPPER_SCRIPT = PROJECT_ROOT / "scripts" / "run_with_status.sh"
 _PERSISTED_SCREEN_RUN_PATTERN = re.compile(r"Persisted screen run id=(\d+)")
 _SNAPSHOT_WAITING_PATTERN = re.compile(r"^SNAPSHOT_WAITING:\s*(.+)$", re.MULTILINE)
+_SNAPSHOT_CURRENT_PATTERN = re.compile(r"^SNAPSHOT_CURRENT:\s*(.+)$", re.MULTILINE)
 
 
 def _load_state() -> dict[str, str]:
@@ -145,6 +146,14 @@ def _sync_scheduler_persistence_from_status(job_id: str) -> None:
             payload["persisted_to_db"] = None
             payload["screen_run_id"] = None
             payload["persistence_message"] = "Snapshot build deferred; prior completed snapshot remains active."
+            tmp_path = status_path.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            tmp_path.replace(status_path)
+            return
+        current_match = _SNAPSHOT_CURRENT_PATTERN.search(log_text)
+        if current_match:
+            payload["message"] = current_match.group(1).strip()
+            payload["persistence_message"] = "Snapshot is already current; no rebuild was needed."
             tmp_path = status_path.with_suffix(".tmp")
             tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
             tmp_path.replace(status_path)

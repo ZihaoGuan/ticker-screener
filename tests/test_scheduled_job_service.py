@@ -136,13 +136,14 @@ class ScheduledJobServiceTests(unittest.TestCase):
             cron_expr="20 20 * * 1-5",
             cron_tz="America/New_York",
             enabled=True,
-            options={"required_job_ids": "daily_rs, technical_ratings"},
+            options={"required_job_ids": "daily_rs, technical_ratings", "required_job_groups": "daily_scanner_batch", "skip_if_current": True},
         )
 
         command = self.run_service.build_command(job["action_id"], job["options"])
 
         self.assertEqual(job["options"]["required_job_ids"], ["daily_rs", "technical_ratings"])
-        self.assertEqual(command[-4:], ["--required-job-id", "daily_rs", "--required-job-id", "technical_ratings"])
+        self.assertEqual(job["options"]["required_job_groups"], ["daily_scanner_batch"])
+        self.assertEqual(command[-7:], ["--required-job-id", "daily_rs", "--required-job-id", "technical_ratings", "--required-job-group", "daily_scanner_batch", "--skip-if-current"])
 
     def test_template_resolution_expands_date_tokens(self) -> None:
         local_now = dt.datetime(2026, 6, 6, 8, 15)

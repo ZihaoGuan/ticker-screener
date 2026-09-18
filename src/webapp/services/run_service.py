@@ -316,6 +316,19 @@ class RunService:
         placeholder="daily_rs, technical_ratings",
         help_text="Comma-separated scheduler job IDs that must complete successfully for today's New York market date before this snapshot is rebuilt.",
     )
+    _required_job_groups_field = RunField(
+        "required_job_groups",
+        "Required Job Groups",
+        "text",
+        placeholder="daily_scanner_batch",
+        help_text="Comma-separated scheduler prerequisite groups. daily_scanner_batch waits for every enabled daily scanner scheduled at 18:00 New York time.",
+    )
+    _skip_if_current_field = RunField(
+        "skip_if_current",
+        "Skip If Snapshot Is Current",
+        "boolean",
+        help_text="For retry schedules: do not rebuild after a successful snapshot already exists for the current market date.",
+    )
     _actions = {
         "screener_history_batch": RunAction(
             "screener_history_batch",
@@ -329,14 +342,14 @@ class RunService:
             "Build Top Hits Snapshot",
             "scripts/build_scanner_top_hits_snapshot.py",
             supports_limit=False,
-            fields=(_required_job_ids_field,),
+            fields=(_required_job_ids_field, _required_job_groups_field, _skip_if_current_field),
         ),
         "build_dashboard_market_health_snapshot": RunAction(
             "build_dashboard_market_health_snapshot",
             "Build Dashboard Market Snapshot",
             "scripts/build_dashboard_market_health_snapshot.py",
             supports_limit=False,
-            fields=(_required_job_ids_field,),
+            fields=(_required_job_ids_field, _required_job_groups_field, _skip_if_current_field),
         ),
         "signal_warm_batch": RunAction(
             "signal_warm_batch",
@@ -2713,6 +2726,10 @@ class RunService:
         if action_id in {"build_scanner_top_hits_snapshot", "build_dashboard_market_health_snapshot"}:
             for job_id in normalized_options.get("required_job_ids") or []:
                 command.extend(["--required-job-id", str(job_id)])
+            for group_name in normalized_options.get("required_job_groups") or []:
+                command.extend(["--required-job-group", str(group_name)])
+            if normalized_options.get("skip_if_current"):
+                command.append("--skip-if-current")
         if action_id in {"screener_history_batch", "signal_warm_batch"} and normalized_options.get("market_data_source"):
             command.extend(["--market-data-source", str(normalized_options["market_data_source"])])
         if action_id in {"screener_history_batch", "signal_warm_batch", "overlap_backtest_v1"} and normalized_options.get("job_run_id") is not None:
@@ -2830,6 +2847,8 @@ class RunService:
             normalized["retry_failed_from_manifest"] = bool(options.get("retry_failed_from_manifest"))
         if "ensure_schema" in options:
             normalized["ensure_schema"] = bool(options.get("ensure_schema"))
+        if "skip_if_current" in options:
+            normalized["skip_if_current"] = bool(options.get("skip_if_current"))
 
         for key in (
             "include_sectors",
@@ -2854,13 +2873,14 @@ class RunService:
             normalized["strategy_ids"] = strategy_ids
             normalized["strategy_ids_json"] = json.dumps(strategy_ids)
 
-        required_job_ids = options.get("required_job_ids")
-        if isinstance(required_job_ids, str):
-            required_job_ids = re.split(r"[\s,]+", required_job_ids.strip())
-        if isinstance(required_job_ids, list):
-            normalized_ids = list(dict.fromkeys(str(item).strip() for item in required_job_ids if str(item).strip()))
-            if normalized_ids:
-                normalized["required_job_ids"] = normalized_ids
+        for option_key in ("required_job_ids", "required_job_groups"):
+            values = options.get(option_key)
+            if isinstance(values, str):
+                values = re.split(r"[\s,]+", values.strip())
+            if isinstance(values, list):
+                normalized_values = list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+                if normalized_values:
+                    normalized[option_key] = normalized_values
 
         hold_periods_json = options.get("hold_periods_json")
         if isinstance(hold_periods_json, str) and hold_periods_json.strip():

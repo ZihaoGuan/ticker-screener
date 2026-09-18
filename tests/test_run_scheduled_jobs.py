@@ -28,6 +28,26 @@ class RunScheduledJobsTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], "waiting")
         self.assertIn("prior completed snapshot remains active", payload["persistence_message"])
+
+    def test_sync_scheduler_persistence_marks_current_snapshot_as_successful_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_status_dir = module.STATUS_DIR
+            try:
+                module.STATUS_DIR = Path(temp_dir)
+                log_path = module.STATUS_DIR / "snapshot.log"
+                log_path.write_text("SNAPSHOT_CURRENT: Top Hits already has a completed snapshot.\n", encoding="utf-8")
+                status_path = module.STATUS_DIR / "top_hits.json"
+                status_path.write_text(
+                    json.dumps({"job_id": "top_hits", "status": "success", "log_file": str(log_path)}), encoding="utf-8"
+                )
+
+                module._sync_scheduler_persistence_from_status("top_hits")
+                payload = json.loads(status_path.read_text(encoding="utf-8"))
+            finally:
+                module.STATUS_DIR = original_status_dir
+
+        self.assertEqual(payload["status"], "success")
+        self.assertIn("no rebuild was needed", payload["persistence_message"])
     def test_sync_scheduler_persistence_from_status_marks_success_when_log_contains_screen_run_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             original_status_dir = module.STATUS_DIR
