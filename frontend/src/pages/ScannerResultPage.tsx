@@ -510,7 +510,7 @@ export function ScannerResultPage() {
                   <thead>
                     <tr>
                       <th>#</th>
-                      <th>{renderSortHeader("Symbol", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th className="pinned-ticker">{renderSortHeader("Symbol", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                       <th>{renderSortHeader("Company", "company", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                       <th>{renderSortHeader("Sector", "sector", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                       <th>{renderSortHeader("Day Vol", "volume", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
@@ -533,7 +533,7 @@ export function ScannerResultPage() {
                     {pagedRows.map((row, index) => (
                       <tr key={`${row.ticker}-${index}`}>
                         <td data-label="#">{(normalizedPage - 1) * pageSize + index + 1}</td>
-                        <td data-label="Symbol">
+                        <td className="pinned-ticker" data-label="Symbol">
                           <Link className="scanner-result-symbol" to={row.chartHref}>
                             <span>{row.ticker}</span>
                             {row.isNew ? <span className="scanner-inline-badge is-new">New</span> : null}

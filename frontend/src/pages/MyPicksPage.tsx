@@ -583,7 +583,7 @@ function PicksTable({
         <thead>
           <tr>
             <th>{renderSortHeader("Added", "added_at", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-            <th>{renderSortHeader("Ticker", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+            <th className="pinned-ticker">{renderSortHeader("Ticker", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("Sector / Industry", "sector_industry", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("Close", "latest_close", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
             <th>{renderSortHeader("1D %", "change_1d_pct", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
@@ -622,7 +622,7 @@ function PicksTable({
           {rows.map((row) => (
             <tr key={row.id}>
               <td data-label="Added">{formatLocalDateTime(row.added_at)}</td>
-              <td data-label="Ticker">
+              <td className="pinned-ticker" data-label="Ticker">
                 <Link to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
               </td>
               <td data-label="Sector / Industry">{[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}</td>

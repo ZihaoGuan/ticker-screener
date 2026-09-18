@@ -5495,3 +5495,63 @@ a {
     height: 520px;
   }
 }
+
+/* Top Hits keeps the frequent controls visible and groups the detailed filters. */
+.top-hits-filter-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #a1a1aa;
+}
+.scanner-result-filter-grid.top-hits-filters {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-items: start;
+}
+.top-hits-filter-group > summary {
+  padding: 16px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.top-hits-filter-group-body { border-top: 1px solid #27272a; }
+.top-hits-scanner-group { grid-column: 1 / -1; }
+.scanner-top-hit-filter-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 4px 16px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.scanner-result-check.is-selected { color: #fbbf24; }
+.top-hits-scanner-badges { width: 280px; max-width: 100%; }
+.top-hits-scanner-badges .scanner-top-hit-pills { flex-direction: column; align-items: flex-start; gap: 4px; }
+.top-hits-scanner-badges .scanner-card-pill { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.scanner-card-pill.is-selected { background: #493715; border-color: #fbbf24; color: #fde68a; font-weight: 700; }
+.top-hits-scanner-toggle { background: none; border: 0; color: #fbbf24; cursor: pointer; padding: 8px 0; font: inherit; }
+@media (min-width: 768px) {
+  .data-table .pinned-ticker,
+  .data-table .pinned-pick {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #18181b;
+    box-shadow: 1px 0 #3f3f46;
+  }
+  .data-table th.pinned-ticker,
+  .data-table th.pinned-pick { z-index: 2; background: #222226; }
+  .data-table .pinned-pick { width: 80px; min-width: 80px; max-width: 80px; }
+  .data-table .pinned-pick + .pinned-ticker { left: 80px; }
+  .scanner-top-hits-table .pinned-ticker { min-width: 180px; width: 180px; max-width: 180px; }
+  .scanner-top-hits-table .pinned-ticker .scanner-result-company { width: 160px; overflow-wrap: anywhere; }
+  .scanner-top-hits-table td[data-label="Scanners"] { min-width: 300px; }
+}
+
+.scanner-top-hits-page .scanner-result-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 768px) {
+  .scanner-top-hits-page .scanner-result-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

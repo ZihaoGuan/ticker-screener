@@ -27,6 +27,15 @@ export function ScannerTopHitsPage() {
   const [notice, setNotice] = useState("");
   const [myPicksNotice, setMyPicksNotice] = useState("");
   const [search, setSearch] = useState("");
+  const [scannerSearch, setScannerSearch] = useState("");
+  const [scannerNames, setScannerNames] = useState<Record<string, string>>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem("top-hits-scanner-names") || "{}");
+      return saved && typeof saved === "object" && !Array.isArray(saved)
+        ? Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim().length > 0)) : {};
+    } catch { return {}; }
+  });
+  const [nameNotice, setNameNotice] = useState("");
   const [sectorFilter, setSectorFilter] = useState("all");
   const [eliteOnly, setEliteOnly] = useState(false);
   const [hasLeadershipScannerOnly, setHasLeadershipScannerOnly] = useState(false);
@@ -101,6 +110,8 @@ export function ScannerTopHitsPage() {
       .map(([id, label]) => ({ id, label }))
       .sort((left, right) => left.label.localeCompare(right.label));
   }, [rows]);
+  const visibleScannerOptions = scannerOptions.filter((scanner) =>
+    `${scanner.label} ${scannerNames[scanner.id] || ""}`.toLowerCase().includes(scannerSearch.trim().toLowerCase()));
   const normalizedLeaderRsRange = useMemo(() => normalizeRsRatingRange(leaderRsMin, leaderRsMax), [leaderRsMin, leaderRsMax]);
   const normalizedRsEvidenceMin = useMemo(() => normalizeBoundedInteger(rsEvidenceMin, 0, 9, 5), [rsEvidenceMin]);
   const normalizedRsDaysMinPct = useMemo(() => normalizeBoundedInteger(rsDaysMinPct, 0, 100, 60), [rsDaysMinPct]);
@@ -114,7 +125,7 @@ export function ScannerTopHitsPage() {
     }
     if (query) {
       nextRows = nextRows.filter((row) =>
-        [row.ticker, row.company, row.sector, row.industry, row.scanner_labels.join(" ")].join(" ").toLowerCase().includes(query),
+        [row.ticker, row.company, row.sector, row.industry, row.scanners.map((scanner) => `${scanner.label} ${scannerNames[normalizeScannerId(scanner.id)] || ""}`).join(" ")].join(" ").toLowerCase().includes(query),
       );
     }
     if (eliteOnly) {
@@ -145,7 +156,7 @@ export function ScannerTopHitsPage() {
       sectorLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeSectorKey(item.sector)) : new Map<string, string>(),
       industryLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeIndustryKey(item.industry)) : new Map<string, string>(),
     }));
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, normalizedLeaderRsRange, normalizedRsDaysMinPct, normalizedRsEvidenceMin, normalizedUpOnDownDaysMin, rows, rsEvidenceOnly, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, normalizedLeaderRsRange, normalizedRsDaysMinPct, normalizedRsEvidenceMin, normalizedUpOnDownDaysMin, rows, rsEvidenceOnly, scannerNames, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -303,7 +314,16 @@ export function ScannerTopHitsPage() {
         </div>
       </section>
 
-      <section className="scanner-result-filter-grid">
+      <div className="top-hits-filter-toolbar">
+        <span>{filteredRows.length} of {rows.length} tickers · {selectedScannerIds.length} scanners selected</span>
+        <button type="button" className="ghost-button" onClick={() => {
+          setSearch(""); setSectorFilter("all"); setSelectedScannerIds([]); setScannerSearch("");
+          setEliteOnly(false); setHasLeadershipScannerOnly(false); setHasFundamentalQualityOnly(false);
+          setLeaderRsOnly(false); setRsEvidenceOnly(false);
+          setLeaderRsMin("90"); setLeaderRsMax(""); setRsEvidenceMin("5"); setRsDaysMinPct("60"); setUpOnDownDaysMin("3");
+        }}>Clear filters</button>
+      </div>
+      <section className="scanner-result-filter-grid top-hits-filters">
         <label className="scanner-result-filter panel">
           <span>Search</span>
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Ticker, sector, scanner…" />
@@ -319,119 +339,150 @@ export function ScannerTopHitsPage() {
             ))}
           </select>
         </label>
-        <label className="scanner-result-filter panel">
-          <span>Elite Pick</span>
-          <span className="scanner-result-check">
-            <input type="checkbox" checked={eliteOnly} onChange={(event) => setEliteOnly(event.target.checked)} />
-            <span>Only show elite candidates</span>
-          </span>
-          <span className="panel-copy">1D + 1W Strong Buy, and FA rank top 200 when present.</span>
-        </label>
-        <label className="scanner-result-filter panel">
-          <span>Scanner Mix</span>
-          <span className="scanner-result-check">
-            <input type="checkbox" checked={hasLeadershipScannerOnly} onChange={(event) => setHasLeadershipScannerOnly(event.target.checked)} />
-            <span>Has Trend Template, Sean BO, or Venu Scan</span>
-          </span>
-          <span className="panel-copy">Focus on names confirmed by your leadership-style scanners.</span>
-        </label>
-        <label className="scanner-result-filter panel">
-          <span>Fundamental Quality</span>
-          <span className="scanner-result-check">
-            <input type="checkbox" checked={hasFundamentalQualityOnly} onChange={(event) => setHasFundamentalQualityOnly(event.target.checked)} />
-            <span>Has Fundamental Quality</span>
-          </span>
-          <span className="panel-copy">Keep only names that also appear on the Fundamental Quality board.</span>
-        </label>
-        <label className="scanner-result-filter panel">
-          <span>RS Leader</span>
-          <span className="scanner-result-check">
-            <input type="checkbox" checked={leaderRsOnly} onChange={(event) => setLeaderRsOnly(event.target.checked)} />
-            <span>Daily RS within range</span>
-          </span>
-          <div className="scanner-result-range-row">
-            <input
-              type="number"
-              min={1}
-              max={99}
-              value={leaderRsMin}
-              onChange={(event) => setLeaderRsMin(event.target.value)}
-              placeholder="Min"
-            />
-            <input
-              type="number"
-              min={1}
-              max={99}
-              value={leaderRsMax}
-              onChange={(event) => setLeaderRsMax(event.target.value)}
-              placeholder="Max"
-            />
+        <details className="panel top-hits-filter-group">
+          <summary>Quality &amp; leadership · {[eliteOnly, hasLeadershipScannerOnly, hasFundamentalQualityOnly].filter(Boolean).length} active</summary>
+          <div className="top-hits-filter-group-body">
+            <label className="scanner-result-filter">
+              <span>Elite Pick</span>
+              <span className="scanner-result-check">
+                <input type="checkbox" checked={eliteOnly} onChange={(event) => setEliteOnly(event.target.checked)} />
+                <span>Only show elite candidates</span>
+              </span>
+              <span className="panel-copy">1D + 1W Strong Buy, and FA rank top 200 when present.</span>
+            </label>
+            <label className="scanner-result-filter">
+              <span>Scanner Mix</span>
+              <span className="scanner-result-check">
+                <input type="checkbox" checked={hasLeadershipScannerOnly} onChange={(event) => setHasLeadershipScannerOnly(event.target.checked)} />
+                <span>Has Trend Template, Weekly Candidate Pool, Sean BO, or Venu Scan</span>
+              </span>
+              <span className="panel-copy">Focus on names confirmed by your leadership-style scanners.</span>
+            </label>
+            <label className="scanner-result-filter">
+              <span>Fundamental Quality</span>
+              <span className="scanner-result-check">
+                <input type="checkbox" checked={hasFundamentalQualityOnly} onChange={(event) => setHasFundamentalQualityOnly(event.target.checked)} />
+                <span>Has Fundamental Quality</span>
+              </span>
+              <span className="panel-copy">Keep only names that also appear on the Fundamental Quality board.</span>
+            </label>
           </div>
-          <span className="panel-copy">Uses `daily_rs_rating`; blank max means up to 99.</span>
-        </label>
-        <label className="scanner-result-filter panel">
-          <span>RS Evidence</span>
-          <span className="scanner-result-check">
-            <input type="checkbox" checked={rsEvidenceOnly} onChange={(event) => setRsEvidenceOnly(event.target.checked)} />
-            <span>Use evidence stack filters</span>
-          </span>
-          <div className="scanner-result-range-row scanner-result-range-row-three">
-            <input
-              type="number"
-              min={0}
-              max={9}
-              value={rsEvidenceMin}
-              onChange={(event) => setRsEvidenceMin(event.target.value)}
-              placeholder="Score"
-              aria-label="Minimum RS evidence score"
-            />
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={rsDaysMinPct}
-              onChange={(event) => setRsDaysMinPct(event.target.value)}
-              placeholder="RS Days %"
-              aria-label="Minimum RS days percent"
-            />
-            <input
-              type="number"
-              min={0}
-              max={21}
-              value={upOnDownDaysMin}
-              onChange={(event) => setUpOnDownDaysMin(event.target.value)}
-              placeholder="Up/Down"
-              aria-label="Minimum up on down days"
-            />
+        </details>
+        <details className="panel top-hits-filter-group">
+          <summary>Relative strength · {[leaderRsOnly, rsEvidenceOnly].filter(Boolean).length} active</summary>
+          <div className="top-hits-filter-group-body">
+            <label className="scanner-result-filter">
+              <span>RS Leader</span>
+              <span className="scanner-result-check">
+                <input type="checkbox" checked={leaderRsOnly} onChange={(event) => setLeaderRsOnly(event.target.checked)} />
+                <span>Daily RS within range</span>
+              </span>
+              <div className="scanner-result-range-row">
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={leaderRsMin}
+                  onChange={(event) => setLeaderRsMin(event.target.value)}
+                  placeholder="Min"
+                  aria-label="Minimum daily RS"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={leaderRsMax}
+                  onChange={(event) => setLeaderRsMax(event.target.value)}
+                  placeholder="Max"
+                  aria-label="Maximum daily RS"
+                />
+              </div>
+              <span className="panel-copy">Daily RS ranges from 1 to 99; leave maximum blank for no upper limit.</span>
+            </label>
+            <label className="scanner-result-filter">
+              <span>RS Evidence</span>
+              <span className="scanner-result-check">
+                <input type="checkbox" checked={rsEvidenceOnly} onChange={(event) => setRsEvidenceOnly(event.target.checked)} />
+                <span>Use evidence stack filters</span>
+              </span>
+              <div className="scanner-result-range-row scanner-result-range-row-three">
+                <input
+                  type="number"
+                  min={0}
+                  max={9}
+                  value={rsEvidenceMin}
+                  onChange={(event) => setRsEvidenceMin(event.target.value)}
+                  placeholder="Score"
+                  aria-label="Minimum RS evidence score"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={rsDaysMinPct}
+                  onChange={(event) => setRsDaysMinPct(event.target.value)}
+                  placeholder="RS Days %"
+                  aria-label="Minimum RS days percent"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={21}
+                  value={upOnDownDaysMin}
+                  onChange={(event) => setUpOnDownDaysMin(event.target.value)}
+                  placeholder="Up/Down"
+                  aria-label="Minimum up on down days"
+                />
+              </div>
+              <span className="panel-copy">Score combines RS Phase, RS highs, RS days, up-on-down days, HVE, and Daily RS.</span>
+            </label>
           </div>
-          <span className="panel-copy">Score combines RS Phase, RS highs, RS days, up-on-down days, HVE, and Daily RS.</span>
-        </label>
-        <label className="scanner-result-filter panel">
-          <span>Scanners</span>
-          <div className="scanner-top-hit-filter-list">
-            {scannerOptions.map((scanner) => {
-              const checked = selectedScannerIds.includes(scanner.id);
-              return (
-                <label key={scanner.id} className="scanner-result-check">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(event) => {
-                      setSelectedScannerIds((current) => {
-                        if (event.target.checked) {
-                          return current.includes(scanner.id) ? current : [...current, scanner.id];
-                        }
-                        return current.filter((item) => item !== scanner.id);
-                      });
-                    }}
-                  />
-                  <span>{scanner.label}</span>
+        </details>
+        <details className="panel top-hits-filter-group top-hits-scanner-group" open>
+          <summary>Scanners · {selectedScannerIds.length} selected</summary>
+          <div className="scanner-result-filter">
+            <input aria-label="Find scanners" placeholder="Find a scanner…" value={scannerSearch} onChange={(event) => setScannerSearch(event.target.value)} />
+            <span className="panel-copy">Match all selected scanners: a ticker must appear in every checked scanner.</span>
+            {selectedScannerIds.length > 0 ? <div className="scanner-top-hit-pills" aria-label="Selected scanner filters">
+              {selectedScannerIds.map((id) => <button key={id} type="button" className="scanner-card-pill is-selected"
+                onClick={() => setSelectedScannerIds((current) => current.filter((item) => item !== id))}
+                aria-label={`Remove ${scannerNames[id] || scannerOptions.find((scanner) => scanner.id === id)?.label || id} filter`}>
+                {scannerNames[id] || scannerOptions.find((scanner) => scanner.id === id)?.label || id} ×
+              </button>)}
+            </div> : null}
+            <div className="scanner-top-hit-filter-list">
+              {visibleScannerOptions.map((scanner) => (
+                <label key={scanner.id} className={`scanner-result-check${selectedScannerIds.includes(scanner.id) ? " is-selected" : ""}`}>
+                  <input type="checkbox" checked={selectedScannerIds.includes(scanner.id)} onChange={(event) => {
+                    setSelectedScannerIds((current) => event.target.checked ? [...current, scanner.id] : current.filter((id) => id !== scanner.id));
+                  }} />
+                  <span title={scanner.label}>{scannerNames[scanner.id] || scanner.label}</span>
                 </label>
-              );
-            })}
+              ))}
+            </div>
+            {visibleScannerOptions.length === 0 ? <span className="panel-copy">No scanners match your search.</span> : null}
+            <details>
+              <summary>Customize scanner names</summary>
+              <p className="panel-copy">Display names are saved in this browser. Leave blank to restore the original name.</p>
+              <div className="scanner-top-hit-filter-list">
+                {visibleScannerOptions.map((scanner) => <label key={scanner.id}>
+                  <span>{scanner.label}</span>
+                  <input aria-label={`Display name for ${scanner.label}`} maxLength={60} placeholder={scanner.label}
+                    defaultValue={scannerNames[scanner.id] || ""}
+                    onBlur={(event) => {
+                      const next = { ...scannerNames };
+                      const name = event.target.value.trim();
+                      if (name) next[scanner.id] = name; else delete next[scanner.id];
+                      setScannerNames(next);
+                      try { localStorage.setItem("top-hits-scanner-names", JSON.stringify(next)); setNameNotice(""); }
+                      catch { setNameNotice("Names changed for this visit, but browser storage is unavailable."); }
+                    }} />
+                </label>)}
+              </div>
+              {nameNotice ? <p role="status">{nameNotice}</p> : null}
+            </details>
           </div>
-          <span className="panel-copy">Checked scanners use AND logic: a ticker must appear in every selected scanner.</span>
-        </label>
+        </details>
         <div className="scanner-result-filter panel scanner-result-filter-actions">
           <span>Board Snapshot</span>
           <div className="scanner-result-view-actions">
@@ -489,6 +540,7 @@ export function ScannerTopHitsPage() {
                   <ScannerTopHitChartCard
                     key={row.ticker}
                     row={row}
+                    selectedScannerIds={selectedScannerIds} scannerNames={scannerNames}
                     boardSignalDate={payload?.latest_signal_date}
                     canManageMyPicks={canManageMyPicks}
                     alreadyMyPick={myPickTickers.has(row.ticker)}
@@ -505,8 +557,8 @@ export function ScannerTopHitsPage() {
               <table className="data-table scanner-result-table scanner-top-hits-table">
                 <thead>
                   <tr>
-                    {canManageMyPicks ? <th>My Pick</th> : null}
-                    <th>{renderSortButton("Ticker", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                    {canManageMyPicks ? <th className="pinned-pick">My Pick</th> : null}
+                    <th className="pinned-ticker">{renderSortButton("Ticker", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>{renderSortButton("Hits", "hits", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
                     <th>Scanners</th>
                     <th>{renderSortButton("Sector", "sector", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
@@ -544,7 +596,7 @@ export function ScannerTopHitsPage() {
                   {pagedRows.map((row) => (
                     <tr key={row.ticker}>
                       {canManageMyPicks ? (
-                        <td data-label="My Pick">
+                        <td className="pinned-pick" data-label="My Pick">
                           <input
                             type="checkbox"
                             checked={myPickTickers.has(row.ticker)}
@@ -558,7 +610,7 @@ export function ScannerTopHitsPage() {
                           />
                         </td>
                       ) : null}
-                      <td data-label="Ticker">
+                      <td className="pinned-ticker" data-label="Ticker">
                         <div className="scanner-result-company">
                           <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>
                             {row.ticker}
@@ -570,13 +622,7 @@ export function ScannerTopHitsPage() {
                         <strong>{formatCount(row.scanner_count)}</strong>
                       </td>
                       <td data-label="Scanners">
-                        <div className="scanner-top-hit-pills">
-                          {row.scanners.map((scanner) => (
-                            <Link key={`${row.ticker}-${scanner.id}`} className="scanner-card-pill" to={`/scanner/${encodeURIComponent(scanner.id)}`}>
-                              {scanner.label}
-                            </Link>
-                          ))}
-                        </div>
+                        <ScannerBadges scanners={row.scanners} selectedScannerIds={selectedScannerIds} scannerNames={scannerNames} />
                       </td>
                       <td data-label="Sector">
                         <div className="scanner-result-sector">
@@ -650,8 +696,32 @@ export function ScannerTopHitsPage() {
   );
 }
 
+function ScannerBadges({ scanners, selectedScannerIds, scannerNames }: { scanners: ScannerTopHitRow["scanners"]; selectedScannerIds: string[]; scannerNames: Record<string, string> }) {
+  const [expanded, setExpanded] = useState(false);
+  const selected = new Set(selectedScannerIds);
+  const ordered = [...scanners].sort((a, b) => Number(selected.has(normalizeScannerId(b.id))) - Number(selected.has(normalizeScannerId(a.id))));
+  const hiddenSelected = ordered.slice(3).filter((scanner) => selected.has(normalizeScannerId(scanner.id))).length;
+  return (
+    <div className="top-hits-scanner-badges">
+      <div className="scanner-top-hit-pills">
+        {(expanded ? ordered : ordered.slice(0, 3)).map((scanner) => {
+          const checked = selected.has(normalizeScannerId(scanner.id));
+          return <Link key={scanner.id} className={`scanner-card-pill${checked ? " is-selected" : ""}`} title={scanner.label} to={`/scanner/${encodeURIComponent(scanner.id)}`}>
+            {checked ? <span aria-label="Selected scanner">✓ </span> : null}{scannerNames[normalizeScannerId(scanner.id)] || scanner.label}
+          </Link>;
+        })}
+      </div>
+      {ordered.length > 3 ? <button type="button" className="top-hits-scanner-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+        {expanded ? "Show fewer" : `+${ordered.length - 3} more${hiddenSelected ? ` (${hiddenSelected} selected)` : ""}`}
+      </button> : null}
+    </div>
+  );
+}
+
 function ScannerTopHitChartCard({
   row,
+  selectedScannerIds,
+  scannerNames,
   boardSignalDate,
   canManageMyPicks,
   alreadyMyPick,
@@ -662,6 +732,8 @@ function ScannerTopHitChartCard({
   onAddToMyPicks,
 }: {
   row: ScannerTopHitRow;
+  selectedScannerIds: string[];
+  scannerNames: Record<string, string>;
   boardSignalDate: string | null | undefined;
   canManageMyPicks: boolean;
   alreadyMyPick: boolean;
@@ -714,14 +786,7 @@ function ScannerTopHitChartCard({
         <span className={`scanner-score-pill ${toneForRating(row.fa_rating, 80)}`}>FA {formatRating(row.fa_rating)}</span>
         <span className={`scanner-score-pill ${toneForPositionAction(row.position_action?.action)}`}>{humanizePositionAction(row.position_action?.action)}</span>
       </div>
-      <div className="scanner-top-hit-pills">
-        {row.scanners.slice(0, 4).map((scanner) => (
-          <Link key={`${row.ticker}-chart-${scanner.id}`} className="scanner-card-pill" to={`/scanner/${encodeURIComponent(scanner.id)}`}>
-            {scanner.label}
-          </Link>
-        ))}
-        {row.scanners.length > 4 ? <span className="scanner-card-pill muted">+{row.scanners.length - 4}</span> : null}
-      </div>
+      <ScannerBadges scanners={row.scanners} selectedScannerIds={selectedScannerIds} scannerNames={scannerNames} />
       <div className="scanner-chart-card-body">
         {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
         {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
