@@ -2796,6 +2796,46 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["canslim_score"], 10)
         self.assertEqual(payload["rows"][1]["canslim_score"], 11)
 
+    def test_top_ratings_payload_is_cached(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        repository_payload = {
+            "as_of_date": "2026-06-13",
+            "previous_as_of_date": "2026-06-06",
+            "rows": [{"ticker": "PLTR", "as_of_date": "2026-06-13"}],
+            "status_counts": {"ok": 1},
+            "sector_options": ["Technology"],
+        }
+        with patch(
+            "src.webapp.services.watchlist_service.RatingsRepository.list_top_rating_snapshots",
+            return_value=repository_payload,
+        ) as list_top, patch.object(service, "_attach_top_rows_canslim_scores"), patch.object(
+            service,
+            "_attach_top_rows_technical_indicator_ratings",
+        ), patch.object(service, "_attach_top_rows_latest_scanner_hit_counts"):
+            first = service.get_top_ratings_payload()
+            second = service.get_top_ratings_payload()
+
+        self.assertEqual(list_top.call_count, 1)
+        self.assertEqual(first, second)
+        self.assertIsNot(first, second)
+
+    def test_latest_scanner_hit_counts_use_persisted_top_hits_snapshot(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        with patch.object(
+            service,
+            "get_scanner_top_hits_snapshot_payload",
+            return_value={
+                "rows": [
+                    {"ticker": "PLTR", "scanner_count": 3},
+                    {"ticker": "NVDA", "scanner_count": 1},
+                ]
+            },
+        ) as get_snapshot:
+            counts = service._build_latest_scanner_hit_count_map()
+
+        self.assertEqual(counts, {"PLTR": 3, "NVDA": 1})
+        get_snapshot.assert_called_once()
+
     def test_get_chart_fundamentals_payload_uses_db_cache_when_complete(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         cached_entry = {

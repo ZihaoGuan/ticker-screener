@@ -130,7 +130,6 @@ export function RatingsPage() {
 
   useEffect(() => {
     let ignore = false;
-    const indicatorNeeded = mode !== "technical-indicator";
     setIsLoading(true);
     setNotice("");
     const primaryRequest =
@@ -139,16 +138,10 @@ export function RatingsPage() {
         : mode === "technical-indicator"
           ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildTechnicalIndicatorRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
           : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector));
-    const technicalIndicatorRequest = indicatorNeeded
-      ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildTechnicalIndicatorRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
-      : Promise.resolve<TopTechnicalIndicatorRatingsResponse | null>(null);
-    void Promise.all([primaryRequest, technicalIndicatorRequest])
-      .then(([response, indicatorResponse]) => {
+    void primaryRequest
+      .then((response) => {
         if (ignore) {
           return;
-        }
-        if (indicatorResponse) {
-          setTechnicalIndicatorPayload(indicatorResponse);
         }
         if (mode === "technical") {
           setTechnicalPayload(response as TopTechnicalRatingsResponse);
@@ -180,10 +173,6 @@ export function RatingsPage() {
       ignore = true;
     };
   }, [mode, requestedDate, requestedLimit, requestedSector, requestedStatus]);
-
-  const technicalIndicatorMap = useMemo(() => {
-    return new Map((technicalIndicatorPayload?.rows ?? []).map((row) => [row.ticker.toUpperCase(), row] satisfies [string, TopTechnicalIndicatorRatingEntry]));
-  }, [technicalIndicatorPayload?.rows]);
 
   const payload = mode === "technical" ? technicalPayload : mode === "technical-indicator" ? technicalIndicatorPayload : fundamentalPayload;
   const rows = mode === "technical" ? (technicalPayload?.rows ?? []) : mode === "technical-indicator" ? (technicalIndicatorPayload?.rows ?? []) : (fundamentalPayload?.rows ?? []);
@@ -364,8 +353,8 @@ export function RatingsPage() {
                     <td data-label="YTD %">{formatPercent(row.perf_ytd_pct)}</td>
                     <td data-label="Hits">{formatCount(row.latest_scanner_hit_count ?? 0)}</td>
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
-                    <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
-                    <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
+                    <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? "-"}</td>
+                    <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? "-"}</td>
                     <td data-label="CANSLIM">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
                     <td data-label="Valuation">{row.valuation_grade ?? "-"} ({formatScore(row.valuation_score)})</td>
                     <td data-label="Profitability">{row.profitability_grade ?? "-"} ({formatScore(row.profitability_score)})</td>
@@ -413,8 +402,8 @@ export function RatingsPage() {
                       {[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}
                     </td>
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
-                    <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.daily.rating_label ?? "-"}</td>
-                    <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? technicalIndicatorMap.get(row.ticker.toUpperCase())?.weekly.rating_label ?? "-"}</td>
+                    <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? "-"}</td>
+                    <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? "-"}</td>
                     <td data-label="CANSLIM">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>
                     <td data-label="Band">{row.rating_band ?? "-"}</td>
                     <td data-label="Trend">{formatScore(row.trend_regime_score)}</td>

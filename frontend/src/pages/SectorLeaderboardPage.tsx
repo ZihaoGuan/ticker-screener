@@ -127,7 +127,7 @@ export function SectorLeaderboardPage() {
     });
     void Promise.allSettled(
       missingTickers.map(async (symbol) => {
-        const payload = await fetchJson<WatchlistChartResponse>(`/api/charts/${symbol}?period=18mo`);
+        const payload = await fetchJson<WatchlistChartResponse>(`/api/charts/${symbol}/preview?period=18mo`);
         return { ticker: symbol, payload };
       }),
     ).then((results) => {

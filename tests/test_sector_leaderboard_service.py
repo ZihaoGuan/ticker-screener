@@ -27,8 +27,22 @@ def _frame(closes: list[float]) -> pd.DataFrame:
 
 
 class SectorLeaderboardServiceTest(unittest.TestCase):
+    def setUp(self):
+        module._clear_sector_leaderboard_cache()
+        self.addCleanup(module._clear_sector_leaderboard_cache)
+
     def test_default_sector_catalog_excludes_xweb(self):
         self.assertNotIn("XWEB", {item.ticker for item in module.DEFAULT_SECTOR_ETFS})
+
+    def test_payload_is_cached_for_the_same_sector_catalog(self):
+        service = SectorLeaderboardService(database_url="postgres://example", etfs=())
+        with patch.object(module, "load_many_ticker_windows", return_value={}) as load_windows:
+            first = service.get_payload(as_of_date=dt.date(2026, 7, 30))
+            second = service.get_payload(as_of_date=dt.date(2026, 7, 30))
+
+        self.assertEqual(load_windows.call_count, 2)
+        self.assertEqual(first, second)
+        self.assertIsNot(first, second)
 
     def test_ranks_rows_and_attaches_holding_direction(self):
         etfs = (

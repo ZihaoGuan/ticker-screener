@@ -90,6 +90,7 @@ _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
 _SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "rs-evidence-v2"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
+_TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
 _SCANNER_BOARD_CUTOFF_HOUR = 20
 _SCANNER_BOARD_CUTOFF_MINUTE = 30
@@ -106,6 +107,9 @@ _scanner_top_hits_cache: dict[tuple[str, ...], tuple[float, dict[str, Any]]] = {
 _scanner_top_hits_cache_lock = threading.Lock()
 _sector_momentum_cache: dict[tuple[str, str, str, str], tuple[float, dict[str, dict[str, Any]]]] = {}
 _sector_momentum_cache_lock = threading.Lock()
+# ponytail: process-local TTL cache; use a shared cache if multiple web workers need consistent warm responses.
+_top_ratings_cache: dict[tuple[str, str, str, int, str, str], tuple[float, dict[str, Any]]] = {}
+_top_ratings_cache_lock = threading.Lock()
 _SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID = "scanner_top_hits_snapshot"
 _IPO_VWAP_MIN_SUPPORTED_DATE = dt.date(2020, 1, 1)
 _RS_EVIDENCE_LOOKBACK_DAYS = 21
@@ -2096,6 +2100,10 @@ class WatchlistService:
         rating_status: str = "ok",
         sector: str = "",
     ) -> dict[str, Any]:
+        cache_key = _build_top_ratings_cache_key(self.database_url, "fundamental", as_of_date, limit, rating_status, sector)
+        cached_payload = _read_top_ratings_cache(cache_key)
+        if cached_payload is not None:
+            return cached_payload
         if not self.database_url:
             return {
                 "as_of_date": None,
@@ -2121,6 +2129,7 @@ class WatchlistService:
         payload["rating_status"] = str(rating_status or "").strip().lower() or "ok"
         payload["sector"] = str(sector or "").strip()
         payload["database_configured"] = True
+        _write_top_ratings_cache(cache_key, payload)
         return payload
 
     def get_top_technical_ratings_payload(
@@ -2131,6 +2140,10 @@ class WatchlistService:
         technical_status: str = "ok",
         sector: str = "",
     ) -> dict[str, Any]:
+        cache_key = _build_top_ratings_cache_key(self.database_url, "technical", as_of_date, limit, technical_status, sector)
+        cached_payload = _read_top_ratings_cache(cache_key)
+        if cached_payload is not None:
+            return cached_payload
         if not self.database_url:
             return {
                 "as_of_date": None,
@@ -2155,6 +2168,7 @@ class WatchlistService:
         payload["technical_status"] = str(technical_status or "").strip().lower() or "ok"
         payload["sector"] = str(sector or "").strip()
         payload["database_configured"] = True
+        _write_top_ratings_cache(cache_key, payload)
         return payload
 
     def get_top_technical_indicator_ratings_payload(
@@ -2165,6 +2179,10 @@ class WatchlistService:
         technical_status: str = "ok",
         sector: str = "",
     ) -> dict[str, Any]:
+        cache_key = _build_top_ratings_cache_key(self.database_url, "technical-indicator", as_of_date, limit, technical_status, sector)
+        cached_payload = _read_top_ratings_cache(cache_key)
+        if cached_payload is not None:
+            return cached_payload
         if not self.database_url:
             return {
                 "as_of_date": None,
@@ -2186,6 +2204,7 @@ class WatchlistService:
         payload["technical_status"] = str(technical_status or "").strip().lower() or "ok"
         payload["sector"] = str(sector or "").strip()
         payload["database_configured"] = True
+        _write_top_ratings_cache(cache_key, payload)
         return payload
 
     def get_chart_insider_payload(
@@ -2538,24 +2557,14 @@ class WatchlistService:
         return live_cards
 
     def _build_latest_scanner_hit_count_map(self, *, now: dt.datetime | None = None) -> dict[str, int]:
-        board_payload = self.get_scanner_board(now=now)
-        live_cards = self._select_scanner_top_hit_live_cards(board_payload)
-        counts: dict[str, int] = {}
-        for card in live_cards:
-            stem = str(card.get("stem") or "").strip()
-            if not stem:
-                continue
-            entries = self._prepare_scanner_top_hit_entries(
-                self._filter_excluded_entries(self.repository.load_watchlist(stem))
-            )
-            seen_tickers: set[str] = set()
-            for entry in entries:
-                ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
-                if not ticker or ticker in seen_tickers:
-                    continue
-                seen_tickers.add(ticker)
-                counts[ticker] = counts.get(ticker, 0) + 1
-        return counts
+        snapshot = self.get_scanner_top_hits_snapshot_payload(now=now)
+        return {
+            ticker: int(row.get("scanner_count") or 0)
+            for row in snapshot.get("rows", [])
+            if isinstance(row, dict)
+            for ticker in [normalize_ticker_symbol(str(row.get("ticker") or ""))]
+            if ticker
+        }
 
     def _attach_latest_market_snapshots(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
         if not self.database_url or not tickers:
@@ -3280,6 +3289,42 @@ def _write_sector_momentum_cache(key: tuple[str, str, str, str], payload: dict[s
         _sector_momentum_cache[key] = (time.time() + _SECTOR_MOMENTUM_CACHE_TTL_SECONDS, copy.deepcopy(payload))
 
 
+def _build_top_ratings_cache_key(
+    database_url: str,
+    kind: str,
+    as_of_date: dt.date | None,
+    limit: int,
+    status: str,
+    sector: str,
+) -> tuple[str, str, str, int, str, str]:
+    return (
+        database_url,
+        kind,
+        as_of_date.isoformat() if as_of_date else "",
+        max(1, min(int(limit), 500)),
+        str(status or "").strip().lower() or "ok",
+        str(sector or "").strip().lower(),
+    )
+
+
+def _read_top_ratings_cache(key: tuple[str, str, str, int, str, str]) -> dict[str, Any] | None:
+    now = time.time()
+    with _top_ratings_cache_lock:
+        cached_entry = _top_ratings_cache.get(key)
+        if cached_entry is None:
+            return None
+        expires_at, payload = cached_entry
+        if expires_at <= now:
+            _top_ratings_cache.pop(key, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _write_top_ratings_cache(key: tuple[str, str, str, int, str, str], payload: dict[str, Any]) -> None:
+    with _top_ratings_cache_lock:
+        _top_ratings_cache[key] = (time.time() + _TOP_RATINGS_CACHE_TTL_SECONDS, copy.deepcopy(payload))
+
+
 def _clear_chart_payload_cache() -> None:
     with _chart_gex_cache_lock:
         _chart_gex_cache.clear()
@@ -3293,6 +3338,8 @@ def _clear_chart_payload_cache() -> None:
         _scanner_top_hits_cache.clear()
     with _sector_momentum_cache_lock:
         _sector_momentum_cache.clear()
+    with _top_ratings_cache_lock:
+        _top_ratings_cache.clear()
 
 
 def _build_chart_overlay_cache_key(

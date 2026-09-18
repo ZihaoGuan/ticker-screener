@@ -3,6 +3,9 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 import math
+import copy
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +35,10 @@ class SectorEtf:
 
 _SSGA_BASE_URL = "https://www.ssga.com/us/en/intermediary/etfs"
 _BENCHMARK_TICKER = "SPY"
+_SECTOR_LEADERBOARD_CACHE_TTL_SECONDS = 10 * 60
+# ponytail: process-local TTL cache; use a shared cache if multiple web workers need consistent warm responses.
+_sector_leaderboard_cache: dict[tuple[str, tuple[str, ...], str, str], tuple[float, dict[str, Any]]] = {}
+_sector_leaderboard_cache_lock = threading.Lock()
 
 
 DEFAULT_SECTOR_ETFS: tuple[SectorEtf, ...] = (
@@ -329,6 +336,15 @@ class SectorLeaderboardService:
 
     def get_payload(self, *, as_of_date: dt.date | None = None) -> dict[str, Any]:
         resolved_as_of = as_of_date or dt.date.today()
+        cache_key = (
+            resolved_as_of.isoformat(),
+            tuple(item.ticker for item in self.etfs),
+            str(self.database_url or ""),
+            str(self.artifacts_dir or ""),
+        )
+        cached_payload = _read_sector_leaderboard_cache(cache_key)
+        if cached_payload is not None:
+            return cached_payload
         etf_tickers = [item.ticker for item in self.etfs]
         cache = load_holdings_cache(self.artifacts_dir) if self.artifacts_dir is not None else None
         holdings_by_etf = self._resolve_holdings_by_etf(cache)
@@ -352,7 +368,7 @@ class SectorLeaderboardService:
         rows.sort(key=lambda row: _sort_value(row.get("day_change_pct")), reverse=True)
         latest_dates = [row["latest_date"] for row in rows if row.get("latest_date")]
         latest_update = max(latest_dates) if latest_dates else None
-        return {
+        payload = {
             "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             "as_of_date": resolved_as_of.isoformat(),
             "latest_data_date": latest_update,
@@ -365,6 +381,8 @@ class SectorLeaderboardService:
             },
             "rows": rows,
         }
+        _write_sector_leaderboard_cache(cache_key, payload)
+        return payload
 
     def _build_row(
         self,
@@ -776,3 +794,25 @@ def _finite_int(value: object) -> int | None:
 def _sort_value(value: object) -> float:
     number = _finite_float(value)
     return number if number is not None else -9999.0
+
+
+def _read_sector_leaderboard_cache(key: tuple[str, tuple[str, ...], str, str]) -> dict[str, Any] | None:
+    with _sector_leaderboard_cache_lock:
+        cached = _sector_leaderboard_cache.get(key)
+        if cached is None:
+            return None
+        expires_at, payload = cached
+        if expires_at <= time.time():
+            _sector_leaderboard_cache.pop(key, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _write_sector_leaderboard_cache(key: tuple[str, tuple[str, ...], str, str], payload: dict[str, Any]) -> None:
+    with _sector_leaderboard_cache_lock:
+        _sector_leaderboard_cache[key] = (time.time() + _SECTOR_LEADERBOARD_CACHE_TTL_SECONDS, copy.deepcopy(payload))
+
+
+def _clear_sector_leaderboard_cache() -> None:
+    with _sector_leaderboard_cache_lock:
+        _sector_leaderboard_cache.clear()
