@@ -5505,6 +5505,14 @@ a {
   gap: 12px;
   color: #a1a1aa;
 }
+.top-hits-preset-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.top-hits-preset-controls select { min-width: 180px; }
+.top-hits-preset-notice { margin: 0; }
 .scanner-result-filter-grid.top-hits-filters {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   align-items: start;

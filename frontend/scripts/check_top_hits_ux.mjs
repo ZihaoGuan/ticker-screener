@@ -39,6 +39,16 @@ try {
   await page.getByText('No tickers match current filters.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Remove scanner group 3', exact: true }).click();
   assert.equal(await cells.count(), 1, 'Removing a group removes its clause');
+  page.once('dialog', dialog => dialog.accept('Momentum setup'));
+  await page.getByRole('button', { name: 'Save preset', exact: true }).click();
+  await page.getByRole('button', { name: 'Set default', exact: true }).click();
+  await page.reload();
+  await cells.first().waitFor();
+  assert.equal(await page.getByLabel('Saved filter preset').inputValue(), 'Momentum setup');
+  assert.equal(await cells.count(), 1, 'Default preset restores scanner groups');
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  assert.equal(await cells.count(), 2, 'Deleting a preset restores unfiltered results');
+  await page.getByLabel('Scanner 11', { exact: true }).check();
   await page.getByText('Customize scanner names', { exact: true }).click();
   const name = page.getByRole('textbox', { name: 'Display name for Scanner 11', exact: true });
   await name.fill('My momentum');
@@ -76,5 +86,5 @@ try {
   await page.locator('.scanner-result-table-wrap').evaluate(el => { el.scrollLeft = 800; });
   assert.ok(Math.abs((await pinned.boundingBox()).x - visitorBefore.x) < 2, 'Visitor ticker stays pinned without pick column');
   assert.deepEqual(errors, []);
-  console.log('Top Hits UX passed: OR within groups, AND across groups, rename persistence, search, reset, chart badges, desktop pinning, visitor layout, mobile width.');
+  console.log('Top Hits UX passed: grouped filters, saved default preset, rename persistence, search, reset, chart badges, desktop pinning, visitor layout, mobile width.');
 } finally { await browser.close(); }

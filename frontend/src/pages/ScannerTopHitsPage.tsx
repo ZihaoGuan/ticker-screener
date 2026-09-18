@@ -14,10 +14,46 @@ import type { MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
 type ViewMode = "list" | "charts";
+type TopHitsFilterPreset = {
+  sectorFilter: string;
+  eliteOnly: boolean;
+  hasLeadershipScannerOnly: boolean;
+  hasFundamentalQualityOnly: boolean;
+  leaderRsOnly: boolean;
+  leaderRsMin: string;
+  leaderRsMax: string;
+  rsEvidenceOnly: boolean;
+  rsEvidenceMin: string;
+  rsDaysMinPct: string;
+  upOnDownDaysMin: string;
+  scannerGroups: string[][];
+  sortBy: SortKey;
+  sortDirection: SortDirection;
+  viewMode: ViewMode;
+};
+type TopHitsPresetStore = { presets: Record<string, TopHitsFilterPreset>; defaultPresetName: string };
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "sean_breakout", "venu_scanner"]);
 const PINNED_SCANNER_OPTIONS = [{ id: "weekly_candidate_pool", label: "Weekly Candidate Pool" }];
+const FILTER_PRESETS_STORAGE_KEY = "top-hits-filter-presets";
+const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
+  sectorFilter: "all",
+  eliteOnly: false,
+  hasLeadershipScannerOnly: false,
+  hasFundamentalQualityOnly: false,
+  leaderRsOnly: false,
+  leaderRsMin: "90",
+  leaderRsMax: "",
+  rsEvidenceOnly: false,
+  rsEvidenceMin: "5",
+  rsDaysMinPct: "60",
+  upOnDownDaysMin: "3",
+  scannerGroups: [[]],
+  sortBy: "hits",
+  sortDirection: "desc",
+  viewMode: "list",
+};
 
 export function ScannerTopHitsPage() {
   const auth = useAuth();
@@ -26,6 +62,10 @@ export function ScannerTopHitsPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [notice, setNotice] = useState("");
   const [myPicksNotice, setMyPicksNotice] = useState("");
+  const [presetStore, setPresetStore] = useState<TopHitsPresetStore>(loadTopHitsPresetStore);
+  const initialFilters = presetStore.presets[presetStore.defaultPresetName] ?? DEFAULT_TOP_HITS_FILTERS;
+  const [selectedPresetName, setSelectedPresetName] = useState(presetStore.defaultPresetName);
+  const [presetNotice, setPresetNotice] = useState("");
   const [search, setSearch] = useState("");
   const [scannerSearch, setScannerSearch] = useState("");
   const [scannerNames, setScannerNames] = useState<Record<string, string>>(() => {
@@ -36,22 +76,22 @@ export function ScannerTopHitsPage() {
     } catch { return {}; }
   });
   const [nameNotice, setNameNotice] = useState("");
-  const [sectorFilter, setSectorFilter] = useState("all");
-  const [eliteOnly, setEliteOnly] = useState(false);
-  const [hasLeadershipScannerOnly, setHasLeadershipScannerOnly] = useState(false);
-  const [hasFundamentalQualityOnly, setHasFundamentalQualityOnly] = useState(false);
-  const [leaderRsOnly, setLeaderRsOnly] = useState(false);
-  const [leaderRsMin, setLeaderRsMin] = useState("90");
-  const [leaderRsMax, setLeaderRsMax] = useState("");
-  const [rsEvidenceOnly, setRsEvidenceOnly] = useState(false);
-  const [rsEvidenceMin, setRsEvidenceMin] = useState("5");
-  const [rsDaysMinPct, setRsDaysMinPct] = useState("60");
-  const [upOnDownDaysMin, setUpOnDownDaysMin] = useState("3");
-  const [scannerGroups, setScannerGroups] = useState<string[][]>([[]]);
+  const [sectorFilter, setSectorFilter] = useState(initialFilters.sectorFilter);
+  const [eliteOnly, setEliteOnly] = useState(initialFilters.eliteOnly);
+  const [hasLeadershipScannerOnly, setHasLeadershipScannerOnly] = useState(initialFilters.hasLeadershipScannerOnly);
+  const [hasFundamentalQualityOnly, setHasFundamentalQualityOnly] = useState(initialFilters.hasFundamentalQualityOnly);
+  const [leaderRsOnly, setLeaderRsOnly] = useState(initialFilters.leaderRsOnly);
+  const [leaderRsMin, setLeaderRsMin] = useState(initialFilters.leaderRsMin);
+  const [leaderRsMax, setLeaderRsMax] = useState(initialFilters.leaderRsMax);
+  const [rsEvidenceOnly, setRsEvidenceOnly] = useState(initialFilters.rsEvidenceOnly);
+  const [rsEvidenceMin, setRsEvidenceMin] = useState(initialFilters.rsEvidenceMin);
+  const [rsDaysMinPct, setRsDaysMinPct] = useState(initialFilters.rsDaysMinPct);
+  const [upOnDownDaysMin, setUpOnDownDaysMin] = useState(initialFilters.upOnDownDaysMin);
+  const [scannerGroups, setScannerGroups] = useState<string[][]>(() => initialFilters.scannerGroups.map((group) => [...group]));
   const [activeScannerGroupIndex, setActiveScannerGroupIndex] = useState(0);
-  const [sortBy, setSortBy] = useState<SortKey>("hits");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [sortBy, setSortBy] = useState<SortKey>(initialFilters.sortBy);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(initialFilters.sortDirection);
+  const [viewMode, setViewMode] = useState<ViewMode>(initialFilters.viewMode);
   const [currentPage, setCurrentPage] = useState(1);
   const [myPickTickers, setMyPickTickers] = useState<Set<string>>(new Set());
   const [savingMyPickTickers, setSavingMyPickTickers] = useState<Record<string, boolean>>({});
@@ -59,6 +99,55 @@ export function ScannerTopHitsPage() {
   const [chartErrors, setChartErrors] = useState<Record<string, string>>({});
   const [chartLoadingTickers, setChartLoadingTickers] = useState<Record<string, boolean>>({});
   const canManageMyPicks = auth.hasCapability("manage_exclusions");
+
+  const applyFilterPreset = (preset: TopHitsFilterPreset) => {
+    setSectorFilter(preset.sectorFilter);
+    setEliteOnly(preset.eliteOnly);
+    setHasLeadershipScannerOnly(preset.hasLeadershipScannerOnly);
+    setHasFundamentalQualityOnly(preset.hasFundamentalQualityOnly);
+    setLeaderRsOnly(preset.leaderRsOnly);
+    setLeaderRsMin(preset.leaderRsMin);
+    setLeaderRsMax(preset.leaderRsMax);
+    setRsEvidenceOnly(preset.rsEvidenceOnly);
+    setRsEvidenceMin(preset.rsEvidenceMin);
+    setRsDaysMinPct(preset.rsDaysMinPct);
+    setUpOnDownDaysMin(preset.upOnDownDaysMin);
+    setScannerGroups(preset.scannerGroups.map((group) => [...group]));
+    setActiveScannerGroupIndex(0);
+    setSortBy(preset.sortBy);
+    setSortDirection(preset.sortDirection);
+    setViewMode(preset.viewMode);
+    setSearch("");
+    setScannerSearch("");
+  };
+
+  const currentFilterPreset = (): TopHitsFilterPreset => ({
+    sectorFilter,
+    eliteOnly,
+    hasLeadershipScannerOnly,
+    hasFundamentalQualityOnly,
+    leaderRsOnly,
+    leaderRsMin,
+    leaderRsMax,
+    rsEvidenceOnly,
+    rsEvidenceMin,
+    rsDaysMinPct,
+    upOnDownDaysMin,
+    scannerGroups: scannerGroups.map((group) => [...group]),
+    sortBy,
+    sortDirection,
+    viewMode,
+  });
+
+  const updatePresetStore = (nextStore: TopHitsPresetStore, successMessage: string) => {
+    setPresetStore(nextStore);
+    try {
+      localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(nextStore));
+      setPresetNotice(successMessage);
+    } catch {
+      setPresetNotice("Preset changed for this visit, but browser storage is unavailable.");
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -320,13 +409,47 @@ export function ScannerTopHitsPage() {
 
       <div className="top-hits-filter-toolbar">
         <span>{filteredRows.length} of {rows.length} tickers · {selectedScannerIds.length} scanner{selectedScannerIds.length === 1 ? "" : "s"} selected</span>
-        <button type="button" className="ghost-button" onClick={() => {
-          setSearch(""); setSectorFilter("all"); setScannerGroups([[]]); setActiveScannerGroupIndex(0); setScannerSearch("");
-          setEliteOnly(false); setHasLeadershipScannerOnly(false); setHasFundamentalQualityOnly(false);
-          setLeaderRsOnly(false); setRsEvidenceOnly(false);
-          setLeaderRsMin("90"); setLeaderRsMax(""); setRsEvidenceMin("5"); setRsDaysMinPct("60"); setUpOnDownDaysMin("3");
-        }}>Clear filters</button>
+        <div className="top-hits-preset-controls">
+          <select aria-label="Saved filter preset" value={selectedPresetName} onChange={(event) => {
+            const name = event.target.value;
+            setSelectedPresetName(name);
+            applyFilterPreset(name ? presetStore.presets[name] : DEFAULT_TOP_HITS_FILTERS);
+            setPresetNotice(name ? `${name} loaded.` : "Filters cleared.");
+          }}>
+            <option value="">No preset</option>
+            {Object.keys(presetStore.presets).sort().map((name) => (
+              <option key={name} value={name}>{name}{name === presetStore.defaultPresetName ? " · Default" : ""}</option>
+            ))}
+          </select>
+          <button type="button" className="ghost-button" onClick={() => {
+            const name = (window.prompt("Preset name", selectedPresetName) || "").trim().slice(0, 60);
+            if (!name) return;
+            const nextStore = { ...presetStore, presets: { ...presetStore.presets, [name]: currentFilterPreset() } };
+            setSelectedPresetName(name);
+            updatePresetStore(nextStore, `${name} saved.`);
+          }}>Save preset</button>
+          {selectedPresetName ? <button type="button" className="ghost-button" disabled={selectedPresetName === presetStore.defaultPresetName} onClick={() => {
+            updatePresetStore({ ...presetStore, defaultPresetName: selectedPresetName }, `${selectedPresetName} will load by default.`);
+          }}>{selectedPresetName === presetStore.defaultPresetName ? "Default" : "Set default"}</button> : null}
+          {selectedPresetName ? <button type="button" className="ghost-button" onClick={() => {
+            const remainingPresets = { ...presetStore.presets };
+            delete remainingPresets[selectedPresetName];
+            const nextStore = {
+              presets: remainingPresets,
+              defaultPresetName: presetStore.defaultPresetName === selectedPresetName ? "" : presetStore.defaultPresetName,
+            };
+            updatePresetStore(nextStore, `${selectedPresetName} deleted.`);
+            setSelectedPresetName("");
+            applyFilterPreset(DEFAULT_TOP_HITS_FILTERS);
+          }}>Delete</button> : null}
+          <button type="button" className="ghost-button" onClick={() => {
+            setSelectedPresetName("");
+            applyFilterPreset(DEFAULT_TOP_HITS_FILTERS);
+            setPresetNotice("Filters cleared.");
+          }}>Clear filters</button>
+        </div>
       </div>
+      {presetNotice ? <p className="panel-copy top-hits-preset-notice" role="status">{presetNotice}</p> : null}
       <section className="scanner-result-filter-grid top-hits-filters">
         <label className="scanner-result-filter panel">
           <span>Search</span>
@@ -1168,6 +1291,51 @@ function normalizeBoundedInteger(value: string, minValue: number, maxValue: numb
 function hasScannerGroupSignals(row: ScannerTopHitRow, scannerGroups: string[][]) {
   const rowScannerIds = new Set(row.scanners.map((scanner) => normalizeScannerId(scanner.id)).filter(Boolean));
   return scannerGroups.filter((group) => group.length > 0).every((group) => group.some((scannerId) => rowScannerIds.has(scannerId)));
+}
+
+function loadTopHitsPresetStore(): TopHitsPresetStore {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { presets: {}, defaultPresetName: "" };
+    const rawStore = parsed as Record<string, unknown>;
+    const rawPresets = rawStore.presets;
+    if (!rawPresets || typeof rawPresets !== "object" || Array.isArray(rawPresets)) return { presets: {}, defaultPresetName: "" };
+    const presets = Object.fromEntries(
+      Object.entries(rawPresets).map(([name, value]) => [name, normalizeTopHitsFilterPreset(value)]),
+    );
+    const defaultPresetName = typeof rawStore.defaultPresetName === "string" && presets[rawStore.defaultPresetName]
+      ? rawStore.defaultPresetName : "";
+    return { presets, defaultPresetName };
+  } catch {
+    return { presets: {}, defaultPresetName: "" };
+  }
+}
+
+function normalizeTopHitsFilterPreset(value: unknown): TopHitsFilterPreset {
+  const preset = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Partial<TopHitsFilterPreset> : {};
+  const scannerGroups = Array.isArray(preset.scannerGroups)
+    ? preset.scannerGroups
+      .filter(Array.isArray)
+      .map((group) => Array.from(new Set(group.filter((id): id is string => typeof id === "string" && id.length > 0))))
+    : [[]];
+  return {
+    sectorFilter: typeof preset.sectorFilter === "string" ? preset.sectorFilter : "all",
+    eliteOnly: preset.eliteOnly === true,
+    hasLeadershipScannerOnly: preset.hasLeadershipScannerOnly === true,
+    hasFundamentalQualityOnly: preset.hasFundamentalQualityOnly === true,
+    leaderRsOnly: preset.leaderRsOnly === true,
+    leaderRsMin: typeof preset.leaderRsMin === "string" ? preset.leaderRsMin : "90",
+    leaderRsMax: typeof preset.leaderRsMax === "string" ? preset.leaderRsMax : "",
+    rsEvidenceOnly: preset.rsEvidenceOnly === true,
+    rsEvidenceMin: typeof preset.rsEvidenceMin === "string" ? preset.rsEvidenceMin : "5",
+    rsDaysMinPct: typeof preset.rsDaysMinPct === "string" ? preset.rsDaysMinPct : "60",
+    upOnDownDaysMin: typeof preset.upOnDownDaysMin === "string" ? preset.upOnDownDaysMin : "3",
+    scannerGroups: scannerGroups.length > 0 ? scannerGroups : [[]],
+    sortBy: typeof preset.sortBy === "string" ? preset.sortBy as SortKey : "hits",
+    sortDirection: preset.sortDirection === "asc" ? "asc" : "desc",
+    viewMode: preset.viewMode === "charts" ? "charts" : "list",
+  };
 }
 
 function normalizeIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {
