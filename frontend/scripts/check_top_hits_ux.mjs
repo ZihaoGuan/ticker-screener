@@ -28,18 +28,22 @@ try {
   assert.equal(await cells.count(), 1);
   assert.match(await cells.first().locator('a').first().innerText(), /Scanner 11/i);
   assert.match(await cells.first().locator('a').first().getAttribute('class'), /is-selected/);
-  for (const label of ['Scanner 00', 'Scanner 01', 'Scanner 02']) await page.getByLabel(label, { exact: true }).check();
-  assert.equal(await cells.count(), 1, 'Multiple scanner filters use AND');
-  assert.match(await cells.first().getByRole('button').innerText(), /1 selected/);
+  await page.getByLabel('Scanner 00', { exact: true }).check();
+  assert.equal(await cells.count(), 2, 'Scanners inside one group use OR');
+  await page.getByRole('button', { name: '+ AND group', exact: true }).click();
+  await page.getByLabel('Scanner 02', { exact: true }).check();
+  assert.equal(await cells.count(), 1, 'Separate scanner groups use AND');
+  assert.match(await page.getByLabel('Scanner filter expression').innerText(), /Group 1[\s\S]*AND Group 2/i);
+  await page.getByRole('button', { name: '+ AND group', exact: true }).click();
   await page.getByLabel('Weekly Candidate Pool', { exact: true }).check();
   await page.getByText('No tickers match current filters.', { exact: true }).waitFor();
-  await page.getByLabel('Weekly Candidate Pool', { exact: true }).uncheck();
-  for (const label of ['Scanner 00', 'Scanner 01', 'Scanner 02']) await page.getByLabel(label, { exact: true }).uncheck();
+  await page.getByRole('button', { name: 'Remove scanner group 3', exact: true }).click();
+  assert.equal(await cells.count(), 1, 'Removing a group removes its clause');
   await page.getByText('Customize scanner names', { exact: true }).click();
   const name = page.getByRole('textbox', { name: 'Display name for Scanner 11', exact: true });
   await name.fill('My momentum');
   await name.press('Tab');
-  assert.match(await cells.first().locator('a').first().innerText(), /My momentum/i);
+  assert.match(await cells.first().innerText(), /My momentum/i);
   await page.getByRole('textbox', { name: 'Find scanners', exact: true }).fill('My momentum');
   assert.equal(await page.locator('.scanner-top-hit-filter-list').first().getByRole('checkbox').count(), 1);
   const pinned = page.locator('tbody .pinned-ticker').first();
@@ -57,7 +61,7 @@ try {
   assert.equal(await page.getByLabel('My momentum', { exact: true }).count(), 1, 'Alias persists');
   await page.getByLabel('My momentum', { exact: true }).check();
   await page.getByRole('button', { name: 'Charts', exact: true }).click();
-  assert.match(await page.locator('.scanner-top-hit-chart-card .scanner-card-pill').first().innerText(), /My momentum/i);
+  assert.match(await page.locator('.scanner-top-hit-chart-card').first().innerText(), /My momentum/i);
   await page.getByRole('button', { name: 'List', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Mobile page fits viewport');
@@ -72,5 +76,5 @@ try {
   await page.locator('.scanner-result-table-wrap').evaluate(el => { el.scrollLeft = 800; });
   assert.ok(Math.abs((await pinned.boundingBox()).x - visitorBefore.x) < 2, 'Visitor ticker stays pinned without pick column');
   assert.deepEqual(errors, []);
-  console.log('Top Hits UX passed: collapse, selection, AND filtering, rename persistence, search, reset, chart badges, desktop pinning, visitor layout, mobile width.');
+  console.log('Top Hits UX passed: OR within groups, AND across groups, rename persistence, search, reset, chart badges, desktop pinning, visitor layout, mobile width.');
 } finally { await browser.close(); }

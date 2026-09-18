@@ -47,7 +47,8 @@ export function ScannerTopHitsPage() {
   const [rsEvidenceMin, setRsEvidenceMin] = useState("5");
   const [rsDaysMinPct, setRsDaysMinPct] = useState("60");
   const [upOnDownDaysMin, setUpOnDownDaysMin] = useState("3");
-  const [selectedScannerIds, setSelectedScannerIds] = useState<string[]>([]);
+  const [scannerGroups, setScannerGroups] = useState<string[][]>([[]]);
+  const [activeScannerGroupIndex, setActiveScannerGroupIndex] = useState(0);
   const [sortBy, setSortBy] = useState<SortKey>("hits");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
@@ -112,6 +113,9 @@ export function ScannerTopHitsPage() {
   }, [rows]);
   const visibleScannerOptions = scannerOptions.filter((scanner) =>
     `${scanner.label} ${scannerNames[scanner.id] || ""}`.toLowerCase().includes(scannerSearch.trim().toLowerCase()));
+  const selectedScannerIds = useMemo(() => Array.from(new Set(scannerGroups.flat())), [scannerGroups]);
+  const activeScannerGroup = scannerGroups[activeScannerGroupIndex] ?? [];
+  const nonEmptyScannerGroupCount = scannerGroups.filter((group) => group.length > 0).length;
   const normalizedLeaderRsRange = useMemo(() => normalizeRsRatingRange(leaderRsMin, leaderRsMax), [leaderRsMin, leaderRsMax]);
   const normalizedRsEvidenceMin = useMemo(() => normalizeBoundedInteger(rsEvidenceMin, 0, 9, 5), [rsEvidenceMin]);
   const normalizedRsDaysMinPct = useMemo(() => normalizeBoundedInteger(rsDaysMinPct, 0, 100, 60), [rsDaysMinPct]);
@@ -149,18 +153,18 @@ export function ScannerTopHitsPage() {
         }),
       );
     }
-    if (selectedScannerIds.length > 0) {
-      nextRows = nextRows.filter((row) => hasSelectedScannerSignals(row, selectedScannerIds));
+    if (nonEmptyScannerGroupCount > 0) {
+      nextRows = nextRows.filter((row) => hasScannerGroupSignals(row, scannerGroups));
     }
     return [...nextRows].sort((left, right) => compareRows(left, right, sortBy, sortDirection, {
       sectorLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeSectorKey(item.sector)) : new Map<string, string>(),
       industryLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeIndustryKey(item.industry)) : new Map<string, string>(),
     }));
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, normalizedLeaderRsRange, normalizedRsDaysMinPct, normalizedRsEvidenceMin, normalizedUpOnDownDaysMin, rows, rsEvidenceOnly, scannerNames, search, sectorFilter, selectedScannerIds, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, nonEmptyScannerGroupCount, normalizedLeaderRsRange, normalizedRsDaysMinPct, normalizedRsEvidenceMin, normalizedUpOnDownDaysMin, rows, rsEvidenceOnly, scannerGroups, scannerNames, search, sectorFilter, sortBy, sortDirection]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, rsDaysMinPct, rsEvidenceMin, rsEvidenceOnly, search, sectorFilter, selectedScannerIds, sortBy, sortDirection, upOnDownDaysMin, viewMode]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, rsDaysMinPct, rsEvidenceMin, rsEvidenceOnly, scannerGroups, search, sectorFilter, sortBy, sortDirection, upOnDownDaysMin, viewMode]);
 
   const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE : LIST_PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
@@ -315,9 +319,9 @@ export function ScannerTopHitsPage() {
       </section>
 
       <div className="top-hits-filter-toolbar">
-        <span>{filteredRows.length} of {rows.length} tickers · {selectedScannerIds.length} scanners selected</span>
+        <span>{filteredRows.length} of {rows.length} tickers · {selectedScannerIds.length} scanner{selectedScannerIds.length === 1 ? "" : "s"} selected</span>
         <button type="button" className="ghost-button" onClick={() => {
-          setSearch(""); setSectorFilter("all"); setSelectedScannerIds([]); setScannerSearch("");
+          setSearch(""); setSectorFilter("all"); setScannerGroups([[]]); setActiveScannerGroupIndex(0); setScannerSearch("");
           setEliteOnly(false); setHasLeadershipScannerOnly(false); setHasFundamentalQualityOnly(false);
           setLeaderRsOnly(false); setRsEvidenceOnly(false);
           setLeaderRsMin("90"); setLeaderRsMax(""); setRsEvidenceMin("5"); setRsDaysMinPct("60"); setUpOnDownDaysMin("3");
@@ -439,24 +443,51 @@ export function ScannerTopHitsPage() {
           </div>
         </details>
         <details className="panel top-hits-filter-group top-hits-scanner-group" open>
-          <summary>Scanners · {selectedScannerIds.length} selected</summary>
+          <summary>Scanners · {selectedScannerIds.length} selected · {nonEmptyScannerGroupCount} group{nonEmptyScannerGroupCount === 1 ? "" : "s"}</summary>
           <div className="scanner-result-filter">
             <input aria-label="Find scanners" placeholder="Find a scanner…" value={scannerSearch} onChange={(event) => setScannerSearch(event.target.value)} />
-            <span className="panel-copy">Match all selected scanners: a ticker must appear in every checked scanner.</span>
-            {selectedScannerIds.length > 0 ? <div className="scanner-top-hit-pills" aria-label="Selected scanner filters">
-              {selectedScannerIds.map((id) => <button key={id} type="button" className="scanner-card-pill is-selected"
-                onClick={() => setSelectedScannerIds((current) => current.filter((item) => item !== id))}
-                aria-label={`Remove ${scannerNames[id] || scannerOptions.find((scanner) => scanner.id === id)?.label || id} filter`}>
-                {scannerNames[id] || scannerOptions.find((scanner) => scanner.id === id)?.label || id} ×
-              </button>)}
+            <span className="panel-copy">A ticker may match any scanner inside a group (OR), and must match every non-empty group (AND).</span>
+            <div className="scanner-filter-group-tabs" role="tablist" aria-label="Scanner filter groups">
+              {scannerGroups.map((group, index) => <div key={index} className="scanner-filter-group-tab">
+                <button type="button" role="tab" aria-selected={index === activeScannerGroupIndex}
+                  className={`scanner-result-view-chip${index === activeScannerGroupIndex ? " is-active" : ""}`}
+                  onClick={() => setActiveScannerGroupIndex(index)}>
+                  Group {index + 1} · {group.length}
+                </button>
+                {scannerGroups.length > 1 ? <button type="button" className="scanner-filter-group-remove"
+                  aria-label={`Remove scanner group ${index + 1}`}
+                  onClick={() => {
+                    setScannerGroups((current) => current.filter((_, groupIndex) => groupIndex !== index));
+                    setActiveScannerGroupIndex((current) => Math.max(0, current > index ? current - 1 : Math.min(current, scannerGroups.length - 2)));
+                  }}>×</button> : null}
+              </div>)}
+              <button type="button" className="ghost-button" onClick={() => {
+                setScannerGroups((current) => [...current, []]);
+                setActiveScannerGroupIndex(scannerGroups.length);
+              }}>+ AND group</button>
+            </div>
+            <span className="panel-copy">Choose scanners for Group {activeScannerGroupIndex + 1}. Multiple choices in this group use OR.</span>
+            {nonEmptyScannerGroupCount > 0 ? <div className="scanner-filter-expression" aria-label="Scanner filter expression">
+              {scannerGroups.map((group, groupIndex) => ({ group, groupIndex })).filter(({ group }) => group.length > 0).map(({ group, groupIndex }, clauseIndex) => <div key={groupIndex} className="scanner-filter-expression-row">
+                <strong>{clauseIndex > 0 ? "AND " : ""}Group {groupIndex + 1}</strong>
+                <div className="scanner-top-hit-pills">
+                  {group.map((id) => <button key={id} type="button" className="scanner-card-pill is-selected"
+                    onClick={() => setScannerGroups((current) => current.map((item, index) => index === groupIndex ? item.filter((scannerId) => scannerId !== id) : item))}
+                    aria-label={`Remove ${scannerNames[id] || scannerOptions.find((scanner) => scanner.id === id)?.label || id} from group ${groupIndex + 1}`}>
+                    {scannerNames[id] || scannerOptions.find((scanner) => scanner.id === id)?.label || id} ×
+                  </button>)}
+                </div>
+              </div>)}
             </div> : null}
             <div className="scanner-top-hit-filter-list">
               {visibleScannerOptions.map((scanner) => (
-                <label key={scanner.id} className={`scanner-result-check${selectedScannerIds.includes(scanner.id) ? " is-selected" : ""}`}>
-                  <input type="checkbox" checked={selectedScannerIds.includes(scanner.id)} onChange={(event) => {
-                    setSelectedScannerIds((current) => event.target.checked ? [...current, scanner.id] : current.filter((id) => id !== scanner.id));
+                <label key={scanner.id} className={`scanner-result-check${activeScannerGroup.includes(scanner.id) ? " is-selected" : ""}`}>
+                  <input type="checkbox" checked={activeScannerGroup.includes(scanner.id)} onChange={(event) => {
+                    setScannerGroups((current) => current.map((group, index) => index === activeScannerGroupIndex
+                      ? event.target.checked ? [...group, scanner.id] : group.filter((id) => id !== scanner.id)
+                      : group.filter((id) => id !== scanner.id)));
                   }} />
-                  <span title={scanner.label}>{scannerNames[scanner.id] || scanner.label}</span>
+                  <span title={scanner.label}>{scannerNames[scanner.id] || scanner.label}{selectedScannerIds.includes(scanner.id) && !activeScannerGroup.includes(scanner.id) ? " · another group" : ""}</span>
                 </label>
               ))}
             </div>
@@ -1134,9 +1165,9 @@ function normalizeBoundedInteger(value: string, minValue: number, maxValue: numb
   return Math.max(minValue, Math.min(maxValue, parsed));
 }
 
-function hasSelectedScannerSignals(row: ScannerTopHitRow, selectedScannerIds: string[]) {
+function hasScannerGroupSignals(row: ScannerTopHitRow, scannerGroups: string[][]) {
   const rowScannerIds = new Set(row.scanners.map((scanner) => normalizeScannerId(scanner.id)).filter(Boolean));
-  return selectedScannerIds.every((scannerId) => rowScannerIds.has(scannerId));
+  return scannerGroups.filter((group) => group.length > 0).every((group) => group.some((scannerId) => rowScannerIds.has(scannerId)));
 }
 
 function normalizeIndicatorLabel(value: TechnicalIndicatorRatingCell | undefined) {
