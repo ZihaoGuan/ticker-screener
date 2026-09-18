@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from src.universe import UniverseTicker
 from src.webapp.services.watchlist_service import WatchlistService, _clear_chart_payload_cache
 
 
@@ -1158,6 +1159,49 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [{"ticker": "PLTR", "scanner_count": 2, "daily_rs_rating": 96}])
         self.assertEqual(payload["snapshot"]["snapshot_run_id"], 902)
         self.assertEqual(payload["snapshot"]["freshness"], "fresh")
+
+    def test_top_hits_snapshot_read_removes_percentage_values_from_sector(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        run = {
+            "id": 903,
+            "run_date": dt.date(2026, 6, 12),
+            "result_summary_json": {
+                "generated_at": "2026-06-13T00:40:00Z",
+                "target_trading_date": "2026-06-12",
+                "total_live_scanners": 2,
+                "total_unique_tickers": 1,
+                "overlapping_ticker_count": 1,
+            },
+        }
+        detail = {
+            **run,
+            "hits": [{"hit_payload_json": {"ticker": "PLTR", "sector": "(0.58%)", "scanner_count": 2}}],
+        }
+        with patch.object(service.screener_history_service, "is_configured", return_value=True), patch.object(
+            service.screener_history_service, "list_runs", return_value=[run]
+        ), patch.object(service.screener_history_service, "get_run", return_value=detail):
+            payload = service.get_scanner_top_hits_snapshot_payload(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+            )
+
+        self.assertEqual(payload["rows"][0]["sector"], "")
+
+    def test_top_hit_entry_uses_universe_sector_when_source_value_is_not_a_sector(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        service._universe_index = {
+            "PLTR": UniverseTicker(
+                symbol="PLTR",
+                sector="Technology",
+                industry="Software",
+                exchange="NASDAQ",
+            )
+        }
+
+        rows = service._prepare_scanner_top_hit_entries(
+            [{"ticker": "PLTR", "sector": "(-0.47%)", "industry": "Software"}]
+        )
+
+        self.assertEqual(rows[0]["sector"], "Technology")
 
     def test_get_chart_payload_snaps_to_latest_available_trading_day(self) -> None:
         frame = pd.DataFrame(

@@ -1066,6 +1066,7 @@ class WatchlistService:
             for item in hit_rows
             if isinstance(item, dict) and isinstance(item.get("hit_payload_json"), dict)
         ]
+        _sanitize_scanner_top_hit_sectors(snapshot_rows)
         snapshot_rows.sort(key=lambda item: (-int(item.get("scanner_count") or 0), str(item.get("ticker") or "")))
         generated_at = str(summary.get("generated_at") or payload.get("created_at") or "")
         return {
@@ -1131,6 +1132,7 @@ class WatchlistService:
                 for item in rows_payload
                 if isinstance(item, dict) and normalize_ticker_symbol(str(item.get("ticker") or ""))
             }
+            _sanitize_scanner_top_hit_sectors(rows_payload)
             if rows_by_ticker:
                 sorted_tickers = sorted(rows_by_ticker)
                 self._attach_latest_market_snapshots(rows_by_ticker, sorted_tickers)
@@ -2351,7 +2353,7 @@ class WatchlistService:
             entry = dict(raw_entry)
             ticker = normalize_ticker_symbol(str(entry.get("ticker", "")))
             metadata = universe_index.get(ticker)
-            sector = _coalesce_text(entry.get("sector"), metadata.sector if metadata else None)
+            sector = _coalesce_sector(entry.get("sector"), metadata.sector if metadata else None)
             industry = _coalesce_text(entry.get("industry"), metadata.industry if metadata else None)
             exchange = _coalesce_text(entry.get("exchange"), metadata.exchange if metadata else None)
             theme_tags = _normalize_theme_tags(entry.get("theme_tags"))
@@ -2390,7 +2392,7 @@ class WatchlistService:
             entry = repair_shifted_finviz_row(dict(raw_entry))
             ticker = normalize_ticker_symbol(str(entry.get("ticker", "")))
             metadata = universe_index.get(ticker)
-            sector = _coalesce_text(entry.get("sector"), metadata.sector if metadata else None)
+            sector = _coalesce_sector(entry.get("sector"), metadata.sector if metadata else None)
             industry = _coalesce_text(entry.get("industry"), metadata.industry if metadata else None)
             exchange = _coalesce_text(entry.get("exchange"), metadata.exchange if metadata else None)
             if ticker:
@@ -2451,7 +2453,7 @@ class WatchlistService:
     def _merge_scanner_top_hit_entry(self, bucket: dict[str, Any], entry: dict[str, Any]) -> None:
         ticker = normalize_ticker_symbol(str(entry.get("ticker") or bucket.get("ticker") or ""))
         company = _coalesce_company_name(ticker, bucket.get("company"), entry.get("company_name"), entry.get("company"))
-        sector = _coalesce_text(bucket.get("sector"), entry.get("sector"))
+        sector = _coalesce_sector(bucket.get("sector"), entry.get("sector"))
         industry = _coalesce_text(bucket.get("industry"), entry.get("industry"))
         day_close = bucket.get("day_close")
         if day_close is None:
@@ -2635,8 +2637,7 @@ class WatchlistService:
             canslim = canslim_map.get(ticker) or {}
             vcp = vcp_map.get(ticker) or {}
             growth_acceleration = growth_acceleration_map.get(ticker) or {}
-            if not row.get("sector"):
-                row["sector"] = _coalesce_text(row.get("sector"), fundamental.get("sector"), technical.get("sector"))
+            row["sector"] = _coalesce_sector(row.get("sector"), fundamental.get("sector"), technical.get("sector")) or ""
             row["perf_year_pct"] = _coerce_optional_float(fundamental.get("perf_year_pct"))
             row["perf_ytd_pct"] = _coerce_optional_float(fundamental.get("perf_ytd_pct"))
             row["fa_rating"] = _coerce_optional_float(fundamental.get("overall_rating"))
@@ -5003,6 +5004,14 @@ def _coalesce_text(*values: object) -> str | None:
     return None
 
 
+def _coalesce_sector(*values: object) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text and re.search(r"[A-Za-z]", text) and "%" not in text:
+            return text
+    return None
+
+
 def _coalesce_company_name(ticker: str, *values: object) -> str | None:
     for value in values:
         text = str(value or "").strip()
@@ -5018,6 +5027,12 @@ def _sanitize_scanner_top_hit_company_names(rows: list[dict[str, Any]]) -> None:
         if company and is_ticker_like_finviz_company_name(company, ticker=ticker):
             row["company"] = ""
             row["company_name"] = ""
+
+
+def _sanitize_scanner_top_hit_sectors(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        if "sector" in row:
+            row["sector"] = _coalesce_sector(row.get("sector")) or ""
 
 
 def _resolve_entry_display_price(entry: dict[str, Any]) -> float | None:
