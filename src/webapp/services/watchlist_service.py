@@ -918,7 +918,14 @@ class WatchlistService:
         _write_scanner_top_hits_cache(cache_key, payload)
         return payload
 
-    def get_scanner_top_hits_snapshot_payload(self, *, now: dt.datetime | None = None) -> dict[str, Any]:
+    def get_scanner_top_hits_snapshot_payload(
+        self,
+        *,
+        now: dt.datetime | None = None,
+        scanner_groups: list[list[str]] | None = None,
+        daily_rs_min: float | None = None,
+        daily_rs_max: float | None = None,
+    ) -> dict[str, Any]:
         """Read the latest completed Top Hits snapshot without doing enrichment.
 
         This is the request-path API.  Expensive universe, market and rating work is
@@ -928,7 +935,7 @@ class WatchlistService:
         target_date = _latest_completed_trading_day(reference_now)
         persisted = self._load_latest_persisted_scanner_top_hits_payload()
         if persisted is None:
-            return {
+            return _filter_scanner_top_hits_payload({
                 "generated_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
                 "reference_now_new_york": reference_now.astimezone(_NEW_YORK_TZ).isoformat(),
                 "target_trading_date": target_date.isoformat(),
@@ -951,7 +958,7 @@ class WatchlistService:
                     "freshness": "missing",
                     "refresh_status": "idle",
                 },
-            }
+            }, scanner_groups, daily_rs_min, daily_rs_max)
         snapshot_date = _coerce_optional_date(persisted.get("target_trading_date"))
         age_seconds = _snapshot_age_seconds(persisted.get("snapshot_generated_at"), reference_now)
         persisted["snapshot"] = {
@@ -962,7 +969,7 @@ class WatchlistService:
             "freshness": "fresh" if snapshot_date == target_date else "stale",
             "refresh_status": "idle",
         }
-        return persisted
+        return _filter_scanner_top_hits_payload(persisted, scanner_groups, daily_rs_min, daily_rs_max)
 
     def persist_scanner_top_hits_snapshot(
         self,
@@ -5033,6 +5040,54 @@ def _sanitize_scanner_top_hit_sectors(rows: list[dict[str, Any]]) -> None:
     for row in rows:
         if "sector" in row:
             row["sector"] = _coalesce_sector(row.get("sector")) or ""
+
+
+def _filter_scanner_top_hits_payload(
+    payload: dict[str, Any],
+    scanner_groups: list[list[str]] | None,
+    daily_rs_min: float | None = None,
+    daily_rs_max: float | None = None,
+) -> dict[str, Any]:
+    normalized_groups = [
+        list(dict.fromkeys(normalized_id for value in group if (normalized_id := str(value or "").strip().lower())))
+        for group in scanner_groups or []
+    ]
+    normalized_groups = [group for group in normalized_groups if group]
+    rs_filter_active = daily_rs_min is not None or daily_rs_max is not None
+    rs_min = daily_rs_min if daily_rs_min is not None else 1.0
+    rs_max = daily_rs_max if daily_rs_max is not None else 99.0
+    if rs_min > rs_max:
+        rs_min, rs_max = rs_max, rs_min
+    if not normalized_groups and not rs_filter_active:
+        return payload
+
+    filtered_rows = []
+    for row in payload.get("rows", []):
+        if not isinstance(row, dict):
+            continue
+        row_scanner_ids = {
+            str(value or "").strip().lower()
+            for scanner in row.get("scanners", [])
+            if isinstance(scanner, dict)
+            for value in (scanner.get("id"), scanner.get("strategy_id"))
+            if str(value or "").strip()
+        }
+        daily_rs_rating = _coerce_optional_float(row.get("daily_rs_rating"))
+        scanner_match = all(any(scanner_id in row_scanner_ids for scanner_id in group) for group in normalized_groups)
+        rs_match = not rs_filter_active or (
+            daily_rs_rating is not None and rs_min <= daily_rs_rating <= rs_max
+        )
+        if scanner_match and rs_match:
+            filtered_rows.append(row)
+
+    filtered_payload = dict(payload)
+    filtered_payload["rows"] = filtered_rows
+    filtered_payload["overlapping_ticker_count"] = len(filtered_rows)
+    if normalized_groups:
+        filtered_payload["scanner_groups"] = normalized_groups
+    if rs_filter_active:
+        filtered_payload["daily_rs_range"] = {"min": rs_min, "max": rs_max}
+    return filtered_payload
 
 
 def _resolve_entry_display_price(entry: dict[str, Any]) -> float | None:

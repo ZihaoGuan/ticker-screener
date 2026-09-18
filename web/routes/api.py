@@ -967,10 +967,26 @@ def scanner_board_refresh_data(
 
 @router.get("/scanner-board/top-hits", response_class=JSONResponse)
 def scanner_top_hits_data(
+    scanner_group: list[str] | None = Query(
+        default=None,
+        description="Repeat for AND groups; comma-separated scanner IDs within each group use OR.",
+    ),
+    daily_rs_min: float | None = Query(default=None, ge=1, le=99),
+    daily_rs_max: float | None = Query(default=None, ge=1, le=99),
     service: WatchlistService = Depends(get_watchlist_service),
     _: Principal = Depends(get_current_principal),
 ) -> JSONResponse:
-    return JSONResponse(service.get_scanner_top_hits_snapshot_payload())
+    scanner_groups = [
+        [scanner_id.strip() for scanner_id in group.split(",") if scanner_id.strip()]
+        for group in scanner_group or []
+    ]
+    return JSONResponse(
+        service.get_scanner_top_hits_snapshot_payload(
+            scanner_groups=scanner_groups,
+            daily_rs_min=daily_rs_min,
+            daily_rs_max=daily_rs_max,
+        )
+    )
 
 
 @router.get("/sector-leaderboard", response_class=JSONResponse)

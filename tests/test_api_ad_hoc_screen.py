@@ -488,6 +488,19 @@ class _FakeWatchlistService:
             ],
         }
 
+    def get_scanner_top_hits_snapshot_payload(
+        self,
+        *,
+        scanner_groups=None,
+        daily_rs_min=None,
+        daily_rs_max=None,
+    ):
+        return {
+            "rows": [],
+            "scanner_groups": scanner_groups or [],
+            "daily_rs_range": {"min": daily_rs_min, "max": daily_rs_max},
+        }
+
     def get_watchlist_detail(self, stem: str):
         return {"stem": stem, "entry_count": 0, "entries": []}
 
@@ -1202,6 +1215,15 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(cards["weekly_rs_new_high"]["entry_count"], 8)
         self.assertEqual(cards["weekly_rs_before_price"]["entry_count"], 6)
         self.assertEqual(cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
+
+    def test_top_hits_accepts_repeated_scanner_groups(self) -> None:
+        response = self.client.get(
+            "/api/scanner-board/top-hits?scanner_group=a,b,c&scanner_group=d&daily_rs_min=90&daily_rs_max=97"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["scanner_groups"], [["a", "b", "c"], ["d"]])
+        self.assertEqual(response.json()["daily_rs_range"], {"min": 90.0, "max": 97.0})
 
     def test_anonymous_can_get_scanner_watchlist_detail(self) -> None:
         response = self.client.get("/api/watchlists/rs_new_high_before_price_2026-06-12")

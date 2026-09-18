@@ -11,7 +11,11 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.universe import UniverseTicker
-from src.webapp.services.watchlist_service import WatchlistService, _clear_chart_payload_cache
+from src.webapp.services.watchlist_service import (
+    WatchlistService,
+    _clear_chart_payload_cache,
+    _filter_scanner_top_hits_payload,
+)
 
 
 class WatchlistServiceTests(unittest.TestCase):
@@ -1202,6 +1206,38 @@ class WatchlistServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(rows[0]["sector"], "Technology")
+
+    def test_top_hits_snapshot_filters_with_or_inside_groups_and_and_across_groups(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        persisted = {
+            "target_trading_date": "2026-06-12",
+            "generated_at": "2026-06-13T00:40:00Z",
+            "overlapping_ticker_count": 4,
+            "rows": [
+                {"ticker": "AAPL", "daily_rs_rating": 95, "scanners": [{"id": "a"}, {"id": "d"}]},
+                {"ticker": "MSFT", "daily_rs_rating": 88, "scanners": [{"id": "b"}, {"id": "d"}]},
+                {"ticker": "NVDA", "daily_rs_rating": 97, "scanners": [{"id": "c"}]},
+                {"ticker": "TSLA", "daily_rs_rating": None, "scanners": [{"id": "a"}, {"id": "d"}]},
+            ],
+            "_snapshot_run_id": 904,
+            "_snapshot_generated_at": "2026-06-13T00:40:00Z",
+        }
+        with patch.object(service, "_load_latest_persisted_scanner_top_hits_payload", return_value=persisted):
+            payload = service.get_scanner_top_hits_snapshot_payload(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc),
+                scanner_groups=[["A", "b", "c"], ["d"]],
+                daily_rs_min=99,
+                daily_rs_max=90,
+            )
+
+        self.assertEqual([row["ticker"] for row in payload["rows"]], ["AAPL"])
+        self.assertEqual(payload["overlapping_ticker_count"], 1)
+        self.assertEqual(payload["scanner_groups"], [["a", "b", "c"], ["d"]])
+        self.assertEqual(payload["daily_rs_range"], {"min": 90, "max": 99})
+
+        rs_only_payload = _filter_scanner_top_hits_payload(persisted, None, daily_rs_min=96)
+        self.assertEqual([row["ticker"] for row in rs_only_payload["rows"]], ["NVDA"])
+        self.assertEqual(rs_only_payload["daily_rs_range"], {"min": 96, "max": 99.0})
 
     def test_get_chart_payload_snaps_to_latest_available_trading_day(self) -> None:
         frame = pd.DataFrame(
