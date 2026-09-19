@@ -28,6 +28,12 @@ def parse_args() -> argparse.Namespace:
         description="Discover Nasdaq split announcements and replace affected tracked ticker history on the effective date."
     )
     parser.add_argument("--as-of-date", default="", help="Date to evaluate in America/New_York (YYYY-MM-DD).")
+    parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=0,
+        help="Include announcements with effective dates from this many calendar days before --as-of-date.",
+    )
     parser.add_argument("--start-date", default="2020-01-01", help="Full-history refresh start date (YYYY-MM-DD).")
     parser.add_argument("--database-url", default="", help="Optional Postgres connection string override.")
     parser.add_argument("--state-path", default=str(DEFAULT_STATE_PATH), help="Persistent split announcement state JSON.")
@@ -76,6 +82,12 @@ def _fetch_calendar(as_of_date: dt.date) -> list[dict[str, str]]:
     with urllib_request.urlopen(request, timeout=30) as response:
         payload = json.loads(response.read().decode("utf-8"))
     return _parse_calendar_rows(payload)
+
+
+def _calendar_start(as_of_date: dt.date, lookback_days: int) -> dt.date:
+    if lookback_days < 0:
+        raise ValueError("lookback days must not be negative")
+    return as_of_date - dt.timedelta(days=lookback_days)
 
 
 def _load_state(path: Path) -> dict[str, object]:
@@ -155,13 +167,17 @@ def main() -> int:
     args = parse_args()
     as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else dt.datetime.now(ZoneInfo("America/New_York")).date()
     dt.date.fromisoformat(args.start_date)
+    calendar_start = _calendar_start(as_of_date, args.lookback_days)
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
     state_path = Path(args.state_path)
     state = _load_state(state_path)
-    announcements = _fetch_calendar(as_of_date)
+    announcements = _fetch_calendar(calendar_start)
     events = _merge_events(state, announcements, now)
     _write_state(state_path, events, now)
-    print(f"split_announcements={len(announcements)} tracked_events={len(events)}", flush=True)
+    print(
+        f"split_calendar_start={calendar_start.isoformat()} split_announcements={len(announcements)} tracked_events={len(events)}",
+        flush=True,
+    )
 
     due = [
         event for event in events

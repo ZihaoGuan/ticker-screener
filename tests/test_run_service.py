@@ -728,11 +728,14 @@ class RunServiceTests(unittest.TestCase):
     def test_build_command_supports_split_history_refresh(self) -> None:
         command = self.service.build_command(
             "refresh_split_adjusted_history",
-            {"as_of_date": "2026-09-19", "start_date": "2020-01-01"},
+            {"as_of_date": "2026-09-19", "start_date": "2020-01-01", "lookback_days": 90},
         )
 
         self.assertEqual(command[1], "scripts/refresh_split_adjusted_history.py")
-        self.assertEqual(command[-4:], ["--as-of-date", "2026-09-19", "--start-date", "2020-01-01"])
+        self.assertEqual(
+            command[-6:],
+            ["--as-of-date", "2026-09-19", "--lookback-days", "90", "--start-date", "2020-01-01"],
+        )
 
     def test_list_actions_includes_fearzone(self) -> None:
         action_ids = {item["id"] for item in self.service.list_actions()}

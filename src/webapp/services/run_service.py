@@ -397,6 +397,7 @@ class RunService:
             fields=(
                 _as_of_date_field,
                 _start_date_field,
+                _lookback_days_field,
             ),
         ),
         "reload_postgres_market_data_date": RunAction(
