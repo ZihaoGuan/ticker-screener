@@ -63,6 +63,7 @@ const BacktestsPage = lazyPage(() => import("./pages/BacktestsPage"), "Backtests
 const WeeklyWatchlistPage = lazyPage(() => import("./pages/WeeklyWatchlistPage"), "WeeklyWatchlistPage");
 const WatchlistsPage = lazyPage(() => import("./pages/WatchlistsPage"), "WatchlistsPage");
 const PairTradesPage = lazyPage(() => import("./pages/PairTradesPage"), "PairTradesPage");
+const DailyReportsPage = lazyPage(() => import("./pages/DailyReportsPage"), "DailyReportsPage");
 const RrgPage = lazyPage(() => import("./pages/RrgPage"), "RrgPage");
 const OverlapPage = lazyPage(() => import("./pages/OverlapPage"), "OverlapPage");
 const MyPicksPage = lazyPage(() => import("./pages/MyPicksPage"), "MyPicksPage");
@@ -178,6 +179,30 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
                 <PairTradesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/daily-reports"
+            element={
+              <ProtectedRoute allowedRoles={["premium", "admin"]}>
+                <DailyReportsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/daily-reports/:reportDate"
+            element={
+              <ProtectedRoute allowedRoles={["premium", "admin"]}>
+                <DailyReportsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/daily-reports/:reportDate/:agentId"
+            element={
+              <ProtectedRoute allowedRoles={["premium", "admin"]}>
+                <DailyReportsPage />
               </ProtectedRoute>
             }
           />

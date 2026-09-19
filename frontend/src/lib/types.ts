@@ -187,6 +187,59 @@ export type PairTradeReportDetail = {
   pairs: PairTradeCandidate[];
 };
 
+export type DailyReportGroup = "A" | "B" | "C" | "D" | "E" | "U";
+
+export type DailyReportSummary = {
+  report_date: string;
+  agent_id: string;
+  agent_name: string;
+  model: string;
+  target_trading_date: string;
+  generated_at: string;
+  title: string;
+  candidate_count: number;
+  analyzed_count: number;
+  group_counts: Record<DailyReportGroup, number>;
+  top_tickers: string[];
+};
+
+export type DailyReportCandidate = {
+  ticker: string;
+  group: DailyReportGroup;
+  score: number | null;
+  data_confidence?: string;
+  last_price?: number | null;
+  pivot?: number | null;
+  entry_range?: string | null;
+  entry_trigger?: string | null;
+  stop?: number | null;
+  risk_pct?: number | null;
+  earnings_date?: string | null;
+  main_reason?: string;
+  supporting_evidence?: string[];
+  counterargument?: string;
+  pre_entry_invalidation?: string;
+  post_entry_failure?: string;
+  next_event?: string;
+};
+
+export type DailyReportDetail = {
+  schema_version: number;
+  report_date: string;
+  agent_id: string;
+  agent_name: string;
+  model: string;
+  target_trading_date: string;
+  generated_at: string;
+  title: string;
+  market_context: string;
+  candidate_count: number;
+  analyzed_count: number;
+  candidates: DailyReportCandidate[];
+  watch_plan: string[];
+  source_url?: string;
+};
+
 export type ScannerBoardCard = {
   id: string;
   strategy_id: string;

@@ -21,6 +21,7 @@ from src.webapp.services.admin_service import AdminService
 from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.audit_service import AuditService
 from src.webapp.services.dashboard_service import DashboardService
+from src.webapp.services.daily_report_service import DailyReportService
 from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.my_picks_service import MyPicksService
@@ -46,6 +47,10 @@ audit_service = AuditService(repository=audit_repository)
 
 def get_dashboard_service() -> DashboardService:
     return DashboardService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
+
+
+def get_daily_report_service() -> DailyReportService:
+    return DailyReportService(artifacts_dir=config.artifacts_dir)
 
 
 def get_earnings_calendar_service() -> EarningsCalendarService:

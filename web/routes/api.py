@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import hmac
 import json
 from pathlib import Path
 from urllib.parse import urlencode
@@ -15,6 +16,7 @@ from src.webapp.services.admin_service import AdminService
 from src.webapp.services.audit_service import AuditService
 from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.dashboard_service import DashboardService
+from src.webapp.services.daily_report_service import DailyReportService
 from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.my_picks_service import MyPicksService
@@ -40,6 +42,7 @@ from web.dependencies import (
     get_chart_watchlist_service,
     get_current_principal,
     get_dashboard_service,
+    get_daily_report_service,
     get_discord_notification_service,
     get_earnings_calendar_service,
     get_my_picks_service,
@@ -1039,6 +1042,62 @@ def pair_trade_report_detail_data(
         return JSONResponse(service.get_report(stem))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/daily-reports", response_class=JSONResponse)
+def daily_reports_data(
+    limit: int = Query(default=90, ge=1, le=365),
+    service: DailyReportService = Depends(get_daily_report_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    return JSONResponse({"reports": service.list_reports(limit=limit)})
+
+
+@router.get("/daily-reports/{report_date}", response_class=JSONResponse)
+def daily_report_detail_data(
+    report_date: str,
+    service: DailyReportService = Depends(get_daily_report_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    try:
+        return JSONResponse(service.get_report(report_date))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/daily-reports/{report_date}/{agent_id}", response_class=JSONResponse)
+def daily_report_agent_detail_data(
+    report_date: str,
+    agent_id: str,
+    service: DailyReportService = Depends(get_daily_report_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    try:
+        return JSONResponse(service.get_report(report_date, agent_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/daily-reports", response_class=JSONResponse)
+def daily_report_ingest_data(
+    payload: dict[str, object] = Body(...),
+    ingest_token: str | None = Header(default=None, alias="X-Daily-Report-Token"),
+    service: DailyReportService = Depends(get_daily_report_service),
+    principal: Principal = Depends(get_current_principal),
+) -> JSONResponse:
+    configured_token = config.daily_report_ingest_token
+    token_matches = bool(
+        configured_token
+        and ingest_token
+        and hmac.compare_digest(configured_token.encode("utf-8"), ingest_token.encode("utf-8"))
+    )
+    if principal.role != ROLE_ADMIN and not token_matches:
+        raise HTTPException(status_code=401, detail="A valid daily-report ingest token is required.")
+    try:
+        report = service.upsert_report(dict(payload))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return JSONResponse(report, status_code=201)
 
 
 @router.get("/charts/{ticker}/preview", response_class=JSONResponse)

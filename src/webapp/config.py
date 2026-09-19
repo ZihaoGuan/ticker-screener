@@ -59,6 +59,7 @@ class WebAppConfig:
     smtp_from_address: str = _env("WEBAPP_SMTP_FROM_ADDRESS", "TICKER_SCREENER_SMTP_FROM_ADDRESS", default="")
     smtp_use_tls: bool = _env("WEBAPP_SMTP_USE_TLS", "TICKER_SCREENER_SMTP_USE_TLS", default="true").strip().lower() in {"1", "true", "yes", "on"}
     smtp_use_ssl: bool = _env("WEBAPP_SMTP_USE_SSL", "TICKER_SCREENER_SMTP_USE_SSL", default="false").strip().lower() in {"1", "true", "yes", "on"}
+    daily_report_ingest_token: str = _env("TICKER_SCREENER_DAILY_REPORT_INGEST_TOKEN", default="")
 
     @property
     def auth_bootstrap_admin_emails(self) -> tuple[str, ...]:

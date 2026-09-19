@@ -65,11 +65,14 @@ Edit `.env` and set:
 - `WEBAPP_BASE_URL`
 - `WEBAPP_AUTH_SECRET_KEY`
 - `WEBAPP_AUTH_BOOTSTRAP_ADMIN_EMAILS`
+- `TICKER_SCREENER_DAILY_REPORT_INGEST_TOKEN`
 - `WEBAPP_GOOGLE_CLIENT_ID`
 - `WEBAPP_GOOGLE_CLIENT_SECRET`
 - `WEBAPP_GOOGLE_REDIRECT_URI`
 
 If you keep the default service names, the example database URL is already correct.
+
+`TICKER_SCREENER_DAILY_REPORT_INGEST_TOKEN` protects the daily-report ingestion endpoint. Use a long random value that is different from the web session secret.
 
 For auth, also configure as needed:
 
