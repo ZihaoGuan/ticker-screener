@@ -206,6 +206,7 @@ class DiscordNotificationService:
         if action_id in {
             "sync_postgres_market_data",
             "reload_postgres_market_data_date",
+            "refresh_split_adjusted_history",
             "sync_finviz_fundamentals",
             "sync_chart_fundamentals_cache",
             "build_sector_rating_baselines",

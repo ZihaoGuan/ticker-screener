@@ -107,6 +107,11 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional explicit path for a JSON sync manifest.",
     )
+    parser.add_argument(
+        "--replace-existing-history",
+        action="store_true",
+        help="Delete and replace each successfully downloaded ticker's existing daily bars in one transaction.",
+    )
     return parser.parse_args()
 
 
@@ -273,6 +278,7 @@ def _download_history(
                     end=(pd.Timestamp(end_date) + pd.Timedelta(days=1)).date().isoformat(),
                     interval="1d",
                     auto_adjust=False,
+                    actions=True,
                     progress=False,
                     group_by="ticker",
                     threads=False,
@@ -396,6 +402,7 @@ def _download_single_history(
                 end=(pd.Timestamp(end_date) + pd.Timedelta(days=1)).date().isoformat(),
                 interval="1d",
                 auto_adjust=False,
+                actions=True,
                 progress=False,
                 group_by="ticker",
                 threads=False,
@@ -935,10 +942,7 @@ def _build_daily_bar_rows(
     return rows
 
 
-def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, ...]], batch_size: int) -> tuple[int, int]:
-    if not rows:
-        return 0, 0
-    sql = """
+_DAILY_BAR_UPSERT_SQL = """
         INSERT INTO daily_bars (
           ticker, trade_date, open, high, low, close, adj_close, volume,
           dividend, split_factor, source, updated_at
@@ -956,13 +960,18 @@ def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, .
           source = EXCLUDED.source,
           updated_at = EXCLUDED.updated_at
     """
+
+
+def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, ...]], batch_size: int) -> tuple[int, int]:
+    if not rows:
+        return 0, 0
     applied = 0
     skipped_overflow = 0
     for index in range(0, len(rows), batch_size):
         batch = rows[index : index + batch_size]
         try:
             with connection.cursor() as cursor:
-                cursor.executemany(sql, batch)
+                cursor.executemany(_DAILY_BAR_UPSERT_SQL, batch)
             connection.commit()
             applied += len(batch)
             continue
@@ -978,7 +987,7 @@ def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, .
         for row in batch:
             try:
                 with connection.cursor() as cursor:
-                    cursor.execute(sql, row)
+                    cursor.execute(_DAILY_BAR_UPSERT_SQL, row)
                 connection.commit()
                 applied += 1
             except Exception as row_exc:
@@ -992,6 +1001,24 @@ def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, .
                     continue
                 raise
     return applied, skipped_overflow
+
+
+def _replace_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, ...]]) -> tuple[int, int]:
+    if not rows:
+        return 0, 0
+    tickers = {str(row[0]) for row in rows}
+    if len(tickers) != 1:
+        raise ValueError("replacement rows must contain exactly one ticker")
+    ticker = next(iter(tickers))
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM daily_bars WHERE ticker = %s", (ticker,))
+            cursor.executemany(_DAILY_BAR_UPSERT_SQL, rows)
+        connection.commit()
+        return len(rows), 0
+    except Exception:
+        connection.rollback()
+        raise
 
 
 def _write_manifest(
@@ -1155,7 +1182,16 @@ def main() -> int:
                 updated_at,
                 source_by_ticker=history_sources,
             )
-            applied, skipped_overflow = _upsert_daily_bars(connection, bar_rows, args.batch_size)
+            if args.replace_existing_history:
+                applied = 0
+                skipped_overflow = 0
+                for ticker in normalized_histories:
+                    ticker_rows = [row for row in bar_rows if row[0] == ticker]
+                    ticker_applied, ticker_skipped = _replace_daily_bars(connection, ticker_rows)
+                    applied += ticker_applied
+                    skipped_overflow += ticker_skipped
+            else:
+                applied, skipped_overflow = _upsert_daily_bars(connection, bar_rows, args.batch_size)
             total_bar_rows += applied
             skipped_overflow_rows += skipped_overflow
             failed = [outcome for outcome in chunk_outcomes if outcome.status.startswith("failed") or outcome.status.startswith("skipped")]

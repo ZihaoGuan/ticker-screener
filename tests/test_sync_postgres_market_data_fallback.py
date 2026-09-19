@@ -6,6 +6,46 @@ from unittest.mock import patch
 
 
 class SyncPostgresMarketDataFallbackTests(unittest.TestCase):
+    def test_replace_daily_bars_deletes_and_inserts_in_one_commit(self) -> None:
+        import scripts.sync_postgres_market_data as script
+
+        calls: list[tuple[str, object]] = []
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def execute(self, sql, params):
+                calls.append((sql, params))
+
+            def executemany(self, sql, rows):
+                calls.append((sql, list(rows)))
+
+        class Connection:
+            commits = 0
+            rollbacks = 0
+
+            def cursor(self):
+                return Cursor()
+
+            def commit(self):
+                self.commits += 1
+
+            def rollback(self):
+                self.rollbacks += 1
+
+        connection = Connection()
+        applied, skipped = script._replace_daily_bars(connection, [("AAPL", 1), ("AAPL", 2)])
+
+        self.assertEqual((applied, skipped), (2, 0))
+        self.assertIn("DELETE FROM daily_bars", calls[0][0])
+        self.assertIn("INSERT INTO daily_bars", calls[1][0])
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(connection.rollbacks, 0)
+
     def test_diagnose_missing_ticker_falls_back_to_nasdaq_when_yahoo_is_empty(self) -> None:
         import pandas as pd
         import scripts.sync_postgres_market_data as script
@@ -68,4 +108,3 @@ class SyncPostgresMarketDataFallbackTests(unittest.TestCase):
         self.assertEqual(merged.index.min().date().isoformat(), "2021-01-25")
         self.assertEqual(merged.index.max().date().isoformat(), "2021-10-21")
         self.assertEqual(errors, [])
-
