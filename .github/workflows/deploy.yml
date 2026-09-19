@@ -90,5 +90,5 @@ jobs:
               sleep 2
             done
             docker-compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < ../sql/postgres_app_schema.sql
-            docker-compose ${COMPOSE_COMMAND}
+            ../scripts/deploy_compose_services.sh ${COMPOSE_COMMAND}
             docker-compose ps

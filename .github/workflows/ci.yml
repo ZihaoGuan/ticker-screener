@@ -43,3 +43,5 @@ jobs:
           test -f deploy/.env.example
           test -f deploy/DEPLOY.md
           test -f sql/postgres_app_schema.sql
+          test -x scripts/deploy_compose_services.sh
+          python tests/test_deploy_compose_services.py
