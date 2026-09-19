@@ -6,6 +6,12 @@ from unittest.mock import patch
 
 
 class SyncPostgresMarketDataFallbackTests(unittest.TestCase):
+    def test_yfinance_symbol_uses_hyphen_for_share_classes(self) -> None:
+        import scripts.sync_postgres_market_data as script
+
+        self.assertEqual(script._yfinance_symbol("BRK.B"), "BRK-B")
+        self.assertEqual(script._yfinance_symbol("aapl"), "AAPL")
+
     def test_replace_daily_bars_deletes_and_inserts_in_one_commit(self) -> None:
         import scripts.sync_postgres_market_data as script
 

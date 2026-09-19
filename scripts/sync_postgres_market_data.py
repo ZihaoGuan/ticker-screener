@@ -223,6 +223,11 @@ def _chunked(items: Sequence[str], size: int) -> Iterable[Sequence[str]]:
         yield items[index : index + size]
 
 
+def _yfinance_symbol(ticker: str) -> str:
+    """Translate canonical share-class symbols to Yahoo Finance notation."""
+    return str(ticker).strip().upper().replace(".", "-")
+
+
 def _normalize_download_chunk(data: "pd.DataFrame", tickers: list[str]) -> dict[str, "pd.DataFrame"]:
     import pandas as pd
 
@@ -262,6 +267,7 @@ def _download_history(
 
     for chunk_index, chunk in enumerate(_chunked(tickers, chunk_size), start=1):
         chunk_list = list(chunk)
+        source_symbols = [_yfinance_symbol(ticker) for ticker in chunk_list]
         print(
             f"downloading chunk {chunk_index}: {chunk_list[0]}..{chunk_list[-1]} ({len(chunk_list)} tickers)",
             flush=True,
@@ -273,7 +279,7 @@ def _download_history(
         for attempt in range(1, max_retries + 1):
             try:
                 data = yf.download(
-                    tickers=chunk_list,
+                    tickers=source_symbols,
                     start=start_date,
                     end=(pd.Timestamp(end_date) + pd.Timedelta(days=1)).date().isoformat(),
                     interval="1d",
@@ -301,9 +307,14 @@ def _download_history(
                 error=last_error,
             )
             continue
+        history_by_source = _normalize_download_chunk(data, source_symbols)
         yield DownloadChunkResult(
             tickers=chunk_list,
-            history_by_ticker=_normalize_download_chunk(data, chunk_list),
+            history_by_ticker={
+                ticker: history
+                for ticker, source_symbol in zip(chunk_list, source_symbols, strict=True)
+                if (history := history_by_source.get(source_symbol)) is not None
+            },
             error=None,
         )
 
@@ -393,11 +404,12 @@ def _download_single_history(
     if single_ticker_sleep_seconds > 0:
         time.sleep(single_ticker_sleep_seconds)
     last_error: str | None = None
+    source_ticker = _yfinance_symbol(ticker)
     frame = None
     for attempt in range(1, max_retries + 1):
         try:
             frame = yf.download(
-                tickers=[ticker],
+                tickers=[source_ticker],
                 start=start_date,
                 end=(pd.Timestamp(end_date) + pd.Timedelta(days=1)).date().isoformat(),
                 interval="1d",
@@ -420,7 +432,7 @@ def _download_single_history(
             )
     if frame is None and last_error is not None:
         return pd.DataFrame(), last_error
-    normalized = _normalize_download_chunk(frame, [ticker]).get(ticker)
+    normalized = _normalize_download_chunk(frame, [source_ticker]).get(source_ticker)
     return _normalize_history_frame(normalized), None
 
 
@@ -435,11 +447,12 @@ def _download_max_history(
 
     if single_ticker_sleep_seconds > 0:
         time.sleep(single_ticker_sleep_seconds)
+    source_ticker = _yfinance_symbol(ticker)
     frame = None
     last_error: str | None = None
     for attempt in range(1, max_retries + 1):
         try:
-            frame = yf.Ticker(ticker).history(period="max", interval="1d", auto_adjust=False, actions=True)
+            frame = yf.Ticker(source_ticker).history(period="max", interval="1d", auto_adjust=False, actions=True)
             last_error = None
             break
         except Exception as exc:
