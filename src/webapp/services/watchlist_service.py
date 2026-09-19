@@ -31,6 +31,7 @@ from ...market_extension import compute_extension_frame, resample_to_weekly
 from ...bollinger_band_screen import compute_latest_bollinger_snapshot
 from ...market_data_access import (
     db_frame_has_recent_coverage,
+    load_daily_bars_frame_from_db,
     load_many_ticker_windows,
     load_many_ticker_windows_for_range,
     load_ticker_metadata_map,
@@ -116,6 +117,8 @@ _RS_EVIDENCE_LOOKBACK_DAYS = 21
 _RS_EVIDENCE_RS_DAYS_THRESHOLD_PCT = 60.0
 _RS_EVIDENCE_UP_ON_DOWN_DAYS_THRESHOLD = 3
 _RS_EVIDENCE_DAILY_RS_THRESHOLD = 90.0
+_MAX_OHLCV_RANGE_DAYS = 5 * 366
+_OHLCV_TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.-]{0,14}$")
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
         "id": "weekly_rs_new_high",
@@ -1624,6 +1627,59 @@ class WatchlistService:
             benchmark_ticker=self.benchmark_ticker,
             data_source=self.market_data_source,
         )
+
+    def get_ohlcv_range_payload(
+        self,
+        ticker: str,
+        *,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> dict[str, Any]:
+        normalized_ticker = normalize_ticker_symbol(str(ticker or ""))
+        if not _OHLCV_TICKER_PATTERN.fullmatch(normalized_ticker):
+            raise ValueError("ticker must be a valid US market symbol")
+        if start_date > end_date:
+            raise ValueError("startDate must be on or before endDate")
+        if (end_date - start_date).days > _MAX_OHLCV_RANGE_DAYS:
+            raise ValueError("requested OHLCV range cannot exceed 5 years")
+
+        frame = load_daily_bars_frame_from_db(
+            normalized_ticker,
+            start_date,
+            end_date,
+            database_url=self.database_url,
+        )
+        frame = _normalize_download_frame(frame)
+        bars: list[dict[str, Any]] = []
+        if frame is not None:
+            frame = frame.sort_index()
+            frame = frame.loc[(frame.index.date >= start_date) & (frame.index.date <= end_date)]
+            for index, row in frame.iterrows():
+                adjusted_close = row.get("Adj Close")
+                bars.append(
+                    {
+                        "date": pd.Timestamp(index).date().isoformat(),
+                        "open": float(row["Open"]),
+                        "high": float(row["High"]),
+                        "low": float(row["Low"]),
+                        "close": float(row["Close"]),
+                        "adjusted_close": float(adjusted_close) if pd.notna(adjusted_close) else None,
+                        "volume": int(row["Volume"]),
+                    }
+                )
+
+        return {
+            "ticker": normalized_ticker,
+            "interval": "1d",
+            "requested_start_date": start_date.isoformat(),
+            "requested_end_date": end_date.isoformat(),
+            "first_available_date": bars[0]["date"] if bars else None,
+            "last_available_date": bars[-1]["date"] if bars else None,
+            "bar_count": len(bars),
+            "data_source": "daily_bars",
+            "price_adjustment": "unadjusted_ohlc_with_adjusted_close",
+            "bars": bars,
+        }
 
     def get_chart_gex_payload(self, ticker: str) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()

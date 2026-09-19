@@ -1325,6 +1325,66 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rs_line"], [])
         self.assertIsNone(payload["vcs"])
 
+    def test_get_ohlcv_range_payload_returns_database_bars_and_coverage_metadata(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = pd.DataFrame(
+            {
+                "Open": [100.0, 102.0],
+                "High": [103.0, 105.0],
+                "Low": [99.0, 101.0],
+                "Close": [102.0, 104.0],
+                "Adj Close": [101.5, 103.5],
+                "Volume": [1_000_000, 1_200_000],
+            },
+            index=pd.to_datetime(["2026-05-28", "2026-05-29"]),
+        )
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_daily_bars_frame_from_db",
+            return_value=frame,
+        ) as load_mock:
+            payload = service.get_ohlcv_range_payload(
+                "nvda",
+                start_date=dt.date(2026, 5, 1),
+                end_date=dt.date(2026, 5, 31),
+            )
+
+        load_mock.assert_called_once_with(
+            "NVDA",
+            dt.date(2026, 5, 1),
+            dt.date(2026, 5, 31),
+            database_url="postgres://example",
+        )
+        self.assertEqual(payload["ticker"], "NVDA")
+        self.assertEqual(payload["first_available_date"], "2026-05-28")
+        self.assertEqual(payload["last_available_date"], "2026-05-29")
+        self.assertEqual(payload["bar_count"], 2)
+        self.assertEqual(payload["data_source"], "daily_bars")
+        self.assertEqual(
+            payload["bars"][0],
+            {
+                "date": "2026-05-28",
+                "open": 100.0,
+                "high": 103.0,
+                "low": 99.0,
+                "close": 102.0,
+                "adjusted_close": 101.5,
+                "volume": 1_000_000,
+            },
+        )
+
+    def test_get_ohlcv_range_payload_rejects_invalid_range(self) -> None:
+        with self.assertRaisesRegex(ValueError, "startDate"):
+            self.service.get_ohlcv_range_payload(
+                "NVDA",
+                start_date=dt.date(2026, 6, 1),
+                end_date=dt.date(2026, 5, 31),
+            )
+
     def test_get_watchlist_detail_prefers_db_previous_scan_comparison(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         db_rows = [

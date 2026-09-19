@@ -68,3 +68,13 @@ The pair of `report_date` and `agent_id` is the idempotency key. Retrying one ag
 `agent_id` is required and may contain lowercase letters, numbers, underscores, and hyphens. Valid groups are `A`, `B`, `C`, `D`, `E`, and `U`. Scores, when present, must be between 0 and 100. Candidate tickers must be unique within a report.
 
 Reports are stored under `artifacts/daily_reports/<report_date>/<agent_id>.json`, which is already mounted into the production web container.
+
+## Daily OHLCV input
+
+The report agent can retrieve one ticker's database-backed daily bars with an explicit inclusive date range. This public read endpoint does not require a session or ingest token:
+
+```text
+GET /api/market-data/NVDA/ohlcv?startDate=2025-09-18&endDate=2026-09-18
+```
+
+The response returns ascending raw daily OHLCV bars, optional adjusted closes, and the first and last dates actually available. The caller must compare `last_available_date` with the report's target trading date before claiming that it evaluated current price action. An empty range returns `bar_count: 0` and `bars: []`. Requests are limited to five calendar years.

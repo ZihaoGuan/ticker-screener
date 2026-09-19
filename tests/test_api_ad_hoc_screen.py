@@ -17,6 +17,7 @@ if TestClient is not None:
         get_admin_service,
         get_auth_service,
         get_audit_service,
+        get_chart_watchlist_service,
         get_current_principal,
         get_dashboard_service,
         get_earnings_calendar_service,
@@ -550,6 +551,36 @@ class _FakeWatchlistService:
         as_of_date: dt.date | None = None,
     ):
         return self.get_chart_payload(ticker, period=period, as_of_date=as_of_date)
+
+    def get_ohlcv_range_payload(
+        self,
+        ticker: str,
+        *,
+        start_date: dt.date,
+        end_date: dt.date,
+    ):
+        return {
+            "ticker": ticker.upper(),
+            "interval": "1d",
+            "requested_start_date": start_date.isoformat(),
+            "requested_end_date": end_date.isoformat(),
+            "first_available_date": "2026-05-29",
+            "last_available_date": "2026-05-29",
+            "bar_count": 1,
+            "data_source": "daily_bars",
+            "price_adjustment": "unadjusted_ohlc_with_adjusted_close",
+            "bars": [
+                {
+                    "date": "2026-05-29",
+                    "open": 100.0,
+                    "high": 103.0,
+                    "low": 99.0,
+                    "close": 102.0,
+                    "adjusted_close": 101.5,
+                    "volume": 1_000_000,
+                }
+            ],
+        }
 
     def get_chart_overlays_payload(
         self,
@@ -1155,6 +1186,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         app.dependency_overrides[get_user_admin_service] = lambda: _FakeUserAdminService()
         app.dependency_overrides[get_dashboard_service] = lambda: _FakeDashboardService()
         app.dependency_overrides[get_watchlist_service] = lambda: _FakeWatchlistService()
+        app.dependency_overrides[get_chart_watchlist_service] = lambda: _FakeWatchlistService()
         app.dependency_overrides[get_earnings_calendar_service] = lambda: _FakeEarningsCalendarService()
         app.dependency_overrides[get_portfolio_service] = lambda: _FakePortfolioService()
         app.dependency_overrides[get_my_picks_service] = lambda: _FakeMyPicksService()
@@ -1197,6 +1229,18 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(payload["period"], "6mo")
         self.assertEqual(payload["requested_as_of_date"], "2026-05-31")
         self.assertEqual(payload["resolved_as_of_date"], "2026-05-30")
+
+    def test_get_ohlcv_range(self) -> None:
+        response = self.client.get(
+            "/api/market-data/nvda/ohlcv?startDate=2026-05-01&endDate=2026-05-31"
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["ticker"], "NVDA")
+        self.assertEqual(payload["requested_start_date"], "2026-05-01")
+        self.assertEqual(payload["requested_end_date"], "2026-05-31")
+        self.assertEqual(payload["bar_count"], 1)
+        self.assertEqual(payload["bars"][0]["date"], "2026-05-29")
 
     def test_get_chart_overlays(self) -> None:
         response = self.client.get("/api/chart-overlays/nvda?asOfDate=2026-05-31&includeSetupMarkers=true")

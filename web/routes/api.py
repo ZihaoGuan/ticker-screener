@@ -1116,6 +1116,24 @@ def ticker_chart_preview_data(
     )
 
 
+@router.get("/market-data/{ticker}/ohlcv", response_class=JSONResponse)
+def ticker_ohlcv_data(
+    ticker: str,
+    start_date: dt.date = Query(alias="startDate"),
+    end_date: dt.date = Query(alias="endDate"),
+    service: WatchlistService = Depends(get_chart_watchlist_service),
+) -> JSONResponse:
+    try:
+        payload = service.get_ohlcv_range_payload(
+            ticker=ticker,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return JSONResponse(payload)
+
+
 @router.get("/charts/{ticker}", response_class=JSONResponse)
 def ticker_chart_data(
     ticker: str,

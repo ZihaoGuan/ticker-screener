@@ -262,6 +262,7 @@ The app should evolve toward a database-backed model:
 - Caddy serves the React application for browser routes such as `/`, `/screeners`, `/watchlists`, `/report`, and `/backtests`.
 - FastAPI serves `/api/*` and `/healthz`.
 - Chart consumers use `/api/charts/{ticker}` or `/api/charts/{ticker}/preview`.
+- Agents and other data consumers use `/api/market-data/{ticker}/ohlcv?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD` for database-backed daily bars over an explicit inclusive range.
 
 ## UI requirements
 
