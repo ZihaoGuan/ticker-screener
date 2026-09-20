@@ -60,7 +60,7 @@ const EMPTY_TOP_HITS_FILTERS: TopHitsFilterPreset = {
 const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   ...EMPTY_TOP_HITS_FILTERS,
   scannerGroups: [
-    ["weekly_candidate_pool", "kai_s2"],
+    ["qullamaggie", "weekly_candidate_pool", "kai_s2"],
     ["venu_scanner", "trend_template", "one_year_winners", "finviz_smallover_sales_growth_trend", "sean_breakout"],
   ],
 };

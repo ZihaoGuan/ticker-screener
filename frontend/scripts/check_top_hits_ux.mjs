@@ -22,7 +22,7 @@ try {
   await page.getByText('No tickers match current filters.', { exact: true }).waitFor();
   assert.match(
     await page.getByLabel('Scanner filter expression').innerText(),
-    /Weekly Candidate Pool[\s\S]*kai_s2[\s\S]*AND Group 2[\s\S]*one_year_winners/i,
+    /Qullamaggie[\s\S]*Weekly Candidate Pool[\s\S]*kai_s2[\s\S]*AND Group 2[\s\S]*one_year_winners/i,
     'Built-in scanner groups load by default',
   );
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
