@@ -1702,6 +1702,8 @@ export type ScheduledJobConfig = {
   cron_tz: string;
   enabled: boolean;
   options: Record<string, unknown>;
+  estimated_duration_seconds: number | null;
+  estimate_sample_count: number;
 };
 
 export type ScheduledJobConfigResponse = {
@@ -1711,6 +1713,8 @@ export type ScheduledJobConfigResponse = {
     label: string;
     bias_group?: "bullish" | "bearish" | "data" | "other";
     bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
+    estimated_duration_seconds: number | null;
+    estimate_sample_count: number;
     fields: Array<{
       id: string;
       label: string;

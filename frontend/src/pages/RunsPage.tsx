@@ -30,6 +30,8 @@ type ScheduledActionOption = {
   label: string;
   bias_group?: "bullish" | "bearish" | "data" | "other";
   bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
+  estimated_duration_seconds: number | null;
+  estimate_sample_count: number;
   fields: Array<{
     id: string;
     label: string;
@@ -891,6 +893,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                       <div key={action.id} className="screener-card">
                         {(() => {
                           const configureOnly = ["signal_warm_batch", "overlap_backtest_v1"].includes(action.id);
+                          const timing = availableScheduledActions.find((item) => item.id === action.id);
                           return (
                             <>
                               <div className="screener-card-header">
@@ -903,6 +906,10 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                                 {configureOnly
                                   ? "Open config to choose date range and screener set."
                                   : describeScreenerAction(action.id, action.fields.length > 0)}
+                              </p>
+                              <p className="file-meta">
+                                Estimated run time: {formatEstimatedDuration(timing?.estimated_duration_seconds)}
+                                {timing?.estimate_sample_count ? ` (${describeEstimateSample(timing.estimate_sample_count)})` : ""}
                               </p>
                               <div className="screener-card-actions">
                                 {!configureOnly ? (
@@ -1511,6 +1518,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                         <th>Cron</th>
                         <th>TZ</th>
                         <th>Options</th>
+                        <th>Est. time</th>
                         <th>Enabled</th>
                         <th>Actions</th>
                       </tr>
@@ -1518,7 +1526,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     <tbody>
                       {scheduledConfigs.length === 0 ? (
                         <tr>
-                          <td colSpan={7}>{isLoadingScheduleConfig ? "Loading schedules..." : "No scheduled jobs configured yet."}</td>
+                          <td colSpan={8}>{isLoadingScheduleConfig ? "Loading schedules..." : "No scheduled jobs configured yet."}</td>
                         </tr>
                       ) : (
                         scheduledConfigs.map((job) => (
@@ -1548,6 +1556,12 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                               <div className="schedule-cell-stack">
                                 <code className="schedule-options-code">{formatScheduleOptionsPreview(job.options)}</code>
                                 <span className="file-meta">{summarizeScheduleOptions(job.options)}</span>
+                              </div>
+                            </td>
+                            <td data-label="Est. time">
+                              <div className="schedule-cell-stack">
+                                <strong>{formatEstimatedDuration(job.estimated_duration_seconds)}</strong>
+                                <span className="file-meta">{describeEstimateSample(job.estimate_sample_count)}</span>
                               </div>
                             </td>
                             <td data-label="Enabled">
@@ -1619,7 +1633,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                         <optgroup key={group.label} label={group.label}>
                           {group.actions.map((item) => (
                             <option key={item.id} value={item.id}>
-                              {item.label}
+                              {item.label} — {formatEstimatedDuration(item.estimated_duration_seconds)}
                             </option>
                           ))}
                         </optgroup>
@@ -1701,6 +1715,11 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     Supported date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_minus_7}}'}</code>, <code>{'{{local_date_minus_14}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
                   </p>
                   <p className="panel-copy">Action Options JSON may be left blank or set to <code>null</code> when no options are needed.</p>
+                  {selectedScheduledAction ? (
+                    <p className="panel-copy">
+                      Estimated run time: <strong>{formatEstimatedDuration(selectedScheduledAction.estimated_duration_seconds)}</strong> ({describeEstimateSample(selectedScheduledAction.estimate_sample_count)}).
+                    </p>
+                  ) : null}
                   <p className="panel-copy">Suggested options:</p>
                   <pre className="panel-copy"><code>{suggestedScheduleOptionsJson}</code></pre>
                   {selectedScheduledAction?.fields?.length ? (
@@ -2065,6 +2084,29 @@ function describeScheduleCadence(cronExpr: string): string {
     return "Intraday cadence";
   }
   return "Custom cadence";
+}
+
+function formatEstimatedDuration(seconds: number | null | undefined): string {
+  if (!seconds || seconds < 1) {
+    return "Not enough history";
+  }
+  if (seconds < 60) {
+    return `~${seconds}s`;
+  }
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `~${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `~${hours}h ${remainingMinutes}m` : `~${hours}h`;
+}
+
+function describeEstimateSample(sampleCount: number | undefined): string {
+  if (!sampleCount) {
+    return "awaiting completed runs";
+  }
+  return `median of ${sampleCount} recent ${sampleCount === 1 ? "run" : "runs"}`;
 }
 
 function formatScheduleOptionsPreview(options: ScheduledJobConfig["options"]): string {

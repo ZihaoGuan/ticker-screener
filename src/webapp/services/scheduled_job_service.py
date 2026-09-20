@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import statistics
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +26,10 @@ class ScheduledJobService:
         self.config_path = project_root / "config" / "scheduled_jobs.json"
 
     def get_context(self) -> dict[str, Any]:
+        jobs = self.list_jobs()
         return {
-            "jobs": self.list_jobs(),
-            "available_actions": self._available_actions(),
+            "jobs": jobs,
+            "available_actions": self._available_actions(jobs),
             "common_timezones": list(_COMMON_TIMEZONES),
             "scheduler_command": f"cd {self.project_root / 'deploy'} && {self.project_root / 'scripts' / 'run_scheduled_jobs.py'}",
             "max_parallel_jobs": self.get_max_parallel_jobs(),
@@ -52,7 +55,11 @@ class ScheduledJobService:
                     "options": item.get("options") if isinstance(item.get("options"), dict) else {},
                 }
             )
-        return [item for item in normalized if item["job_id"] and item["action_id"] and item["cron_expr"]]
+        jobs = [item for item in normalized if item["job_id"] and item["action_id"] and item["cron_expr"]]
+        estimates = {job["job_id"]: self._estimate_job_duration(job["job_id"]) for job in jobs}
+        for job in jobs:
+            job.update(estimates[job["job_id"]])
+        return jobs
 
     def upsert_job(
         self,
@@ -141,7 +148,7 @@ class ScheduledJobService:
         self._write_jobs(payload)
         return parsed
 
-    def _available_actions(self) -> list[dict[str, Any]]:
+    def _available_actions(self, jobs: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         filter_catalog = self.run_service._get_filter_catalog()
         actions = self.run_service.list_actions() + [
             {
@@ -167,6 +174,15 @@ class ScheduledJobService:
             for action in self.run_service._actions.values()
             if action.action_id == "sync_postgres_market_data"
         ]
+        job_estimates = jobs if jobs is not None else self.list_jobs()
+        estimates_by_action: dict[str, list[int]] = {}
+        sample_counts_by_action: dict[str, int] = {}
+        for job in job_estimates:
+            duration = job.get("estimated_duration_seconds")
+            if isinstance(duration, int) and duration > 0:
+                action_id = str(job["action_id"])
+                estimates_by_action.setdefault(action_id, []).append(duration)
+                sample_counts_by_action[action_id] = sample_counts_by_action.get(action_id, 0) + int(job.get("estimate_sample_count") or 0)
         return [
             {
                 "id": item["id"],
@@ -174,9 +190,41 @@ class ScheduledJobService:
                 "bias_group": item.get("bias_group") or "other",
                 "bullish_subgroup": item.get("bullish_subgroup") or "",
                 "fields": item.get("fields", []),
+                **_summarize_durations(
+                    estimates_by_action.get(str(item["id"]), []),
+                    sample_count=sample_counts_by_action.get(str(item["id"]), 0),
+                ),
             }
             for item in actions
         ]
+
+    def _estimate_job_duration(self, job_id: str) -> dict[str, Any]:
+        log_dir = self.project_root / "artifacts" / "status" / "logs"
+        if not log_dir.is_dir():
+            return _summarize_durations([])
+        active_log = self._active_log_file(job_id)
+        durations: list[int] = []
+        for log_path in sorted(log_dir.glob(f"{job_id}-*.log"), reverse=True)[:12]:
+            if active_log and log_path == active_log:
+                continue
+            started_at = _started_at_from_log_name(job_id, log_path.name)
+            if started_at is None:
+                continue
+            duration = int(log_path.stat().st_mtime - started_at.timestamp())
+            if 0 < duration <= 12 * 60 * 60:
+                durations.append(duration)
+        return _summarize_durations(durations)
+
+    def _active_log_file(self, job_id: str) -> Path | None:
+        status_path = self.project_root / "artifacts" / "status" / f"{job_id}.json"
+        try:
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(status, dict) or str(status.get("status") or "").lower() not in {"queued", "running", "waiting"}:
+            return None
+        log_file = status.get("log_file")
+        return Path(log_file) if isinstance(log_file, str) and log_file else None
 
     def _load_jobs(self) -> dict[str, Any]:
         if not self.config_path.exists():
@@ -190,6 +238,25 @@ class ScheduledJobService:
     def _write_jobs(self, payload: dict[str, Any]) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _started_at_from_log_name(job_id: str, filename: str) -> datetime | None:
+    prefix = f"{job_id}-"
+    if not filename.startswith(prefix) or not filename.endswith(".log"):
+        return None
+    try:
+        return datetime.strptime(filename[len(prefix) : -4], "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def _summarize_durations(durations: list[int], *, sample_count: int | None = None) -> dict[str, Any]:
+    if not durations:
+        return {"estimated_duration_seconds": None, "estimate_sample_count": 0}
+    return {
+        "estimated_duration_seconds": int(round(statistics.median(durations))),
+        "estimate_sample_count": sample_count if sample_count is not None else len(durations),
+    }
 
 
 def _normalize_job_id(value: str) -> str:

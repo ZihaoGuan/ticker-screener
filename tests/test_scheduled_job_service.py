@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -49,6 +51,45 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         self.assertEqual(actions["rs"]["bias_group"], "bullish")
         self.assertEqual(actions["rs"]["bullish_subgroup"], "leaders")
+
+    def test_completed_log_durations_are_exposed_for_jobs_and_actions(self) -> None:
+        config_path = self.project_root / "config" / "scheduled_jobs.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            '{"jobs":[{"job_id":"daily_rs","job_label":"Daily RS","action_id":"rs","cron_expr":"0 18 * * 1-5","cron_tz":"America/New_York","enabled":true,"options":{}}]}\n',
+            encoding="utf-8",
+        )
+        log_dir = self.project_root / "artifacts" / "status" / "logs"
+        log_dir.mkdir(parents=True)
+        for stamp, seconds in (("20260918T220000Z", 120), ("20260919T220000Z", 180), ("20260920T220000Z", 240)):
+            log_path = log_dir / f"daily_rs-{stamp}.log"
+            log_path.write_text("completed\n", encoding="utf-8")
+            started_at = dt.datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.UTC)
+            os.utime(log_path, (started_at.timestamp() + seconds, started_at.timestamp() + seconds))
+
+        context = self.service.get_context()
+
+        self.assertEqual(context["jobs"][0]["estimated_duration_seconds"], 180)
+        self.assertEqual(context["jobs"][0]["estimate_sample_count"], 3)
+        action = next(item for item in context["available_actions"] if item["id"] == "rs")
+        self.assertEqual(action["estimated_duration_seconds"], 180)
+        self.assertEqual(action["estimate_sample_count"], 3)
+
+    def test_active_log_is_not_used_for_duration_estimate(self) -> None:
+        config_path = self.project_root / "config" / "scheduled_jobs.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            '{"jobs":[{"job_id":"daily_rs","job_label":"Daily RS","action_id":"rs","cron_expr":"0 18 * * 1-5","cron_tz":"America/New_York","enabled":true,"options":{}}]}\n',
+            encoding="utf-8",
+        )
+        log_dir = self.project_root / "artifacts" / "status" / "logs"
+        log_dir.mkdir(parents=True)
+        log_path = log_dir / "daily_rs-20260920T220000Z.log"
+        log_path.write_text("still running\n", encoding="utf-8")
+        status_dir = self.project_root / "artifacts" / "status"
+        (status_dir / "daily_rs.json").write_text(json.dumps({"status": "running", "log_file": str(log_path)}), encoding="utf-8")
+
+        self.assertIsNone(self.service.list_jobs()[0]["estimated_duration_seconds"])
 
     def test_get_context_loads_even_with_stale_removed_action_in_jobs_file(self) -> None:
         config_path = self.project_root / "config" / "scheduled_jobs.json"
