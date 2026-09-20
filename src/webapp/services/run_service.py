@@ -226,13 +226,6 @@ class RunService:
         placeholder="20",
         help_text="Minimum filtered peer count required per sector metric baseline.",
     )
-    _min_category_metrics_field = RunField(
-        "min_category_metrics",
-        "Min Category Metrics",
-        "number",
-        placeholder="1.0",
-        help_text="Current ratings pipeline expects 1.0 for full category coverage.",
-    )
     _entry_signal_threshold_field = RunField(
         "entry_signal_threshold",
         "Entry Threshold",
@@ -586,7 +579,6 @@ class RunService:
                 _execution_mode_field,
                 _target_worker_field,
                 _min_sector_peers_field,
-                _min_category_metrics_field,
             ),
         ),
         "build_technical_ratings": RunAction(
@@ -636,7 +628,6 @@ class RunService:
                 _retry_failed_from_manifest_field,
                 _circuit_breaker_consecutive_503_field,
                 _min_sector_peers_field,
-                _min_category_metrics_field,
             ),
         ),
         "sync_tiger_positions": RunAction(
@@ -2716,8 +2707,6 @@ class RunService:
             command.extend(["--entry-signal-threshold", str(normalized_options["entry_signal_threshold"])])
         if normalized_options.get("min_sector_peers") is not None:
             command.extend(["--min-sector-peers", str(normalized_options["min_sector_peers"])])
-        if normalized_options.get("min_category_metrics") is not None:
-            command.extend(["--min-category-metrics", str(normalized_options["min_category_metrics"])])
         if normalized_options.get("hold_periods_json"):
             command.extend(["--hold-periods-json", str(normalized_options["hold_periods_json"])])
         if normalized_options.get("entry_rule_json"):
@@ -2833,7 +2822,7 @@ class RunService:
                 normalized[key] = int(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{key.replace('_', ' ').title()} must be an integer.") from exc
-        for key in ("delay_min_seconds", "delay_max_seconds", "rest_seconds", "min_category_metrics", "retry_base_seconds", "chunk_sleep_seconds", "single_ticker_sleep_seconds", "min_correlation"):
+        for key in ("delay_min_seconds", "delay_max_seconds", "rest_seconds", "retry_base_seconds", "chunk_sleep_seconds", "single_ticker_sleep_seconds", "min_correlation"):
             value = options.get(key)
             if value in (None, ""):
                 continue

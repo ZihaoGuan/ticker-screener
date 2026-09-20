@@ -78,6 +78,93 @@ class RatingsCalculatorTests(unittest.TestCase):
         self.assertEqual(rating.performance_grade, "A+")
         self.assertEqual(rating.overall_rating, 106.64)
 
+    def test_partial_category_coverage_produces_rating_and_keeps_diagnostics(self) -> None:
+        snapshot = FundamentalsSnapshot(
+            ticker="NVDA",
+            as_of_date=dt.date(2026, 6, 13),
+            sector="Technology",
+            industry="Semiconductors",
+            forward_pe=0.5,
+            price_to_sales=0.5,
+            price_to_book=0.5,
+            profit_margin_pct=120.0,
+            operating_margin_pct=120.0,
+            gross_margin_pct=120.0,
+            roe_pct=120.0,
+            roa_pct=120.0,
+            eps_this_y_pct=120.0,
+            eps_next_y_pct=120.0,
+            sales_qq_pct=120.0,
+            eps_qq_pct=120.0,
+            perf_month_pct=120.0,
+            perf_quarter_pct=120.0,
+            perf_half_pct=120.0,
+            perf_year_pct=120.0,
+            perf_ytd_pct=120.0,
+            volatility_month_pct=0.5,
+        )
+        less_is_better = {"forward_pe", "peg_ratio_5y", "price_to_sales", "price_to_book", "price_to_fcf", "volatility_month_pct"}
+        baselines = {metric_name: _baseline(metric_name, less_is_better=metric_name in less_is_better) for metric_name in ALL_RATING_METRICS}
+
+        rating = build_ticker_rating(snapshot, baselines)
+
+        self.assertEqual(rating.rating_status, "ok")
+        self.assertEqual(rating.missing_metric_names, ["eps_next_5y_pct", "peg_ratio_5y", "price_to_fcf"])
+        self.assertEqual(rating.rating_status_reason, "Partial metric coverage: 18/21.")
+        self.assertIsNotNone(rating.overall_rating)
+
+    def test_category_below_minimum_coverage_remains_unrated(self) -> None:
+        snapshot = FundamentalsSnapshot(
+            ticker="NVDA",
+            as_of_date=dt.date(2026, 6, 13),
+            sector="Technology",
+            industry="Semiconductors",
+            forward_pe=0.5,
+        )
+        baselines = {metric_name: _baseline(metric_name, less_is_better=metric_name in {"forward_pe", "peg_ratio_5y", "price_to_sales", "price_to_book", "price_to_fcf", "volatility_month_pct"}) for metric_name in ALL_RATING_METRICS}
+
+        rating = build_ticker_rating(snapshot, baselines)
+
+        self.assertEqual(rating.rating_status, "missing_metrics")
+        self.assertIn("valuation:1/5 (requires 2)", rating.rating_status_reason or "")
+
+    def test_missing_peer_baseline_does_not_reject_a_well_covered_category(self) -> None:
+        snapshot = FundamentalsSnapshot(
+            ticker="NVDA",
+            as_of_date=dt.date(2026, 6, 13),
+            sector="Technology",
+            industry="Semiconductors",
+            forward_pe=0.5,
+            peg_ratio_5y=0.5,
+            price_to_sales=0.5,
+            price_to_book=0.5,
+            price_to_fcf=0.5,
+            profit_margin_pct=120.0,
+            operating_margin_pct=120.0,
+            gross_margin_pct=120.0,
+            roe_pct=120.0,
+            roa_pct=120.0,
+            eps_this_y_pct=120.0,
+            eps_next_y_pct=120.0,
+            eps_next_5y_pct=120.0,
+            sales_qq_pct=120.0,
+            eps_qq_pct=120.0,
+            perf_month_pct=120.0,
+            perf_quarter_pct=120.0,
+            perf_half_pct=120.0,
+            perf_year_pct=120.0,
+            perf_ytd_pct=120.0,
+            volatility_month_pct=0.5,
+        )
+        less_is_better = {"forward_pe", "peg_ratio_5y", "price_to_sales", "price_to_book", "price_to_fcf", "volatility_month_pct"}
+        baselines = {metric_name: _baseline(metric_name, less_is_better=metric_name in less_is_better) for metric_name in ALL_RATING_METRICS}
+        del baselines["peg_ratio_5y"]
+
+        rating = build_ticker_rating(snapshot, baselines)
+
+        self.assertEqual(rating.rating_status, "ok")
+        self.assertEqual(rating.insufficient_baseline_metrics, ["peg_ratio_5y"])
+
 
 if __name__ == "__main__":
     unittest.main()

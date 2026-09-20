@@ -22,7 +22,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--as-of-date", default=today_label())
     parser.add_argument("--include-sectors", nargs="+", help="Only rebuild ratings for tickers in the selected sectors.")
     parser.add_argument("--min-sector-peers", type=int, default=MIN_SECTOR_PEERS_DEFAULT)
-    parser.add_argument("--min-category-metrics", type=float, default=1.0)
     parser.add_argument("--database-url", default="")
     return parser.parse_args()
 

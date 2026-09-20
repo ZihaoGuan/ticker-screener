@@ -46,6 +46,33 @@ CATEGORY_METRICS: Mapping[str, tuple[str, ...]] = {
     "performance": PERFORMANCE_METRICS,
 }
 
+# A category remains comparable when it has enough scored inputs, even if a
+# source legitimately cannot provide every ratio or analyst estimate.
+MIN_CATEGORY_METRIC_COUNTS: Mapping[str, int] = {
+    "valuation": 2,
+    "profitability": 2,
+    "growth": 2,
+    "performance": 4,
+}
+
+
+def build_metric_coverage(missing_metric_names: object) -> dict[str, object]:
+    missing = {str(name) for name in (missing_metric_names or [])}
+    categories = {
+        category_name: {
+            "available": sum(metric_name not in missing for metric_name in metric_names),
+            "total": len(metric_names),
+            "minimum": MIN_CATEGORY_METRIC_COUNTS[category_name],
+        }
+        for category_name, metric_names in CATEGORY_METRICS.items()
+    }
+    total = len(ALL_RATING_METRICS)
+    return {
+        "available": total - len(set(ALL_RATING_METRICS) & missing),
+        "total": total,
+        "categories": categories,
+    }
+
 ALL_RATING_METRICS = (
     *VALUATION_METRICS,
     *PROFITABILITY_METRICS,

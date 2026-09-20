@@ -7,6 +7,7 @@ from .constants import (
     GRADE_ORDER,
     GRADE_SCORES,
     LESS_IS_BETTER_METRICS,
+    MIN_CATEGORY_METRIC_COUNTS,
     MIN_SECTOR_PEERS_DEFAULT,
     RATING_STATUS_INSUFFICIENT_SECTOR_PEERS,
     RATING_STATUS_MISSING_METRICS,
@@ -62,6 +63,7 @@ def build_ticker_rating(
 
     missing_metric_names: list[str] = []
     insufficient_metrics: list[str] = []
+    insufficient_category_coverage: list[str] = []
     category_scores: dict[str, float] = {}
     category_grades: dict[str, str] = {}
 
@@ -81,27 +83,26 @@ def build_ticker_rating(
                 insufficient_metrics.append(metric_name)
                 continue
             metric_grade_scores.append(float(GRADE_SCORES[grade]))
-        if len(metric_grade_scores) != len(metric_names):
+        minimum_count = MIN_CATEGORY_METRIC_COUNTS[category_name]
+        if len(metric_grade_scores) < minimum_count:
+            insufficient_category_coverage.append(
+                f"{category_name}:{len(metric_grade_scores)}/{len(metric_names)} (requires {minimum_count})"
+            )
             continue
         score = round(sum(metric_grade_scores) / len(metric_grade_scores), 2)
         category_scores[category_name] = score
         category_grades[category_name] = _convert_score_to_letter_grade(score) or "F"
 
-    if missing_metric_names:
-        rating.rating_status = RATING_STATUS_MISSING_METRICS
-        rating.rating_status_reason = "One or more required rating metrics are missing."
+    if insufficient_category_coverage:
         rating.missing_metric_names = sorted(set(missing_metric_names))
-        return rating
-    if insufficient_metrics:
-        rating.rating_status = RATING_STATUS_INSUFFICIENT_SECTOR_PEERS
-        rating.rating_status_reason = "Sector peer baselines are missing or too small for one or more metrics."
         rating.insufficient_baseline_metrics = sorted(set(insufficient_metrics))
+        if insufficient_metrics and not missing_metric_names:
+            rating.rating_status = RATING_STATUS_INSUFFICIENT_SECTOR_PEERS
+            rating.rating_status_reason = "Insufficient sector peer baselines for one or more rating categories: " + "; ".join(insufficient_category_coverage) + "."
+        else:
+            rating.rating_status = RATING_STATUS_MISSING_METRICS
+            rating.rating_status_reason = "Insufficient usable metrics for one or more rating categories: " + "; ".join(insufficient_category_coverage) + "."
         return rating
-    if len(category_scores) != len(CATEGORY_METRICS):
-        rating.rating_status = RATING_STATUS_MISSING_METRICS
-        rating.rating_status_reason = "Incomplete category scores."
-        return rating
-
     rating.valuation_score = category_scores["valuation"]
     rating.profitability_score = category_scores["profitability"]
     rating.growth_score = category_scores["growth"]
@@ -112,7 +113,14 @@ def build_ticker_rating(
     rating.growth_grade = category_grades["growth"]
     rating.performance_grade = category_grades["performance"]
     rating.rating_status = RATING_STATUS_OK
-    rating.rating_status_reason = None
+    rating.missing_metric_names = sorted(set(missing_metric_names))
+    rating.insufficient_baseline_metrics = sorted(set(insufficient_metrics))
+    if missing_metric_names:
+        available_count = sum(len(metric_names) for metric_names in CATEGORY_METRICS.values()) - len(set(missing_metric_names))
+        total_count = sum(len(metric_names) for metric_names in CATEGORY_METRICS.values())
+        rating.rating_status_reason = f"Partial metric coverage: {available_count}/{total_count}."
+    else:
+        rating.rating_status_reason = None
     return rating
 
 

@@ -1208,6 +1208,11 @@ export type ChartFundamentalsResponse = {
   rating_diagnostics?: {
     missing_metric_names: string[];
     insufficient_baseline_metrics: string[];
+    metric_coverage?: {
+      available: number;
+      total: number;
+      categories: Record<string, { available: number; total: number; minimum: number }>;
+    };
   } | null;
   technical_snapshot?: {
     as_of_date: string;
@@ -1311,6 +1316,11 @@ export type TopRatingEntry = {
   performance_grade: string | null;
   rating_status: string | null;
   rating_status_reason: string | null;
+  metric_coverage?: {
+    available: number;
+    total: number;
+    categories: Record<string, { available: number; total: number; minimum: number }>;
+  };
   canslim_score?: number | null;
   canslim_max_score?: number | null;
   canslim_rank?: number | null;

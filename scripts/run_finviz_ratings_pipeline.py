@@ -29,7 +29,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry-failed-from-manifest", action="store_true")
     parser.add_argument("--circuit-breaker-consecutive-503", type=int, default=25)
     parser.add_argument("--min-sector-peers", type=int, default=20)
-    parser.add_argument("--min-category-metrics", type=float, default=1.0)
     parser.add_argument("--database-url", default="")
     return parser.parse_args()
 
@@ -108,8 +107,6 @@ def main() -> int:
         *shared,
         "--min-sector-peers",
         str(args.min_sector_peers),
-        "--min-category-metrics",
-        str(args.min_category_metrics),
     ]
     if args.include_sectors:
         rating_command.append("--include-sectors")

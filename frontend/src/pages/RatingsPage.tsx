@@ -35,6 +35,10 @@ function formatCanslimScore(score: number | null | undefined, maxScore: number |
   return `${score}/${maxScore ?? 14}`;
 }
 
+function formatMetricCoverage(coverage: TopRatingEntry["metric_coverage"]): string {
+  return coverage ? `${coverage.available}/${coverage.total}` : "--";
+}
+
 function buildFundamentalRequestPath(asOfDate: string, limit: number, ratingStatus: string, sector: string) {
   const query = new URLSearchParams();
   if (asOfDate.trim()) {
@@ -328,6 +332,7 @@ export function RatingsPage() {
                   <th>YTD %</th>
                   <th>Hits</th>
                   <th>Overall</th>
+                  <th>Coverage</th>
                   <th>1D</th>
                   <th>1W</th>
                   <th>CANSLIM</th>
@@ -353,6 +358,7 @@ export function RatingsPage() {
                     <td data-label="YTD %">{formatPercent(row.perf_ytd_pct)}</td>
                     <td data-label="Hits">{formatCount(row.latest_scanner_hit_count ?? 0)}</td>
                     <td data-label="Overall">{formatScore(row.overall_rating)}</td>
+                    <td data-label="Coverage" title="Available fundamental metrics / total rating metrics">{formatMetricCoverage(row.metric_coverage)}</td>
                     <td data-label="1D">{row.technical_indicator_ratings?.["1d"]?.rating_label ?? "-"}</td>
                     <td data-label="1W">{row.technical_indicator_ratings?.["1w"]?.rating_label ?? "-"}</td>
                     <td data-label="CANSLIM">{formatCanslimScore(row.canslim_score, row.canslim_max_score)}</td>

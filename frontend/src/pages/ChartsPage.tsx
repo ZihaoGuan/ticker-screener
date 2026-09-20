@@ -1125,12 +1125,27 @@ export function ChartsPage() {
                 : "No fundamentals snapshot metadata."}
             </p>
             {latestRatingSnapshot.rating_status_reason ? <p className="panel-copy">{latestRatingSnapshot.rating_status_reason}</p> : null}
+            {latestRatingDiagnostics?.metric_coverage ? (
+              <p className="panel-copy">
+                Coverage: {latestRatingDiagnostics.metric_coverage.available}/{latestRatingDiagnostics.metric_coverage.total}
+                {Object.entries(latestRatingDiagnostics.metric_coverage.categories)
+                  .map(([category, coverage]) => ` · ${category} ${coverage.available}/${coverage.total}`)
+                  .join("")}
+              </p>
+            ) : null}
             {latestRatingDiagnostics && (latestRatingDiagnostics.missing_metric_names.length > 0 || latestRatingDiagnostics.insufficient_baseline_metrics.length > 0) ? (
               <details>
-                <summary className="panel-copy">Rating diagnostics</summary>
-                <pre className="panel-copy" style={{ whiteSpace: "pre-wrap" }}>
-                  {JSON.stringify(latestRatingDiagnostics, null, 2)}
-                </pre>
+                <summary className="panel-copy">Unavailable inputs and peer-baseline diagnostics</summary>
+                {latestRatingDiagnostics.missing_metric_names.length > 0 ? (
+                  <p className="panel-copy">
+                    Unavailable or not meaningful for this ticker: {latestRatingDiagnostics.missing_metric_names.join(", ")}
+                  </p>
+                ) : null}
+                {latestRatingDiagnostics.insufficient_baseline_metrics.length > 0 ? (
+                  <p className="panel-copy">
+                    Peer baseline unavailable: {latestRatingDiagnostics.insufficient_baseline_metrics.join(", ")}
+                  </p>
+                ) : null}
               </details>
             ) : null}
           </>

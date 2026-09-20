@@ -6,7 +6,7 @@ from typing import Any, Iterable
 
 from src.market_data_access import resolve_database_url
 
-from .constants import RATING_STATUS_SCRAPE_FAILED
+from .constants import RATING_STATUS_SCRAPE_FAILED, build_metric_coverage
 from .models import FundamentalsSnapshot, RatingSnapshot, SectorMetricBaseline, TechnicalIndicatorRatingSnapshot, TechnicalRatingSnapshot
 
 
@@ -1087,6 +1087,7 @@ class RatingsRepository:
             rating_diagnostics = {
                 "missing_metric_names": list(missing_metric_names or []),
                 "insufficient_baseline_metrics": list(insufficient_baseline_metrics or []),
+                "metric_coverage": build_metric_coverage(missing_metric_names),
             }
 
         fundamental_rank: int | None = None
@@ -1674,7 +1675,8 @@ class RatingsRepository:
                         r.growth_grade,
                         r.performance_grade,
                         r.rating_status,
-                        r.rating_status_reason
+                        r.rating_status_reason,
+                        r.missing_metric_names
                       FROM ticker_rating_snapshots r
                       LEFT JOIN ticker_fundamentals_snapshots f
                         ON f.ticker = r.ticker AND f.as_of_date = r.as_of_date
@@ -1708,6 +1710,7 @@ class RatingsRepository:
                       ranked.performance_grade,
                       ranked.rating_status,
                       ranked.rating_status_reason,
+                      ranked.missing_metric_names,
                       ranked.current_rank
                     FROM ranked
                     ORDER BY ranked.current_rank ASC
@@ -1769,6 +1772,7 @@ class RatingsRepository:
                     "performance_grade": performance_grade,
                     "rating_status": rating_status_value,
                     "rating_status_reason": rating_status_reason,
+                    "metric_coverage": build_metric_coverage(missing_metric_names),
                 },
                 previous_ranks,
             )
@@ -1790,6 +1794,7 @@ class RatingsRepository:
                 performance_grade,
                 rating_status_value,
                 rating_status_reason,
+                missing_metric_names,
                 current_rank,
             ) in rows
         ]
