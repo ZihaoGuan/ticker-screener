@@ -2545,7 +2545,7 @@ class WatchlistService:
             fa_rating = _coerce_optional_float(entry.get("fa_rating"))
         canslim_score = bucket.get("canslim_score")
         if canslim_score is None:
-            canslim_score = _coerce_optional_int(entry.get("canslim_score"))
+            canslim_score = _coerce_optional_float(entry.get("canslim_score"))
         canslim_max_score = bucket.get("canslim_max_score")
         if canslim_max_score is None:
             canslim_max_score = _coerce_optional_int(entry.get("canslim_max_score"))
@@ -2713,7 +2713,7 @@ class WatchlistService:
             row["rs_rating_6m"] = _coerce_optional_float(technical.get("rs_rating_6m"))
             row["industry_group"] = _coalesce_text(technical.get("industry_group"))
             row["industry_group_member_count"] = _coerce_optional_int(technical.get("industry_group_member_count"))
-            row["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))
+            row["canslim_score"] = _coerce_optional_float(canslim.get("canslim_score"))
             row["canslim_max_score"] = _coerce_optional_int(canslim.get("canslim_max_score"))
             row["canslim_rank"] = _coerce_optional_int(canslim.get("canslim_rank"))
             row["vcp_score"] = _coerce_optional_float(vcp.get("vcp_score"))
@@ -2792,7 +2792,7 @@ class WatchlistService:
             entry["weekly_rs_rating"] = _coerce_optional_float(technical.get("weekly_rs_rating"))
             entry["industry_group"] = _coalesce_text(technical.get("industry_group"))
             entry["industry_group_member_count"] = _coerce_optional_int(technical.get("industry_group_member_count"))
-            entry["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))
+            entry["canslim_score"] = _coerce_optional_float(canslim.get("canslim_score"))
             entry["canslim_max_score"] = _coerce_optional_int(canslim.get("canslim_max_score"))
             entry["canslim_rank"] = _coerce_optional_int(canslim.get("canslim_rank"))
             entry["vcp_score"] = _coerce_optional_float(vcp.get("vcp_score"))
@@ -2820,7 +2820,7 @@ class WatchlistService:
             if not ticker:
                 continue
             canslim = canslim_map.get(ticker) or {}
-            row["canslim_score"] = _coerce_optional_int(canslim.get("canslim_score"))
+            row["canslim_score"] = _coerce_optional_float(canslim.get("canslim_score"))
             row["canslim_max_score"] = _coerce_optional_int(canslim.get("canslim_max_score"))
             row["canslim_rank"] = _coerce_optional_int(canslim.get("canslim_rank"))
 

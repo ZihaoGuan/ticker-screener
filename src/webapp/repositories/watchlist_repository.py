@@ -57,10 +57,40 @@ class WatchlistRepository:
         if not normalized_tickers:
             return {}
         resolved: dict[str, dict[str, Any]] = {}
+        legacy_metadata: list[dict[str, Any]] = []
+        has_canslim_v2_artifact = False
         for metadata in self.list_recent_watchlists(limit=400, include_deprecated=False):
             strategy_id = _strategy_id_for_metadata(metadata)
-            if strategy_id not in {"canslim", "canslim_v2"}:
+            if strategy_id == "canslim":
+                legacy_metadata.append(metadata)
                 continue
+            if strategy_id != "canslim_v2":
+                continue
+            has_canslim_v2_artifact = True
+            stem = str(metadata.get("stem") or "").strip()
+            if not stem:
+                continue
+            for item in self._load_canslim_v2_hits(metadata, stem):
+                ticker = str(item.get("ticker") or "").strip().upper()
+                if ticker not in normalized_tickers or ticker in resolved:
+                    continue
+                score = _coerce_optional_float(item.get("composite_score"))
+                if score is None:
+                    score = _coerce_optional_float(item.get("score"))
+                rank = _coerce_optional_int(item.get("rank"))
+                if score is None:
+                    continue
+                resolved[ticker] = {
+                    "canslim_score": score,
+                    "canslim_max_score": 100,
+                    "canslim_rank": rank,
+                }
+            if len(resolved) >= len(normalized_tickers):
+                break
+        if has_canslim_v2_artifact:
+            return resolved
+
+        for metadata in legacy_metadata:
             stem = str(metadata.get("stem") or "").strip()
             if not stem:
                 continue
@@ -68,19 +98,31 @@ class WatchlistRepository:
                 ticker = str(item.get("ticker") or "").strip().upper()
                 if ticker not in normalized_tickers or ticker in resolved:
                     continue
-                score = _coerce_optional_int(item.get("score"))
+                score = _coerce_optional_float(item.get("score"))
                 max_score = _coerce_optional_int(item.get("max_score"))
-                rank = _coerce_optional_int(item.get("rank"))
                 if score is None or max_score is None:
                     continue
                 resolved[ticker] = {
                     "canslim_score": score,
                     "canslim_max_score": max_score,
-                    "canslim_rank": rank,
+                    "canslim_rank": _coerce_optional_int(item.get("rank")),
                 }
             if len(resolved) >= len(normalized_tickers):
                 break
         return resolved
+
+    def _load_canslim_v2_hits(self, metadata: dict[str, Any], stem: str) -> list[dict[str, Any]]:
+        watchlist_path = Path(str(metadata.get("path") or ""))
+        raw_path = watchlist_path.with_name("raw_results.json") if watchlist_path.name == "watchlist.json" else None
+        if raw_path is not None and raw_path.exists():
+            try:
+                payload = json.loads(raw_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                payload = None
+            hits = payload.get("hits") if isinstance(payload, dict) else None
+            if isinstance(hits, list):
+                return [dict(item) for item in hits if isinstance(item, dict)]
+        return self.load_watchlist(stem)
 
     def load_latest_stored_vcp_score_map(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
         normalized_tickers = {

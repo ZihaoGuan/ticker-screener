@@ -60,6 +60,30 @@ class WatchlistRepositoryTests(unittest.TestCase):
 
         self.assertEqual([item["ticker"] for item in payload], ["NVDA", "CRWD"])
 
+    def test_load_latest_stored_canslim_score_map_reads_all_canslim_v2_raw_hits(self) -> None:
+        watchlist_path = self._write_new_watchlist(
+            date_folder="2026-09-19",
+            strategy_id="canslim_v2",
+            date_label="2026-09-19",
+            tickers=["NVDA"],
+        )
+        watchlist_path.with_name("raw_results.json").write_text(
+            json.dumps(
+                {
+                    "hits": [
+                        {"ticker": "NVDA", "composite_score": 91.4, "rank": 1},
+                        {"ticker": "AAPL", "composite_score": 62.7, "rank": 2},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.repository.load_latest_stored_canslim_score_map(["NVDA", "AAPL"])
+
+        self.assertEqual(payload["NVDA"], {"canslim_score": 91.4, "canslim_max_score": 100, "canslim_rank": 1})
+        self.assertEqual(payload["AAPL"], {"canslim_score": 62.7, "canslim_max_score": 100, "canslim_rank": 2})
+
     def test_new_layout_wins_over_legacy_duplicate_stem(self) -> None:
         watchlists_dir = self.artifacts_dir / "watchlists"
         watchlists_dir.mkdir(parents=True, exist_ok=True)
