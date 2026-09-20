@@ -368,6 +368,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("trend_template", "trend_template", "Trend Template"),
         ("kai_s2", "kai_s2", "Kai S2"),
         ("one_year_winners", "one_year_winners", "1Y Winners > $10B"),
+        ("qullamaggie", "qullamaggie", "Qullamaggie"),
         ("market_correction_resilience", "market_correction_resilience", "Market Correction Resilience"),
         ("pre_earnings_ma_stack", "pre_earnings_ma_stack", "Pre Earnings MA Stack"),
         ("earnings_weekly_criteria", "earnings_weekly_criteria", "Earnings Weekly Criteria"),

@@ -2001,6 +2001,8 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
       "Liquid high-beta trend leaders with price above 20/50/200 SMA, 150D SMA above 200D SMA, market cap above $1B, avg volume above 2M, and close x 30D avg volume above $100M.",
     one_year_winners:
       "Rolling 1-year winners above 30% with market cap above $10B, positive TTM revenue growth, beta above 1, monthly dollar liquidity above $900M, price above $20 and 100 EMA, and 21 EMA above 50 SMA.",
+    qullamaggie:
+      "Momentum candidates up at least 30% over 3 or 6 months, near recent and 52-week highs, above 10/20/50/200 SMA, with 1M+ average volume, $100M+ market cap, ADR20 of 4%+, strong Daily RS, and a tight flag or pullback near the 10/20 SMA.",
     gap_fill: "Post-earnings gap reversal candidates with reclaim or fill behavior.",
     macd_golden_cross: "Fresh bullish MACD crossovers where the MACD line has recently moved above the signal line.",
     inside_dryup_v2: "Latest inside day plus extreme price-volume dry-up, without requiring breakout follow-through.",

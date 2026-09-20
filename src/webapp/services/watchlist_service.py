@@ -638,6 +638,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "qullamaggie",
+        "strategy_id": "qullamaggie",
+        "label": "Qullamaggie",
+        "description": "Momentum candidates up at least 30% over 3 or 6 months, near recent and 52-week highs, above 10/20/50/200 SMA, with 1M+ average volume, $100M+ market cap, ADR20 of 4%+, strong Daily RS, and a tight flag or pullback near the 10/20 SMA. Confirm the chart structure before acting.",
+        "timeframe": "Daily",
+        "accent": "amber",
+        "bias_group": "bullish",
+    },
+    {
         "id": "vcs_critical_tightness",
         "strategy_id": "vcs_critical_tightness",
         "label": "VCS Critical Tightness",

@@ -34,8 +34,11 @@ type TopHitsFilterPreset = {
 type TopHitsPresetStore = { presets: Record<string, TopHitsFilterPreset>; defaultPresetName: string };
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
-const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "sean_breakout", "venu_scanner"]);
-const PINNED_SCANNER_OPTIONS = [{ id: "weekly_candidate_pool", label: "Weekly Candidate Pool" }];
+const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "qullamaggie", "sean_breakout", "venu_scanner"]);
+const PINNED_SCANNER_OPTIONS = [
+  { id: "weekly_candidate_pool", label: "Weekly Candidate Pool" },
+  { id: "qullamaggie", label: "Qullamaggie" },
+];
 const FILTER_PRESETS_STORAGE_KEY = "top-hits-filter-presets";
 const EMPTY_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   sectorFilter: "all",

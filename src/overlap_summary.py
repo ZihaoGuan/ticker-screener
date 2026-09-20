@@ -89,6 +89,11 @@ PIPELINES = (
         "filename": "kai_s2_{date}.json",
     },
     {
+        "id": "qullamaggie",
+        "label": "Qullamaggie",
+        "filename": "qullamaggie_{date}.json",
+    },
+    {
         "id": "near_52wk_high",
         "label": "Near 52W High",
         "filename": "near_52wk_high_{date}.json",
@@ -296,6 +301,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "weinstein_stage2_early": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "kai_s2": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "one_year_winners": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "qullamaggie": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sma200_pullback_buy": {"bias_group": "bullish", "bullish_subgroup": "pullbacks"},
     "weekly_tight_close_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
 }

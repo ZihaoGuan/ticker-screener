@@ -761,6 +761,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("trend_template", action_ids)
         self.assertIn("kai_s2", action_ids)
         self.assertIn("one_year_winners", action_ids)
+        self.assertIn("qullamaggie", action_ids)
         self.assertIn("canslim", action_ids)
         self.assertIn("vcs_setup_stage", action_ids)
         self.assertIn("vcs_critical_tightness", action_ids)

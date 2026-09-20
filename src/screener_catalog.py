@@ -32,6 +32,7 @@ from .macd_screen import find_recent_macd_hit
 from .near_52wk_high_screen import PRICE_HISTORY_DAYS as NEAR_52WK_HIGH_HISTORY_DAYS, run_near_52wk_high_screen
 from .near_200ma_screen import run_near_200ma_screen
 from .one_year_winners_screen import ONE_YEAR_WINNERS_HISTORY_DAYS, find_one_year_winners_hit
+from .qullamaggie_screen import QULLAMAGGIE_HISTORY_DAYS, find_qullamaggie_hit
 from .rti_screen import find_recent_rti_hit
 from .sean_breakout_screen import find_recent_sean_breakout_hit
 from .rsi_ma_bb_screen import find_recent_rsi_ma_bb_hit
@@ -1190,6 +1191,42 @@ def _run_one_year_winners(bundle: ScreenerInputBundle) -> ScreenerEvaluationResu
     )
 
 
+def _run_qullamaggie(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    database_url = str(bundle.extras.get("database_url") or "")
+    ratings = RatingsRepository(database_url)
+    fundamentals = ratings.load_latest_fundamentals_snapshots_for_tickers(
+        [bundle.ticker],
+        as_of_date=bundle.as_of_date,
+    ).get(bundle.ticker.upper(), {})
+    technicals = ratings.load_latest_technical_rating_snapshots_for_tickers(
+        [bundle.ticker],
+        as_of_date=bundle.as_of_date,
+        allow_older_as_of_date=True,
+    ).get(bundle.ticker.upper(), {})
+    hit = find_qullamaggie_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        market_cap=fundamentals.get("market_cap"),
+        daily_rs_rating=technicals.get("daily_rs_rating"),
+        signal_date=bundle.as_of_date,
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "recent_return_pct": payload["recent_return_pct"],
+            "adr_pct_20": payload["adr_pct_20"],
+            "daily_rs_rating": payload["daily_rs_rating"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
 def _run_vcp_spec(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     hit = find_recent_vcp_spec_hit(
         bundle.bars,
@@ -1692,6 +1729,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=ONE_YEAR_WINNERS_HISTORY_DAYS,
             warmup_trading_days=20,
             evaluator=_run_one_year_winners,
+        ),
+        "qullamaggie": ScreenerSpec(
+            id="qullamaggie",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=QULLAMAGGIE_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_qullamaggie,
         ),
         "vcs_setup_stage": ScreenerSpec(
             id="vcs_setup_stage",
