@@ -1408,6 +1408,7 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertIn("event: snapshot", body)
         self.assertIn('"job_id":"rs-job"', body)
         self.assertIn('"id":"rs"', body)
+        self.assertIn('"action_activity"', body)
 
     def test_premium_can_stream_child_job_log(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(

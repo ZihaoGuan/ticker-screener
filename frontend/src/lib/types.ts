@@ -782,6 +782,7 @@ export type RunPrecheckResponse = {
 
 export type JobsResponse = {
   actions: RunAction[];
+  action_activity: ScreenerActionActivity[];
   jobs: {
     job_id: string;
     action_id: string;
@@ -809,6 +810,7 @@ export type JobsResponse = {
     backtest_run_id?: number | null;
     cancel_requested: boolean;
     execution_mode?: "local" | "remote";
+    trigger_source?: "manual" | "scheduler" | "retry" | "system";
     worker_name?: string;
     target_worker?: string;
     duration_seconds: number;
@@ -847,6 +849,27 @@ export type JobsResponse = {
       duration_seconds: number;
     }>;
   }[];
+};
+
+export type ScreenerActivityEntry = {
+  job_id: string;
+  label: string;
+  status: "queued" | "running" | "success" | "failed" | "cancelled" | "interrupted";
+  started_at: string;
+  finished_at: string;
+  success_count: number;
+  screen_run_id?: number | null;
+  estimated_duration_seconds?: number | null;
+  message?: string;
+};
+
+export type ScreenerActionActivity = {
+  action_id: string;
+  adhoc_current: ScreenerActivityEntry | null;
+  adhoc_last: ScreenerActivityEntry | null;
+  scheduled_current: ScreenerActivityEntry | null;
+  scheduled_last: ScreenerActivityEntry | null;
+  scheduled_count: number;
 };
 
 export type WatchlistsResponse = {

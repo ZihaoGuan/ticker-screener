@@ -187,9 +187,12 @@ def _job_stream_signature(job: dict[str, object]) -> str:
 
 
 def _jobs_payload(service: RunService) -> dict[str, object]:
+    jobs = service.list_jobs()
+    schedule_service = ScheduledJobService(project_root=service.project_root, run_service=service)
     return {
         "actions": service.list_actions(),
-        "jobs": service.list_jobs(),
+        "jobs": jobs,
+        "action_activity": schedule_service.get_action_activity(run_jobs=jobs),
     }
 
 
@@ -519,7 +522,7 @@ def jobs_data(
     service: RunService = Depends(get_run_service),
     _: Principal = Depends(require_run_screeners),
 ) -> JSONResponse:
-    return JSONResponse({"actions": service.list_actions(), "jobs": service.list_jobs()})
+    return JSONResponse(_jobs_payload(service))
 
 
 @router.get("/jobs/stream")

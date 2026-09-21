@@ -16,6 +16,8 @@ import type {
   ScheduledJobConfig,
   ScheduledJobConfigResponse,
   ScheduledJobSummary,
+  ScreenerActionActivity,
+  ScreenerActivityEntry,
 } from "../lib/types";
 import "./RunsPage.css";
 
@@ -213,6 +215,10 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     }
     return actions.filter((action) => !["signal_warm_batch", "overlap_backtest_v1"].includes(action.id));
   }, [mode, payload]);
+  const actionActivityById = useMemo(
+    () => new Map((payload?.action_activity ?? []).map((activity) => [activity.action_id, activity])),
+    [payload?.action_activity],
+  );
 
   const visibleJobs = useMemo(() => {
     const jobs = payload?.jobs ?? [];
@@ -894,6 +900,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                         {(() => {
                           const configureOnly = ["signal_warm_batch", "overlap_backtest_v1"].includes(action.id);
                           const timing = availableScheduledActions.find((item) => item.id === action.id);
+                          const activity = actionActivityById.get(action.id);
+                          const actionIsActive = Boolean(activity?.adhoc_current || activity?.scheduled_current);
+                          const estimatedDuration = timing?.estimated_duration_seconds ?? activity?.scheduled_current?.estimated_duration_seconds ?? activity?.scheduled_last?.estimated_duration_seconds;
                           return (
                             <>
                               <div className="screener-card-header">
@@ -908,12 +917,16 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                                   : describeScreenerAction(action.id, action.fields.length > 0)}
                               </p>
                               <p className="file-meta">
-                                Estimated run time: {formatEstimatedDuration(timing?.estimated_duration_seconds)}
+                                Estimated run time: {formatEstimatedDuration(estimatedDuration)}
                                 {timing?.estimate_sample_count ? ` (${describeEstimateSample(timing.estimate_sample_count)})` : ""}
                               </p>
+                              <div className="screener-card-activity" aria-live="polite">
+                                {renderScreenerActivity("One-time", activity?.adhoc_current, activity?.adhoc_last)}
+                                {renderScreenerActivity("Scheduled", activity?.scheduled_current, activity?.scheduled_last, activity?.scheduled_count)}
+                              </div>
                               <div className="screener-card-actions">
                                 {!configureOnly ? (
-                                  <button className="screener-run-button" onClick={() => void handleQuickRun(action.id)} type="button" disabled={isRunning}>
+                                  <button className="screener-run-button" onClick={() => void handleQuickRun(action.id)} type="button" disabled={isRunning || actionIsActive}>
                                     RUN DEFAULT
                                   </button>
                                 ) : null}
@@ -2107,6 +2120,37 @@ function describeEstimateSample(sampleCount: number | undefined): string {
     return "awaiting completed runs";
   }
   return `median of ${sampleCount} recent ${sampleCount === 1 ? "run" : "runs"}`;
+}
+
+function renderScreenerActivity(
+  label: string,
+  current: ScreenerActivityEntry | null | undefined,
+  last: ScreenerActivityEntry | null | undefined,
+  scheduledCount = 0,
+) {
+  const entry = current ?? last;
+  if (!entry) {
+    return <span className="screener-activity-line screener-activity-idle">{label}: {scheduledCount ? "Idle" : "Not scheduled"}</span>;
+  }
+  const isActive = entry.status === "queued" || entry.status === "running";
+  const labelText = isActive ? (entry.status === "queued" ? "Queued" : "Running") : describeActivityStatus(entry.status);
+  const timestamp = isActive ? entry.started_at : entry.finished_at || entry.started_at;
+  const timeText = timestamp ? formatLocalDateTime(timestamp) : "time unavailable";
+  const timingText = isActive && entry.estimated_duration_seconds ? ` · ${formatEstimatedDuration(entry.estimated_duration_seconds)} typical` : "";
+  return (
+    <span className={`screener-activity-line screener-activity-${entry.status}`}>
+      {isActive ? <span className="screener-activity-spinner" aria-label="Running" /> : null}
+      {label}: {labelText} · {timeText}{timingText}
+      {!isActive && entry.success_count > 0 ? ` · ${entry.success_count} hits` : ""}
+    </span>
+  );
+}
+
+function describeActivityStatus(status: ScreenerActivityEntry["status"]): string {
+  if (status === "success") return "Succeeded";
+  if (status === "failed") return "Failed";
+  if (status === "cancelled") return "Cancelled";
+  return "Interrupted";
 }
 
 function formatScheduleOptionsPreview(options: ScheduledJobConfig["options"]): string {

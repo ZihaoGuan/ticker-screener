@@ -35,6 +35,36 @@ class ScheduledJobService:
             "max_parallel_jobs": self.get_max_parallel_jobs(),
         }
 
+    def get_action_activity(self, *, run_jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return card-safe activity for every configured or recently run action."""
+        configured_jobs = self.list_jobs()
+        by_action: dict[str, dict[str, Any]] = {}
+        for job in configured_jobs:
+            action_id = str(job["action_id"])
+            activity = by_action.setdefault(action_id, _empty_action_activity(action_id))
+            activity["scheduled_count"] += 1
+            status = self._scheduled_status(job)
+            entry = _activity_entry(status, estimated_duration_seconds=job.get("estimated_duration_seconds"))
+            if entry is None:
+                continue
+            if entry["status"] in {"queued", "running"}:
+                activity["scheduled_current"] = _newer_activity(activity["scheduled_current"], entry)
+            else:
+                activity["scheduled_last"] = _newer_activity(activity["scheduled_last"], entry)
+
+        for job in run_jobs:
+            action_id = str(job.get("action_id") or "").strip()
+            if not action_id:
+                continue
+            activity = by_action.setdefault(action_id, _empty_action_activity(action_id))
+            entry = _activity_entry(job)
+            if entry is None:
+                continue
+            target = "scheduled" if str(job.get("trigger_source") or "manual") == "scheduler" else "adhoc"
+            state_key = f"{target}_{'current' if entry['status'] in {'queued', 'running'} else 'last'}"
+            activity[state_key] = _newer_activity(activity[state_key], entry)
+        return sorted(by_action.values(), key=lambda item: str(item["action_id"]))
+
     def list_jobs(self) -> list[dict[str, Any]]:
         payload = self._load_jobs()
         jobs = payload.get("jobs", [])
@@ -226,6 +256,26 @@ class ScheduledJobService:
         log_file = status.get("log_file")
         return Path(log_file) if isinstance(log_file, str) and log_file else None
 
+    def _scheduled_status(self, job: dict[str, Any]) -> dict[str, Any] | None:
+        status_path = self.project_root / "artifacts" / "status" / f"{job['job_id']}.json"
+        try:
+            payload = json.loads(status_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        payload = dict(payload)
+        payload["job_id"] = str(payload.get("job_id") or job["job_id"])
+        payload["label"] = str(payload.get("job_label") or job["job_label"])
+        payload["started_at"] = str(payload.get("last_started_at") or "")
+        payload["finished_at"] = str(payload.get("last_finished_at") or "")
+        payload["success_count"] = int(payload.get("success_count") or 0)
+        status = str(payload.get("status") or "unknown").lower()
+        if status in {"queued", "running", "waiting"} and _is_stale_status(payload, estimated_duration_seconds=job.get("estimated_duration_seconds")):
+            payload["status"] = "interrupted"
+            payload["message"] = "No completion signal was recorded within the expected run window."
+        return payload
+
     def _load_jobs(self) -> dict[str, Any]:
         if not self.config_path.exists():
             return {"jobs": []}
@@ -257,6 +307,59 @@ def _summarize_durations(durations: list[int], *, sample_count: int | None = Non
         "estimated_duration_seconds": int(round(statistics.median(durations))),
         "estimate_sample_count": sample_count if sample_count is not None else len(durations),
     }
+
+
+def _empty_action_activity(action_id: str) -> dict[str, Any]:
+    return {
+        "action_id": action_id,
+        "adhoc_current": None,
+        "adhoc_last": None,
+        "scheduled_current": None,
+        "scheduled_last": None,
+        "scheduled_count": 0,
+    }
+
+
+def _activity_entry(payload: dict[str, Any] | None, *, estimated_duration_seconds: Any = None) -> dict[str, Any] | None:
+    if not payload:
+        return None
+    status = str(payload.get("status") or "unknown").lower()
+    if status == "waiting":
+        status = "queued"
+    if status not in {"queued", "running", "success", "failed", "cancelled", "interrupted"}:
+        return None
+    return {
+        "job_id": str(payload.get("job_id") or ""),
+        "label": str(payload.get("label") or payload.get("job_label") or ""),
+        "status": status,
+        "started_at": str(payload.get("started_at") or payload.get("last_started_at") or ""),
+        "finished_at": str(payload.get("finished_at") or payload.get("last_finished_at") or ""),
+        "success_count": int(payload.get("success_count") or 0),
+        "screen_run_id": payload.get("screen_run_id"),
+        "estimated_duration_seconds": estimated_duration_seconds if isinstance(estimated_duration_seconds, int) else None,
+        "message": str(payload.get("message") or ""),
+    }
+
+
+def _newer_activity(current: dict[str, Any] | None, candidate: dict[str, Any]) -> dict[str, Any]:
+    if current is None:
+        return candidate
+    current_time = str(current.get("finished_at") or current.get("started_at") or "")
+    candidate_time = str(candidate.get("finished_at") or candidate.get("started_at") or "")
+    return candidate if candidate_time >= current_time else current
+
+
+def _is_stale_status(payload: dict[str, Any], *, estimated_duration_seconds: Any) -> bool:
+    started_at = str(payload.get("last_started_at") or payload.get("started_at") or "")
+    try:
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    expected = estimated_duration_seconds if isinstance(estimated_duration_seconds, int) else 0
+    threshold_seconds = max(30 * 60, expected * 3)
+    return (datetime.now(UTC) - started.astimezone(UTC)).total_seconds() > threshold_seconds
 
 
 def _normalize_job_id(value: str) -> str:

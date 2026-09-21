@@ -91,6 +91,64 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         self.assertIsNone(self.service.list_jobs()[0]["estimated_duration_seconds"])
 
+    def test_action_activity_keeps_manual_and_scheduled_states_separate(self) -> None:
+        config_path = self.project_root / "config" / "scheduled_jobs.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            '{"jobs":[{"job_id":"daily_rs","job_label":"Daily RS","action_id":"rs","cron_expr":"0 18 * * 1-5","cron_tz":"America/New_York","enabled":true,"options":{}}]}\n',
+            encoding="utf-8",
+        )
+        status_dir = self.project_root / "artifacts" / "status"
+        status_dir.mkdir(parents=True)
+        (status_dir / "daily_rs.json").write_text(
+            json.dumps(
+                {
+                    "status": "success",
+                    "last_started_at": "2026-09-20T22:00:00Z",
+                    "last_finished_at": "2026-09-20T22:02:00Z",
+                    "success_count": 4,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        activity = self.service.get_action_activity(
+            run_jobs=[
+                {
+                    "job_id": "manual-rs",
+                    "action_id": "rs",
+                    "label": "Run RS",
+                    "status": "running",
+                    "started_at": "2026-09-21T00:00:00Z",
+                    "finished_at": "",
+                    "trigger_source": "manual",
+                }
+            ]
+        )
+
+        rs = next(item for item in activity if item["action_id"] == "rs")
+        self.assertEqual(rs["adhoc_current"]["job_id"], "manual-rs")
+        self.assertEqual(rs["scheduled_last"]["status"], "success")
+        self.assertEqual(rs["scheduled_last"]["success_count"], 4)
+
+    def test_stale_scheduled_running_status_is_exposed_as_interrupted(self) -> None:
+        config_path = self.project_root / "config" / "scheduled_jobs.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            '{"jobs":[{"job_id":"daily_rs","job_label":"Daily RS","action_id":"rs","cron_expr":"0 18 * * 1-5","cron_tz":"America/New_York","enabled":true,"options":{}}]}\n',
+            encoding="utf-8",
+        )
+        status_dir = self.project_root / "artifacts" / "status"
+        status_dir.mkdir(parents=True)
+        (status_dir / "daily_rs.json").write_text(
+            json.dumps({"status": "running", "last_started_at": "2020-01-01T00:00:00Z"}),
+            encoding="utf-8",
+        )
+
+        activity = self.service.get_action_activity(run_jobs=[])
+
+        self.assertEqual(activity[0]["scheduled_last"]["status"], "interrupted")
+
     def test_get_context_loads_even_with_stale_removed_action_in_jobs_file(self) -> None:
         config_path = self.project_root / "config" / "scheduled_jobs.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
