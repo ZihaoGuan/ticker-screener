@@ -94,6 +94,21 @@ PIPELINES = (
         "filename": "qullamaggie_{date}.json",
     },
     {
+        "id": "stockbee_9m_movers",
+        "label": "Stockbee 9 Million Movers",
+        "filename": "stockbee_9m_movers_{date}.json",
+    },
+    {
+        "id": "stockbee_20pct_weekly_movers",
+        "label": "Stockbee 20% Weekly Movers",
+        "filename": "stockbee_20pct_weekly_movers_{date}.json",
+    },
+    {
+        "id": "stockbee_4pct_daily_movers",
+        "label": "Stockbee 4% Daily Movers",
+        "filename": "stockbee_4pct_daily_movers_{date}.json",
+    },
+    {
         "id": "near_52wk_high",
         "label": "Near 52W High",
         "filename": "near_52wk_high_{date}.json",
@@ -302,6 +317,9 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "kai_s2": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "one_year_winners": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "qullamaggie": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "stockbee_9m_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "stockbee_20pct_weekly_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "stockbee_4pct_daily_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sma200_pullback_buy": {"bias_group": "bullish", "bullish_subgroup": "pullbacks"},
     "weekly_tight_close_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
 }

@@ -47,6 +47,7 @@ from .stockbee_momentum_burst_screen import (
     STOCKBEE_MOMENTUM_BURST_HISTORY_DAYS,
     find_recent_stockbee_momentum_burst_hit,
 )
+from .stockbee_movers_screen import STOCKBEE_MOVER_HISTORY_DAYS, evaluate_stockbee_mover_frame
 from .vcp_spec_screen import VCP_SPEC_HISTORY_DAYS, find_recent_vcp_spec_hit
 from .vcp_scored_screen import VCP_SCORED_HISTORY_DAYS, score_vcp_hit
 from .vcp_v3_screen import VCP_V3_HISTORY_DAYS, find_vcp_v3_hit
@@ -1149,6 +1150,24 @@ def _run_stockbee_momentum_burst(bundle: ScreenerInputBundle) -> ScreenerEvaluat
     )
 
 
+def _run_stockbee_mover(bundle: ScreenerInputBundle, profile: str) -> ScreenerEvaluationResult:
+    hit = evaluate_stockbee_mover_frame(bundle.bars, ticker=_ticker_from_bundle(bundle), profile=profile)
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "daily_change_pct": payload["daily_change_pct"],
+            "weekly_change_pct": payload["weekly_change_pct"],
+            "volume": payload["volume"],
+        },
+        reasons=tuple(str(item) for item in payload["reasons"]),
+        hit=payload,
+    )
+
+
 def _run_kai_s2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     metadata = dict(bundle.metadata or {})
     market_cap = metadata.get("market_cap")
@@ -1889,6 +1908,27 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=STOCKBEE_MOMENTUM_BURST_HISTORY_DAYS,
             warmup_trading_days=10,
             evaluator=_run_stockbee_momentum_burst,
+        ),
+        "stockbee_9m_movers": ScreenerSpec(
+            id="stockbee_9m_movers",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=STOCKBEE_MOVER_HISTORY_DAYS,
+            warmup_trading_days=1,
+            evaluator=lambda bundle: _run_stockbee_mover(bundle, "stockbee_9m_movers"),
+        ),
+        "stockbee_20pct_weekly_movers": ScreenerSpec(
+            id="stockbee_20pct_weekly_movers",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=STOCKBEE_MOVER_HISTORY_DAYS,
+            warmup_trading_days=1,
+            evaluator=lambda bundle: _run_stockbee_mover(bundle, "stockbee_20pct_weekly_movers"),
+        ),
+        "stockbee_4pct_daily_movers": ScreenerSpec(
+            id="stockbee_4pct_daily_movers",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=STOCKBEE_MOVER_HISTORY_DAYS,
+            warmup_trading_days=1,
+            evaluator=lambda bundle: _run_stockbee_mover(bundle, "stockbee_4pct_daily_movers"),
         ),
         "kai_s2": ScreenerSpec(
             id="kai_s2",

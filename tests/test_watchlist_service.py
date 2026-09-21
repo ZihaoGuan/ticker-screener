@@ -283,8 +283,9 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["daily_rs_new_high"]["entry_count"], 3)
         self.assertEqual(cards["rs_phase"]["stem"], "rs_phase_2026-06-11")
         self.assertEqual(cards["rs_phase"]["entry_count"], 2)
-        self.assertEqual(cards["canslim"]["stem"], "canslim_2026-06-11")
-        self.assertEqual(cards["canslim"]["entry_count"], 3)
+        self.assertNotIn("canslim", cards)
+        self.assertNotIn("canslim_v2", cards)
+        self.assertNotIn("minervini_growth_acceleration", cards)
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-11")
         self.assertEqual(cards["sean_gap_up"]["entry_count"], 2)
         self.assertEqual(cards["cup_detection"]["stem"], "cup_detection_2026-06-11")
@@ -376,10 +377,9 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["rs"]["preview_tickers"], ["PLTR", "CRWV"])
         self.assertEqual(cards["daily_rs_new_high"]["stem"], "daily_rs_new_high_2026-06-12")
         self.assertEqual(cards["daily_rs_new_high"]["preview_tickers"], ["AAPL", "PLTR", "CRWV"])
-        self.assertEqual(cards["canslim"]["stem"], "canslim_2026-06-12")
-        self.assertEqual(cards["canslim"]["preview_tickers"], ["NVDA", "APP"])
-        self.assertEqual(cards["canslim_v2"]["stem"], "canslim_v2_2026-06-12")
-        self.assertEqual(cards["canslim_v2"]["preview_tickers"], ["NVDA"])
+        self.assertNotIn("canslim", cards)
+        self.assertNotIn("canslim_v2", cards)
+        self.assertNotIn("minervini_growth_acceleration", cards)
         self.assertEqual(cards["sean_gap_up"]["stem"], "sean_peg_earnings_gap_2026-06-12")
         self.assertEqual(cards["fearzone"]["stem"], "fearzone_2026-06-12")
         self.assertEqual(cards["vcs_critical_tightness"]["stem"], "vcs_critical_tightness_2026-06-12")
@@ -1987,6 +1987,20 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertTrue(cards["weinstein_stage_analysis"]["available"])
         self.assertEqual(cards["weinstein_stage_analysis"]["entry_count"], 2)
         self.assertEqual(cards["weinstein_stage_analysis"]["timeframe"], "Weekly")
+
+    def test_get_scanner_board_includes_lightweight_stockbee_mover_cards(self) -> None:
+        for strategy_id in ("stockbee_9m_movers", "stockbee_20pct_weekly_movers", "stockbee_4pct_daily_movers"):
+            self._write_watchlist(
+                f"{strategy_id}_2026-06-12",
+                tickers=["NVDA"],
+                modified_at=dt.datetime(2026, 6, 12, 23, 31, tzinfo=dt.timezone.utc),
+            )
+
+        payload = self.service.get_scanner_board(now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc))
+        cards = {item["id"]: item for item in payload["cards"]}
+        for strategy_id in ("stockbee_9m_movers", "stockbee_20pct_weekly_movers", "stockbee_4pct_daily_movers"):
+            self.assertTrue(cards[strategy_id]["available"])
+            self.assertEqual(cards[strategy_id]["entry_count"], 1)
 
     def test_get_scanner_board_includes_gap_fill_card(self) -> None:
         self._write_watchlist(

@@ -466,6 +466,13 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["stockbee_momentum_burst"]["label"], "Run Stockbee Momentum Burst")
         self.assertIn("scripts/run_stockbee_momentum_burst_screen.py", actions["stockbee_momentum_burst"]["command"])
 
+    def test_list_actions_includes_lightweight_stockbee_movers(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+
+        self.assertEqual(actions["stockbee_9m_movers"]["label"], "Run Stockbee 9 Million Movers")
+        self.assertIn("--profile stockbee_20pct_weekly_movers", actions["stockbee_20pct_weekly_movers"]["command"])
+        self.assertIn("--profile stockbee_4pct_daily_movers", actions["stockbee_4pct_daily_movers"]["command"])
+
     def test_list_actions_includes_near_52wk_high(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 

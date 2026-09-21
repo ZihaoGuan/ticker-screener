@@ -2089,6 +2089,24 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="leaders",
         ),
+        "stockbee_9m_movers": RunAction(
+            "stockbee_9m_movers", "Run Stockbee 9 Million Movers", "scripts/run_stockbee_movers_screen.py",
+            extra_args=("--profile", "stockbee_9m_movers"),
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field, _filter_precedence_field, _include_sectors_field, _exclude_sectors_field, _include_industries_field, _exclude_industries_field, _include_themes_field, _exclude_themes_field),
+            bias_group="bullish", bullish_subgroup="leaders",
+        ),
+        "stockbee_20pct_weekly_movers": RunAction(
+            "stockbee_20pct_weekly_movers", "Run Stockbee 20% Weekly Movers", "scripts/run_stockbee_movers_screen.py",
+            extra_args=("--profile", "stockbee_20pct_weekly_movers"),
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field, _filter_precedence_field, _include_sectors_field, _exclude_sectors_field, _include_industries_field, _exclude_industries_field, _include_themes_field, _exclude_themes_field),
+            bias_group="bullish", bullish_subgroup="leaders",
+        ),
+        "stockbee_4pct_daily_movers": RunAction(
+            "stockbee_4pct_daily_movers", "Run Stockbee 4% Daily Movers", "scripts/run_stockbee_movers_screen.py",
+            extra_args=("--profile", "stockbee_4pct_daily_movers"),
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field, _filter_precedence_field, _include_sectors_field, _exclude_sectors_field, _include_industries_field, _exclude_industries_field, _include_themes_field, _exclude_themes_field),
+            bias_group="bullish", bullish_subgroup="leaders",
+        ),
         "canslim": RunAction(
             "canslim",
             "Run CANSLIM",
