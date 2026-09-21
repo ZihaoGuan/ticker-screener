@@ -59,6 +59,7 @@ from .vcp_screen import run_vcp_screen
 from .vcs_screen import find_recent_vcs_hit
 from .weinstein_stage2_early_screen import (
     WEINSTEIN_STAGE2_EARLY_HISTORY_DAYS,
+    classify_weinstein_stage,
     find_weinstein_stage2_early_hit,
 )
 from .weekly_tight_close_screen import find_weekly_tight_close_breakout_hit, find_weekly_tight_close_hit
@@ -658,6 +659,25 @@ def _run_weinstein_stage2_early(bundle: ScreenerInputBundle) -> ScreenerEvaluati
             "signal_date": payload["signal_date"],
             "run_length_weeks": payload["run_length_weeks"],
             "weekly_ma30": payload["weekly_ma30"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_weinstein_stage_analysis(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = classify_weinstein_stage(bundle.bars, ticker=_ticker_from_bundle(bundle))
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker, "reason": "insufficient_weekly_history"})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "current_stage": payload["current_stage"],
+            "stage_alias": payload["stage_alias"],
+            "maturity": payload["maturity"],
+            "run_length_weeks": payload["run_length_weeks"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
@@ -1785,6 +1805,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=WEINSTEIN_STAGE2_EARLY_HISTORY_DAYS,
             warmup_trading_days=20,
             evaluator=_run_weinstein_stage2_early,
+        ),
+        "weinstein_stage_analysis": ScreenerSpec(
+            id="weinstein_stage_analysis",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=WEINSTEIN_STAGE2_EARLY_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_weinstein_stage_analysis,
         ),
         "weekly_tight_close_breakout": ScreenerSpec(
             id="weekly_tight_close_breakout",

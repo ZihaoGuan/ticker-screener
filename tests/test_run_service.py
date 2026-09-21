@@ -770,6 +770,7 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("double_bottom_detection", action_ids)
         self.assertIn("weekly_tight_close", action_ids)
         self.assertIn("weinstein_stage2_early", action_ids)
+        self.assertIn("weinstein_stage_analysis", action_ids)
         self.assertIn("weekly_tight_close_breakout", action_ids)
         self.assertIn("three_weeks_tight", action_ids)
         self.assertIn("inside_dryup", action_ids)

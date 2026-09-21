@@ -322,6 +322,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("rs_phase", "rs_phase", "RS Phase"),
         ("rs_new_high_before_price", "rs", "RS"),
         ("cup_handle", "cup_handle", "Cup Handle"),
+        ("weinstein_stage_analysis", "weinstein_stage_analysis", "Weinstein Stage Analysis"),
         ("gap_fill", "gap_fill", "Gap Fill"),
         ("ftd_sweep", "ftd_sweep", "FTD Sweep"),
         ("fearzone_zeiierman", "fearzone_zeiierman", "Fearzone Zeiierman"),

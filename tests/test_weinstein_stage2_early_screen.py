@@ -5,7 +5,8 @@ import unittest
 import pandas as pd
 
 from src.universe import UniverseTicker
-from src.weinstein_stage2_early_screen import find_weinstein_stage2_early_hit
+from src.weinstein_stage2_early_screen import classify_weinstein_stage, find_weinstein_stage2_early_hit
+from src.weinstein_stage_analysis_watchlist_builder import build_weinstein_stage_analysis_watchlist
 
 
 def _weinstein_stage2_frame(*, early: bool) -> pd.DataFrame:
@@ -65,6 +66,22 @@ class WeinsteinStage2EarlyScreenTests(unittest.TestCase):
         )
 
         self.assertIsNone(hit)
+
+    def test_classifier_exposes_stage2a_and_stage2b(self) -> None:
+        ticker = UniverseTicker(symbol="NVDA")
+        early = classify_weinstein_stage(_weinstein_stage2_frame(early=True), ticker=ticker)
+        mature = classify_weinstein_stage(_weinstein_stage2_frame(early=False), ticker=ticker)
+
+        self.assertIsNotNone(early)
+        self.assertIsNotNone(mature)
+        assert early is not None and mature is not None
+        self.assertEqual((early.current_stage, early.maturity), ("Stage 2 - Advance", "Early"))
+        self.assertEqual((mature.current_stage, mature.maturity), ("Stage 2 - Advance", "Mature"))
+        self.assertEqual((early.stage_alias, mature.stage_alias), ("Stage 2A", "Stage 2B"))
+
+        watchlist = build_weinstein_stage_analysis_watchlist([early, mature])
+        self.assertEqual(watchlist[0]["stage_alias"], "Stage 2A")
+        self.assertEqual(watchlist[1]["stage_alias"], "Stage 2B")
 
 
 if __name__ == "__main__":

@@ -1683,6 +1683,19 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="leaders",
         ),
+        "weinstein_stage_analysis": RunAction(
+            "weinstein_stage_analysis",
+            "Run Weinstein Stage Analysis",
+            "scripts/run_weinstein_stage_analysis_screen.py",
+            fields=(
+                _limit_field, _tickers_field, _date_label_field, _as_of_date_field,
+                _market_data_source_field, _filter_precedence_field, _include_sectors_field,
+                _exclude_sectors_field, _include_industries_field, _exclude_industries_field,
+                _include_themes_field, _exclude_themes_field,
+            ),
+            bias_group="bullish",
+            bullish_subgroup="leaders",
+        ),
         "weekly_tight_close_breakout": RunAction(
             "weekly_tight_close_breakout",
             "Run Weekly Tight Close Breakout",

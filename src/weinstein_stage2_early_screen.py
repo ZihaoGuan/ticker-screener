@@ -21,7 +21,7 @@ WEINSTEIN_STAGE2_EARLY_LATE_EXTENSION_PCT = 0.08
 
 
 @dataclass(frozen=True)
-class WeinsteinStage2EarlyHit:
+class WeinsteinStageAnalysisHit:
     ticker: str
     sector: str | None
     industry: str | None
@@ -29,6 +29,7 @@ class WeinsteinStage2EarlyHit:
     signal_date: str
     previous_stage: str
     current_stage: str
+    stage_alias: str
     maturity: str
     sentiment: str
     weekly_close: float
@@ -48,7 +49,7 @@ class WeinsteinStage2EarlyScreenResult:
     total_tickers: int
     passed_tickers: int
     failed_tickers: list[dict[str, str]]
-    hits: list[WeinsteinStage2EarlyHit]
+    hits: list[WeinsteinStageAnalysisHit]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -58,6 +59,9 @@ class WeinsteinStage2EarlyScreenResult:
             "failed_tickers": self.failed_tickers,
             "hits": [item.to_dict() for item in self.hits],
         }
+
+
+WeinsteinStageAnalysisResult = WeinsteinStage2EarlyScreenResult
 
 
 def _normalize_bars_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -123,11 +127,27 @@ def _sentiment_name(stage: int, maturity: str) -> str:
     return "Balanced / Basing"
 
 
-def find_weinstein_stage2_early_hit(
+def _stage_alias(stage: int, maturity: str) -> str:
+    if stage == 2:
+        return {"Early": "Stage 2A", "Mature": "Stage 2B", "Late": "Stage 2C"}[maturity]
+    return _stage_name(stage).replace(" - ", " ")
+
+
+# Kept as an alias to preserve the existing Stage 2 Early runner and builder
+# contract while allowing the same underlying classifier to expose every stage.
+WeinsteinStage2EarlyHit = WeinsteinStageAnalysisHit
+
+
+def classify_weinstein_stage(
     frame: pd.DataFrame,
     *,
     ticker: UniverseTicker,
-) -> WeinsteinStage2EarlyHit | None:
+) -> WeinsteinStageAnalysisHit | None:
+    """Classify a ticker using the pasted Weinstein Stage Analyzer Pine rules.
+
+    This intentionally runs on weekly bars: 30-week EMA, five-week slope,
+    plus/minus three-percent price band, and the source script's maturity rules.
+    """
     daily = _normalize_bars_frame(frame)
     if daily.empty:
         return None
@@ -191,17 +211,13 @@ def find_weinstein_stage2_early_hit(
     else:
         maturity = "Late"
 
-    if current_stage != 2 or maturity != "Early" or previous_stage != 1:
-        return None
-
     reasons = [
         f"current weekly stage is {_stage_name(current_stage)} and maturity is {maturity}",
         f"previous distinct weekly stage was {_stage_name(previous_stage)} for {previous_distinct_run_length} weeks",
         f"30W EMA {current_ma:.2f}, weekly close {current_close:.2f}, slope ratio {slope_ratio * 100:.2f}%",
         f"run length {run_length} weeks, extension beyond +3% band {extension_pct * 100:.2f}%",
     ]
-
-    return WeinsteinStage2EarlyHit(
+    return WeinsteinStageAnalysisHit(
         ticker=ticker.symbol,
         sector=ticker.sector,
         industry=ticker.industry,
@@ -209,6 +225,7 @@ def find_weinstein_stage2_early_hit(
         signal_date=weekly.index[-1].date().isoformat(),
         previous_stage=_stage_name(previous_stage),
         current_stage=_stage_name(current_stage),
+        stage_alias=_stage_alias(current_stage, maturity),
         maturity=maturity,
         sentiment=_sentiment_name(current_stage, maturity),
         weekly_close=current_close,
@@ -218,6 +235,19 @@ def find_weinstein_stage2_early_hit(
         run_length_weeks=run_length,
         reasons=reasons,
     )
+
+
+def find_weinstein_stage2_early_hit(
+    frame: pd.DataFrame,
+    *,
+    ticker: UniverseTicker,
+) -> WeinsteinStage2EarlyHit | None:
+    hit = classify_weinstein_stage(frame, ticker=ticker)
+    if hit is None:
+        return None
+    if hit.current_stage != "Stage 2 - Advance" or hit.maturity != "Early" or hit.previous_stage != "Stage 1 - Base":
+        return None
+    return hit
 
 
 def run_weinstein_stage2_early_screen(
@@ -271,6 +301,57 @@ def run_weinstein_stage2_early_screen(
 
     print(f"finished weinstein stage2 early screen: passed={len(hits)}, failed={len(failures)}, total={total_tickers}")
     return WeinsteinStage2EarlyScreenResult(
+        run_date=run_date.isoformat(),
+        total_tickers=total_tickers,
+        passed_tickers=len(hits),
+        failed_tickers=failures,
+        hits=hits,
+    )
+
+
+def run_weinstein_stage_analysis(
+    config: AppConfig,
+    tickers: list[UniverseTicker],
+    *,
+    as_of_date: dt.date | None = None,
+) -> WeinsteinStageAnalysisResult:
+    """Classify every eligible ticker instead of filtering only early Stage 2."""
+    cookstock = load_configured_cookstock(config)
+    hits: list[WeinsteinStageAnalysisHit] = []
+    failures: list[dict[str, str]] = []
+    total_tickers = len(tickers)
+    run_date = as_of_date or dt.date.today()
+    print(f"starting weinstein stage analysis: total={total_tickers}")
+
+    with freeze_cookstock_today(cookstock, as_of_date):
+        position = 0
+        for ticker_batch in iter_prefetched_cookstock_batches(
+            config,
+            tickers,
+            as_of_date=as_of_date,
+            history_lookback_days=WEINSTEIN_STAGE2_EARLY_HISTORY_DAYS,
+            benchmark_ticker=config.benchmark_ticker,
+        ):
+            for ticker in ticker_batch:
+                position += 1
+                try:
+                    financials = cookstock.cookFinancials(
+                        ticker.symbol,
+                        benchmarkTicker=config.benchmark_ticker,
+                        historyLookbackDays=WEINSTEIN_STAGE2_EARLY_HISTORY_DAYS,
+                    )
+                    hit = classify_weinstein_stage(_build_price_frame(financials), ticker=ticker)
+                    if hit is None:
+                        print(f"[{position}/{total_tickers}] {ticker.symbol} skipped: insufficient weekly history")
+                        continue
+                    hits.append(hit)
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} {hit.current_stage} {hit.maturity}")
+                except Exception as exc:
+                    failures.append({"ticker": ticker.symbol, "error": str(exc)})
+                    print(f"[{position}/{total_tickers}] {ticker.symbol} failed: {exc}")
+
+    print(f"finished weinstein stage analysis: classified={len(hits)}, failed={len(failures)}, total={total_tickers}")
+    return WeinsteinStageAnalysisResult(
         run_date=run_date.isoformat(),
         total_tickers=total_tickers,
         passed_tickers=len(hits),

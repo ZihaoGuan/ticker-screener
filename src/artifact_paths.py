@@ -315,6 +315,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("weinstein_stage2_early_{date_label}.json",),
         "legacy_summary_templates": ("weinstein_stage2_early_run_summary_{date_label}.json",),
     },
+    "weinstein_stage_analysis": {
+        "stem_template": "weinstein_stage_analysis_{date_label}",
+        "legacy_watchlist_templates": ("weinstein_stage_analysis_{date_label}.json",),
+        "legacy_raw_templates": ("weinstein_stage_analysis_{date_label}.json",),
+        "legacy_summary_templates": ("weinstein_stage_analysis_run_summary_{date_label}.json",),
+    },
     "weekly_tight_close_breakout": {
         "stem_template": "weekly_tight_close_breakout_{date_label}",
         "legacy_watchlist_templates": ("weekly_tight_close_breakout_{date_label}.json",),
@@ -543,6 +549,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("cup_detection", "cup_detection"),
     ("double_bottom_detection", "double_bottom_detection"),
     ("weinstein_stage2_early", "weinstein_stage2_early"),
+    ("weinstein_stage_analysis", "weinstein_stage_analysis"),
     ("weekly_tight_close", "weekly_tight_close"),
     ("weekly_tight_close_breakout", "weekly_tight_close_breakout"),
     ("three_weeks_tight", "three_weeks_tight"),

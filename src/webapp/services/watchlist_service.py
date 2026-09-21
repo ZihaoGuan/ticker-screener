@@ -588,6 +588,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "lime",
     },
     {
+        "id": "weinstein_stage_analysis",
+        "strategy_id": "weinstein_stage_analysis",
+        "label": "Weinstein Stage Analysis",
+        "description": "Full weekly Weinstein classifier: Stage 1, Stage 2A/2B/2C, Stage 3, and Stage 4 using the 30-week EMA rules.",
+        "timeframe": "Weekly",
+        "accent": "violet",
+        "bias_group": "bullish",
+    },
+    {
         "id": "ema21_pullback_buy",
         "strategy_id": "ema21_pullback_buy",
         "label": "EMA21 Pullback Buy",

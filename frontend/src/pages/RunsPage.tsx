@@ -2046,6 +2046,7 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     leif_high_tight_flag: "Leif Soreide HTF breakout setup with scored pole, flag, volume, RS, and breakout rules.",
     weekly_tight_close: "Three weekly bars with ATR-scaled tight closes plus tight highs or lows, while first bar still passes wick and range filter.",
     weinstein_stage2_early: "Weekly regime names that just shifted from Stage 1 base into early Stage 2 advance above a rising 30-week EMA band.",
+    weinstein_stage_analysis: "Full weekly Weinstein classification using the referenced 30-week EMA rules: Stage 1, Stage 2A/2B/2C, Stage 3, and Stage 4.",
     weekly_tight_close_breakout: "Names already breaking above the three-week tight-close box after the weekly tight-close detector formed.",
     ema21_pullback_buy: "Strict-uptrend leaders that tag the 21 EMA, hold the close, then fire first bullish break above the test-candle high.",
     sma200_pullback_buy: "Long-trend leaders that test the 200 SMA from above, hold the close, then reclaim through the test-candle high.",

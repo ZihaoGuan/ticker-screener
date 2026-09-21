@@ -1988,6 +1988,29 @@ class AdHocScreenServiceTests(unittest.TestCase):
         self.assertEqual(payload["screeners"][0]["id"], "weinstein_stage2_early")
         self.assertTrue(payload["screeners"][0]["passed"])
 
+    def test_run_supports_weinstein_stage_analysis_catalog_entry(self) -> None:
+        ticker_frame = _weinstein_stage2_early_frame()
+        benchmark_frame = _frame("2026-01-02", 105)
+        service = AdHocScreenService(app_config=AppConfig(), database_url="postgres://unit-test")
+
+        with patch(
+            "src.webapp.services.ad_hoc_screen_service.load_many_ticker_windows",
+            return_value={"AAPL": ticker_frame, "SPY": benchmark_frame},
+        ), patch(
+            "src.webapp.services.ad_hoc_screen_service.load_ticker_metadata_map",
+            return_value={"AAPL": {"ticker": "AAPL", "sector": "Technology", "industry": "Software", "exchange": "NASDAQ"}},
+        ):
+            payload = service.run(
+                ticker="AAPL",
+                as_of_date=dt.date(2025, 10, 31),
+                screener_ids=["weinstein_stage_analysis"],
+            )
+
+        self.assertTrue(payload["screeners"][0]["passed"])
+        self.assertEqual(payload["screeners"][0]["hit"]["current_stage"], "Stage 2 - Advance")
+        self.assertEqual(payload["screeners"][0]["hit"]["stage_alias"], "Stage 2A")
+        self.assertEqual(payload["screeners"][0]["hit"]["maturity"], "Early")
+
     def test_run_supports_three_weeks_tight_catalog_entry(self) -> None:
         ticker_frame = _three_weeks_tight_frame()
         benchmark_frame = _frame("2026-01-02", 40)

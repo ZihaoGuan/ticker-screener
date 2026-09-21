@@ -1974,6 +1974,20 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["weinstein_stage2_early"]["preview_tickers"], ["TSM", "NVDA"])
         self.assertEqual(cards["weinstein_stage2_early"]["timeframe"], "Weekly")
 
+    def test_get_scanner_board_includes_weinstein_stage_analysis_card(self) -> None:
+        self._write_watchlist(
+            "weinstein_stage_analysis_2026-06-12",
+            tickers=["TSM", "NVDA"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 31, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc))
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertTrue(cards["weinstein_stage_analysis"]["available"])
+        self.assertEqual(cards["weinstein_stage_analysis"]["entry_count"], 2)
+        self.assertEqual(cards["weinstein_stage_analysis"]["timeframe"], "Weekly")
+
     def test_get_scanner_board_includes_gap_fill_card(self) -> None:
         self._write_watchlist(
             "gap_fill_2026-06-12",
