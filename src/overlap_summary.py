@@ -109,6 +109,11 @@ PIPELINES = (
         "filename": "stockbee_4pct_daily_movers_{date}.json",
     },
     {
+        "id": "darvas_box_breakout",
+        "label": "Darvas Box Breakout",
+        "filename": "darvas_box_breakout_{date}.json",
+    },
+    {
         "id": "near_52wk_high",
         "label": "Near 52W High",
         "filename": "near_52wk_high_{date}.json",
@@ -320,6 +325,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "stockbee_9m_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "stockbee_20pct_weekly_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "stockbee_4pct_daily_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "darvas_box_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sma200_pullback_buy": {"bias_group": "bullish", "bullish_subgroup": "pullbacks"},
     "weekly_tight_close_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
 }

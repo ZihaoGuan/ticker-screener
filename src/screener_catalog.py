@@ -9,6 +9,7 @@ from .bollinger_band_screen import find_recent_bollinger_band_breakout_hit
 from .config import AppConfig
 from .base_detection_screen import find_active_base_detection_hit
 from .cup_detection_screen import find_active_cup_detection_hit
+from .darvas_box_screen import DARVAS_BOX_HISTORY_DAYS, find_darvas_box_breakout_hit
 from .double_bottom_detection_screen import find_active_double_bottom_detection_hit
 from .earnings_gap_screen import run_earnings_gap_screen
 from .elite_rs_screen import run_elite_rs_screen
@@ -687,6 +688,22 @@ def _run_weinstein_stage_analysis(bundle: ScreenerInputBundle) -> ScreenerEvalua
 
 def _run_weekly_tight_close_breakout(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     hit = find_weekly_tight_close_breakout_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "breakout_price": payload["breakout_price"]},
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_darvas_box_breakout(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_darvas_box_breakout_hit(
         bundle.bars,
         ticker=_ticker_from_bundle(bundle),
     )
@@ -1691,6 +1708,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=120,
             warmup_trading_days=20,
             evaluator=_run_bollinger_band_breakout,
+        ),
+        "darvas_box_breakout": ScreenerSpec(
+            id="darvas_box_breakout",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=DARVAS_BOX_HISTORY_DAYS + 1,
+            warmup_trading_days=0,
+            evaluator=_run_darvas_box_breakout,
         ),
         "ema21_pullback_buy": ScreenerSpec(
             id="ema21_pullback_buy",

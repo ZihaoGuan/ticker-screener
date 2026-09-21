@@ -657,6 +657,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "darvas_box_breakout",
+        "strategy_id": "darvas_box_breakout",
+        "label": "Darvas Box Breakout",
+        "description": "Daily closes that clear a confirmed 20-session Darvas box near the 52-week high on at least 1.5x prior 50-session average volume. The box must be 15% wide or less and have at least two touches near resistance.",
+        "timeframe": "Daily",
+        "accent": "cyan",
+        "bias_group": "bullish",
+    },
+    {
         "id": "vcs_critical_tightness",
         "strategy_id": "vcs_critical_tightness",
         "label": "VCS Critical Tightness",

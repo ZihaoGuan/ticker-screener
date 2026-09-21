@@ -381,6 +381,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("qullamaggie_{date_label}.json",),
         "legacy_summary_templates": ("qullamaggie_run_summary_{date_label}.json",),
     },
+    "darvas_box_breakout": {
+        "stem_template": "darvas_box_breakout_{date_label}",
+        "legacy_watchlist_templates": ("darvas_box_breakout_{date_label}.json",),
+        "legacy_raw_templates": ("darvas_box_breakout_{date_label}.json",),
+        "legacy_summary_templates": ("darvas_box_breakout_run_summary_{date_label}.json",),
+    },
     "market_correction_resilience": {
         "stem_template": "market_correction_resilience_{date_label}",
         "legacy_watchlist_templates": ("market_correction_resilience_{date_label}.json",),
@@ -580,6 +586,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("kai_s2", "kai_s2"),
     ("one_year_winners", "one_year_winners"),
     ("qullamaggie", "qullamaggie"),
+    ("darvas_box_breakout", "darvas_box_breakout"),
     ("market_correction_resilience", "market_correction_resilience"),
     ("stockbee_momentum_burst", "stockbee_momentum_burst"),
     ("stockbee_9m_movers", "stockbee_9m_movers"),
