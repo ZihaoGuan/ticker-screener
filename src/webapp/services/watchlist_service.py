@@ -21,7 +21,7 @@ import requests
 import yfinance as yf
 
 from ...config import AppConfig
-from ...artifact_paths import watchlist_stem_from_path
+from ...artifact_paths import strategy_id_from_legacy_stem, watchlist_stem_from_path
 from ...canslim_screen import CANSLIM_HISTORY_DAYS, CANSLIM_INSIDER_LOOKBACK_DAYS, compute_canslim_frame_metrics, evaluate_canslim_ticker
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
@@ -89,7 +89,7 @@ _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
-_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "rs-evidence-v2"
+_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v1"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -117,6 +117,20 @@ _RS_EVIDENCE_LOOKBACK_DAYS = 21
 _RS_EVIDENCE_RS_DAYS_THRESHOLD_PCT = 60.0
 _RS_EVIDENCE_UP_ON_DOWN_DAYS_THRESHOLD = 3
 _RS_EVIDENCE_DAILY_RS_THRESHOLD = 90.0
+_GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {"id": "qullamaggie", "label": "Qullamaggie", "accent": "amber", "available": True},
+    {"id": "trend_template", "label": "Minervini", "accent": "yellow", "available": True},
+    {"id": "stockbee_9m_movers", "label": "SB 9M Movers", "accent": "teal", "available": True},
+    {"id": "stockbee_4pct_daily_movers", "label": "SB 4% Daily", "accent": "teal", "available": True},
+    {"id": "stockbee_20pct_weekly_movers", "label": "SB 20% Weekly", "accent": "teal", "available": True},
+    {"id": "canslim", "label": "O'Neil", "accent": "blue", "available": True},
+    {"id": "liquid_growth", "label": "Liquid Growth (TML)", "accent": "sky", "available": False},
+    {"id": "club_97", "label": "97 Club", "accent": "gold", "available": False},
+    {"id": "high_volume_close", "label": "High Volume Close (HVC)", "accent": "cyan", "available": False},
+)
+_GURU_AVAILABLE_SCANNER_IDS = frozenset(
+    str(item["id"]) for item in _GURU_SCANNER_DEFINITIONS if bool(item.get("available"))
+)
 _MAX_OHLCV_RANGE_DAYS = 5 * 366
 _OHLCV_TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.-]{0,14}$")
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
@@ -1022,7 +1036,7 @@ class WatchlistService:
             return payload
         run_date = dt.date.fromisoformat(target_trading_date_text)
         summary_payload = {
-            "snapshot_schema_version": "top-hits-v3",
+            "snapshot_schema_version": "top-hits-v4",
             "generated_at": payload.get("generated_at"),
             "reference_now_new_york": payload.get("reference_now_new_york"),
             "target_trading_date": payload.get("target_trading_date"),
@@ -1036,6 +1050,7 @@ class WatchlistService:
             "total_unique_tickers": int(payload.get("total_unique_tickers") or 0),
             "overlapping_ticker_count": int(payload.get("overlapping_ticker_count") or 0),
             "cards": copy.deepcopy(payload.get("cards") or []),
+            "guru_board": copy.deepcopy(payload.get("guru_board") or {}),
         }
         config_json = {
             "kind": "scanner_top_hits_snapshot",
@@ -1122,6 +1137,7 @@ class WatchlistService:
             "total_unique_tickers": int(summary.get("total_unique_tickers") or 0),
             "overlapping_ticker_count": int(summary.get("overlapping_ticker_count") or len(snapshot_rows)),
             "rows": snapshot_rows,
+            "guru_board": copy.deepcopy(summary.get("guru_board") or {}),
             "_snapshot_run_id": run_id,
             "_snapshot_generated_at": generated_at,
         }
@@ -1205,12 +1221,14 @@ class WatchlistService:
                 "total_unique_tickers": int(summary_payload.get("total_unique_tickers") or 0),
                 "overlapping_ticker_count": int(summary_payload.get("overlapping_ticker_count") or 0),
                 "rows": rows_payload,
+                "guru_board": copy.deepcopy(summary_payload.get("guru_board") or {}),
             }
         return None
 
     def _build_scanner_top_hits_payload_live(self, *, board_payload: dict[str, Any], rrg_service: Any | None = None) -> dict[str, Any]:
         live_cards = self._select_scanner_top_hit_live_cards(board_payload)
         aggregated: dict[str, dict[str, Any]] = {}
+        guru_aggregated: dict[str, dict[str, Any]] = {}
 
         for card in live_cards:
             stem = str(card.get("stem") or "").strip()
@@ -1265,6 +1283,14 @@ class WatchlistService:
                 scanners = bucket["scanners"]
                 if scanner_meta["id"] and not any(str(item.get("id") or "") == scanner_meta["id"] for item in scanners):
                     scanners.append(dict(scanner_meta))
+                if scanner_meta["id"] in _GURU_AVAILABLE_SCANNER_IDS:
+                    guru_bucket = guru_aggregated.setdefault(ticker, self._new_scanner_top_hit_bucket(ticker))
+                    self._merge_scanner_top_hit_entry(guru_bucket, entry)
+                    guru_scanners = guru_bucket["scanners"]
+                    if not any(str(item.get("id") or "") == scanner_meta["id"] for item in guru_scanners):
+                        guru_scanners.append(dict(scanner_meta))
+
+        self._append_canslim_guru_candidates(guru_aggregated, board_payload)
 
         total_unique_tickers = len(aggregated)
         for row in aggregated.values():
@@ -1296,14 +1322,124 @@ class WatchlistService:
 
         rows.sort(key=lambda item: (-int(item.get("scanner_count") or 0), str(item.get("ticker") or "")))
         overlapping_count = len(rows)
+        guru_board = self._build_guru_board_payload(guru_aggregated, board_payload=board_payload)
         payload = {
             **board_payload,
             "total_live_scanners": len(live_cards),
             "total_unique_tickers": total_unique_tickers,
             "overlapping_ticker_count": overlapping_count,
             "rows": rows,
+            "guru_board": guru_board,
         }
         return payload
+
+    @staticmethod
+    def _new_scanner_top_hit_bucket(ticker: str) -> dict[str, Any]:
+        return {
+            "ticker": ticker,
+            "company": "",
+            "sector": "",
+            "industry": "",
+            "day_close": None,
+            "change_pct": None,
+            "change_from_52wk_low_pct": None,
+            "bollinger_band_status": None,
+            "perf_year_pct": None,
+            "perf_ytd_pct": None,
+            "rs_rating": None,
+            "rs_evidence_score": None,
+            "rs_evidence_max_score": None,
+            "rs_days_21d": None,
+            "rs_days_21d_pct": None,
+            "rs_phase_active_days": None,
+            "up_on_down_days_21d": None,
+            "up_on_down_days_21d_pct": None,
+            "relative_strength_evidence": None,
+            "ta_rating": None,
+            "fa_rating": None,
+            "fa_current_rank": None,
+            "technical_indicator_ratings": {},
+            "scanner_count": 0,
+            "scanners": [],
+        }
+
+    def _append_canslim_guru_candidates(self, guru_aggregated: dict[str, dict[str, Any]], board_payload: dict[str, Any]) -> None:
+        target_date = str(board_payload.get("target_trading_date") or "")
+        metadata = next(
+            (
+                item for item in self.repository.list_recent_watchlists(limit=400, include_deprecated=False)
+                if strategy_id_from_legacy_stem(str(item.get("stem") or "")) == "canslim"
+                and (not target_date or str(item.get("sort_date") or "") <= target_date)
+            ),
+            None,
+        )
+        if not isinstance(metadata, dict):
+            return
+        stem = str(metadata.get("stem") or "").strip()
+        if not stem:
+            return
+        scanner_meta = {
+            "id": "canslim", "strategy_id": "canslim", "label": "O'Neil CANSLIM",
+            "timeframe": "Daily", "stem": stem, "sort_date": str(metadata.get("sort_date") or ""),
+        }
+        for entry in self._prepare_scanner_top_hit_entries(self._filter_excluded_entries(self.repository.load_watchlist(stem))):
+            ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
+            if not ticker:
+                continue
+            bucket = guru_aggregated.setdefault(ticker, self._new_scanner_top_hit_bucket(ticker))
+            self._merge_scanner_top_hit_entry(bucket, entry)
+            if not any(str(item.get("id") or "") == "canslim" for item in bucket["scanners"]):
+                bucket["scanners"].append(scanner_meta)
+
+    def _build_guru_board_payload(self, rows_by_ticker: dict[str, dict[str, Any]], *, board_payload: dict[str, Any]) -> dict[str, Any]:
+        tickers = sorted(rows_by_ticker)
+        target_date = _coerce_optional_date(board_payload.get("target_trading_date"))
+        if tickers:
+            self._attach_latest_market_snapshots(rows_by_ticker, tickers)
+            self._attach_latest_rating_snapshots(rows_by_ticker, tickers)
+            self._attach_relative_strength_evidence(rows_by_ticker, tickers)
+            self._attach_latest_position_actions(rows_by_ticker, tickers, as_of_date=target_date)
+        stage_map = self._load_latest_weinstein_stage_map(target_date)
+        rows: list[dict[str, Any]] = []
+        for ticker in tickers:
+            row = rows_by_ticker[ticker]
+            row["scanner_count"] = len(row.get("scanners") or [])
+            row["scanner_labels"] = [str(item.get("label") or "") for item in row["scanners"] if str(item.get("label") or "").strip()]
+            row["stage_analysis"] = copy.deepcopy(stage_map.get(ticker) or None)
+            row["strike_zone"] = _build_guru_strike_zone(row)
+            rows.append(row)
+        rows.sort(key=_guru_row_sort_key)
+        return {
+            "definitions": copy.deepcopy(_GURU_SCANNER_DEFINITIONS),
+            "total_unique_tickers": len(rows),
+            "total_scanner_matches": sum(int(row.get("scanner_count") or 0) for row in rows),
+            "confluence_ticker_count": sum(1 for row in rows if int(row.get("scanner_count") or 0) >= 2),
+            "rows": rows,
+        }
+
+    def _load_latest_weinstein_stage_map(self, target_date: dt.date | None) -> dict[str, dict[str, Any]]:
+        target_text = target_date.isoformat() if target_date else ""
+        metadata = next(
+            (
+                item for item in self.repository.list_recent_watchlists(limit=400, include_deprecated=False)
+                if strategy_id_from_legacy_stem(str(item.get("stem") or "")) == "weinstein_stage_analysis"
+                and (not target_text or str(item.get("sort_date") or "") <= target_text)
+            ),
+            None,
+        )
+        if not isinstance(metadata, dict):
+            return {}
+        stage_map: dict[str, dict[str, Any]] = {}
+        for entry in self.repository.load_watchlist(str(metadata.get("stem") or "")):
+            ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
+            alias = _coalesce_text(entry.get("stage_alias"))
+            if ticker and alias:
+                stage_map[ticker] = {
+                    "alias": alias,
+                    "maturity": _coalesce_text(entry.get("maturity")),
+                    "as_of_date": _coalesce_text(entry.get("event_date")),
+                }
+        return stage_map
 
     def get_weekly_watchlist_board(self, stem: str | None = None) -> dict[str, Any]:
         weekly_files = [item for item in self.repository.list_recent_watchlists(limit=200, include_deprecated=False) if item.get("group_key") == "weekly_rs"]
@@ -2585,6 +2721,9 @@ class WatchlistService:
         if growth_acceleration_score is None:
             growth_acceleration_score = _coerce_optional_float(entry.get("growth_acceleration_score") or entry.get("acceleration_score"))
         growth_acceleration_label = _coalesce_text(bucket.get("growth_acceleration_label"), entry.get("growth_acceleration_label"), entry.get("acceleration_label"))
+        earnings_date = _coalesce_text(
+            bucket.get("earnings_date"), entry.get("next_earnings_date"), entry.get("earnings_date"), entry.get("earnings_release_date"),
+        )
         technical_indicator_ratings = bucket.get("technical_indicator_ratings")
         if not isinstance(technical_indicator_ratings, dict) or not technical_indicator_ratings:
             raw_indicator_ratings = entry.get("technical_indicator_ratings")
@@ -2608,6 +2747,7 @@ class WatchlistService:
         bucket["vcp_rating"] = vcp_rating
         bucket["growth_acceleration_score"] = growth_acceleration_score
         bucket["growth_acceleration_label"] = growth_acceleration_label
+        bucket["earnings_date"] = earnings_date or None
         bucket["technical_indicator_ratings"] = technical_indicator_ratings
 
     def _select_scanner_top_hit_live_cards(self, board_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2697,6 +2837,7 @@ class WatchlistService:
                 row["up_on_down_days_21d_pct"] = metrics["up_on_down_days_pct"]
             if change_pct is None and latest_close is not None and previous_close is not None and previous_close > 0:
                 row["change_pct"] = ((latest_close / previous_close) - 1.0) * 100.0
+            _attach_guru_market_badges(row, frame)
 
     def _attach_relative_strength_evidence(self, rows_by_ticker: dict[str, dict[str, Any]], tickers: list[str]) -> None:
         for ticker in tickers:
@@ -5172,6 +5313,77 @@ def _filter_scanner_top_hits_payload(
     if rs_filter_active:
         filtered_payload["daily_rs_range"] = {"min": rs_min, "max": rs_max}
     return filtered_payload
+
+
+def _attach_guru_market_badges(row: dict[str, Any], frame: pd.DataFrame) -> None:
+    """Attach lightweight, snapshot-safe market context used by Guru Board cards."""
+    if len(frame) < 200:
+        row["position_bucket"] = "no_data"
+        return
+    close = _coerce_optional_float(frame.iloc[-1].get("Close"))
+    ema10 = _coerce_optional_float(frame["Close"].ewm(span=10, adjust=False).mean().iloc[-1])
+    ema21 = _coerce_optional_float(frame["Close"].ewm(span=21, adjust=False).mean().iloc[-1])
+    sma50 = _coerce_optional_float(frame["Close"].rolling(50).mean().iloc[-1])
+    sma200 = _coerce_optional_float(frame["Close"].rolling(200).mean().iloc[-1])
+    previous_close = frame["Close"].shift(1)
+    true_range = pd.concat(
+        [frame["High"] - frame["Low"], (frame["High"] - previous_close).abs(), (frame["Low"] - previous_close).abs()],
+        axis=1,
+    ).max(axis=1)
+    atr20 = _coerce_optional_float(true_range.rolling(20).mean().iloc[-1])
+    row["ema10"] = ema10
+    row["ema21"] = ema21
+    row["sma50"] = sma50
+    row["sma200"] = sma200
+    row["atr20"] = atr20
+    row["atr_to_sma50"] = ((close - sma50) / atr20) if close is not None and sma50 is not None and atr20 and atr20 > 0 else None
+    row["position_bucket"] = _classify_position_bucket(close, ema10, ema21, sma50, sma200, atr20)
+    earnings_date = _coerce_optional_date(row.get("earnings_date"))
+    current_date = frame.index[-1].date() if hasattr(frame.index[-1], "date") else None
+    row["earnings_days"] = (earnings_date - current_date).days if earnings_date and current_date and earnings_date >= current_date else None
+
+
+def _classify_position_bucket(
+    close: float | None,
+    ema10: float | None,
+    ema21: float | None,
+    sma50: float | None,
+    sma200: float | None,
+    atr20: float | None,
+) -> str:
+    if None in {close, ema10, ema21, sma50, sma200}:
+        return "no_data"
+    assert close is not None and ema10 is not None and ema21 is not None and sma50 is not None and sma200 is not None
+    if atr20 and atr20 > 0 and close >= ema10 + (2 * atr20):
+        return "extended"
+    if close >= ema10:
+        return "above_ema10"
+    if close >= ema21:
+        return "ema10_ema21"
+    if close >= sma50:
+        return "ema21_sma50"
+    if close >= sma200:
+        return "below_sma50_above_sma200"
+    return "below_sma200"
+
+
+def _build_guru_strike_zone(row: dict[str, Any]) -> dict[str, str]:
+    position_action = row.get("position_action") if isinstance(row.get("position_action"), dict) else {}
+    action = str(position_action.get("action") or "")
+    earnings_days = _coerce_optional_int(row.get("earnings_days"))
+    if action == "add_position" and (earnings_days is None or earnings_days > 7):
+        return {"state": "active", "label": "Active", "reason": "Current position model permits adds."}
+    scanner_ids = {str(item.get("id") or "") for item in row.get("scanners", []) if isinstance(item, dict)}
+    if "qullamaggie" in scanner_ids and action != "avoid_new":
+        return {"state": "ready", "label": "Ready", "reason": "Momentum setup; confirm its chart trigger."}
+    return {"state": "context", "label": "Context", "reason": "Leadership or discovery evidence, not an entry trigger."}
+
+
+def _guru_row_sort_key(row: dict[str, Any]) -> tuple[int, int, float, str]:
+    strike = row.get("strike_zone") if isinstance(row.get("strike_zone"), dict) else {}
+    state_rank = {"active": 0, "ready": 1, "context": 2}.get(str(strike.get("state") or ""), 3)
+    daily_rs = _coerce_optional_float(row.get("daily_rs_rating")) or 0.0
+    return (state_rank, -int(row.get("scanner_count") or 0), -daily_rs, str(row.get("ticker") or ""))
 
 
 def _resolve_entry_display_price(entry: dict[str, Any]) -> float | None:

@@ -13,7 +13,7 @@ import type { MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, 
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
-type ViewMode = "list" | "charts";
+type ViewMode = "list" | "charts" | "guru" | "position";
 type TopHitsFilterPreset = {
   sectorFilter: string;
   eliteOnly: boolean;
@@ -190,6 +190,7 @@ export function ScannerTopHitsPage() {
   }, [canManageMyPicks]);
 
   const rows = payload?.rows ?? [];
+  const guruBoard = payload?.guru_board;
   const snapshot = payload?.snapshot;
   const sectors = useMemo(
     () => Array.from(new Set(rows.map((row) => row.sector).filter((sector) => sector && sector !== "Unknown sector"))).sort(),
@@ -219,6 +220,15 @@ export function ScannerTopHitsPage() {
   const normalizedRsEvidenceMin = useMemo(() => normalizeBoundedInteger(rsEvidenceMin, 0, 9, 5), [rsEvidenceMin]);
   const normalizedRsDaysMinPct = useMemo(() => normalizeBoundedInteger(rsDaysMinPct, 0, 100, 60), [rsDaysMinPct]);
   const normalizedUpOnDownDaysMin = useMemo(() => normalizeBoundedInteger(upOnDownDaysMin, 0, 21, 3), [upOnDownDaysMin]);
+  const guruRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return (guruBoard?.rows ?? []).filter((row) => {
+      if (sectorFilter !== "all" && row.sector !== sectorFilter) return false;
+      if (query && ![row.ticker, row.company, row.sector, row.industry, row.scanners.map((scanner) => scanner.label).join(" ")].join(" ").toLowerCase().includes(query)) return false;
+      if (leaderRsOnly && !hasDailyRsRatingInRange(row, normalizedLeaderRsRange.min, normalizedLeaderRsRange.max)) return false;
+      return true;
+    });
+  }, [guruBoard?.rows, leaderRsOnly, normalizedLeaderRsRange, search, sectorFilter]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -675,8 +685,22 @@ export function ScannerTopHitsPage() {
             >
               Charts
             </button>
+            <button
+              className={`scanner-result-view-chip${viewMode === "guru" ? " is-active" : ""}`}
+              type="button"
+              onClick={() => setViewMode("guru")}
+            >
+              Guru Board
+            </button>
+            <button
+              className={`scanner-result-view-chip${viewMode === "position" ? " is-active" : ""}`}
+              type="button"
+              onClick={() => setViewMode("position")}
+            >
+              Position Map
+            </button>
           </div>
-          <span className="panel-copy">Chart mode loads visible names only.</span>
+          <span className="panel-copy">Guru Board keeps scanner overlap visible; unavailable strategies stay clearly marked.</span>
         </div>
       </section>
 
@@ -684,9 +708,14 @@ export function ScannerTopHitsPage() {
         {isLoading && !payload ? <LoadingBlock label="Loading scanner top hits…" /> : null}
         {notice ? <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></p> : null}
         {!notice && myPicksNotice ? <p className="panel-copy earnings-console-note">{myPicksNotice}</p> : null}
-        {!isLoading && !notice && filteredRows.length === 0 ? <p className="panel-copy">No tickers match current filters.</p> : null}
-        {filteredRows.length > 0 ? (
+        {!isLoading && !notice && ((viewMode === "guru" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
+        {((viewMode === "guru" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
           <>
+            {viewMode === "guru" ? (
+              <GuruBoard rows={guruRows} definitions={guruBoard?.definitions ?? []} totalScannerMatches={guruBoard?.total_scanner_matches ?? 0} confluenceTickerCount={guruBoard?.confluence_ticker_count ?? 0} />
+            ) : viewMode === "position" ? (
+              <PositionMap rows={guruRows} />
+            ) : <>
             <div className="scanner-top-hits-toolbar">
               <span>{formatCount(filteredRows.length)} names</span>
               <span>Latest board date {formatLocalDate(payload?.target_trading_date)}</span>
@@ -853,6 +882,7 @@ export function ScannerTopHitsPage() {
               pageSize={pageSize}
               onPageChange={setCurrentPage}
             />
+            </>}
           </>
         ) : null}
       </section>
@@ -879,6 +909,99 @@ function ScannerBadges({ scanners, selectedScannerIds, scannerNames }: { scanner
         {expanded ? "Show fewer" : `+${ordered.length - 3} more${hiddenSelected ? ` (${hiddenSelected} selected)` : ""}`}
       </button> : null}
     </div>
+  );
+}
+
+function GuruBoard({
+  rows,
+  definitions,
+  totalScannerMatches,
+  confluenceTickerCount,
+}: {
+  rows: ScannerTopHitRow[];
+  definitions: NonNullable<ScannerTopHitsResponse["guru_board"]>["definitions"];
+  totalScannerMatches: number;
+  confluenceTickerCount: number;
+}) {
+  return (
+    <section className="guru-board" aria-label="Guru scanner board">
+      <div className="guru-board-summary">
+        <span><strong>{formatCount(rows.length)}</strong> Guru names</span>
+        <span><strong>{formatCount(totalScannerMatches)}</strong> scanner matches</span>
+        <span><strong>{formatCount(confluenceTickerCount)}</strong> confluence names</span>
+      </div>
+      <div className="guru-board-scroll">
+        {definitions.map((definition) => {
+          const columnRows = rows.filter((row) => row.scanners.some((scanner) => normalizeScannerId(scanner.id) === definition.id));
+          return (
+            <article className={`guru-column is-${definition.accent}`} key={definition.id}>
+              <header>
+                <strong>{formatCount(columnRows.length)}</strong>
+                <span>{definition.label}</span>
+              </header>
+              {!definition.available ? <p className="guru-column-unavailable">Rules not configured yet</p> : null}
+              <div className="guru-column-cards">
+                {columnRows.slice(0, 30).map((row) => <GuruTickerCard key={row.ticker} row={row} />)}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      <p className="panel-copy guru-board-note">A ticker can appear in multiple columns. Strike Zone is chart-review guidance, not an automatic buy signal.</p>
+    </section>
+  );
+}
+
+function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
+  const stage = row.stage_analysis?.alias || "--";
+  const strike = row.strike_zone?.label || "Context";
+  const strikeTone = row.strike_zone?.state || "context";
+  const atr = row.atr_to_sma50 == null ? "--" : `${row.atr_to_sma50 >= 0 ? "+" : ""}${row.atr_to_sma50.toFixed(1)} ATR`;
+  const earnings = row.earnings_days == null ? "Earnings TBD" : row.earnings_days === 0 ? "Earnings today" : `Earnings ${row.earnings_days}d`;
+  return (
+    <Link className="guru-ticker-card" to={buildChartHref(row.ticker)} title={`${row.ticker}: ${row.strike_zone?.reason || ""}`}>
+      <div className="guru-ticker-main">
+        <strong>{row.ticker}</strong>
+        <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
+      </div>
+      <div className="guru-ticker-badges">
+        <span title="Guru scanner overlap">{row.scanner_count}×</span>
+        <span title="Weinstein stage">{stage}</span>
+        <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
+      </div>
+      <div className="guru-ticker-context">
+        <span title="ATR distance from SMA50">📏 {atr}</span>
+        <span title={earnings}>📅 {row.earnings_days == null ? "TBD" : `${row.earnings_days}d`}</span>
+        <span className={`guru-strike is-${strikeTone}`}>⚾ {strike}</span>
+      </div>
+    </Link>
+  );
+}
+
+const POSITION_BUCKETS = [
+  ["extended", "Extended"],
+  ["above_ema10", "Above EMA10"],
+  ["ema10_ema21", "EMA10–EMA21"],
+  ["ema21_sma50", "EMA21–SMA50"],
+  ["below_sma50_above_sma200", "Below SMA50 · Above SMA200"],
+  ["below_sma200", "Below SMA200"],
+  ["no_data", "No Data"],
+] as const;
+
+function PositionMap({ rows }: { rows: ScannerTopHitRow[] }) {
+  return (
+    <section className="guru-board" aria-label="Market position map">
+      <div className="guru-board-summary"><span>Each Guru ticker appears once, based on its latest moving-average position.</span></div>
+      <div className="guru-board-scroll position-map-scroll">
+        {POSITION_BUCKETS.map(([id, label]) => {
+          const bucketRows = rows.filter((row) => (row.position_bucket || "no_data") === id);
+          return <article className="guru-column position-map-column" key={id}>
+            <header><strong>{formatCount(bucketRows.length)}</strong><span>{label}</span></header>
+            <div className="guru-column-cards">{bucketRows.slice(0, 30).map((row) => <GuruTickerCard key={row.ticker} row={row} />)}</div>
+          </article>;
+        })}
+      </div>
+    </section>
   );
 }
 

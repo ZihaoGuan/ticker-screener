@@ -13,7 +13,9 @@ import pandas as pd
 from src.universe import UniverseTicker
 from src.webapp.services.watchlist_service import (
     WatchlistService,
+    _build_guru_strike_zone,
     _clear_chart_payload_cache,
+    _classify_position_bucket,
     _filter_scanner_top_hits_payload,
 )
 
@@ -62,6 +64,38 @@ class WatchlistServiceTests(unittest.TestCase):
             },
             index=index,
         )
+
+    def test_guru_position_bucket_classifies_extension_and_support_ranges(self) -> None:
+        self.assertEqual(_classify_position_bucket(112.0, 108.0, 105.0, 100.0, 90.0, 2.0), "extended")
+        self.assertEqual(_classify_position_bucket(107.0, 108.0, 105.0, 100.0, 90.0, 2.0), "ema10_ema21")
+        self.assertEqual(_classify_position_bucket(95.0, 108.0, 105.0, 100.0, 90.0, 2.0), "below_sma50_above_sma200")
+        self.assertEqual(_classify_position_bucket(None, 108.0, 105.0, 100.0, 90.0, 2.0), "no_data")
+
+    def test_guru_strike_zone_requires_safe_position_and_earnings_context(self) -> None:
+        active = _build_guru_strike_zone({"position_action": {"action": "add_position"}, "earnings_days": 12, "scanners": []})
+        earnings_risk = _build_guru_strike_zone({"position_action": {"action": "add_position"}, "earnings_days": 3, "scanners": []})
+        ready = _build_guru_strike_zone({"position_action": {"action": "hold_position"}, "scanners": [{"id": "qullamaggie"}]})
+        self.assertEqual(active["state"], "active")
+        self.assertEqual(earnings_risk["state"], "context")
+        self.assertEqual(ready["state"], "ready")
+
+    def test_guru_board_keeps_single_scanner_candidates_and_stage_context(self) -> None:
+        rows_by_ticker = {
+            "NVDA": {
+                "ticker": "NVDA",
+                "scanners": [{"id": "qullamaggie", "label": "Qullamaggie"}],
+                "position_action": {"action": "hold_position"},
+                "daily_rs_rating": 95,
+            }
+        }
+        with patch.object(self.service, "_load_latest_weinstein_stage_map", return_value={"NVDA": {"alias": "2B", "maturity": "mature"}}):
+            payload = self.service._build_guru_board_payload(rows_by_ticker, board_payload={"target_trading_date": "2026-06-12"})
+
+        self.assertEqual(payload["total_unique_tickers"], 1)
+        self.assertEqual(payload["total_scanner_matches"], 1)
+        self.assertEqual(payload["rows"][0]["stage_analysis"]["alias"], "2B")
+        self.assertEqual(payload["rows"][0]["strike_zone"]["state"], "ready")
+        self.assertEqual([item["id"] for item in payload["definitions"]][-3:], ["liquid_growth", "club_97", "high_volume_close"])
 
     def test_get_watchlist_detail_fails_open_when_universe_load_errors(self) -> None:
         with patch("src.webapp.services.watchlist_service.load_universe", side_effect=RuntimeError("nasdaq offline")), patch(

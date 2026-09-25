@@ -329,6 +329,32 @@ export type ScannerTopHitRow = {
     as_of_date: string | null;
   } | null;
   position_action?: PositionActionSnapshot | null;
+  ema10?: number | null;
+  ema21?: number | null;
+  sma50?: number | null;
+  sma200?: number | null;
+  atr20?: number | null;
+  atr_to_sma50?: number | null;
+  earnings_date?: string | null;
+  earnings_days?: number | null;
+  position_bucket?: string | null;
+  stage_analysis?: { alias: string; maturity?: string | null; as_of_date?: string | null } | null;
+  strike_zone?: { state: "active" | "ready" | "context" | string; label: string; reason: string } | null;
+};
+
+export type GuruScannerDefinition = {
+  id: string;
+  label: string;
+  accent: string;
+  available: boolean;
+};
+
+export type GuruBoardSnapshot = {
+  definitions: GuruScannerDefinition[];
+  total_unique_tickers: number;
+  total_scanner_matches: number;
+  confluence_ticker_count: number;
+  rows: ScannerTopHitRow[];
 };
 
 export type RelativeStrengthEvidence = {
@@ -352,6 +378,7 @@ export type ScannerTopHitsResponse = ScannerBoardResponse & {
   total_unique_tickers: number;
   overlapping_ticker_count: number;
   rows: ScannerTopHitRow[];
+  guru_board?: GuruBoardSnapshot;
   snapshot?: SnapshotMetadata;
 };
 
