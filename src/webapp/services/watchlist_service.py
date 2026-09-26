@@ -125,6 +125,11 @@ _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "stockbee_4pct_daily_movers", "label": "SB 4% Daily", "accent": "teal", "available": True},
     {"id": "stockbee_20pct_weekly_movers", "label": "SB 20% Weekly", "accent": "teal", "available": True},
     {"id": "canslim", "label": "O'Neil", "accent": "blue", "available": True},
+    {"id": "weekly_candidate_pool", "label": "Weekly Candidate Pool", "accent": "indigo", "available": True},
+    {"id": "one_year_winners", "label": "Wey How", "accent": "lime", "available": True},
+    {"id": "kai_s1", "label": "Kai S1", "accent": "cyan", "available": True},
+    {"id": "kai_s2", "label": "Kai S2", "accent": "cyan", "available": True},
+    {"id": "venu_scanner", "label": "Venu Scanner", "accent": "emerald", "available": True},
     {"id": "club_97", "label": "97 Club", "accent": "gold", "available": False},
     {"id": "high_volume_close", "label": "High Volume Close (HVC)", "accent": "cyan", "available": False},
 )

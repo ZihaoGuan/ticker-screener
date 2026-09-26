@@ -102,6 +102,9 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["strike_zone"]["state"], "ready")
         self.assertEqual([item["id"] for item in payload["definitions"]][-2:], ["club_97", "high_volume_close"])
         self.assertNotIn("liquid_growth", {item["id"] for item in payload["definitions"]})
+        definitions = {item["id"]: item for item in payload["definitions"]}
+        self.assertTrue({"kai_s1", "kai_s2", "venu_scanner", "weekly_candidate_pool", "one_year_winners"}.issubset(definitions))
+        self.assertEqual(definitions["one_year_winners"]["label"], "Wey How")
 
     def test_guru_board_excludes_extended_or_unverified_names(self) -> None:
         rows_by_ticker = {
