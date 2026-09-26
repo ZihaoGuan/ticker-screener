@@ -34,6 +34,7 @@ type TopHitsFilterPreset = {
 type TopHitsPresetStore = { presets: Record<string, TopHitsFilterPreset>; defaultPresetName: string };
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
+const GURU_COLUMN_PAGE_SIZE = 30;
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "qullamaggie", "sean_breakout", "venu_scanner"]);
 const PINNED_SCANNER_OPTIONS = [
   { id: "weekly_candidate_pool", label: "Weekly Candidate Pool" },
@@ -923,6 +924,7 @@ function GuruBoard({
   totalScannerMatches: number;
   confluenceTickerCount: number;
 }) {
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   return (
     <section className="guru-board" aria-label="Guru scanner board">
       <div className="guru-board-summary">
@@ -933,6 +935,8 @@ function GuruBoard({
       <div className="guru-board-scroll">
         {definitions.map((definition) => {
           const columnRows = rows.filter((row) => row.scanners.some((scanner) => normalizeScannerId(scanner.id) === definition.id));
+          const visibleCount = visibleCounts[definition.id] ?? GURU_COLUMN_PAGE_SIZE;
+          const remainingCount = Math.max(0, columnRows.length - visibleCount);
           return (
             <article className={`guru-column is-${definition.accent}`} key={definition.id}>
               <header>
@@ -941,8 +945,11 @@ function GuruBoard({
               </header>
               {!definition.available ? <p className="guru-column-unavailable">Rules not configured yet</p> : null}
               <div className="guru-column-cards">
-                {columnRows.slice(0, 30).map((row) => <GuruTickerCard key={row.ticker} row={row} />)}
+                {columnRows.slice(0, visibleCount).map((row) => <GuruTickerCard key={row.ticker} row={row} />)}
               </div>
+              {remainingCount > 0 ? <button className="ghost-button guru-column-load-more" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [definition.id]: visibleCount + GURU_COLUMN_PAGE_SIZE }))}>
+                Load 30 more ({formatCount(remainingCount)} remaining)
+              </button> : null}
             </article>
           );
         })}
@@ -959,7 +966,6 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
   const atr = row.atr_to_sma50 == null ? "--" : `${row.atr_to_sma50 >= 0 ? "+" : ""}${row.atr_to_sma50.toFixed(1)} ATR`;
   const earnings = row.earnings_days == null ? "Earnings TBD" : row.earnings_days === 0 ? "Earnings today" : `Earnings ${row.earnings_days}d`;
   const rmv = row.rmv ? `RMV ${row.rmv.value.toFixed(0)} · R${row.rmv.rank || "–"}` : null;
-  const hasRsPhase = row.scanners.some((scanner) => normalizeScannerId(scanner.id) === "rs_phase");
   return (
     <Link className="guru-ticker-card" to={buildChartHref(row.ticker)} title={`${row.ticker}: ${row.strike_zone?.reason || ""}`}>
       <div className="guru-ticker-main">
@@ -970,7 +976,6 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
         <span title="Guru scanner overlap">{row.scanner_count}×</span>
         <span title="Weinstein stage">{stage}</span>
         <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
-        {hasRsPhase ? <span title="RS line is above its 21 EMA">RS Phase</span> : null}
         {rmv ? <span title="Relative Measured Volatility tightness rank">{rmv}</span> : null}
       </div>
       <div className="guru-ticker-context">

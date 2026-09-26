@@ -5712,6 +5712,7 @@ a {
 .position-map-column:nth-child(7) > header { background: #71717a; color: #f4f4f5; }
 .guru-column-cards { display: grid; gap: 5px; padding: 7px; }
 .guru-column-unavailable { margin: 10px; color: #71717a; font-size: 12px; text-align: center; }
+.guru-column-load-more { width: calc(100% - 14px); margin: 0 7px 7px; font-size: 11px; }
 .guru-ticker-card { display: grid; gap: 5px; padding: 8px; border-left: 3px solid #22c55e; border-radius: 5px; background: #202636; color: #e4e4e7; text-decoration: none; }
 .guru-ticker-card:hover, .guru-ticker-card:focus-visible { outline: 2px solid #fbbf24; outline-offset: 1px; }
 .guru-ticker-main, .guru-ticker-badges, .guru-ticker-context { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
