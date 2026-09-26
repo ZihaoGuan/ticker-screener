@@ -39,54 +39,35 @@ function formatMetricCoverage(coverage: TopRatingEntry["metric_coverage"]): stri
   return coverage ? `${coverage.available}/${coverage.total}` : "--";
 }
 
-function buildFundamentalRequestPath(asOfDate: string, limit: number, ratingStatus: string, sector: string) {
+function buildFundamentalRequestPath(limit: number, sector: string) {
   const query = new URLSearchParams();
-  if (asOfDate.trim()) {
-    query.set("asOfDate", asOfDate.trim());
-  }
   query.set("limit", String(limit));
-  if (ratingStatus.trim()) {
-    query.set("ratingStatus", ratingStatus.trim());
-  }
   if (sector.trim()) {
     query.set("sector", sector.trim());
   }
   return `/api/ratings/top?${query.toString()}`;
 }
 
-function buildTechnicalRequestPath(asOfDate: string, limit: number, technicalStatus: string, sector: string) {
+function buildTechnicalRequestPath(limit: number, sector: string) {
   const query = new URLSearchParams();
-  if (asOfDate.trim()) {
-    query.set("asOfDate", asOfDate.trim());
-  }
   query.set("limit", String(limit));
-  if (technicalStatus.trim()) {
-    query.set("technicalStatus", technicalStatus.trim());
-  }
   if (sector.trim()) {
     query.set("sector", sector.trim());
   }
   return `/api/ratings/technical/top?${query.toString()}`;
 }
 
-function buildTechnicalIndicatorRequestPath(asOfDate: string, limit: number, technicalStatus: string, sector: string) {
+function buildTechnicalIndicatorRequestPath(limit: number, sector: string) {
   const query = new URLSearchParams();
-  if (asOfDate.trim()) {
-    query.set("asOfDate", asOfDate.trim());
-  }
   query.set("limit", String(limit));
-  if (technicalStatus.trim()) {
-    query.set("technicalStatus", technicalStatus.trim());
-  }
   if (sector.trim()) {
     query.set("sector", sector.trim());
   }
   return `/api/ratings/technical-indicator/top?${query.toString()}`;
 }
 
-function statusOptions(response: TopRatingsResponse | TopTechnicalRatingsResponse | TopTechnicalIndicatorRatingsResponse | null, preferredKey: "ok" = "ok") {
-  const counts = response?.status_counts ?? {};
-  return [preferredKey, ...Object.keys(counts).filter((key) => key !== preferredKey).sort()];
+function isSectorOption(value: string): boolean {
+  return !/^\(?[+-]?\d+(?:\.\d+)?%\)?$/.test(value.trim());
 }
 
 function normalizeMode(value: string | null): RatingsMode {
@@ -122,8 +103,6 @@ function rankChangeTitle(row: Pick<TopRatingEntry, "current_rank" | "previous_ra
 export function RatingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const mode = normalizeMode(searchParams.get("mode"));
-  const requestedDate = (searchParams.get("date") ?? "").trim();
-  const requestedStatus = (searchParams.get("status") ?? "ok").trim().toLowerCase() || "ok";
   const requestedSector = (searchParams.get("sector") ?? "").trim();
   const requestedLimit = Math.min(500, Math.max(1, Number(searchParams.get("limit") ?? "100") || 100));
   const [fundamentalPayload, setFundamentalPayload] = useState<TopRatingsResponse | null>(null);
@@ -138,10 +117,10 @@ export function RatingsPage() {
     setNotice("");
     const primaryRequest =
       mode === "technical"
-        ? fetchJson<TopTechnicalRatingsResponse>(buildTechnicalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
+        ? fetchJson<TopTechnicalRatingsResponse>(buildTechnicalRequestPath(requestedLimit, requestedSector))
         : mode === "technical-indicator"
-          ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildTechnicalIndicatorRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector))
-          : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedDate, requestedLimit, requestedStatus, requestedSector));
+          ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildTechnicalIndicatorRequestPath(requestedLimit, requestedSector))
+          : fetchJson<TopRatingsResponse>(buildFundamentalRequestPath(requestedLimit, requestedSector));
     void primaryRequest
       .then((response) => {
         if (ignore) {
@@ -176,11 +155,11 @@ export function RatingsPage() {
     return () => {
       ignore = true;
     };
-  }, [mode, requestedDate, requestedLimit, requestedSector, requestedStatus]);
+  }, [mode, requestedLimit, requestedSector]);
 
   const payload = mode === "technical" ? technicalPayload : mode === "technical-indicator" ? technicalIndicatorPayload : fundamentalPayload;
   const rows = mode === "technical" ? (technicalPayload?.rows ?? []) : mode === "technical-indicator" ? (technicalIndicatorPayload?.rows ?? []) : (fundamentalPayload?.rows ?? []);
-  const visibleSectors = payload?.sector_options ?? [];
+  const visibleSectors = (payload?.sector_options ?? []).filter(isSectorOption);
   const bestOverall = useMemo(
     () =>
       rows.reduce<number | null>((best, row) => {
@@ -192,7 +171,6 @@ export function RatingsPage() {
       }, null),
     [mode, rows],
   );
-  const visibleStatuses = statusOptions(payload);
   const heroTitle =
     mode === "technical"
       ? "Top technical rated tickers"
@@ -256,20 +234,6 @@ export function RatingsPage() {
               <option value="fundamental">fundamental</option>
               <option value="technical">technical</option>
               <option value="technical-indicator">technical-indicator</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>As Of Date</span>
-            <input type="date" value={requestedDate} onChange={(event) => updateParam("date", event.target.value || null)} />
-          </label>
-          <label className="field">
-            <span>Status</span>
-            <select value={requestedStatus} onChange={(event) => updateParam("status", event.target.value)}>
-              {visibleStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
             </select>
           </label>
           <label className="field">
