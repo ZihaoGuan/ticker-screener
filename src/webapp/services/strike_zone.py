@@ -130,6 +130,11 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
             "trigger_date": None,
             "signal_age_days": None,
             "supporting_signals": [],
+            "score_breakdown": {
+                "total": 0,
+                "blocked": True,
+                "groups": [],
+            },
             "warnings": hard_risks,
         }
 
@@ -181,6 +186,15 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
             confirmations.append({"label": f"RS {rs_rating:.0f}", "points": 10, "kind": "strength"})
         elif rs_rating >= 80:
             confirmations.append({"label": f"RS {rs_rating:.0f}", "points": 6, "kind": "strength"})
+    rs_phase_state = str(row.get("rs_phase_state") or "").strip().lower()
+    rs_phase_points = {"new": 8, "quick_reclaim": 8, "established": 6, "mature": 3}.get(rs_phase_state, 0)
+    if rs_phase_points:
+        leads_price = bool(row.get("daily_rs_new_high_before_price"))
+        points = min(10, rs_phase_points + (4 if leads_price else 0))
+        label = f"RS Phase {rs_phase_state.replace('_', ' ')}"
+        if leads_price:
+            label += " leads price"
+        confirmations.append({"label": label, "points": points, "kind": "strength"})
 
     fresh_triggers = [item for item in triggers if bool(item["fresh"])]
     fresh_setups = [item for item in setups if bool(item["fresh"])]
@@ -206,6 +220,36 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
         warnings.append("Earnings date is unavailable.")
 
     all_signals = [*fresh_triggers, *fresh_setups, *confirmations]
+    score_breakdown = {
+        "total": score,
+        "blocked": False,
+        "groups": [
+            {
+                "id": "trigger",
+                "label": "Trigger",
+                "awarded_points": trigger_points,
+                "max_points": max((int(item["points"]) for item in triggers), default=0),
+                "scoring_rule": "Best fresh trigger",
+                "signals": triggers,
+            },
+            {
+                "id": "setup",
+                "label": "Setup",
+                "awarded_points": setup_points,
+                "max_points": 25,
+                "scoring_rule": "Best fresh setup, plus 5 for multiple fresh setups; capped at 25",
+                "signals": setups,
+            },
+            {
+                "id": "confirmation",
+                "label": "Confirmation",
+                "awarded_points": confirmation_points,
+                "max_points": 25,
+                "scoring_rule": "Confirmation points summed; capped at 25",
+                "signals": confirmations,
+            },
+        ],
+    }
     return {
         "state": state,
         "label": label,
@@ -215,5 +259,6 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
         "trigger_date": primary_signal.get("signal_date") if primary_signal else None,
         "signal_age_days": primary_signal.get("age_days") if primary_signal else None,
         "supporting_signals": all_signals,
+        "score_breakdown": score_breakdown,
         "warnings": warnings,
     }

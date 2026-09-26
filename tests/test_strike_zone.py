@@ -27,6 +27,9 @@ class StrikeZoneTests(unittest.TestCase):
         self.assertEqual(result["state"], "active")
         self.assertEqual(result["score"], 65)
         self.assertIn("reclaim", str(result["primary_signal"]))
+        groups = {item["id"]: item for item in result["score_breakdown"]["groups"]}
+        self.assertEqual(groups["trigger"]["awarded_points"], 40)
+        self.assertEqual(groups["confirmation"]["awarded_points"], 25)
 
     def test_ready_uses_tight_setup_without_an_entry_trigger(self) -> None:
         result = build_strike_zone(
@@ -59,6 +62,7 @@ class StrikeZoneTests(unittest.TestCase):
         self.assertEqual(result["state"], "avoid")
         self.assertEqual(result["score"], 0)
         self.assertGreaterEqual(len(result["warnings"]), 3)
+        self.assertTrue(result["score_breakdown"]["blocked"])
 
     def test_stale_breakout_does_not_remain_active(self) -> None:
         result = build_strike_zone(
@@ -74,6 +78,39 @@ class StrikeZoneTests(unittest.TestCase):
 
         self.assertEqual(result["state"], "context")
         self.assertIsNone(result["primary_signal"])
+
+    def test_rs_phase_lifecycle_confirms_but_does_not_create_an_active_entry(self) -> None:
+        result = build_strike_zone(
+            {
+                "atr_to_sma50": 1.0,
+                "earnings_days": 14,
+                "rs_phase_state": "quick_reclaim",
+                "daily_rs_new_high_before_price": True,
+                "scanners": [],
+            },
+            as_of_date=dt.date(2026, 9, 27),
+        )
+
+        self.assertEqual(result["state"], "context")
+        self.assertEqual(result["score"], 10)
+        self.assertIn("RS Phase quick reclaim leads price", [item["label"] for item in result["supporting_signals"]])
+
+    def test_wyckoff_buy_signal_appears_in_hover_score_breakdown(self) -> None:
+        result = build_strike_zone(
+            {
+                "atr_to_sma50": 1.0,
+                "earnings_days": 14,
+                "daily_rs_rating": 95,
+                "stage_analysis": {"alias": "2A"},
+                "scanners": [{"id": "wyckoff_buy_signal", "sort_date": "2026-09-25"}],
+            },
+            as_of_date=dt.date(2026, 9, 27),
+        )
+
+        trigger_group = next(item for item in result["score_breakdown"]["groups"] if item["id"] == "trigger")
+        self.assertEqual(trigger_group["awarded_points"], 35)
+        self.assertEqual(trigger_group["signals"][0]["label"], "Wyckoff buy signal")
+        self.assertEqual(trigger_group["signals"][0]["points"], 35)
 
 
 if __name__ == "__main__":

@@ -143,6 +143,9 @@ def _run_rs_phase(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
         metrics={
             "ticker": bundle.ticker,
             "rs_phase_active_days": payload["rs_phase_active_days"],
+            "rs_phase_state": payload["rs_phase_state"],
+            "rs_phase_badge_label": payload["rs_phase_badge_label"],
+            "rs_phase_quick_reclaim": payload["rs_phase_quick_reclaim"],
             "rs_rating": payload["rs_rating"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),

@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.rs_phase_screen import compute_rs_phase_context, find_recent_rs_phase_hit
+from src.rs_phase_screen import classify_rs_phase_lifecycle, compute_rs_phase_context, find_recent_rs_phase_hit
 from src.universe import UniverseTicker
 
 
@@ -26,6 +26,28 @@ def _frame(closes: list[float], *, high_spike: float | None = None) -> pd.DataFr
 
 
 class RsPhaseScreenTests(unittest.TestCase):
+    def test_lifecycle_marks_fresh_phase_and_mature_phase(self) -> None:
+        fresh = classify_rs_phase_lifecycle(pd.Series([False, True, True, True]))
+        mature = classify_rs_phase_lifecycle(pd.Series([False, *([True] * 21)]))
+
+        self.assertEqual(fresh["rs_phase_state"], "new")
+        self.assertEqual(fresh["rs_phase_badge_label"], "RS New · 3D")
+        self.assertEqual(mature["rs_phase_state"], "mature")
+        self.assertEqual(mature["rs_phase_badge_label"], "RS Mature · 21D")
+
+    def test_lifecycle_distinguishes_quick_reclaim_from_confirmed_loss(self) -> None:
+        quick_reclaim = classify_rs_phase_lifecycle(pd.Series([False, True, True, True, False, False, True]))
+        one_day_dip = classify_rs_phase_lifecycle(pd.Series([False, True, True, True, False]))
+        confirmed_loss = classify_rs_phase_lifecycle(pd.Series([False, True, True, True, False, False]))
+
+        self.assertEqual(quick_reclaim["rs_phase_state"], "quick_reclaim")
+        self.assertTrue(quick_reclaim["rs_phase_quick_reclaim"])
+        self.assertEqual(quick_reclaim["rs_phase_below_days_before_reclaim"], 2)
+        self.assertEqual(one_day_dip["rs_phase_state"], "inactive")
+        self.assertFalse(one_day_dip["rs_phase_loss_confirmed"])
+        self.assertEqual(confirmed_loss["rs_phase_state"], "lost")
+        self.assertTrue(confirmed_loss["rs_phase_loss_confirmed"])
+
     def test_context_marks_active_rs_phase_and_before_price_high(self) -> None:
         stock_closes = [100.0 + index * 0.5 for index in range(80)]
         stock_closes[-11] = 150.0

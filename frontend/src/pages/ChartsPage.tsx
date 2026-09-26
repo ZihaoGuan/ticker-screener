@@ -1477,8 +1477,8 @@ export function ChartsPage() {
                 </span>
               ) : null}
               {rsPhase ? (
-                <span className={`chart-pill ${rsPhase.active ? "chart-pill-rs" : "chart-pill-event"}`}>
-                  {rsPhase.active ? `RS Phase ${rsPhase.active_days}D` : "RS Phase lost"}
+                <span className={`chart-pill ${rsPhase.active ? "chart-pill-rs" : "chart-pill-event"} ${rsPhase.state ? `is-rs-phase-${rsPhase.state}` : ""}`}>
+                  {rsPhase.badge_label ?? (rsPhase.active ? `RS Phase ${rsPhase.active_days}D` : rsPhase.loss_confirmed ? "RS Lost" : "RS Inactive")}
                 </span>
               ) : null}
               {rsPhase?.recent_reclaim_days_ago === 0 ? <span className="chart-pill chart-pill-rs">RS reclaim today</span> : null}

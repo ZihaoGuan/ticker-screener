@@ -296,6 +296,9 @@ export type ScannerTopHitRow = {
   rs_days_21d?: number | null;
   rs_days_21d_pct?: number | null;
   rs_phase_active_days?: number | null;
+  rs_phase_state?: string | null;
+  rs_phase_badge_label?: string | null;
+  rs_phase_quick_reclaim?: boolean | null;
   up_on_down_days_21d?: number | null;
   up_on_down_days_21d_pct?: number | null;
   relative_strength_evidence?: RelativeStrengthEvidence | null;
@@ -349,6 +352,18 @@ export type ScannerTopHitRow = {
     trigger_date?: string | null;
     signal_age_days?: number | null;
     supporting_signals?: Array<{ label: string; points: number; kind: string; signal_date?: string | null; age_days?: number | null; fresh?: boolean }>;
+    score_breakdown?: {
+      total: number;
+      blocked: boolean;
+      groups: Array<{
+        id: string;
+        label: string;
+        awarded_points: number;
+        max_points: number;
+        scoring_rule: string;
+        signals: Array<{ label: string; points: number; kind: string; signal_date?: string | null; age_days?: number | null; fresh?: boolean }>;
+      }>;
+    };
     warnings?: string[];
   } | null;
 };
@@ -374,6 +389,8 @@ export type RelativeStrengthEvidence = {
   rs_days_21d: number | null;
   rs_days_21d_pct: number | null;
   rs_phase_active_days?: number | null;
+  rs_phase_state?: string | null;
+  rs_phase_badge_label?: string | null;
   up_on_down_days_21d: number | null;
   up_on_down_days_21d_pct: number | null;
   rs_phase_active: boolean;
@@ -1032,6 +1049,11 @@ export type WatchlistChartResponse = {
     as_of_date: string;
     recent_reclaim_days_ago: number | null;
     recent_loss_days_ago: number | null;
+    state?: string;
+    badge_label?: string;
+    quick_reclaim?: boolean;
+    below_days_before_reclaim?: number | null;
+    loss_confirmed?: boolean;
   } | null;
   relative_strength_evidence?: RelativeStrengthEvidence | null;
   daily_rs_rating?: Array<{ time: string; value: number }>;

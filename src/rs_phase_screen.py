@@ -15,6 +15,10 @@ RS_PHASE_HISTORY_DAYS = 320
 RS_PHASE_EMA_PERIOD = 21
 RS_PHASE_MIN_ACTIVE_DAYS = 3
 RS_PHASE_NEW_HIGH_LOOKBACK = 50
+RS_PHASE_NEW_MAX_DAYS = 3
+RS_PHASE_ESTABLISHED_MAX_DAYS = 20
+RS_PHASE_QUICK_RECLAIM_MAX_BELOW_DAYS = 3
+RS_PHASE_CONFIRMED_LOSS_MIN_DAYS = 2
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,10 @@ class RsPhaseHit:
     current_rs_line: float
     current_rs_ema21: float
     rs_phase_active_days: int
+    rs_phase_state: str
+    rs_phase_badge_label: str
+    rs_phase_quick_reclaim: bool
+    rs_phase_below_days_before_reclaim: int | None
     rs_phase_new_reclaim: bool
     rs_phase_recent_reclaim_days_ago: int | None
     daily_rs_new_high: bool
@@ -42,6 +50,99 @@ class RsPhaseHit:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+def _trailing_run_length(values: list[bool], target: bool) -> int:
+    count = 0
+    for value in reversed(values):
+        if value is not target:
+            break
+        count += 1
+    return count
+
+
+def _rs_phase_badge_label(state: str, active_days: int) -> str:
+    if state == "quick_reclaim":
+        return "RS Quick Reclaim"
+    if state == "new":
+        return f"RS New · {active_days}D"
+    if state == "established":
+        return f"RS Established · {active_days}D"
+    if state == "mature":
+        return f"RS Mature · {active_days}D"
+    if state == "lost":
+        return "RS Lost"
+    return "RS Inactive"
+
+
+def classify_rs_phase_lifecycle(phase_active: pd.Series) -> dict[str, object]:
+    """Classify the latest RS-line/EMA21 relationship without treating a one-day dip as a loss."""
+    values = [bool(value) for value in phase_active.dropna().tolist()]
+    if not values:
+        return {
+            "rs_phase_state": "inactive",
+            "rs_phase_badge_label": "RS Inactive",
+            "rs_phase_active_days": 0,
+            "rs_phase_inactive_days": 0,
+            "rs_phase_quick_reclaim": False,
+            "rs_phase_below_days_before_reclaim": None,
+            "rs_phase_prior_active_days": None,
+            "rs_phase_new_reclaim": False,
+            "rs_phase_recent_reclaim_days_ago": None,
+            "rs_phase_lost": False,
+            "rs_phase_loss_confirmed": False,
+            "rs_phase_recent_loss_days_ago": None,
+        }
+
+    active_days = _trailing_run_length(values, True)
+    inactive_days = _trailing_run_length(values, False)
+    reclaim_positions = [index for index in range(1, len(values)) if values[index] and not values[index - 1]]
+    loss_positions = [index for index in range(1, len(values)) if not values[index] and values[index -1]]
+    latest_reclaim = reclaim_positions[-1] if reclaim_positions else None
+    latest_loss = loss_positions[-1] if loss_positions else None
+    recent_reclaim_days_ago = len(values) - latest_reclaim - 1 if latest_reclaim is not None else None
+    recent_loss_days_ago = len(values) - latest_loss - 1 if latest_loss is not None else None
+
+    below_days_before_reclaim = None
+    prior_active_days = None
+    quick_reclaim = False
+    if values[-1] and latest_reclaim is not None:
+        before_reclaim = values[:latest_reclaim]
+        below_days_before_reclaim = _trailing_run_length(before_reclaim, False)
+        before_dip = before_reclaim[: len(before_reclaim) - below_days_before_reclaim]
+        prior_active_days = _trailing_run_length(before_dip, True)
+        quick_reclaim = (
+            active_days <= RS_PHASE_NEW_MAX_DAYS
+            and 1 <= below_days_before_reclaim <= RS_PHASE_QUICK_RECLAIM_MAX_BELOW_DAYS
+            and prior_active_days >= RS_PHASE_MIN_ACTIVE_DAYS
+        )
+
+    loss_confirmed = bool(
+        not values[-1]
+        and inactive_days >= RS_PHASE_CONFIRMED_LOSS_MIN_DAYS
+        and _trailing_run_length(values[: len(values) - inactive_days], True) >= RS_PHASE_MIN_ACTIVE_DAYS
+    )
+    if values[-1]:
+        state = "quick_reclaim" if quick_reclaim else (
+            "new" if active_days <= RS_PHASE_NEW_MAX_DAYS else "established" if active_days <= RS_PHASE_ESTABLISHED_MAX_DAYS else "mature"
+        )
+    else:
+        state = "lost" if loss_confirmed else "inactive"
+
+    return {
+        "rs_phase_state": state,
+        "rs_phase_badge_label": _rs_phase_badge_label(state, active_days),
+        "rs_phase_active_days": active_days,
+        "rs_phase_inactive_days": inactive_days,
+        "rs_phase_quick_reclaim": quick_reclaim,
+        "rs_phase_below_days_before_reclaim": below_days_before_reclaim,
+        "rs_phase_prior_active_days": prior_active_days,
+        "rs_phase_new_reclaim": bool(values[-1] and latest_reclaim == len(values) - 1),
+        "rs_phase_recent_reclaim_days_ago": recent_reclaim_days_ago,
+        "rs_phase_lost": bool(not values[-1] and latest_loss == len(values) - 1),
+        "rs_phase_loss_confirmed": loss_confirmed,
+        "rs_phase_recent_loss_days_ago": recent_loss_days_ago,
+    }
 
 
 @dataclass(frozen=True)
@@ -112,18 +213,7 @@ def compute_rs_phase_context(
     rs_line = aligned["Close"] / aligned["BenchmarkClose"]
     rs_ema = rs_line.ewm(span=max(1, int(ema_period)), adjust=False).mean()
     phase_active = rs_line > rs_ema
-    reclaim = phase_active & ~phase_active.shift(1, fill_value=False)
-    loss = ~phase_active & phase_active.shift(1, fill_value=False)
-    active_days = 0
-    for value in reversed([bool(item) for item in phase_active.tolist()]):
-        if not value:
-            break
-        active_days += 1
-
-    recent_reclaim_days_ago = None
-    if bool(reclaim.any()):
-        recent_reclaim_index = reclaim[reclaim].index[-1]
-        recent_reclaim_days_ago = len(reclaim.loc[recent_reclaim_index:]) - 1
+    lifecycle = classify_rs_phase_lifecycle(phase_active)
 
     rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
         rs_line,
@@ -141,10 +231,7 @@ def compute_rs_phase_context(
         "current_rs_line": float(rs_line.iloc[-1]),
         "current_rs_ema21": float(rs_ema.iloc[-1]),
         "rs_phase_active": bool(phase_active.iloc[-1]),
-        "rs_phase_active_days": int(active_days),
-        "rs_phase_new_reclaim": bool(reclaim.iloc[-1]),
-        "rs_phase_recent_reclaim_days_ago": int(recent_reclaim_days_ago) if recent_reclaim_days_ago is not None else None,
-        "rs_phase_lost": bool(loss.iloc[-1]),
+        **lifecycle,
         "daily_rs_new_high": bool(rs_new_high.loc[latest_index]),
         "daily_rs_new_high_before_price": bool(rs_new_high_before_price.loc[latest_index]),
         "daily_price_high": float(rolling_price_high.iloc[-1]),
@@ -188,6 +275,7 @@ def find_recent_rs_phase_hit(
         f"RS line {float(context['current_rs_line']):.6f} > RS EMA21 {float(context['current_rs_ema21']):.6f}",
         f"RS rating {float(rs_rating):.1f}",
     ]
+    reasons.append(f"RS lifecycle: {str(context['rs_phase_badge_label'])}")
     if bool(context["rs_phase_new_reclaim"]):
         reasons.append("RS phase reclaimed today")
     elif context["rs_phase_recent_reclaim_days_ago"] is not None:
@@ -209,6 +297,10 @@ def find_recent_rs_phase_hit(
         current_rs_line=float(context["current_rs_line"]),
         current_rs_ema21=float(context["current_rs_ema21"]),
         rs_phase_active_days=int(context["rs_phase_active_days"]),
+        rs_phase_state=str(context["rs_phase_state"]),
+        rs_phase_badge_label=str(context["rs_phase_badge_label"]),
+        rs_phase_quick_reclaim=bool(context["rs_phase_quick_reclaim"]),
+        rs_phase_below_days_before_reclaim=context["rs_phase_below_days_before_reclaim"],
         rs_phase_new_reclaim=bool(context["rs_phase_new_reclaim"]),
         rs_phase_recent_reclaim_days_ago=context["rs_phase_recent_reclaim_days_ago"],
         daily_rs_new_high=bool(context["daily_rs_new_high"]),

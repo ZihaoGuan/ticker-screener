@@ -6,8 +6,10 @@ from .rs_phase_screen import RsPhaseHit
 def build_rs_phase_watchlist(hits: list[RsPhaseHit]) -> list[dict[str, object]]:
     watchlist: list[dict[str, object]] = []
     for hit in hits:
-        badges = [f"RS Phase {hit.rs_phase_active_days}D"]
-        if hit.rs_phase_new_reclaim:
+        badges = [hit.rs_phase_badge_label]
+        if hit.rs_phase_quick_reclaim:
+            badges.append("Quick Shakeout")
+        elif hit.rs_phase_new_reclaim:
             badges.append("RS Reclaim")
         if hit.daily_rs_new_high_before_price:
             badges.append("RS NH Before Price")
@@ -37,6 +39,13 @@ def build_rs_phase_watchlist(hits: list[RsPhaseHit]) -> list[dict[str, object]]:
                 "signal_rs_rating": round(hit.rs_rating, 2),
                 "signal_rs_score": round(hit.rs_score, 4),
                 "rs_phase_active_days": hit.rs_phase_active_days,
+                "rs_phase_state": hit.rs_phase_state,
+                "rs_phase_badge_label": hit.rs_phase_badge_label,
+                "rs_phase_quick_reclaim": hit.rs_phase_quick_reclaim,
+                "rs_phase_below_days_before_reclaim": hit.rs_phase_below_days_before_reclaim,
+                "rs_phase_new_reclaim": hit.rs_phase_new_reclaim,
+                "rs_phase_recent_reclaim_days_ago": hit.rs_phase_recent_reclaim_days_ago,
+                "daily_rs_new_high_before_price": hit.daily_rs_new_high_before_price,
                 "signal_badges": badges,
             }
         )

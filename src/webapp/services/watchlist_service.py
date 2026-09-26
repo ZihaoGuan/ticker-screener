@@ -41,6 +41,7 @@ from ...market_data_access import (
 from ...ratings.finviz_insider import load_finviz_insider_signal_map
 from ...ratings.repository import RatingsRepository
 from ...rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
+from ...rs_phase_screen import classify_rs_phase_lifecycle
 from ...sepa_vcp_screen import build_sepa_dashboard_snapshot
 from ...ticker_filters import is_excluded_ticker, load_excluded_tickers, normalize_ticker_symbol
 from ...trend_template_screen import evaluate_trend_template
@@ -2787,6 +2788,8 @@ class WatchlistService:
         entry_rs_phase_active_days = _resolve_rs_phase_active_days(entry)
         if entry_rs_phase_active_days is not None:
             rs_phase_active_days = max(rs_phase_active_days or 0, entry_rs_phase_active_days)
+        entry_rs_phase_state = _coalesce_text(entry.get("rs_phase_state"))
+        entry_rs_phase_badge_label = _coalesce_text(entry.get("rs_phase_badge_label"))
         ta_rating = bucket.get("ta_rating")
         if ta_rating is None:
             ta_rating = _coerce_optional_float(entry.get("ta_rating"))
@@ -2831,6 +2834,18 @@ class WatchlistService:
         bucket["perf_ytd_pct"] = perf_ytd_pct
         bucket["rs_rating"] = rs_rating
         bucket["rs_phase_active_days"] = rs_phase_active_days
+        if entry_rs_phase_state:
+            bucket["rs_phase_state"] = entry_rs_phase_state
+        if entry_rs_phase_badge_label:
+            bucket["rs_phase_badge_label"] = entry_rs_phase_badge_label
+        if entry.get("rs_phase_quick_reclaim") is not None:
+            bucket["rs_phase_quick_reclaim"] = bool(entry.get("rs_phase_quick_reclaim"))
+        if entry.get("rs_phase_below_days_before_reclaim") is not None:
+            bucket["rs_phase_below_days_before_reclaim"] = _coerce_optional_int(entry.get("rs_phase_below_days_before_reclaim"))
+        if entry.get("rs_phase_recent_reclaim_days_ago") is not None:
+            bucket["rs_phase_recent_reclaim_days_ago"] = _coerce_optional_int(entry.get("rs_phase_recent_reclaim_days_ago"))
+        if entry.get("daily_rs_new_high_before_price") is not None:
+            bucket["daily_rs_new_high_before_price"] = bool(entry.get("daily_rs_new_high_before_price"))
         bucket["ta_rating"] = ta_rating
         bucket["fa_rating"] = fa_rating
         bucket["canslim_score"] = canslim_score
@@ -4564,12 +4579,7 @@ def _build_rs_phase_snapshot(
     aligned.columns = ["rs_line", "rs_ema21", "active"]
     if aligned.empty:
         return None
-    active_values = [bool(value) for value in aligned["active"].tolist()]
-    active_days = 0
-    for value in reversed(active_values):
-        if not value:
-            break
-        active_days += 1
+    lifecycle = classify_rs_phase_lifecycle(aligned["active"])
     latest_index = aligned.index[-1]
     recent_reclaim_days_ago = None
     if reclaim is not None and bool(reclaim.any()):
@@ -4581,12 +4591,17 @@ def _build_rs_phase_snapshot(
         recent_loss_days_ago = len(loss.loc[recent_loss_index:]) - 1
     return {
         "active": bool(aligned["active"].iloc[-1]),
-        "active_days": int(active_days),
+        "active_days": int(lifecycle["rs_phase_active_days"]),
         "current_rs_line": float(aligned["rs_line"].iloc[-1]),
         "current_rs_ema21": float(aligned["rs_ema21"].iloc[-1]),
         "as_of_date": pd.Timestamp(latest_index).date().isoformat(),
         "recent_reclaim_days_ago": int(recent_reclaim_days_ago) if recent_reclaim_days_ago is not None else None,
         "recent_loss_days_ago": int(recent_loss_days_ago) if recent_loss_days_ago is not None else None,
+        "state": lifecycle["rs_phase_state"],
+        "badge_label": lifecycle["rs_phase_badge_label"],
+        "quick_reclaim": lifecycle["rs_phase_quick_reclaim"],
+        "below_days_before_reclaim": lifecycle["rs_phase_below_days_before_reclaim"],
+        "loss_confirmed": lifecycle["rs_phase_loss_confirmed"],
     }
 
 
@@ -4693,6 +4708,8 @@ def _build_relative_strength_evidence(row: dict[str, Any]) -> dict[str, Any]:
         "rs_days_21d": _coerce_optional_int(row.get("rs_days_21d")),
         "rs_days_21d_pct": rs_days_pct,
         "rs_phase_active_days": _coerce_optional_int(row.get("rs_phase_active_days")),
+        "rs_phase_state": _coalesce_text(row.get("rs_phase_state")),
+        "rs_phase_badge_label": _coalesce_text(row.get("rs_phase_badge_label")),
         "up_on_down_days_21d": up_on_down_days,
         "up_on_down_days_21d_pct": _coerce_optional_float(row.get("up_on_down_days_21d_pct")),
         "rs_phase_active": "rs_phase" in scanner_ids,
@@ -4747,6 +4764,9 @@ def _build_chart_relative_strength_evidence(
     row = {
         "scanners": scanners,
         "daily_rs_rating": latest_daily_rs,
+        "rs_phase_active_days": rs_phase_snapshot.get("active_days") if rs_phase_snapshot else None,
+        "rs_phase_state": rs_phase_snapshot.get("state") if rs_phase_snapshot else None,
+        "rs_phase_badge_label": rs_phase_snapshot.get("badge_label") if rs_phase_snapshot else None,
         "rs_days_21d": metrics["rs_days"],
         "rs_days_21d_pct": metrics["rs_days_pct"],
         "up_on_down_days_21d": metrics["up_on_down_days"],

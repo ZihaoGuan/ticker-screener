@@ -833,7 +833,7 @@ export function ScannerTopHitsPage() {
                       <td data-label="Bollinger">{renderBollingerBandStatus(row.bollinger_band_status)}</td>
                       <td data-label="RS Evidence">{renderRsEvidenceCell(row)}</td>
                       <td data-label="RS Days">{formatCountWithPercent(row.rs_days_21d, row.rs_days_21d_pct)}</td>
-                      <td data-label="RS Phase">{formatPhaseDays(resolveRsPhaseActiveDays(row))}</td>
+                      <td data-label="RS Phase">{resolveRsPhaseBadge(row) ?? "--"}</td>
                       <td data-label="Up/Down">{formatCountWithPercent(row.up_on_down_days_21d, row.up_on_down_days_21d_pct)}</td>
                       <td data-label="1Y %">{renderChange(row.perf_year_pct)}</td>
                       <td data-label="YTD %">{renderChange(row.perf_ytd_pct)}</td>
@@ -978,9 +978,9 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
   const strikeScore = row.strike_zone?.score;
   const primarySignal = row.strike_zone?.primary_signal;
   const signalAge = row.strike_zone?.signal_age_days;
-  const strikeTitle = [row.strike_zone?.reason, ...(row.strike_zone?.warnings ?? [])].filter(Boolean).join(" ");
+  const strikeTitle = buildStrikeZoneTitle(row.strike_zone);
   return (
-    <Link className="guru-ticker-card" to={buildChartHref(row.ticker)} title={`${row.ticker}: ${strikeTitle}`}>
+    <Link className="guru-ticker-card" to={buildChartHref(row.ticker)} title={`${row.ticker} chart`}>
       <div className="guru-ticker-main">
         <strong>{row.ticker}</strong>
         <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
@@ -989,6 +989,7 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
         <span title="Guru scanner overlap">{row.scanner_count}×</span>
         <span title="Weinstein stage">{stage}</span>
         <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
+        {resolveRsPhaseBadge(row) ? <span className={rsPhaseBadgeClass(row)} title="RS Phase lifecycle">{resolveRsPhaseBadge(row)}</span> : null}
         {rmv ? <span title="Relative Measured Volatility tightness rank">{rmv}</span> : null}
       </div>
       <div className="guru-ticker-context">
@@ -999,6 +1000,36 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
       </div>
     </Link>
   );
+}
+
+function buildStrikeZoneTitle(strikeZone: ScannerTopHitRow["strike_zone"]): string {
+  if (!strikeZone) {
+    return "Strike Zone context is unavailable.";
+  }
+  const lines = [
+    `Strike Zone: ${strikeZone.label}${strikeZone.score == null ? "" : ` ${strikeZone.score}/100`}`,
+    strikeZone.reason,
+  ];
+  const breakdown = strikeZone.score_breakdown;
+  if (breakdown?.blocked) {
+    lines.push("Score blocked by risk controls.");
+  }
+  for (const group of breakdown?.groups ?? []) {
+    lines.push("", `${group.label}: ${group.awarded_points}/${group.max_points} awarded`);
+    for (const signal of group.signals) {
+      const age = signal.age_days == null ? "" : ` · ${signal.age_days}d ago`;
+      const freshness = signal.fresh === false ? " · stale, not counted" : age;
+      lines.push(`• ${signal.label}: +${signal.points}${freshness}`);
+    }
+    if (group.signals.length === 0) {
+      lines.push("• None");
+    }
+    lines.push(`Rule: ${group.scoring_rule}`);
+  }
+  if ((strikeZone.warnings?.length ?? 0) > 0) {
+    lines.push("", "Warnings:", ...(strikeZone.warnings ?? []).map((warning) => `• ${warning}`));
+  }
+  return lines.filter((line): line is string => typeof line === "string").join("\n");
 }
 
 const POSITION_BUCKETS = [
@@ -1090,7 +1121,7 @@ function ScannerTopHitChartCard({
         {row.rs_evidence_score != null ? (
           <span className={`scanner-score-pill ${toneForRating(row.rs_evidence_score, 5)}`}>Evidence {row.rs_evidence_score}/{row.rs_evidence_max_score ?? 9}</span>
         ) : null}
-        {resolveRsPhaseActiveDays(row) != null ? <span className="scanner-score-pill">RS Phase {formatPhaseDays(resolveRsPhaseActiveDays(row))}</span> : null}
+        {resolveRsPhaseBadge(row) ? <span className={`scanner-score-pill ${rsPhaseBadgeClass(row)}`}>{resolveRsPhaseBadge(row)}</span> : null}
         <span className={`scanner-score-pill ${toneForRating(row.daily_rs_rating ?? row.rs_rating, 90)}`}>RS {formatRating(row.daily_rs_rating ?? row.rs_rating)}</span>
         <span className={`scanner-score-pill ${toneForRating(row.ta_rating, 80)}`}>TA {formatRating(row.ta_rating)}</span>
         <span className={`scanner-score-pill ${toneForRating(row.fa_rating, 80)}`}>FA {formatRating(row.fa_rating)}</span>
@@ -1279,6 +1310,20 @@ function formatPhaseDays(value: number | null | undefined) {
 
 function resolveRsPhaseActiveDays(row: ScannerTopHitRow): number | null {
   return row.rs_phase_active_days ?? row.relative_strength_evidence?.rs_phase_active_days ?? null;
+}
+
+function resolveRsPhaseBadge(row: ScannerTopHitRow): string | null {
+  const label = row.rs_phase_badge_label ?? row.relative_strength_evidence?.rs_phase_badge_label;
+  if (label) {
+    return label;
+  }
+  const activeDays = resolveRsPhaseActiveDays(row);
+  return activeDays == null ? null : `RS Phase ${formatPhaseDays(activeDays)}`;
+}
+
+function rsPhaseBadgeClass(row: ScannerTopHitRow): string {
+  const state = row.rs_phase_state ?? row.relative_strength_evidence?.rs_phase_state ?? "";
+  return state ? `is-rs-phase-${state}` : "";
 }
 
 function formatCountWithPercent(count: number | null | undefined, pct: number | null | undefined) {

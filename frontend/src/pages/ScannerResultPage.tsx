@@ -45,6 +45,8 @@ type ScannerRow = {
   accelLabel: string;
   arsScore: number | null;
   rsPhaseActiveDays: number | null;
+  rsPhaseBadgeLabel: string;
+  rsPhaseState: string;
   dailyRsRating: number | null;
   alsScore: number | null;
   technicalIndicator1d: string;
@@ -488,6 +490,7 @@ export function ScannerResultPage() {
                       <div className="scanner-chart-card-score-row">
                         <span className={`scanner-score-pill ${toneForScore(row.alsScore, 100)}`}>ALS {formatIntegerScore(row.alsScore)}</span>
                         <span className={`scanner-score-pill ${toneForScore(row.taScore, 10)}`}>TA {formatTenPointScore(row.taScore)}</span>
+                        {row.rsPhaseBadgeLabel ? <span className={`scanner-score-pill ${rsPhaseBadgeClass(row.rsPhaseState)}`}>{row.rsPhaseBadgeLabel}</span> : null}
                         <span className="scanner-chart-card-volume">Vol {formatVolume(row.dayVolume)}</span>
                       </div>
                       <div className="scanner-chart-card-body">
@@ -567,7 +570,7 @@ export function ScannerResultPage() {
                         <td data-label="CANSLIM">{formatCanslimScore(row.canslimScore, row.canslimMaxScore)}</td>
                         <td data-label="Accel">{formatAccelerationScore(row.accelScore, row.accelLabel)}</td>
                         <td data-label="ARS">{formatPercentScore(row.arsScore)}</td>
-                        <td data-label="RS Phase">{formatPhaseDays(row.rsPhaseActiveDays)}</td>
+                        <td data-label="RS Phase">{row.rsPhaseBadgeLabel ? <span className={`scanner-score-pill ${rsPhaseBadgeClass(row.rsPhaseState)}`}>{row.rsPhaseBadgeLabel}</span> : formatPhaseDays(row.rsPhaseActiveDays)}</td>
                         <td data-label="Daily RS">{formatPercentScore(row.dailyRsRating)}</td>
                         <td data-label="ALS Score" className="scanner-result-als-cell">
                           {formatIntegerScore(row.alsScore)}
@@ -657,6 +660,8 @@ function buildScannerRow(
     faScore: fundamentalOverall != null ? fundamentalOverall / 10 : null,
     arsScore: leadershipOverall,
     rsPhaseActiveDays: resolveRsPhaseActiveDays(entry),
+    rsPhaseBadgeLabel: resolveRsPhaseBadgeLabel(entry),
+    rsPhaseState: String(entry.rs_phase_state ?? "").trim(),
     dailyRsRating: directDailyRsRating ?? technical?.daily_rs_rating ?? null,
     alsScore: averagePresent([technicalOverall, fundamentalOverall, leadershipOverall]),
     technicalIndicator1d: dailyIndicator?.rating_label ?? "",
@@ -735,6 +740,26 @@ function resolveRsPhaseActiveDays(entry: Record<string, unknown> | null | undefi
     }
   }
   return null;
+}
+
+function resolveRsPhaseBadgeLabel(entry: Record<string, unknown> | null | undefined): string {
+  const directValue = String(entry?.rs_phase_badge_label ?? "").trim();
+  if (directValue) {
+    return directValue;
+  }
+  const badges = entry?.signal_badges;
+  if (Array.isArray(badges)) {
+    const lifecycleBadge = badges.find((badge) => /^RS (New|Quick Reclaim|Established|Mature)\b/i.test(String(badge ?? "").trim()));
+    if (lifecycleBadge) {
+      return String(lifecycleBadge);
+    }
+  }
+  const activeDays = resolveRsPhaseActiveDays(entry);
+  return activeDays == null ? "" : `RS Phase ${Math.round(activeDays)}D`;
+}
+
+function rsPhaseBadgeClass(state: string): string {
+  return state ? `is-rs-phase-${state}` : "";
 }
 
 function compareScannerRows(left: ScannerRow, right: ScannerRow, sortBy: SortKey, sortDirection: SortDirection) {

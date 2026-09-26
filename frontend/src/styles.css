@@ -5011,6 +5011,12 @@ a {
   color: #f87171;
 }
 
+.is-rs-phase-new { color: #67e8f9 !important; border-color: #0891b2 !important; background: rgba(8, 145, 178, 0.16) !important; }
+.is-rs-phase-quick_reclaim { color: #86efac !important; border-color: #16a34a !important; background: rgba(22, 163, 74, 0.16) !important; }
+.is-rs-phase-established { color: #bbf7d0 !important; border-color: #15803d !important; background: rgba(21, 128, 61, 0.14) !important; }
+.is-rs-phase-mature { color: #fde68a !important; border-color: #b45309 !important; background: rgba(180, 83, 9, 0.16) !important; }
+.is-rs-phase-lost { color: #fecaca !important; border-color: #dc2626 !important; background: rgba(220, 38, 38, 0.16) !important; }
+
 .scanner-result-als-cell {
   color: #fdba74;
   font-weight: 700;
