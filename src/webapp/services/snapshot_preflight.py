@@ -18,6 +18,7 @@ class SnapshotPreflight:
     target_date: str
     required_job_ids: tuple[str, ...]
     pending_job_ids: tuple[str, ...]
+    active_job_ids: tuple[str, ...]
 
     @property
     def ready(self) -> bool:
@@ -48,14 +49,18 @@ def check_required_scheduled_jobs(
         clean_ids.extend(group_job_ids or [f"group:{group_name}"])
     clean_ids = list(dict.fromkeys(clean_ids))
     pending: list[str] = []
+    active: list[str] = []
     for job_id in clean_ids:
         payload = _load_status(status_dir / f"{job_id}.json")
+        if str((payload or {}).get("status") or "").lower() in {"queued", "running"}:
+            active.append(job_id)
         if not _completed_successfully_for_date(payload, target_date=target_date):
             pending.append(job_id)
     return SnapshotPreflight(
         target_date=target_date,
         required_job_ids=tuple(clean_ids),
         pending_job_ids=tuple(pending),
+        active_job_ids=tuple(active),
     )
 
 

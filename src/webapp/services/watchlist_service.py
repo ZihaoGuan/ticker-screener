@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import hashlib
 import html
 from io import StringIO
 import json
@@ -1051,15 +1052,43 @@ class WatchlistService:
             }, scanner_groups, daily_rs_min, daily_rs_max)
         snapshot_date = _coerce_optional_date(persisted.get("target_trading_date"))
         age_seconds = _snapshot_age_seconds(persisted.get("snapshot_generated_at"), reference_now)
+        refresh_state = _load_scanner_top_hits_refresh_state(self.repository.artifacts_dir / "status")
         persisted["snapshot"] = {
             "snapshot_run_id": persisted.pop("_snapshot_run_id", None),
             "snapshot_generated_at": persisted.pop("_snapshot_generated_at", persisted.get("generated_at") or None),
             "source_data_as_of": persisted.get("target_trading_date") or None,
             "age_seconds": age_seconds,
             "freshness": "fresh" if snapshot_date == target_date else "stale",
-            "refresh_status": "idle",
+            **refresh_state,
         }
         return _filter_scanner_top_hits_payload(persisted, scanner_groups, daily_rs_min, daily_rs_max)
+
+    def get_scanner_top_hits_snapshot_refresh_state(
+        self,
+        *,
+        now: dt.datetime | None = None,
+        board_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return the lightweight inputs needed by the snapshot scheduler.
+
+        The fingerprint is based only on persisted scanner-run identity metadata.
+        It therefore catches scheduled and ad-hoc scanner completions without
+        putting a write hook into every individual scanner implementation.
+        """
+        resolved_board_payload = board_payload or self.get_scanner_board(now=now)
+        target_date = str(resolved_board_payload.get("target_trading_date") or "")
+        fingerprint, latest_source_at = _scanner_top_hits_source_fingerprint(resolved_board_payload)
+        persisted = self._load_latest_persisted_scanner_top_hits_payload() or {}
+        persisted_date = str(persisted.get("target_trading_date") or "")
+        persisted_fingerprint = str(persisted.get("source_fingerprint") or "")
+        return {
+            "target_date": target_date,
+            "source_fingerprint": fingerprint,
+            "persisted_source_fingerprint": persisted_fingerprint,
+            "latest_source_at": latest_source_at,
+            "has_current_snapshot": bool(target_date and persisted_date == target_date),
+            "source_changed": bool(fingerprint and fingerprint != persisted_fingerprint),
+        }
 
     def persist_scanner_top_hits_snapshot(
         self,
@@ -1097,6 +1126,8 @@ class WatchlistService:
             "cards": copy.deepcopy(payload.get("cards") or []),
             "guru_board": copy.deepcopy(payload.get("guru_board") or {}),
         }
+        source_fingerprint, _ = _scanner_top_hits_source_fingerprint(resolved_board_payload)
+        summary_payload["source_fingerprint"] = source_fingerprint
         config_json = {
             "kind": "scanner_top_hits_snapshot",
             "benchmark_ticker": self.benchmark_ticker,
@@ -1183,6 +1214,7 @@ class WatchlistService:
             "overlapping_ticker_count": int(summary.get("overlapping_ticker_count") or len(snapshot_rows)),
             "rows": snapshot_rows,
             "guru_board": copy.deepcopy(summary.get("guru_board") or {}),
+            "source_fingerprint": str(summary.get("source_fingerprint") or ""),
             "_snapshot_run_id": run_id,
             "_snapshot_generated_at": generated_at,
         }
@@ -1267,6 +1299,7 @@ class WatchlistService:
                 "overlapping_ticker_count": int(summary_payload.get("overlapping_ticker_count") or 0),
                 "rows": rows_payload,
                 "guru_board": copy.deepcopy(summary_payload.get("guru_board") or {}),
+                "source_fingerprint": str(summary_payload.get("source_fingerprint") or ""),
             }
         return None
 
@@ -3636,6 +3669,51 @@ def _snapshot_age_seconds(value: object, reference_now: dt.datetime) -> int | No
 def _write_scanner_top_hits_cache(key: tuple[str, ...], payload: dict[str, Any]) -> None:
     with _scanner_top_hits_cache_lock:
         _scanner_top_hits_cache[key] = (time.time() + _SCANNER_TOP_HITS_CACHE_TTL_SECONDS, copy.deepcopy(payload))
+
+
+def _scanner_top_hits_source_fingerprint(board_payload: dict[str, Any]) -> tuple[str, str]:
+    """Hash the persisted source runs selected for the current board date."""
+    source_cards: list[dict[str, object]] = []
+    latest_source_at = ""
+    for card in board_payload.get("cards") or []:
+        if not isinstance(card, dict):
+            continue
+        captured_at = str(card.get("captured_at") or "")
+        source_cards.append(
+            {
+                "strategy_id": str(card.get("strategy_id") or ""),
+                "sort_date": str(card.get("sort_date") or ""),
+                "captured_at": captured_at,
+                "entry_count": int(card.get("entry_count") or 0),
+                "stem": str(card.get("stem") or ""),
+            }
+        )
+        latest_source_at = max(latest_source_at, captured_at)
+    payload = {
+        "target_trading_date": str(board_payload.get("target_trading_date") or ""),
+        "manual_override_target_date": str(board_payload.get("manual_override_target_date") or ""),
+        "source_cards": sorted(source_cards, key=lambda item: str(item["strategy_id"])),
+    }
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16], latest_source_at
+
+
+def _load_scanner_top_hits_refresh_state(status_dir: Path) -> dict[str, str]:
+    """Expose scheduler progress without adding work to the request path."""
+    defaults = {"refresh_status": "idle", "refresh_message": ""}
+    try:
+        payload = json.loads((status_dir / "build_scanner_top_hits_snapshot.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return defaults
+    if not isinstance(payload, dict):
+        return defaults
+    status = str(payload.get("status") or "").lower()
+    if status not in {"queued", "running", "waiting", "failed"}:
+        return defaults
+    return {
+        "refresh_status": status,
+        "refresh_message": str(payload.get("message") or "").strip(),
+    }
 
 
 def _read_sector_momentum_cache(key: tuple[str, str, str, str]) -> dict[str, dict[str, Any]] | None:

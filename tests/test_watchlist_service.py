@@ -17,6 +17,7 @@ from src.webapp.services.watchlist_service import (
     _clear_chart_payload_cache,
     _classify_position_bucket,
     _filter_scanner_top_hits_payload,
+    _scanner_top_hits_source_fingerprint,
 )
 
 
@@ -1262,6 +1263,44 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [{"ticker": "PLTR", "scanner_count": 2, "daily_rs_rating": 96}])
         self.assertEqual(payload["snapshot"]["snapshot_run_id"], 902)
         self.assertEqual(payload["snapshot"]["freshness"], "fresh")
+
+    def test_top_hits_refresh_state_tracks_source_fingerprint_and_scheduler_waiting_status(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        board_payload = {
+            "target_trading_date": "2026-06-12",
+            "cards": [{"strategy_id": "rs", "sort_date": "2026-06-12", "captured_at": "2026-06-13T00:45:00Z", "entry_count": 4, "stem": "rs_2026-06-12"}],
+        }
+        source_fingerprint, _ = _scanner_top_hits_source_fingerprint(board_payload)
+        persisted = {"target_trading_date": "2026-06-12", "source_fingerprint": "older-fingerprint"}
+        with patch.object(service, "_load_latest_persisted_scanner_top_hits_payload", return_value=persisted):
+            state = service.get_scanner_top_hits_snapshot_refresh_state(board_payload=board_payload)
+
+        self.assertTrue(state["has_current_snapshot"])
+        self.assertTrue(state["source_changed"])
+        self.assertEqual(state["source_fingerprint"], source_fingerprint)
+
+    def test_top_hits_snapshot_read_exposes_scheduler_waiting_message(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        status_dir = Path(self.temp_dir.name) / "status"
+        status_dir.mkdir(parents=True)
+        (status_dir / "build_scanner_top_hits_snapshot.json").write_text(
+            json.dumps({"status": "waiting", "message": "waiting for active source jobs rs"}),
+            encoding="utf-8",
+        )
+        persisted = {
+            "target_trading_date": "2026-06-12",
+            "generated_at": "2026-06-13T00:40:00Z",
+            "rows": [],
+            "_snapshot_run_id": 904,
+            "_snapshot_generated_at": "2026-06-13T00:40:00Z",
+        }
+        with patch.object(service, "_load_latest_persisted_scanner_top_hits_payload", return_value=persisted):
+            payload = service.get_scanner_top_hits_snapshot_payload(
+                now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+            )
+
+        self.assertEqual(payload["snapshot"]["refresh_status"], "waiting")
+        self.assertIn("active source jobs", payload["snapshot"]["refresh_message"])
 
     def test_top_hits_snapshot_read_removes_percentage_values_from_sector(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")

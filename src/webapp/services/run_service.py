@@ -322,6 +322,12 @@ class RunService:
         "boolean",
         help_text="For retry schedules: do not rebuild after a successful snapshot already exists for the current market date.",
     )
+    _allow_incremental_refresh_field = RunField(
+        "allow_incremental_refresh",
+        "Allow Incremental Refresh",
+        "boolean",
+        help_text="Refresh a completed same-date Top Hits snapshot when scanner inputs change, without waiting for unrelated scheduled jobs.",
+    )
     _actions = {
         "screener_history_batch": RunAction(
             "screener_history_batch",
@@ -335,7 +341,7 @@ class RunService:
             "Build Top Hits Snapshot",
             "scripts/build_scanner_top_hits_snapshot.py",
             supports_limit=False,
-            fields=(_required_job_ids_field, _required_job_groups_field, _skip_if_current_field),
+            fields=(_required_job_ids_field, _required_job_groups_field, _skip_if_current_field, _allow_incremental_refresh_field),
         ),
         "build_dashboard_market_health_snapshot": RunAction(
             "build_dashboard_market_health_snapshot",
@@ -2865,6 +2871,8 @@ class RunService:
                 command.extend(["--required-job-group", str(group_name)])
             if normalized_options.get("skip_if_current"):
                 command.append("--skip-if-current")
+            if action_id == "build_scanner_top_hits_snapshot" and normalized_options.get("allow_incremental_refresh"):
+                command.append("--allow-incremental-refresh")
         if action_id in {"screener_history_batch", "signal_warm_batch"} and normalized_options.get("market_data_source"):
             command.extend(["--market-data-source", str(normalized_options["market_data_source"])])
         if action_id in {"screener_history_batch", "signal_warm_batch", "overlap_backtest_v1"} and normalized_options.get("job_run_id") is not None:
@@ -2984,6 +2992,8 @@ class RunService:
             normalized["ensure_schema"] = bool(options.get("ensure_schema"))
         if "skip_if_current" in options:
             normalized["skip_if_current"] = bool(options.get("skip_if_current"))
+        if "allow_incremental_refresh" in options:
+            normalized["allow_incremental_refresh"] = bool(options.get("allow_incremental_refresh"))
 
         for key in (
             "include_sectors",

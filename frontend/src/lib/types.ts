@@ -417,6 +417,7 @@ export type SnapshotMetadata = {
   age_seconds?: number | null;
   freshness: "fresh" | "stale" | "missing" | string;
   refresh_status?: "idle" | "queued" | "running" | "failed" | string;
+  refresh_message?: string;
 };
 
 export type SectorLeaderboardHolding = {

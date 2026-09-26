@@ -668,6 +668,7 @@ export function ScannerTopHitsPage() {
           <span className="panel-copy">Updated {formatLocalDateTime(payload?.latest_update_at)}.</span>
           {snapshot?.freshness === "stale" ? <span className="panel-copy earnings-console-note">Showing the latest completed snapshot while a newer market day is pending.</span> : null}
           {snapshot?.freshness === "missing" ? <span className="panel-copy earnings-console-note">No completed Top Hits snapshot is available yet. Run “Build Top Hits Snapshot” after the scanner batch.</span> : null}
+          {snapshot?.refresh_status && snapshot.refresh_status !== "idle" ? <span className="panel-copy earnings-console-note">Refresh {snapshot.refresh_status}: {snapshot.refresh_message || "checking scanner inputs"}</span> : null}
         </div>
         <div className="scanner-result-filter panel scanner-result-filter-actions">
           <span className="eyebrow">View</span>
