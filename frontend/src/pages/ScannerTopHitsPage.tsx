@@ -958,6 +958,7 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
   const strikeTone = row.strike_zone?.state || "context";
   const atr = row.atr_to_sma50 == null ? "--" : `${row.atr_to_sma50 >= 0 ? "+" : ""}${row.atr_to_sma50.toFixed(1)} ATR`;
   const earnings = row.earnings_days == null ? "Earnings TBD" : row.earnings_days === 0 ? "Earnings today" : `Earnings ${row.earnings_days}d`;
+  const rmv = row.rmv ? `RMV ${row.rmv.value.toFixed(0)} · R${row.rmv.rank || "–"}` : null;
   return (
     <Link className="guru-ticker-card" to={buildChartHref(row.ticker)} title={`${row.ticker}: ${row.strike_zone?.reason || ""}`}>
       <div className="guru-ticker-main">
@@ -968,6 +969,7 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
         <span title="Guru scanner overlap">{row.scanner_count}×</span>
         <span title="Weinstein stage">{stage}</span>
         <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
+        {rmv ? <span title="Relative Measured Volatility tightness rank">{rmv}</span> : null}
       </div>
       <div className="guru-ticker-context">
         <span title="ATR distance from SMA50">📏 {atr}</span>

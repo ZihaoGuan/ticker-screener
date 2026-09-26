@@ -26,6 +26,7 @@ from .hve_screen import find_recent_hve_hit
 from .htf_runup_screen import run_htf_runup_screen
 from .inside_dryup_screen import find_recent_inside_dryup_hit
 from .inside_dryup_v2_screen import HISTORY_DAYS as INSIDE_DRYUP_V2_HISTORY_DAYS, find_recent_inside_dryup_v2_hit
+from .kai_s1_screen import KAI_S1_HISTORY_DAYS, find_kai_s1_hit
 from .kai_s2_screen import KAI_S2_HISTORY_DAYS, find_kai_s2_hit
 from .leif_high_tight_flag_screen import LEIF_HTF_LOOKBACK_DAYS, find_leif_high_tight_flag_hit
 from .lost_21ema_screen import run_lost_21ema_screen
@@ -37,6 +38,7 @@ from .liquid_growth_screen import LIQUID_GROWTH_HISTORY_DAYS, run_liquid_growth_
 from .minervini_vcp_detector_screen import MINERVINI_VCP_HISTORY_DAYS, find_minervini_vcp_detector_hit
 from .qullamaggie_screen import QULLAMAGGIE_HISTORY_DAYS, find_qullamaggie_hit
 from .rti_screen import find_recent_rti_hit
+from .rmv_screen import RMV_HISTORY_DAYS, find_rmv_hit
 from .sean_breakout_screen import find_recent_sean_breakout_hit
 from .rsi_ma_bb_screen import find_recent_rsi_ma_bb_hit
 from .rs_screen import run_rs_screen
@@ -451,6 +453,19 @@ def _run_rti(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
             "rti_value": payload["rti_value"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_rmv_tightness(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_rmv_hit(bundle.bars, ticker=_ticker_from_bundle(bundle), signal_date=bundle.as_of_date)
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "rmv": payload["rmv"], "rank_tier": payload["rank_tier"]},
+        reasons=tuple(str(item) for item in payload["reasons"]),
         hit=payload,
     )
 
@@ -1218,6 +1233,24 @@ def _run_kai_s2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     )
 
 
+def _run_kai_s1(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    metadata = dict(bundle.metadata or {})
+    try:
+        market_cap = float(metadata["market_cap"]) if metadata.get("market_cap") is not None else None
+    except (TypeError, ValueError):
+        market_cap = None
+    hit = find_kai_s1_hit(bundle.bars, ticker=_ticker_from_bundle(bundle), market_cap=market_cap, signal_date=bundle.as_of_date)
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "market_cap": payload["market_cap"], "dollar_volume": payload["dollar_volume"], "adr_pct_20": payload["adr_pct_20"]},
+        reasons=tuple(str(item) for item in payload["reasons"]),
+        hit=payload,
+    )
+
+
 def _run_one_year_winners(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     database_url = str(bundle.extras.get("database_url") or "")
     fundamentals = RatingsRepository(database_url).load_latest_fundamentals_snapshots_for_tickers(
@@ -1821,6 +1854,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             warmup_trading_days=5,
             evaluator=_run_rti,
         ),
+        "rmv_tightness": ScreenerSpec(
+            id="rmv_tightness",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=RMV_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_rmv_tightness,
+        ),
         "sean_breakout": ScreenerSpec(
             id="sean_breakout",
             required_inputs=("daily_bars", "metadata"),
@@ -2002,6 +2042,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=STOCKBEE_MOVER_HISTORY_DAYS,
             warmup_trading_days=1,
             evaluator=lambda bundle: _run_stockbee_mover(bundle, "stockbee_4pct_daily_movers"),
+        ),
+        "kai_s1": ScreenerSpec(
+            id="kai_s1",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=KAI_S1_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_kai_s1,
         ),
         "kai_s2": ScreenerSpec(
             id="kai_s2",

@@ -587,6 +587,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "accent": "cyan",
     },
     {
+        "id": "rmv_tightness",
+        "strategy_id": "rmv_tightness",
+        "label": "RMV Tight Entry Zones",
+        "description": "Relative Measured Volatility ranks tight daily compression, A+ Tightness/VDU setups, troughs, and compression releases. Confirm the price-pane trigger before entry.",
+        "timeframe": "Daily",
+        "accent": "violet",
+        "bias_group": "bullish",
+    },
+    {
         "id": "double_bottom_detection",
         "strategy_id": "double_bottom_detection",
         "label": "Double Bottom",
@@ -661,6 +670,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "timeframe": "Daily",
         "accent": "violet",
         "bias_group": "bullish",
+    },
+    {
+        "id": "kai_s1",
+        "strategy_id": "kai_s1",
+        "label": "Kai S1",
+        "description": "Weekly trend leaders: price above weekly 30/40 SMA and daily 50 SMA, weekly 30 SMA above weekly 40 SMA, price above $5, market cap above $10B, session dollar volume above $100M, and ADR20 above 2%.",
+        "timeframe": "Daily / Weekly",
+        "accent": "cyan",
     },
     {
         "id": "kai_s2",
@@ -1418,12 +1435,14 @@ class WatchlistService:
             self._attach_relative_strength_evidence(rows_by_ticker, tickers)
             self._attach_latest_position_actions(rows_by_ticker, tickers, as_of_date=target_date)
         stage_map = self._load_latest_weinstein_stage_map(target_date)
+        rmv_map = self._load_latest_rmv_map(target_date)
         rows: list[dict[str, Any]] = []
         for ticker in tickers:
             row = rows_by_ticker[ticker]
             row["scanner_count"] = len(row.get("scanners") or [])
             row["scanner_labels"] = [str(item.get("label") or "") for item in row["scanners"] if str(item.get("label") or "").strip()]
             row["stage_analysis"] = copy.deepcopy(stage_map.get(ticker) or None)
+            row["rmv"] = copy.deepcopy(rmv_map.get(ticker) or None)
             row["strike_zone"] = _build_guru_strike_zone(row)
             rows.append(row)
         rows.sort(key=_guru_row_sort_key)
@@ -3078,6 +3097,26 @@ class WatchlistService:
                 "as_of_date": str(latest.get("date") or "").strip() or None,
             }
         _write_sector_momentum_cache(cache_key, result)
+        return result
+
+    def _load_latest_rmv_map(self, target_date: dt.date | None) -> dict[str, dict[str, Any]]:
+        target_text = target_date.isoformat() if target_date else ""
+        metadata = next(
+            (
+                item for item in self.repository.list_recent_watchlists(limit=400, include_deprecated=False)
+                if strategy_id_from_legacy_stem(str(item.get("stem") or "")) == "rmv_tightness"
+                and (not target_text or str(item.get("sort_date") or "") <= target_text)
+            ),
+            None,
+        )
+        if not isinstance(metadata, dict):
+            return {}
+        result: dict[str, dict[str, Any]] = {}
+        for entry in self.repository.load_watchlist(str(metadata.get("stem") or "")):
+            ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
+            value = _coerce_optional_float(entry.get("rmv"))
+            if ticker and value is not None:
+                result[ticker] = {"value": value, "rank": _coerce_optional_int(entry.get("rmv_rank")) or 0, "signal_kind": str(entry.get("rmv_signal_kind") or "")}
         return result
 
     def _get_universe_index(self) -> dict[str, UniverseTicker]:
@@ -5394,6 +5433,9 @@ def _build_guru_strike_zone(row: dict[str, Any]) -> dict[str, str]:
     scanner_ids = {str(item.get("id") or "") for item in row.get("scanners", []) if isinstance(item, dict)}
     if "qullamaggie" in scanner_ids and action != "avoid_new":
         return {"state": "ready", "label": "Ready", "reason": "Momentum setup; confirm its chart trigger."}
+    rmv = row.get("rmv") if isinstance(row.get("rmv"), dict) else {}
+    if int(rmv.get("rank") or 0) in {1, 2} and action != "avoid_new":
+        return {"state": "ready", "label": "Ready", "reason": "RMV A+ compression; confirm the price-pane trigger."}
     return {"state": "context", "label": "Context", "reason": "Leadership or discovery evidence, not an entry trigger."}
 
 

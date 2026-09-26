@@ -88,11 +88,15 @@ class WatchlistServiceTests(unittest.TestCase):
                 "daily_rs_rating": 95,
             }
         }
-        with patch.object(self.service, "_load_latest_weinstein_stage_map", return_value={"NVDA": {"alias": "2B", "maturity": "mature"}}):
+        with (
+            patch.object(self.service, "_load_latest_weinstein_stage_map", return_value={"NVDA": {"alias": "2B", "maturity": "mature"}}),
+            patch.object(self.service, "_load_latest_rmv_map", return_value={"NVDA": {"value": 8.0, "rank": 1, "signal_kind": "confluence"}}),
+        ):
             payload = self.service._build_guru_board_payload(rows_by_ticker, board_payload={"target_trading_date": "2026-06-12"})
 
         self.assertEqual(payload["total_unique_tickers"], 1)
         self.assertEqual(payload["total_scanner_matches"], 1)
+        self.assertEqual(payload["rows"][0]["rmv"]["rank"], 1)
         self.assertEqual(payload["rows"][0]["stage_analysis"]["alias"], "2B")
         self.assertEqual(payload["rows"][0]["strike_zone"]["state"], "ready")
         self.assertEqual([item["id"] for item in payload["definitions"]][-3:], ["liquid_growth", "club_97", "high_volume_close"])
@@ -1849,6 +1853,19 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertTrue(cards["rti"]["available"])
         self.assertEqual(cards["rti"]["entry_count"], 2)
         self.assertEqual(cards["rti"]["preview_tickers"], ["NVDA", "CRWD"])
+
+    def test_get_scanner_board_includes_rmv_tightness_card(self) -> None:
+        self._write_watchlist(
+            "rmv_tightness_2026-06-12",
+            tickers=["NVDA", "CRWD"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 36, tzinfo=dt.timezone.utc),
+        )
+
+        cards = {item["id"]: item for item in self.service.get_scanner_board(now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc))["cards"]}
+
+        self.assertEqual(cards["rmv_tightness"]["label"], "RMV Tight Entry Zones")
+        self.assertTrue(cards["rmv_tightness"]["available"])
+        self.assertEqual(cards["rmv_tightness"]["entry_count"], 2)
 
     def test_get_scanner_board_includes_vcp_spec_card(self) -> None:
         self._write_watchlist(

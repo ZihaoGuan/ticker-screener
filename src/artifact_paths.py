@@ -189,6 +189,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("rti_{date_label}.json",),
         "legacy_summary_templates": ("rti_run_summary_{date_label}.json",),
     },
+    "rmv_tightness": {
+        "stem_template": "rmv_tightness_{date_label}",
+        "legacy_watchlist_templates": ("rmv_tightness_{date_label}.json",),
+        "legacy_raw_templates": ("rmv_tightness_{date_label}.json",),
+        "legacy_summary_templates": ("rmv_tightness_run_summary_{date_label}.json",),
+    },
     "sean_breakout": {
         "stem_template": "sean_breakout_{date_label}",
         "legacy_watchlist_templates": ("sean_breakout_{date_label}.json",),
@@ -374,6 +380,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_watchlist_templates": ("kai_s2_{date_label}.json",),
         "legacy_raw_templates": ("kai_s2_{date_label}.json",),
         "legacy_summary_templates": ("kai_s2_run_summary_{date_label}.json",),
+    },
+    "kai_s1": {
+        "stem_template": "kai_s1_{date_label}",
+        "legacy_watchlist_templates": ("kai_s1_{date_label}.json",),
+        "legacy_raw_templates": ("kai_s1_{date_label}.json",),
+        "legacy_summary_templates": ("kai_s1_run_summary_{date_label}.json",),
     },
     "one_year_winners": {
         "stem_template": "one_year_winners_{date_label}",
@@ -596,6 +608,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("trend_template", "trend_template"),
     ("minervini_vcp_detector", "minervini_vcp_detector"),
     ("weekly_candidate_pool", "weekly_candidate_pool"),
+    ("kai_s1", "kai_s1"),
     ("kai_s2", "kai_s2"),
     ("one_year_winners", "one_year_winners"),
     ("liquid_growth", "liquid_growth"),
@@ -646,6 +659,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("sma200_pullback_buy", "sma200_pullback_buy"),
     ("sepa_vcp", "sepa_vcp"),
     ("rti", "rti"),
+    ("rmv_tightness", "rmv_tightness"),
     ("sean_breakout", "sean_breakout"),
     ("vcs_setup_stage", "vcs_setup_stage"),
     ("vcs_critical_tightness", "vcs_critical_tightness"),

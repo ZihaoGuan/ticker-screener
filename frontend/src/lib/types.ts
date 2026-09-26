@@ -339,6 +339,7 @@ export type ScannerTopHitRow = {
   earnings_days?: number | null;
   position_bucket?: string | null;
   stage_analysis?: { alias: string; maturity?: string | null; as_of_date?: string | null } | null;
+  rmv?: { value: number; rank: number; signal_kind: string } | null;
   strike_zone?: { state: "active" | "ready" | "context" | string; label: string; reason: string } | null;
 };
 

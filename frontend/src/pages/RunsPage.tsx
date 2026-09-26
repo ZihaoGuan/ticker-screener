@@ -2029,6 +2029,8 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
       'This screen is based on the Trend Template (TTP) by 2 times US Investing Champion Mark Minervini. He uses the Trend Template as the first step for his stock selection. The criteria are described in his book "Think and trade like a stock market wizard" : The current stock price is above both the 150-day (30-week) and the 200-day (40-week) moving average price lines. The 150-day moving average is above the 200-day moving average. The 200-day moving average line is trending up for at least 1 month (preferably 4–5 months minimum in most cases). The 50-day (10-week) moving average is above both the 150-day and 200-day moving averages. The current stock price is trading above the 50-day moving average. The current stock price is at least 30% above its 52-week low. The current stock price is within at least 25% of its 52-week high (the closer to a new high the better). The Relative Strength ranking (RS ranking) is no less than 70.',
     weekly_candidate_pool:
       "Weekly candidate universe only, not an entry signal: price above $10 and 50 EMA, ADR20 above 4%, Daily RS above 90, 10 EMA above 20 EMA, and at least 70% above the 52-week low. Review charts, mark bases, then wait for a setup.",
+    kai_s1:
+      "Weekly trend leaders: price above weekly 30/40 SMA and daily 50 SMA, weekly 30 SMA above weekly 40 SMA, price above $5, market cap above $10B, session dollar volume above $100M, and ADR20 above 2%.",
     kai_s2:
       "Liquid high-beta trend leaders with price above 20/50/200 SMA, 150D SMA above 200D SMA, market cap above $1B, avg volume above 2M, and close x 30D avg volume above $100M.",
     one_year_winners:
