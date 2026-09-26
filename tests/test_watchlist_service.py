@@ -72,11 +72,11 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(_classify_position_bucket(None, 108.0, 105.0, 100.0, 90.0, 2.0), "no_data")
 
     def test_guru_strike_zone_requires_safe_position_and_earnings_context(self) -> None:
-        active = _build_guru_strike_zone({"position_action": {"action": "add_position"}, "earnings_days": 12, "scanners": []})
+        permitted = _build_guru_strike_zone({"position_action": {"action": "add_position"}, "earnings_days": 12, "scanners": []})
         earnings_risk = _build_guru_strike_zone({"position_action": {"action": "add_position"}, "earnings_days": 3, "scanners": []})
-        ready = _build_guru_strike_zone({"position_action": {"action": "hold_position"}, "scanners": [{"id": "qullamaggie"}]})
-        self.assertEqual(active["state"], "active")
-        self.assertEqual(earnings_risk["state"], "context")
+        ready = _build_guru_strike_zone({"position_action": {"action": "hold_position"}, "daily_rs_rating": 95, "stage_analysis": {"alias": "2A"}, "rmv": {"rank": 1}, "scanners": [{"id": "qullamaggie"}]})
+        self.assertEqual(permitted["state"], "context")
+        self.assertEqual(earnings_risk["state"], "avoid")
         self.assertEqual(ready["state"], "ready")
 
     def test_guru_strike_zone_promotes_active_ma_support_reclaims(self) -> None:
@@ -86,7 +86,9 @@ class WatchlistServiceTests(unittest.TestCase):
                 "earnings_days": 12,
                 "signal_state": "active",
                 "active_profiles": ["D EMA21", "W EMA8"],
-                "scanners": [{"id": "ma_pullback_retest"}],
+                "daily_rs_rating": 95,
+                "stage_analysis": {"alias": "2A"},
+                "scanners": [{"id": "ma_pullback_retest"}, {"id": "trend_template"}],
             }
         )
 
@@ -97,7 +99,7 @@ class WatchlistServiceTests(unittest.TestCase):
         rows_by_ticker = {
             "NVDA": {
                 "ticker": "NVDA",
-                "scanners": [{"id": "qullamaggie", "label": "Qullamaggie"}],
+                "scanners": [{"id": "qullamaggie", "label": "Qullamaggie", "sort_date": "2026-06-12"}],
                 "position_action": {"action": "hold_position"},
                 "daily_rs_rating": 95,
                 "atr_to_sma50": 2.0,
@@ -105,7 +107,7 @@ class WatchlistServiceTests(unittest.TestCase):
         }
         with (
             patch.object(self.service, "_load_latest_weinstein_stage_map", return_value={"NVDA": {"alias": "2B", "maturity": "mature"}}),
-            patch.object(self.service, "_load_latest_rmv_map", return_value={"NVDA": {"value": 8.0, "rank": 1, "signal_kind": "confluence"}}),
+            patch.object(self.service, "_load_latest_rmv_map", return_value={"NVDA": {"value": 8.0, "rank": 1, "signal_kind": "confluence", "as_of_date": "2026-06-12"}}),
         ):
             payload = self.service._build_guru_board_payload(rows_by_ticker, board_payload={"target_trading_date": "2026-06-12"})
 
@@ -134,6 +136,31 @@ class WatchlistServiceTests(unittest.TestCase):
             payload = self.service._build_guru_board_payload(rows_by_ticker, board_payload={"target_trading_date": "2026-06-12"})
 
         self.assertEqual([row["ticker"] for row in payload["rows"]], ["NVDA"])
+
+    def test_guru_board_attaches_latest_strike_zone_setup_evidence(self) -> None:
+        rows_by_ticker = {
+            "NVDA": {
+                "ticker": "NVDA",
+                "scanners": [{"id": "trend_template", "label": "Minervini", "sort_date": "2026-06-12"}],
+                "daily_rs_rating": 95,
+                "atr_to_sma50": 1.2,
+            }
+        }
+        with (
+            patch.object(
+                self.service.repository,
+                "list_recent_watchlists",
+                return_value=[{"stem": "three_weeks_tight_2026-06-12", "sort_date": "2026-06-12"}],
+            ),
+            patch.object(self.service.repository, "load_watchlist", return_value=[{"ticker": "NVDA"}]),
+            patch.object(self.service, "_load_latest_weinstein_stage_map", return_value={"NVDA": {"alias": "2A"}}),
+            patch.object(self.service, "_load_latest_rmv_map", return_value={"NVDA": {"value": 8.0, "rank": 1, "as_of_date": "2026-06-12"}}),
+        ):
+            payload = self.service._build_guru_board_payload(rows_by_ticker, board_payload={"target_trading_date": "2026-06-12"})
+
+        row = payload["rows"][0]
+        self.assertEqual(row["strike_zone"]["state"], "ready")
+        self.assertIn("three_weeks_tight", {item["id"] for item in row["scanners"]})
 
     def test_get_watchlist_detail_fails_open_when_universe_load_errors(self) -> None:
         with patch("src.webapp.services.watchlist_service.load_universe", side_effect=RuntimeError("nasdaq offline")), patch(

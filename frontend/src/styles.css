@@ -5724,6 +5724,9 @@ a {
 .guru-strike.is-active { color: #86efac; border-color: #16a34a; }
 .guru-strike.is-ready { color: #fde68a; border-color: #d97706; }
 .guru-strike.is-context { color: #c4b5fd; border-color: #7c3aed; }
+.guru-strike.is-avoid { color: #fca5a5; border-color: #dc2626; }
+.guru-primary-signal { color: #a7f3d0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guru-strike-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 10px; }
 .guru-board-note { margin: 0; }
 @media (min-width: 768px) {
   .data-table .pinned-ticker,

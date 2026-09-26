@@ -340,7 +340,17 @@ export type ScannerTopHitRow = {
   position_bucket?: string | null;
   stage_analysis?: { alias: string; maturity?: string | null; as_of_date?: string | null } | null;
   rmv?: { value: number; rank: number; signal_kind: string } | null;
-  strike_zone?: { state: "active" | "ready" | "context" | string; label: string; reason: string } | null;
+  strike_zone?: {
+    state: "active" | "ready" | "context" | "avoid" | string;
+    label: string;
+    score?: number;
+    reason: string;
+    primary_signal?: string | null;
+    trigger_date?: string | null;
+    signal_age_days?: number | null;
+    supporting_signals?: Array<{ label: string; points: number; kind: string; signal_date?: string | null; age_days?: number | null; fresh?: boolean }>;
+    warnings?: string[];
+  } | null;
 };
 
 export type GuruScannerDefinition = {

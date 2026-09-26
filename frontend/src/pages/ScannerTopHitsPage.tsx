@@ -925,16 +925,25 @@ function GuruBoard({
   confluenceTickerCount: number;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
+  const [strikeFilter, setStrikeFilter] = useState<"all" | "active" | "ready" | "context" | "avoid">("all");
+  const visibleRows = strikeFilter === "all" ? rows : rows.filter((row) => row.strike_zone?.state === strikeFilter);
   return (
     <section className="guru-board" aria-label="Guru scanner board">
       <div className="guru-board-summary">
-        <span><strong>{formatCount(rows.length)}</strong> Guru names</span>
+        <span><strong>{formatCount(visibleRows.length)}</strong> Guru names</span>
         <span><strong>{formatCount(totalScannerMatches)}</strong> scanner matches</span>
         <span><strong>{formatCount(confluenceTickerCount)}</strong> confluence names</span>
       </div>
+      <div className="guru-strike-filters" role="group" aria-label="Strike Zone status">
+        {(["all", "active", "ready", "context", "avoid"] as const).map((state) => (
+          <button key={state} type="button" className={`scanner-result-view-chip${strikeFilter === state ? " is-active" : ""}`} onClick={() => setStrikeFilter(state)}>
+            {state === "all" ? "All" : state[0].toUpperCase() + state.slice(1)}
+          </button>
+        ))}
+      </div>
       <div className="guru-board-scroll">
         {definitions.map((definition) => {
-          const columnRows = rows.filter((row) => row.scanners.some((scanner) => normalizeScannerId(scanner.id) === definition.id));
+          const columnRows = visibleRows.filter((row) => row.scanners.some((scanner) => normalizeScannerId(scanner.id) === definition.id));
           const visibleCount = visibleCounts[definition.id] ?? GURU_COLUMN_PAGE_SIZE;
           const remainingCount = Math.max(0, columnRows.length - visibleCount);
           return (
@@ -966,8 +975,12 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
   const atr = row.atr_to_sma50 == null ? "--" : `${row.atr_to_sma50 >= 0 ? "+" : ""}${row.atr_to_sma50.toFixed(1)} ATR`;
   const earnings = row.earnings_days == null ? "Earnings TBD" : row.earnings_days === 0 ? "Earnings today" : `Earnings ${row.earnings_days}d`;
   const rmv = row.rmv ? `RMV ${row.rmv.value.toFixed(0)} · R${row.rmv.rank || "–"}` : null;
+  const strikeScore = row.strike_zone?.score;
+  const primarySignal = row.strike_zone?.primary_signal;
+  const signalAge = row.strike_zone?.signal_age_days;
+  const strikeTitle = [row.strike_zone?.reason, ...(row.strike_zone?.warnings ?? [])].filter(Boolean).join(" ");
   return (
-    <Link className="guru-ticker-card" to={buildChartHref(row.ticker)} title={`${row.ticker}: ${row.strike_zone?.reason || ""}`}>
+    <Link className="guru-ticker-card" to={buildChartHref(row.ticker)} title={`${row.ticker}: ${strikeTitle}`}>
       <div className="guru-ticker-main">
         <strong>{row.ticker}</strong>
         <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
@@ -981,7 +994,8 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
       <div className="guru-ticker-context">
         <span title="ATR distance from SMA50">📏 {atr}</span>
         <span title={earnings}>📅 {row.earnings_days == null ? "TBD" : `${row.earnings_days}d`}</span>
-        <span className={`guru-strike is-${strikeTone}`}>⚾ {strike}</span>
+        <span className={`guru-strike is-${strikeTone}`} title={strikeTitle}>⚾ {strike}{strikeScore == null ? "" : ` ${strikeScore}`}</span>
+        {primarySignal ? <span className="guru-primary-signal" title={`Primary trigger${signalAge == null ? "" : ` · ${signalAge}d ago`}`}>⚡ {primarySignal}</span> : null}
       </div>
     </Link>
   );

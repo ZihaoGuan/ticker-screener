@@ -53,6 +53,7 @@ from ..repositories.position_decision_repository import PositionDecisionReposito
 from ..repositories.watchlist_repository import WatchlistRepository
 from .insider_fetcher import fetch_insider_trades_window
 from .screener_history_service import ScreenerHistoryService
+from .strike_zone import STRIKE_ZONE_SCANNER_IDS, build_strike_zone, strike_zone_scanner_label
 
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,7 @@ _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
-_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v1"
+_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v2"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -1442,6 +1443,7 @@ class WatchlistService:
             self._attach_latest_rating_snapshots(rows_by_ticker, tickers)
             self._attach_relative_strength_evidence(rows_by_ticker, tickers)
             self._attach_latest_position_actions(rows_by_ticker, tickers, as_of_date=target_date)
+            self._attach_strike_zone_scanner_evidence(rows_by_ticker, target_date=target_date)
         stage_map = self._load_latest_weinstein_stage_map(target_date)
         rmv_map = self._load_latest_rmv_map(target_date)
         rows: list[dict[str, Any]] = []
@@ -1454,7 +1456,7 @@ class WatchlistService:
             row["scanner_labels"] = [str(item.get("label") or "") for item in row["scanners"] if str(item.get("label") or "").strip()]
             row["stage_analysis"] = copy.deepcopy(stage_map.get(ticker) or None)
             row["rmv"] = copy.deepcopy(rmv_map.get(ticker) or None)
-            row["strike_zone"] = _build_guru_strike_zone(row)
+            row["strike_zone"] = _build_guru_strike_zone(row, as_of_date=target_date)
             rows.append(row)
         rows.sort(key=_guru_row_sort_key)
         return {
@@ -1464,6 +1466,42 @@ class WatchlistService:
             "confluence_ticker_count": sum(1 for row in rows if int(row.get("scanner_count") or 0) >= 2),
             "rows": rows,
         }
+
+    def _attach_strike_zone_scanner_evidence(self, rows_by_ticker: dict[str, dict[str, Any]], *, target_date: dt.date | None) -> None:
+        """Attach the latest relevant setup artifacts without adding extra Guru columns."""
+        target_text = target_date.isoformat() if target_date else ""
+        selected: dict[str, dict[str, Any]] = {}
+        for metadata in self.repository.list_recent_watchlists(limit=400, include_deprecated=False):
+            strategy_id = str(metadata.get("strategy_id") or "") or strategy_id_from_legacy_stem(str(metadata.get("stem") or ""))
+            if strategy_id not in STRIKE_ZONE_SCANNER_IDS or strategy_id in selected:
+                continue
+            if target_text and str(metadata.get("sort_date") or "") > target_text:
+                continue
+            selected[strategy_id] = metadata
+        if not selected:
+            return
+        candidate_tickers = set(rows_by_ticker)
+        for strategy_id, metadata in selected.items():
+            stem = str(metadata.get("stem") or "").strip()
+            if not stem:
+                continue
+            scanner_meta = {
+                "id": strategy_id,
+                "strategy_id": strategy_id,
+                "label": strike_zone_scanner_label(strategy_id),
+                "timeframe": "Daily",
+                "stem": stem,
+                "sort_date": str(metadata.get("sort_date") or ""),
+            }
+            for entry in self.repository.load_watchlist(stem):
+                ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
+                if ticker not in candidate_tickers:
+                    continue
+                row = rows_by_ticker[ticker]
+                self._merge_scanner_top_hit_entry(row, entry)
+                scanners = row.setdefault("scanners", [])
+                if not any(str(item.get("id") or "") == strategy_id for item in scanners if isinstance(item, dict)):
+                    scanners.append(dict(scanner_meta))
 
     def _load_latest_weinstein_stage_map(self, target_date: dt.date | None) -> dict[str, dict[str, Any]]:
         target_text = target_date.isoformat() if target_date else ""
@@ -3134,12 +3172,13 @@ class WatchlistService:
         )
         if not isinstance(metadata, dict):
             return {}
+        as_of_date = str(metadata.get("sort_date") or "")
         result: dict[str, dict[str, Any]] = {}
         for entry in self.repository.load_watchlist(str(metadata.get("stem") or "")):
             ticker = normalize_ticker_symbol(str(entry.get("ticker") or ""))
             value = _coerce_optional_float(entry.get("rmv"))
             if ticker and value is not None:
-                result[ticker] = {"value": value, "rank": _coerce_optional_int(entry.get("rmv_rank")) or 0, "signal_kind": str(entry.get("rmv_signal_kind") or "")}
+                result[ticker] = {"value": value, "rank": _coerce_optional_int(entry.get("rmv_rank")) or 0, "signal_kind": str(entry.get("rmv_signal_kind") or ""), "as_of_date": as_of_date}
         return result
 
     def _get_universe_index(self) -> dict[str, UniverseTicker]:
@@ -5446,33 +5485,15 @@ def _classify_position_bucket(
     return "below_sma200"
 
 
-def _build_guru_strike_zone(row: dict[str, Any]) -> dict[str, str]:
-    position_action = row.get("position_action") if isinstance(row.get("position_action"), dict) else {}
-    action = str(position_action.get("action") or "")
-    earnings_days = _coerce_optional_int(row.get("earnings_days"))
-    if action == "add_position" and (earnings_days is None or earnings_days > 7):
-        return {"state": "active", "label": "Active", "reason": "Current position model permits adds."}
-    scanner_ids = {str(item.get("id") or "") for item in row.get("scanners", []) if isinstance(item, dict)}
-    ma_signal_state = str(row.get("signal_state") or "")
-    ma_profiles = row.get("active_profiles") if ma_signal_state == "active" else row.get("ready_profiles")
-    if "ma_pullback_retest" in scanner_ids and action != "avoid_new" and (earnings_days is None or earnings_days > 7):
-        profile_text = ", ".join(str(item) for item in ma_profiles if str(item).strip()) if isinstance(ma_profiles, list) else "moving-average"
-        if ma_signal_state == "active":
-            return {"state": "active", "label": "Active", "reason": f"Fresh {profile_text} support reclaim."}
-        return {"state": "ready", "label": "Ready", "reason": f"{profile_text.title()} pullback is holding; confirm the reclaim."}
-    if "qullamaggie" in scanner_ids and action != "avoid_new":
-        return {"state": "ready", "label": "Ready", "reason": "Momentum setup; confirm its chart trigger."}
-    rmv = row.get("rmv") if isinstance(row.get("rmv"), dict) else {}
-    if int(rmv.get("rank") or 0) in {1, 2} and action != "avoid_new":
-        return {"state": "ready", "label": "Ready", "reason": "RMV A+ compression; confirm the price-pane trigger."}
-    return {"state": "context", "label": "Context", "reason": "Leadership or discovery evidence, not an entry trigger."}
+def _build_guru_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None = None) -> dict[str, Any]:
+    return build_strike_zone(row, as_of_date=as_of_date)
 
 
-def _guru_row_sort_key(row: dict[str, Any]) -> tuple[int, int, float, str]:
+def _guru_row_sort_key(row: dict[str, Any]) -> tuple[int, int, int, float, str]:
     strike = row.get("strike_zone") if isinstance(row.get("strike_zone"), dict) else {}
-    state_rank = {"active": 0, "ready": 1, "context": 2}.get(str(strike.get("state") or ""), 3)
+    state_rank = {"active": 0, "ready": 1, "context": 2, "avoid": 3}.get(str(strike.get("state") or ""), 4)
     daily_rs = _coerce_optional_float(row.get("daily_rs_rating")) or 0.0
-    return (state_rank, -int(row.get("scanner_count") or 0), -daily_rs, str(row.get("ticker") or ""))
+    return (state_rank, -int(strike.get("score") or 0), -int(row.get("scanner_count") or 0), -daily_rs, str(row.get("ticker") or ""))
 
 
 def _resolve_entry_display_price(entry: dict[str, Any]) -> float | None:
