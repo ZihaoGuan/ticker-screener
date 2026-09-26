@@ -357,6 +357,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("trend_template_{date_label}.json",),
         "legacy_summary_templates": ("trend_template_run_summary_{date_label}.json",),
     },
+    "minervini_vcp_detector": {
+        "stem_template": "minervini_vcp_detector_{date_label}",
+        "legacy_watchlist_templates": ("minervini_vcp_detector_{date_label}.json",),
+        "legacy_raw_templates": ("minervini_vcp_detector_{date_label}.json",),
+        "legacy_summary_templates": ("minervini_vcp_detector_run_summary_{date_label}.json",),
+    },
     "weekly_candidate_pool": {
         "stem_template": "weekly_candidate_pool_{date_label}",
         "legacy_watchlist_templates": ("weekly_candidate_pool_{date_label}.json",),
@@ -374,6 +380,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_watchlist_templates": ("one_year_winners_{date_label}.json",),
         "legacy_raw_templates": ("one_year_winners_{date_label}.json",),
         "legacy_summary_templates": ("one_year_winners_run_summary_{date_label}.json",),
+    },
+    "liquid_growth": {
+        "stem_template": "liquid_growth_{date_label}",
+        "legacy_watchlist_templates": ("liquid_growth_{date_label}.json",),
+        "legacy_raw_templates": ("liquid_growth_{date_label}.json",),
+        "legacy_summary_templates": ("liquid_growth_run_summary_{date_label}.json",),
     },
     "qullamaggie": {
         "stem_template": "qullamaggie_{date_label}",
@@ -582,9 +594,11 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("near_52wk_high", "near_52wk_high"),
     ("lost_21ema", "lost_21ema"),
     ("trend_template", "trend_template"),
+    ("minervini_vcp_detector", "minervini_vcp_detector"),
     ("weekly_candidate_pool", "weekly_candidate_pool"),
     ("kai_s2", "kai_s2"),
     ("one_year_winners", "one_year_winners"),
+    ("liquid_growth", "liquid_growth"),
     ("qullamaggie", "qullamaggie"),
     ("darvas_box_breakout", "darvas_box_breakout"),
     ("market_correction_resilience", "market_correction_resilience"),

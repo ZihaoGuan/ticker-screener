@@ -124,7 +124,7 @@ _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "stockbee_4pct_daily_movers", "label": "SB 4% Daily", "accent": "teal", "available": True},
     {"id": "stockbee_20pct_weekly_movers", "label": "SB 20% Weekly", "accent": "teal", "available": True},
     {"id": "canslim", "label": "O'Neil", "accent": "blue", "available": True},
-    {"id": "liquid_growth", "label": "Liquid Growth (TML)", "accent": "sky", "available": False},
+    {"id": "liquid_growth", "label": "Liquid Growth (TML)", "accent": "sky", "available": True},
     {"id": "club_97", "label": "97 Club", "accent": "gold", "available": False},
     {"id": "high_volume_close", "label": "High Volume Close (HVC)", "accent": "cyan", "available": False},
 )
@@ -296,6 +296,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": "Finviz-prefiltered quality compounders with mid-cap-and-up size, strong margins and ROE, then local annual revenue CAGR and diluted EPS growth confirmation.",
         "timeframe": "Daily",
         "accent": "emerald",
+        "bias_group": "bullish",
+    },
+    {
+        "id": "liquid_growth",
+        "strategy_id": "liquid_growth",
+        "label": "Liquid Growth (TML)",
+        "description": "Liquid institutional growth leaders: price above rising 50/200 SMAs, $2B+ market cap, $30M+ 50-day dollar volume, ROE of 17%+, strong quality margins, reported quarterly revenue and EPS growth of 25%+, and Daily RS of 85+.",
+        "timeframe": "Daily",
+        "accent": "sky",
         "bias_group": "bullish",
     },
     {
@@ -634,6 +643,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": TREND_TEMPLATE_DESCRIPTION,
         "timeframe": "Daily",
         "accent": "lime",
+    },
+    {
+        "id": "minervini_vcp_detector",
+        "strategy_id": "minervini_vcp_detector",
+        "label": "Minervini VCP Detector",
+        "description": "Pre-breakout leaders that pass the local Minervini Trend Template, have market cap above $2B, are within 7% below stable 100-day resistance, hold higher 10/20/30-day lows, and show a contracting 20-day volume average.",
+        "timeframe": "Daily / Weekly",
+        "accent": "yellow",
+        "bias_group": "bullish",
     },
     {
         "id": "weekly_candidate_pool",
