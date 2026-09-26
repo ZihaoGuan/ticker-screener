@@ -127,6 +127,7 @@ _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "canslim", "label": "O'Neil", "accent": "blue", "available": True},
     {"id": "daily_rs_new_high", "label": "RS New High", "accent": "cyan", "available": True},
     {"id": "rs", "label": "RS NH Before Price", "accent": "cyan", "available": True},
+    {"id": "rs_phase", "label": "RS Phase", "accent": "cyan", "available": True},
     {"id": "weekly_candidate_pool", "label": "Weekly Candidate Pool", "accent": "indigo", "available": True},
     {"id": "one_year_winners", "label": "Wey How", "accent": "lime", "available": True},
     {"id": "kai_s1", "label": "Kai S1", "accent": "cyan", "available": True},
