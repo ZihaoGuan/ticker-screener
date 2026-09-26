@@ -799,30 +799,29 @@ def approximate_rs_rating(score: float) -> float | None:
 def compute_rs_new_high_flags(rs_line: pd.Series, price_reference: pd.Series, lookback: int) -> tuple[pd.Series, pd.Series]:
     aligned = pd.concat([rs_line, price_reference], axis=1, join="inner").dropna()
     aligned.columns = ["rs_line", "price_reference"]
-    rolling_rs_high = aligned["rs_line"].rolling(window=lookback, min_periods=1).max()
-    rolling_price_high = aligned["price_reference"].rolling(window=lookback, min_periods=1).max()
-    tolerance = 1e-12
-    new_high = aligned["rs_line"] >= (rolling_rs_high - tolerance)
-    new_high_before_price = new_high & (aligned["price_reference"] < (rolling_price_high - tolerance))
+    rolling_rs_high = aligned["rs_line"].rolling(window=lookback, min_periods=1).max().shift(1)
+    rolling_price_high = aligned["price_reference"].rolling(window=lookback, min_periods=1).max().shift(1)
+    new_high = aligned["rs_line"] >= rolling_rs_high
+    new_high_before_price = new_high & (aligned["price_reference"] <= rolling_price_high)
     return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
 
 
-def compute_rs_analysis(history: pd.DataFrame, benchmark_history: pd.DataFrame, daily_lookback: int = 250, weekly_lookback: int = 52) -> RSAnalysis:
+def compute_rs_analysis(history: pd.DataFrame, benchmark_history: pd.DataFrame, daily_lookback: int = 50, weekly_lookback: int = 50) -> RSAnalysis:
     daily_line = compute_rs_line(history["Close"], benchmark_history["Close"])
     daily_score = compute_weighted_rs_score(history["Close"], benchmark_history["Close"]).reindex(daily_line.index)
     daily_rating = daily_score.apply(approximate_rs_rating)
     daily_new_high, daily_new_high_before_price = compute_rs_new_high_flags(
         rs_line=daily_line,
-        price_reference=history["High"].reindex(daily_line.index),
+        price_reference=history["Close"].reindex(daily_line.index),
         lookback=daily_lookback,
     )
 
-    weekly_stock = history.resample("W-FRI").agg({"Close": "last", "High": "max"}).dropna()
+    weekly_stock = history.resample("W-FRI").last().dropna()
     weekly_benchmark = benchmark_history.resample("W-FRI").agg({"Close": "last"}).dropna()
     weekly_rs_line = compute_rs_line(weekly_stock["Close"], weekly_benchmark["Close"])
     weekly_new_high, weekly_new_high_before_price = compute_rs_new_high_flags(
         rs_line=weekly_rs_line,
-        price_reference=weekly_stock["High"].reindex(weekly_rs_line.index),
+        price_reference=weekly_stock["Close"].reindex(weekly_rs_line.index),
         lookback=weekly_lookback,
     )
 

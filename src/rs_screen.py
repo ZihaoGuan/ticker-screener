@@ -222,11 +222,10 @@ def _compute_rs_new_high_flags(
         empty = pd.Series(dtype=bool)
         return empty, empty
     aligned.columns = ["rs_line", "price_reference"]
-    rolling_rs_high = aligned["rs_line"].rolling(window=max(1, int(lookback)), min_periods=1).max()
-    rolling_price_high = aligned["price_reference"].rolling(window=max(1, int(lookback)), min_periods=1).max()
-    tolerance = 1e-12
-    new_high = aligned["rs_line"] >= (rolling_rs_high - tolerance)
-    new_high_before_price = new_high & (aligned["price_reference"] < (rolling_price_high - tolerance))
+    rolling_rs_high = aligned["rs_line"].rolling(window=max(1, int(lookback)), min_periods=1).max().shift(1)
+    rolling_price_high = aligned["price_reference"].rolling(window=max(1, int(lookback)), min_periods=1).max().shift(1)
+    new_high = aligned["rs_line"] >= rolling_rs_high
+    new_high_before_price = new_high & (aligned["price_reference"] <= rolling_price_high)
     return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
 
 
@@ -247,7 +246,7 @@ def _compute_weekly_rs_context(
     if aligned.empty:
         return None
 
-    weekly_stock = aligned[["Close", "High"]].resample("W-FRI").agg({"Close": "last", "High": "max"}).dropna()
+    weekly_stock = aligned[["Close"]].resample("W-FRI").last().dropna()
     weekly_benchmark = aligned[["benchmark_close"]].resample("W-FRI").agg({"benchmark_close": "last"}).dropna()
     weekly_aligned = weekly_stock.join(weekly_benchmark, how="inner").dropna()
     if weekly_aligned.empty:
@@ -256,7 +255,7 @@ def _compute_weekly_rs_context(
     weekly_rs_line = weekly_aligned["Close"] / weekly_aligned["benchmark_close"]
     weekly_new_high, weekly_before_price = _compute_rs_new_high_flags(
         weekly_rs_line,
-        weekly_aligned["High"],
+        weekly_aligned["Close"],
         lookback=max(1, int(weekly_lookback_weeks)),
     )
 
@@ -377,7 +376,7 @@ def run_rs_screen(
                                 recent_signal_weeks=int(summary.get("weekly_recent_signal_weeks", config.rs_weekly_recent_signal_weeks)),
                                 require_before_price=effective_require_before_price,
                             )
-                            if not weekly_context or not bool(weekly_context["recent_weekly_signal"]):
+                            if not weekly_context or not bool(weekly_context["latest_weekly_signal"]):
                                 continue
                             if effective_require_before_price:
                                 summary["weekly_rs_new_high_before_price"] = bool(weekly_context["latest_weekly_signal"])

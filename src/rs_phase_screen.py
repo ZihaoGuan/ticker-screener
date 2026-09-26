@@ -14,7 +14,7 @@ from .universe import UniverseTicker
 RS_PHASE_HISTORY_DAYS = 320
 RS_PHASE_EMA_PERIOD = 21
 RS_PHASE_MIN_ACTIVE_DAYS = 3
-RS_PHASE_NEW_HIGH_LOOKBACK = 250
+RS_PHASE_NEW_HIGH_LOOKBACK = 50
 
 
 @dataclass(frozen=True)
@@ -127,12 +127,12 @@ def compute_rs_phase_context(
 
     rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
         rs_line,
-        aligned["High"],
+        aligned["Close"],
         lookback=max(1, int(new_high_lookback)),
     )
     latest_index = aligned.index[-1]
-    rolling_rs_high = rs_line.rolling(window=max(1, int(new_high_lookback)), min_periods=1).max()
-    rolling_price_high = aligned["High"].rolling(window=max(1, int(new_high_lookback)), min_periods=1).max()
+    rolling_rs_high = rs_line.rolling(window=max(1, int(new_high_lookback)), min_periods=1).max().shift(1)
+    rolling_price_high = aligned["Close"].rolling(window=max(1, int(new_high_lookback)), min_periods=1).max().shift(1)
 
     return {
         "signal_date": pd.Timestamp(latest_index).date().isoformat(),

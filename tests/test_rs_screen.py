@@ -95,23 +95,28 @@ class _FakeCookstockModule:
 
 class RsScreenTests(unittest.TestCase):
     def test_compute_rs_new_high_flags_matches_pine_before_price_rule(self) -> None:
-        index = pd.date_range("2026-01-05", periods=5, freq="B")
-        rs_line = pd.Series([1.00, 1.05, 1.08, 1.12, 1.20], index=index)
-        price_high = pd.Series([10.0, 10.4, 10.8, 11.5, 11.1], index=index)
+        index = pd.date_range("2026-01-05", periods=6, freq="B")
+        rs_line = pd.Series([1.00, 1.05, 1.08, 1.12, 1.15, 1.20], index=index)
+        closes = pd.Series([10.0, 10.4, 10.8, 11.5, 11.1, 11.1], index=index)
 
-        new_high, before_price = _compute_rs_new_high_flags(rs_line, price_high, lookback=5)
+        new_high, before_price = _compute_rs_new_high_flags(rs_line, closes, lookback=5)
 
         self.assertTrue(bool(new_high.iloc[-1]))
         self.assertTrue(bool(before_price.iloc[-1]))
 
-    def test_compute_rs_new_high_flags_rejects_when_price_also_sets_high(self) -> None:
-        index = pd.date_range("2026-01-05", periods=5, freq="B")
-        rs_line = pd.Series([1.00, 1.05, 1.08, 1.12, 1.20], index=index)
-        price_high = pd.Series([10.0, 10.4, 10.8, 11.5, 11.8], index=index)
+    def test_compute_rs_new_high_flags_matches_pine_equality_and_prior_window(self) -> None:
+        index = pd.date_range("2026-01-05", periods=7, freq="B")
+        rs_line = pd.Series([9.0, 1.00, 1.05, 1.08, 1.12, 1.15, 1.15], index=index)
+        closes = pd.Series([99.0, 10.0, 10.4, 10.8, 11.5, 11.1, 11.5], index=index)
 
-        new_high, before_price = _compute_rs_new_high_flags(rs_line, price_high, lookback=5)
+        new_high, before_price = _compute_rs_new_high_flags(rs_line, closes, lookback=5)
 
         self.assertTrue(bool(new_high.iloc[-1]))
+        self.assertTrue(bool(before_price.iloc[-1]))
+
+        higher_close = closes.copy()
+        higher_close.iloc[-1] = 11.6
+        _, before_price = _compute_rs_new_high_flags(rs_line, higher_close, lookback=5)
         self.assertFalse(bool(before_price.iloc[-1]))
 
     def test_run_rs_screen_uses_clean_stock_rows_for_rs_rating(self) -> None:

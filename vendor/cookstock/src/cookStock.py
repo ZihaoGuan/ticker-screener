@@ -375,8 +375,8 @@ class algoParas:
     BENCHMARK_TICKER = 'SPY'
     RS_LOOKBACK_DAYS = 90
     RS_LINE_NEAR_HIGH_RATIO = 0.95
-    RS_NEW_HIGH_DAILY_LOOKBACK_DAYS = 250
-    RS_NEW_HIGH_WEEKLY_LOOKBACK_WEEKS = 52
+    RS_NEW_HIGH_DAILY_LOOKBACK_DAYS = 50
+    RS_NEW_HIGH_WEEKLY_LOOKBACK_WEEKS = 50
     RS_NEW_HIGH_HISTORY_DAYS = 400
     RS_NEW_HIGH_REQUIRE_BEFORE_PRICE = True
     RS_WEEKLY_RECENT_SIGNAL_WEEKS = 4
@@ -2417,11 +2417,10 @@ class cookFinancials(YahooFinancials):
             empty = pd.Series(dtype=bool)
             return empty, empty
         aligned.columns = ['rs_line', 'price_reference']
-        rolling_rs_high = aligned['rs_line'].rolling(window=max(1, int(lookback)), min_periods=1).max()
-        rolling_price_high = aligned['price_reference'].rolling(window=max(1, int(lookback)), min_periods=1).max()
-        tolerance = 1e-12
-        new_high = aligned['rs_line'] >= (rolling_rs_high - tolerance)
-        new_high_before_price = new_high & (aligned['price_reference'] < (rolling_price_high - tolerance))
+        rolling_rs_high = aligned['rs_line'].rolling(window=max(1, int(lookback)), min_periods=1).max().shift(1)
+        rolling_price_high = aligned['price_reference'].rolling(window=max(1, int(lookback)), min_periods=1).max().shift(1)
+        new_high = aligned['rs_line'] >= rolling_rs_high
+        new_high_before_price = new_high & (aligned['price_reference'] <= rolling_price_high)
         return (
             new_high.reindex(rs_line.index, fill_value=False),
             new_high_before_price.reindex(rs_line.index, fill_value=False),
@@ -2446,21 +2445,21 @@ class cookFinancials(YahooFinancials):
             return None
 
         aligned['rs_line'] = aligned['close'] / aligned['benchmark_close']
-        daily_lookback = max(20, int(getattr(algoParas, 'RS_NEW_HIGH_DAILY_LOOKBACK_DAYS', 250)))
-        weekly_lookback = max(10, int(getattr(algoParas, 'RS_NEW_HIGH_WEEKLY_LOOKBACK_WEEKS', 52)))
+        daily_lookback = max(20, int(getattr(algoParas, 'RS_NEW_HIGH_DAILY_LOOKBACK_DAYS', 50)))
+        weekly_lookback = max(10, int(getattr(algoParas, 'RS_NEW_HIGH_WEEKLY_LOOKBACK_WEEKS', 50)))
         daily_new_high, daily_new_high_before_price = self._compute_rs_new_high_flags(
             rs_line=aligned['rs_line'],
-            price_reference=aligned['high'],
+            price_reference=aligned['close'],
             lookback=daily_lookback,
         )
 
-        weekly_stock = aligned[['close', 'high']].resample('W-FRI').agg({'close': 'last', 'high': 'max'}).dropna()
+        weekly_stock = aligned[['close']].resample('W-FRI').last().dropna()
         weekly_benchmark = aligned[['benchmark_close']].resample('W-FRI').agg({'benchmark_close': 'last'}).dropna()
         weekly_aligned = weekly_stock.join(weekly_benchmark, how='inner').dropna()
         weekly_rs_line = weekly_aligned['close'] / weekly_aligned['benchmark_close'] if not weekly_aligned.empty else pd.Series(dtype=float)
         weekly_new_high, weekly_new_high_before_price = self._compute_rs_new_high_flags(
             rs_line=weekly_rs_line,
-            price_reference=weekly_aligned['high'] if not weekly_aligned.empty else pd.Series(dtype=float),
+            price_reference=weekly_aligned['close'] if not weekly_aligned.empty else pd.Series(dtype=float),
             lookback=weekly_lookback,
         )
 
@@ -2481,7 +2480,7 @@ class cookFinancials(YahooFinancials):
             if true_positions:
                 weekly_signal_weeks_ago = len(recent_flags_list) - 1 - true_positions[-1]
         if normalized_signal_profile == 'weekly':
-            triggered = weekly_rs_new_high_recent
+            triggered = latest_weekly_new_high_before_price if require_before_price else latest_weekly_new_high
         else:
             triggered = latest_daily_new_high_before_price if require_before_price else latest_daily_new_high
         if not triggered:
@@ -2516,8 +2515,8 @@ class cookFinancials(YahooFinancials):
             'current_price': float(aligned['close'].iloc[-1]),
             'current_high': float(aligned['high'].iloc[-1]),
             'current_rs_line': float(aligned['rs_line'].iloc[-1]),
-            'daily_rs_line_high': float(aligned['rs_line'].rolling(window=daily_lookback, min_periods=1).max().iloc[-1]),
-            'daily_price_high': float(aligned['high'].rolling(window=daily_lookback, min_periods=1).max().iloc[-1]),
+            'daily_rs_line_high': float(aligned['rs_line'].rolling(window=daily_lookback, min_periods=1).max().shift(1).iloc[-1]),
+            'daily_price_high': float(aligned['close'].rolling(window=daily_lookback, min_periods=1).max().shift(1).iloc[-1]),
             'daily_lookback_days': daily_lookback,
             'weekly_lookback_weeks': weekly_lookback,
             'daily_rs_new_high': latest_daily_new_high,

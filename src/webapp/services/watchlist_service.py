@@ -2020,8 +2020,8 @@ class WatchlistService:
         if rs_line is not None and benchmark_frame is not None and not benchmark_frame.empty:
             rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
                 rs_line=rs_line,
-                price_reference=frame["High"].reindex(rs_line.index),
-                lookback=250,
+                price_reference=frame["Close"].reindex(rs_line.index),
+                lookback=50,
             )
         for index, row in frame.iterrows():
             if index not in visible_index_set:
@@ -4538,11 +4538,10 @@ def _compute_rs_rating_series(stock: pd.Series, benchmark: pd.Series) -> pd.Seri
 def _compute_rs_new_high_flags(rs_line: pd.Series, price_reference: pd.Series, lookback: int) -> tuple[pd.Series, pd.Series]:
     aligned = pd.concat([rs_line, price_reference], axis=1, join="inner").dropna()
     aligned.columns = ["rs_line", "price_reference"]
-    rolling_rs_high = aligned["rs_line"].rolling(window=lookback, min_periods=1).max()
-    rolling_price_high = aligned["price_reference"].rolling(window=lookback, min_periods=1).max()
-    tolerance = 1e-12
-    new_high = aligned["rs_line"] >= (rolling_rs_high - tolerance)
-    new_high_before_price = new_high & (aligned["price_reference"] < (rolling_price_high - tolerance))
+    rolling_rs_high = aligned["rs_line"].rolling(window=lookback, min_periods=1).max().shift(1)
+    rolling_price_high = aligned["price_reference"].rolling(window=lookback, min_periods=1).max().shift(1)
+    new_high = aligned["rs_line"] >= rolling_rs_high
+    new_high_before_price = new_high & (aligned["price_reference"] <= rolling_price_high)
     return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
 
 

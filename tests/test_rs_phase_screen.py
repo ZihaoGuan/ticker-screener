@@ -27,8 +27,11 @@ def _frame(closes: list[float], *, high_spike: float | None = None) -> pd.DataFr
 
 class RsPhaseScreenTests(unittest.TestCase):
     def test_context_marks_active_rs_phase_and_before_price_high(self) -> None:
-        benchmark = _frame([100.0] * 80)
-        stock = _frame([100.0 + index * 0.5 for index in range(80)], high_spike=160.0)
+        stock_closes = [100.0 + index * 0.5 for index in range(80)]
+        stock_closes[-11] = 150.0
+        benchmark_closes = [100.0] * 70 + [70.0] * 10
+        benchmark = _frame(benchmark_closes)
+        stock = _frame(stock_closes)
 
         context = compute_rs_phase_context(stock, benchmark)
 

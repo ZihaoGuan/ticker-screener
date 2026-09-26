@@ -12,8 +12,8 @@ class AppConfig:
     engine_version: str = "v1"
     screen_profile: str = "legacy"
     rs_lookback_days: int = 90
-    rs_new_high_daily_lookback_days: int = 250
-    rs_new_high_weekly_lookback_weeks: int = 52
+    rs_new_high_daily_lookback_days: int = 50
+    rs_new_high_weekly_lookback_weeks: int = 50
     rs_new_high_history_days: int = 400
     rs_new_high_require_before_price: bool = True
     rs_weekly_recent_signal_weeks: int = 4
