@@ -31,6 +31,7 @@ from .kai_s2_screen import KAI_S2_HISTORY_DAYS, find_kai_s2_hit
 from .leif_high_tight_flag_screen import LEIF_HTF_LOOKBACK_DAYS, find_leif_high_tight_flag_hit
 from .lost_21ema_screen import run_lost_21ema_screen
 from .macd_screen import find_recent_macd_hit
+from .ma_pullback_retest_screen import MA_PULLBACK_RETEST_HISTORY_DAYS, find_ma_pullback_retest_hit
 from .near_52wk_high_screen import PRICE_HISTORY_DAYS as NEAR_52WK_HIGH_HISTORY_DAYS, run_near_52wk_high_screen
 from .near_200ma_screen import run_near_200ma_screen
 from .one_year_winners_screen import ONE_YEAR_WINNERS_HISTORY_DAYS, find_one_year_winners_hit
@@ -363,6 +364,27 @@ def _run_sma200_pullback_buy(bundle: ScreenerInputBundle) -> ScreenerEvaluationR
             "signal_date": payload["signal_date"],
             "test_date": payload["test_date"],
             "test_count": payload["test_count"],
+        },
+        reasons=tuple(str(item) for item in payload.get("reasons", [])),
+        hit=payload,
+    )
+
+
+def _run_ma_pullback_retest(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_ma_pullback_retest_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "signal_state": payload["signal_state"],
+            "matched_profiles": payload["matched_profiles"],
         },
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
@@ -1791,6 +1813,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=140,
             warmup_trading_days=20,
             evaluator=_run_ema21_pullback_buy,
+        ),
+        "ma_pullback_retest": ScreenerSpec(
+            id="ma_pullback_retest",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=MA_PULLBACK_RETEST_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_ma_pullback_retest,
         ),
         "sma200_pullback_buy": ScreenerSpec(
             id="sma200_pullback_buy",

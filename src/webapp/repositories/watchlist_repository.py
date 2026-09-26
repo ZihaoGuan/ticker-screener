@@ -338,6 +338,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("bb_squeeze", "bb_squeeze", "BB Squeeze"),
         ("bollinger_band_breakout", "bollinger_band_breakout", "Above Upper Bollinger Band"),
         ("ema21_pullback_buy", "ema21_pullback_buy", "EMA21 Pullback Buy"),
+        ("ma_pullback_retest", "ma_pullback_retest", "MA Pullback & Retest"),
         ("sma200_pullback_buy", "sma200_pullback_buy", "200 SMA Pullback Buy"),
         ("high_tight_flag_setup", "high_tight_flag_setup", "High Tight Flag Setup"),
         ("high_tight_flag", "high_tight_flag", "High Tight Flag"),

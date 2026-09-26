@@ -159,6 +159,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("ema21_pullback_buy_{date_label}.json",),
         "legacy_summary_templates": ("ema21_pullback_buy_run_summary_{date_label}.json",),
     },
+    "ma_pullback_retest": {
+        "stem_template": "ma_pullback_retest_{date_label}",
+        "legacy_watchlist_templates": ("ma_pullback_retest_{date_label}.json",),
+        "legacy_raw_templates": ("ma_pullback_retest_{date_label}.json",),
+        "legacy_summary_templates": ("ma_pullback_retest_run_summary_{date_label}.json",),
+    },
     "my_picks_sma50_reclaim": {
         "stem_template": "my_picks_sma50_reclaim_{date_label}",
         "legacy_watchlist_templates": ("my_picks_sma50_reclaim_{date_label}.json",),
@@ -649,6 +655,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("bb_squeeze", "bb_squeeze"),
     ("bollinger_band_breakout", "bollinger_band_breakout"),
     ("ema21_pullback_buy", "ema21_pullback_buy"),
+    ("ma_pullback_retest", "ma_pullback_retest"),
     ("sma200_pullback_buy", "sma200_pullback_buy"),
     ("sepa_vcp", "sepa_vcp"),
     ("rti", "rti"),

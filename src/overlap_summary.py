@@ -274,6 +274,11 @@ PIPELINES = (
         "filename": "sma200_pullback_buy_{date}.json",
     },
     {
+        "id": "ma_pullback_retest",
+        "label": "MA Pullback & Retest",
+        "filename": "ma_pullback_retest_{date}.json",
+    },
+    {
         "id": "weekly_tight_close_breakout",
         "label": "Weekly Tight Close Breakout",
         "filename": "weekly_tight_close_breakout_{date}.json",
@@ -333,6 +338,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "stockbee_4pct_daily_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "darvas_box_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sma200_pullback_buy": {"bias_group": "bullish", "bullish_subgroup": "pullbacks"},
+    "ma_pullback_retest": {"bias_group": "bullish", "bullish_subgroup": "pullbacks"},
     "weekly_tight_close_breakout": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
 }
 

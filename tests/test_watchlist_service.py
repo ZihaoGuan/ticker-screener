@@ -79,6 +79,20 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(earnings_risk["state"], "context")
         self.assertEqual(ready["state"], "ready")
 
+    def test_guru_strike_zone_promotes_active_ma_support_reclaims(self) -> None:
+        strike = _build_guru_strike_zone(
+            {
+                "position_action": {"action": "hold_position"},
+                "earnings_days": 12,
+                "signal_state": "active",
+                "active_profiles": ["D EMA21", "W EMA8"],
+                "scanners": [{"id": "ma_pullback_retest"}],
+            }
+        )
+
+        self.assertEqual(strike["state"], "active")
+        self.assertIn("D EMA21", strike["reason"])
+
     def test_guru_board_keeps_single_scanner_candidates_and_stage_context(self) -> None:
         rows_by_ticker = {
             "NVDA": {
@@ -104,7 +118,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertNotIn("club_97", {item["id"] for item in payload["definitions"]})
         self.assertNotIn("liquid_growth", {item["id"] for item in payload["definitions"]})
         definitions = {item["id"]: item for item in payload["definitions"]}
-        self.assertTrue({"daily_rs_new_high", "rs", "rs_phase", "kai_s1", "kai_s2", "venu_scanner", "weekly_candidate_pool", "one_year_winners"}.issubset(definitions))
+        self.assertTrue({"daily_rs_new_high", "rs", "rs_phase", "kai_s1", "kai_s2", "venu_scanner", "weekly_candidate_pool", "one_year_winners", "ma_pullback_retest"}.issubset(definitions))
         self.assertEqual(definitions["one_year_winners"]["label"], "Wey How")
 
     def test_guru_board_excludes_extended_or_unverified_names(self) -> None:
@@ -1994,6 +2008,22 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertTrue(cards["ema21_pullback_buy"]["available"])
         self.assertEqual(cards["ema21_pullback_buy"]["entry_count"], 2)
         self.assertEqual(cards["ema21_pullback_buy"]["preview_tickers"], ["NVDA", "AAPL"])
+
+    def test_get_scanner_board_includes_ma_pullback_retest_card(self) -> None:
+        self._write_watchlist(
+            "ma_pullback_retest_2026-06-12",
+            tickers=["NVDA", "AAPL"],
+            modified_at=dt.datetime(2026, 6, 12, 23, 31, tzinfo=dt.timezone.utc),
+        )
+
+        payload = self.service.get_scanner_board(
+            now=dt.datetime(2026, 6, 13, 1, 0, tzinfo=dt.timezone.utc)
+        )
+
+        cards = {item["id"]: item for item in payload["cards"]}
+        self.assertTrue(cards["ma_pullback_retest"]["available"])
+        self.assertEqual(cards["ma_pullback_retest"]["entry_count"], 2)
+        self.assertEqual(cards["ma_pullback_retest"]["preview_tickers"], ["NVDA", "AAPL"])
 
     def test_get_scanner_board_includes_sma200_pullback_buy_card(self) -> None:
         self._write_watchlist(

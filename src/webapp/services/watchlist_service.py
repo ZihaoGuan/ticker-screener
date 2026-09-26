@@ -125,6 +125,7 @@ _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "stockbee_4pct_daily_movers", "label": "SB 4% Daily", "accent": "teal", "available": True},
     {"id": "stockbee_20pct_weekly_movers", "label": "SB 20% Weekly", "accent": "teal", "available": True},
     {"id": "canslim", "label": "O'Neil", "accent": "blue", "available": True},
+    {"id": "ma_pullback_retest", "label": "Pullback / Retest", "accent": "lime", "available": True},
     {"id": "daily_rs_new_high", "label": "RS New High", "accent": "cyan", "available": True},
     {"id": "rs", "label": "RS NH Before Price", "accent": "cyan", "available": True},
     {"id": "rs_phase", "label": "RS Phase", "accent": "cyan", "available": True},
@@ -634,6 +635,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": "Uptrend leaders that tested the 21 EMA, held the close, then triggered a first bullish breakout over the test-candle high.",
         "timeframe": "Daily",
         "accent": "lime",
+    },
+    {
+        "id": "ma_pullback_retest",
+        "strategy_id": "ma_pullback_retest",
+        "label": "MA Pullback & Retest",
+        "description": "Fresh daily and weekly moving-average pullbacks/reclaims across EMA8, EMA21, EMA200, SMA50, SMA120, SMA200, weekly EMA8 and weekly EMA200.",
+        "timeframe": "Daily / Weekly",
+        "accent": "lime",
+        "bias_group": "bullish",
     },
     {
         "id": "sma200_pullback_buy",
@@ -2766,6 +2776,12 @@ class WatchlistService:
         if not isinstance(technical_indicator_ratings, dict) or not technical_indicator_ratings:
             raw_indicator_ratings = entry.get("technical_indicator_ratings")
             technical_indicator_ratings = raw_indicator_ratings if isinstance(raw_indicator_ratings, dict) else {}
+        entry_signal_state = str(entry.get("signal_state") or "")
+        bucket_signal_state = str(bucket.get("signal_state") or "")
+        if entry_signal_state == "active" or not bucket_signal_state:
+            bucket_signal_state = entry_signal_state
+        entry_active_profiles = entry.get("active_profiles")
+        entry_ready_profiles = entry.get("ready_profiles")
         bucket["company"] = company or ""
         if sector:
             bucket["sector"] = sector
@@ -2787,6 +2803,12 @@ class WatchlistService:
         bucket["growth_acceleration_label"] = growth_acceleration_label
         bucket["earnings_date"] = earnings_date or None
         bucket["technical_indicator_ratings"] = technical_indicator_ratings
+        if bucket_signal_state:
+            bucket["signal_state"] = bucket_signal_state
+        if isinstance(entry_active_profiles, list):
+            bucket["active_profiles"] = list(entry_active_profiles)
+        if isinstance(entry_ready_profiles, list):
+            bucket["ready_profiles"] = list(entry_ready_profiles)
 
     def _select_scanner_top_hit_live_cards(self, board_payload: dict[str, Any]) -> list[dict[str, Any]]:
         cards = [dict(item) for item in board_payload.get("cards", []) if isinstance(item, dict)]
@@ -5431,6 +5453,13 @@ def _build_guru_strike_zone(row: dict[str, Any]) -> dict[str, str]:
     if action == "add_position" and (earnings_days is None or earnings_days > 7):
         return {"state": "active", "label": "Active", "reason": "Current position model permits adds."}
     scanner_ids = {str(item.get("id") or "") for item in row.get("scanners", []) if isinstance(item, dict)}
+    ma_signal_state = str(row.get("signal_state") or "")
+    ma_profiles = row.get("active_profiles") if ma_signal_state == "active" else row.get("ready_profiles")
+    if "ma_pullback_retest" in scanner_ids and action != "avoid_new" and (earnings_days is None or earnings_days > 7):
+        profile_text = ", ".join(str(item) for item in ma_profiles if str(item).strip()) if isinstance(ma_profiles, list) else "moving-average"
+        if ma_signal_state == "active":
+            return {"state": "active", "label": "Active", "reason": f"Fresh {profile_text} support reclaim."}
+        return {"state": "ready", "label": "Ready", "reason": f"{profile_text.title()} pullback is holding; confirm the reclaim."}
     if "qullamaggie" in scanner_ids and action != "avoid_new":
         return {"state": "ready", "label": "Ready", "reason": "Momentum setup; confirm its chart trigger."}
     rmv = row.get("rmv") if isinstance(row.get("rmv"), dict) else {}
