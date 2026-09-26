@@ -117,6 +117,7 @@ _RS_EVIDENCE_LOOKBACK_DAYS = 21
 _RS_EVIDENCE_RS_DAYS_THRESHOLD_PCT = 60.0
 _RS_EVIDENCE_UP_ON_DOWN_DAYS_THRESHOLD = 3
 _RS_EVIDENCE_DAILY_RS_THRESHOLD = 90.0
+_GURU_MAX_ATR_TO_SMA50_EXTENSION = 5.0
 _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "qullamaggie", "label": "Qullamaggie", "accent": "amber", "available": True},
     {"id": "trend_template", "label": "Minervini", "accent": "yellow", "available": True},
@@ -124,7 +125,6 @@ _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "stockbee_4pct_daily_movers", "label": "SB 4% Daily", "accent": "teal", "available": True},
     {"id": "stockbee_20pct_weekly_movers", "label": "SB 20% Weekly", "accent": "teal", "available": True},
     {"id": "canslim", "label": "O'Neil", "accent": "blue", "available": True},
-    {"id": "liquid_growth", "label": "Liquid Growth (TML)", "accent": "sky", "available": True},
     {"id": "club_97", "label": "97 Club", "accent": "gold", "available": False},
     {"id": "high_volume_close", "label": "High Volume Close (HVC)", "accent": "cyan", "available": False},
 )
@@ -296,15 +296,6 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": "Finviz-prefiltered quality compounders with mid-cap-and-up size, strong margins and ROE, then local annual revenue CAGR and diluted EPS growth confirmation.",
         "timeframe": "Daily",
         "accent": "emerald",
-        "bias_group": "bullish",
-    },
-    {
-        "id": "liquid_growth",
-        "strategy_id": "liquid_growth",
-        "label": "Liquid Growth (TML)",
-        "description": "Liquid institutional growth leaders: price above rising 50/200 SMAs, $2B+ market cap, $30M+ 50-day dollar volume, ROE of 17%+, strong quality margins, reported quarterly revenue and EPS growth of 25%+, and Daily RS of 85+.",
-        "timeframe": "Daily",
-        "accent": "sky",
         "bias_group": "bullish",
     },
     {
@@ -1439,6 +1430,9 @@ class WatchlistService:
         rows: list[dict[str, Any]] = []
         for ticker in tickers:
             row = rows_by_ticker[ticker]
+            atr_to_sma50 = _coerce_optional_float(row.get("atr_to_sma50"))
+            if atr_to_sma50 is None or atr_to_sma50 >= _GURU_MAX_ATR_TO_SMA50_EXTENSION:
+                continue
             row["scanner_count"] = len(row.get("scanners") or [])
             row["scanner_labels"] = [str(item.get("label") or "") for item in row["scanners"] if str(item.get("label") or "").strip()]
             row["stage_analysis"] = copy.deepcopy(stage_map.get(ticker) or None)

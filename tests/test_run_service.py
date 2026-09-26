@@ -454,10 +454,11 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(actions["fundamental_quality"]["label"], "Run Fundamental Quality")
         self.assertIn("scripts/run_fundamental_quality_screen.py", actions["fundamental_quality"]["command"])
 
-    def test_list_actions_excludes_gamma_squeeze(self) -> None:
+    def test_list_actions_excludes_removed_screeners(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
 
         self.assertNotIn("gamma_squeeze", actions)
+        self.assertNotIn("liquid_growth", actions)
 
     def test_list_actions_includes_stockbee_momentum_burst(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}

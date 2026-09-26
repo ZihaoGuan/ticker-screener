@@ -45,6 +45,7 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertIn("venu_scanner", actions)
         self.assertIn("fundamental_quality", actions)
         self.assertNotIn("gamma_squeeze", actions)
+        self.assertNotIn("liquid_growth", actions)
 
     def test_available_actions_include_grouping_metadata(self) -> None:
         actions = {item["id"]: item for item in self.service.get_context()["available_actions"]}

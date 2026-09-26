@@ -86,6 +86,7 @@ class WatchlistServiceTests(unittest.TestCase):
                 "scanners": [{"id": "qullamaggie", "label": "Qullamaggie"}],
                 "position_action": {"action": "hold_position"},
                 "daily_rs_rating": 95,
+                "atr_to_sma50": 2.0,
             }
         }
         with (
@@ -99,7 +100,22 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["rmv"]["rank"], 1)
         self.assertEqual(payload["rows"][0]["stage_analysis"]["alias"], "2B")
         self.assertEqual(payload["rows"][0]["strike_zone"]["state"], "ready")
-        self.assertEqual([item["id"] for item in payload["definitions"]][-3:], ["liquid_growth", "club_97", "high_volume_close"])
+        self.assertEqual([item["id"] for item in payload["definitions"]][-2:], ["club_97", "high_volume_close"])
+        self.assertNotIn("liquid_growth", {item["id"] for item in payload["definitions"]})
+
+    def test_guru_board_excludes_extended_or_unverified_names(self) -> None:
+        rows_by_ticker = {
+            "NVDA": {"ticker": "NVDA", "scanners": [{"id": "qullamaggie", "label": "Qullamaggie"}], "atr_to_sma50": 4.9},
+            "PLTR": {"ticker": "PLTR", "scanners": [{"id": "qullamaggie", "label": "Qullamaggie"}], "atr_to_sma50": 5.0},
+            "SMCI": {"ticker": "SMCI", "scanners": [{"id": "qullamaggie", "label": "Qullamaggie"}]},
+        }
+        with (
+            patch.object(self.service, "_load_latest_weinstein_stage_map", return_value={}),
+            patch.object(self.service, "_load_latest_rmv_map", return_value={}),
+        ):
+            payload = self.service._build_guru_board_payload(rows_by_ticker, board_payload={"target_trading_date": "2026-06-12"})
+
+        self.assertEqual([row["ticker"] for row in payload["rows"]], ["NVDA"])
 
     def test_get_watchlist_detail_fails_open_when_universe_load_errors(self) -> None:
         with patch("src.webapp.services.watchlist_service.load_universe", side_effect=RuntimeError("nasdaq offline")), patch(

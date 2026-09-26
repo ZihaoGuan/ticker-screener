@@ -393,12 +393,6 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("one_year_winners_{date_label}.json",),
         "legacy_summary_templates": ("one_year_winners_run_summary_{date_label}.json",),
     },
-    "liquid_growth": {
-        "stem_template": "liquid_growth_{date_label}",
-        "legacy_watchlist_templates": ("liquid_growth_{date_label}.json",),
-        "legacy_raw_templates": ("liquid_growth_{date_label}.json",),
-        "legacy_summary_templates": ("liquid_growth_run_summary_{date_label}.json",),
-    },
     "qullamaggie": {
         "stem_template": "qullamaggie_{date_label}",
         "legacy_watchlist_templates": ("qullamaggie_{date_label}.json",),
@@ -611,7 +605,6 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("kai_s1", "kai_s1"),
     ("kai_s2", "kai_s2"),
     ("one_year_winners", "one_year_winners"),
-    ("liquid_growth", "liquid_growth"),
     ("qullamaggie", "qullamaggie"),
     ("darvas_box_breakout", "darvas_box_breakout"),
     ("market_correction_resilience", "market_correction_resilience"),

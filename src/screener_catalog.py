@@ -34,7 +34,6 @@ from .macd_screen import find_recent_macd_hit
 from .near_52wk_high_screen import PRICE_HISTORY_DAYS as NEAR_52WK_HIGH_HISTORY_DAYS, run_near_52wk_high_screen
 from .near_200ma_screen import run_near_200ma_screen
 from .one_year_winners_screen import ONE_YEAR_WINNERS_HISTORY_DAYS, find_one_year_winners_hit
-from .liquid_growth_screen import LIQUID_GROWTH_HISTORY_DAYS, run_liquid_growth_screen
 from .minervini_vcp_detector_screen import MINERVINI_VCP_HISTORY_DAYS, find_minervini_vcp_detector_hit
 from .qullamaggie_screen import QULLAMAGGIE_HISTORY_DAYS, find_qullamaggie_hit
 from .rti_screen import find_recent_rti_hit
@@ -1282,11 +1281,6 @@ def _run_one_year_winners(bundle: ScreenerInputBundle) -> ScreenerEvaluationResu
     )
 
 
-def _run_liquid_growth(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
-    config = bundle.extras["config"]
-    return _single_ticker_result(bundle, run_liquid_growth_screen, config)
-
-
 def _run_minervini_vcp_detector(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     database_url = str(bundle.extras.get("database_url") or "")
     fundamentals = RatingsRepository(database_url).load_latest_fundamentals_snapshots_for_tickers(
@@ -1618,13 +1612,6 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=1,
             warmup_trading_days=0,
             evaluator=_run_fundamental_quality,
-        ),
-        "liquid_growth": ScreenerSpec(
-            id="liquid_growth",
-            required_inputs=("daily_bars", "metadata"),
-            lookback_trading_days=LIQUID_GROWTH_HISTORY_DAYS,
-            warmup_trading_days=20,
-            evaluator=_run_liquid_growth,
         ),
         "minervini_vcp_detector": ScreenerSpec(
             id="minervini_vcp_detector",
