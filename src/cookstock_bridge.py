@@ -201,6 +201,17 @@ def load_configured_cookstock(config: AppConfig, *, market_data_source: str | No
     return module
 
 
+@contextmanager
+def use_cookstock_engine_version(module: ModuleType, engine_version: str):
+    algo = module.algoParas
+    previous_engine_version = algo.ENGINE_VERSION
+    algo.ENGINE_VERSION = engine_version
+    try:
+        yield
+    finally:
+        algo.ENGINE_VERSION = previous_engine_version
+
+
 def resolve_prefetch_batch_size(total_tickers: int, *, override: int | None = None) -> int:
     if override is not None and override > 0:
         return override

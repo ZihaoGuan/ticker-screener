@@ -4,7 +4,12 @@ from dataclasses import asdict, dataclass
 import datetime as dt
 
 from .config import AppConfig
-from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
+from .cookstock_bridge import (
+    freeze_cookstock_today,
+    iter_prefetched_cookstock_batches,
+    load_configured_cookstock,
+    use_cookstock_engine_version,
+)
 from .universe import UniverseTicker
 
 
@@ -192,7 +197,12 @@ def run_vcp_screen(
     total_tickers = len(tickers)
     history_days = max(config.rs_new_high_history_days, 365)
 
-    with freeze_cookstock_today(cookstock, as_of_date):
+    # The v2 implementation validates VCPs against trading bars and avoids the
+    # legacy calendar-date sentinel that caused per-ticker failures in v1.
+    with (
+        use_cookstock_engine_version(cookstock, "v2"),
+        freeze_cookstock_today(cookstock, as_of_date),
+    ):
         position = 0
         for ticker_batch in iter_prefetched_cookstock_batches(
             config,

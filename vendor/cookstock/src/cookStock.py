@@ -2743,6 +2743,8 @@ class cookFinancials(YahooFinancials):
         #search for local low
         if counter >= counterThr:
             print('start search for lowest price')
+            if not isinstance(localHighestDate, str):
+                return False, -1, -1, -1, -1
             tmp_dt = dt.datetime.strptime(localHighestDate, "%Y-%m-%d")
             localHighestDate_dt = tmp_dt.date()
             tmp = date - localHighestDate_dt
