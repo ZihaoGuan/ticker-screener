@@ -20,6 +20,7 @@ from src.webapp.services.daily_report_service import DailyReportService
 from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.my_picks_service import MyPicksService
+from src.webapp.services.momentum_etf_portfolio_service import MomentumEtfPortfolioService
 from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.pair_trade_service import PairTradeService
@@ -46,6 +47,7 @@ from web.dependencies import (
     get_discord_notification_service,
     get_earnings_calendar_service,
     get_my_picks_service,
+    get_momentum_etf_portfolio_service,
     get_overlap_backtest_service,
     get_overlap_service,
     get_pair_trade_service,
@@ -993,6 +995,14 @@ def scanner_top_hits_data(
             daily_rs_max=daily_rs_max,
         )
     )
+
+
+@router.get("/scanner-board/momentum-etf-portfolios", response_class=JSONResponse)
+def momentum_etf_portfolios_data(
+    service: MomentumEtfPortfolioService = Depends(get_momentum_etf_portfolio_service),
+    _: Principal = Depends(get_current_principal),
+) -> JSONResponse:
+    return JSONResponse(service.get_payload())
 
 
 @router.get("/sector-leaderboard", response_class=JSONResponse)

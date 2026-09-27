@@ -9,11 +9,11 @@ import { fetchJson } from "../lib/api";
 import { buildChartCandles, buildExponentialMovingAverage } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
-import type { MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
+import type { MomentumEtfPortfoliosResponse, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
-type ViewMode = "list" | "charts" | "guru" | "position";
+type ViewMode = "list" | "charts" | "guru" | "position" | "etf-portfolios";
 type TopHitsFilterPreset = {
   sectorFilter: string;
   eliteOnly: boolean;
@@ -109,6 +109,12 @@ export function ScannerTopHitsPage() {
   const [chartPayloads, setChartPayloads] = useState<Record<string, WatchlistChartResponse | null | undefined>>({});
   const [chartErrors, setChartErrors] = useState<Record<string, string>>({});
   const [chartLoadingTickers, setChartLoadingTickers] = useState<Record<string, boolean>>({});
+  const [etfPayload, setEtfPayload] = useState<MomentumEtfPortfoliosResponse | null>(null);
+  const [etfLoading, setEtfLoading] = useState(false);
+  const [etfNotice, setEtfNotice] = useState("");
+  const [selectedEtf, setSelectedEtf] = useState("all");
+  const [etfTopHitsOnly, setEtfTopHitsOnly] = useState(false);
+  const [etfMinOverlap, setEtfMinOverlap] = useState(1);
   const canManageMyPicks = auth.hasCapability("manage_exclusions");
 
   const applyFilterPreset = (preset: TopHitsFilterPreset) => {
@@ -175,6 +181,22 @@ export function ScannerTopHitsPage() {
       });
     return () => controller.abort();
   }, [reloadKey]);
+
+  useEffect(() => {
+    if (viewMode !== "etf-portfolios" || etfPayload || etfLoading) return;
+    const controller = new AbortController();
+    setEtfLoading(true);
+    setEtfNotice("");
+    void fetchJson<MomentumEtfPortfoliosResponse>("/api/scanner-board/momentum-etf-portfolios", { signal: controller.signal })
+      .then(setEtfPayload)
+      .catch((error) => {
+        if (!controller.signal.aborted) setEtfNotice(error instanceof Error ? error.message : "Failed to load momentum ETF portfolios.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setEtfLoading(false);
+      });
+    return () => controller.abort();
+  }, [etfLoading, etfPayload, viewMode]);
 
   useEffect(() => {
     if (!canManageMyPicks) {
@@ -701,6 +723,13 @@ export function ScannerTopHitsPage() {
             >
               Position Map
             </button>
+            <button
+              className={`scanner-result-view-chip${viewMode === "etf-portfolios" ? " is-active" : ""}`}
+              type="button"
+              onClick={() => setViewMode("etf-portfolios")}
+            >
+              ETF Portfolios
+            </button>
           </div>
           <span className="panel-copy">Guru Board keeps scanner overlap visible; unavailable strategies stay clearly marked.</span>
         </div>
@@ -710,8 +739,21 @@ export function ScannerTopHitsPage() {
         {isLoading && !payload ? <LoadingBlock label="Loading scanner top hits…" /> : null}
         {notice ? <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></p> : null}
         {!notice && myPicksNotice ? <p className="panel-copy earnings-console-note">{myPicksNotice}</p> : null}
-        {!isLoading && !notice && ((viewMode === "guru" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
-        {((viewMode === "guru" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
+        {!isLoading && !notice && !etfLoading && viewMode !== "etf-portfolios" && ((viewMode === "guru" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
+        {viewMode === "etf-portfolios" ? (
+          <MomentumEtfPortfolioBoard
+            payload={etfPayload}
+            loading={etfLoading}
+            notice={etfNotice}
+            selectedEtf={selectedEtf}
+            topHitsOnly={etfTopHitsOnly}
+            minOverlap={etfMinOverlap}
+            onSelectedEtfChange={setSelectedEtf}
+            onTopHitsOnlyChange={setEtfTopHitsOnly}
+            onMinOverlapChange={setEtfMinOverlap}
+            onRetry={() => setEtfPayload(null)}
+          />
+        ) : ((viewMode === "guru" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
           <>
             {viewMode === "guru" ? (
               <GuruBoard rows={guruRows} definitions={guruBoard?.definitions ?? []} totalScannerMatches={guruBoard?.total_scanner_matches ?? 0} confluenceTickerCount={guruBoard?.confluence_ticker_count ?? 0} />
@@ -1042,6 +1084,76 @@ const POSITION_BUCKETS = [
   ["below_sma200", "Below SMA200"],
   ["no_data", "No Data"],
 ] as const;
+
+function MomentumEtfPortfolioBoard({
+  payload,
+  loading,
+  notice,
+  selectedEtf,
+  topHitsOnly,
+  minOverlap,
+  onSelectedEtfChange,
+  onTopHitsOnlyChange,
+  onMinOverlapChange,
+  onRetry,
+}: {
+  payload: MomentumEtfPortfoliosResponse | null;
+  loading: boolean;
+  notice: string;
+  selectedEtf: string;
+  topHitsOnly: boolean;
+  minOverlap: number;
+  onSelectedEtfChange: (value: string) => void;
+  onTopHitsOnlyChange: (value: boolean) => void;
+  onMinOverlapChange: (value: number) => void;
+  onRetry: () => void;
+}) {
+  const rows = useMemo(() => (payload?.rows ?? []).filter((row) => {
+    if (selectedEtf !== "all" && !row.funds.some((fund) => fund.ticker === selectedEtf)) return false;
+    if (topHitsOnly && !row.top_hit) return false;
+    return row.etf_count >= minOverlap;
+  }), [minOverlap, payload?.rows, selectedEtf, topHitsOnly]);
+  if (loading && !payload) return <LoadingBlock label="Loading momentum ETF portfolios…" />;
+  if (notice) return <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={onRetry}>Retry</button></p>;
+  if (!payload) return <p className="panel-copy">No momentum ETF holdings cache is available yet. Run “Refresh Momentum ETF Holdings”.</p>;
+  return (
+    <section className="scanner-result-table-wrap" aria-label="Momentum ETF portfolios">
+      <div className="scanner-top-hits-toolbar">
+        <span>{formatCount(payload.summary.total_unique_holdings)} unique holdings</span>
+        <span>{formatCount(payload.summary.overlap_holding_count)} held by multiple ETFs</span>
+        <span>{formatCount(payload.summary.top_hits_count)} Top Hits matches</span>
+        <span>Holdings refreshed {formatLocalDate(payload.holdings_generated_at)}</span>
+      </div>
+      <div className="scanner-result-view-actions" role="group" aria-label="Momentum ETF filters">
+        <button className={`scanner-result-view-chip${selectedEtf === "all" ? " is-active" : ""}`} type="button" onClick={() => onSelectedEtfChange("all")}>All</button>
+        {payload.funds.map((fund) => <button className={`scanner-result-view-chip${selectedEtf === fund.ticker ? " is-active" : ""}`} type="button" key={fund.ticker} onClick={() => onSelectedEtfChange(fund.ticker)}>{fund.ticker}</button>)}
+        <label className="scanner-result-checkbox"><input type="checkbox" checked={topHitsOnly} onChange={(event) => onTopHitsOnlyChange(event.target.checked)} /> Top Hits only</label>
+        <label className="field"><span>ETF overlap</span><select value={minOverlap} onChange={(event) => onMinOverlapChange(Number(event.target.value))}><option value={1}>Any ETF</option><option value={2}>2+ ETFs</option><option value={3}>3+ ETFs</option><option value={4}>All 4 ETFs</option></select></label>
+      </div>
+      <div className="guru-board-summary">
+        {payload.funds.map((fund) => <span key={fund.ticker}><a href={fund.source_url} target="_blank" rel="noreferrer"><strong>{fund.ticker}</strong></a> {fund.holding_count}{fund.is_complete ? "" : ` of ${fund.reported_holding_count}`} holdings · {fund.top_hits_count} Top Hits · {fund.as_of_date || "date TBD"}{fund.source_kind === "fallback" ? " · source fallback" : ""}</span>)}
+      </div>
+      {Object.keys(payload.errors).length > 0 ? <p className="panel-copy earnings-console-note">Using the last successful cache where available. Refresh issue: {Object.keys(payload.errors).join(", ")}.</p> : null}
+      {rows.length === 0 ? <p className="panel-copy">No holdings match these ETF filters.</p> : (
+        <table className="scanner-result-table">
+          <thead><tr><th>Stock</th><th>Held by</th><th>ETF count</th><th>Reported weight</th><th>Top Hits</th><th>RS</th><th>Stage</th><th>Strike Zone</th><th>Extension</th></tr></thead>
+          <tbody>{rows.map((row) => <tr key={row.ticker}>
+            <td data-label="Stock"><Link to={buildChartHref(row.ticker)}><strong>{row.ticker}</strong></Link><br /><span className="panel-copy">{row.company || "—"}</span></td>
+            <td data-label="Held by">{row.funds.map((fund) => <span className="scanner-score-pill" key={fund.ticker}>{fund.ticker} {fund.weight == null ? "—" : `${fund.weight.toFixed(2)}%`}</span>)}</td>
+            <td data-label="ETF count">{row.etf_count}</td>
+            <td data-label="Reported weight">{row.combined_weight.toFixed(2)}%</td>
+            <td data-label="Top Hits">{row.top_hit ? <span className="scanner-score-pill is-positive" title={row.scanner_labels.join(" · ")}>{row.scanner_count} scanners</span> : <span className="panel-copy">—</span>}</td>
+            <td data-label="RS">{row.daily_rs_rating == null ? "—" : row.daily_rs_rating}</td>
+            <td data-label="Stage">{row.stage_analysis?.alias || "—"}</td>
+            <td data-label="Strike Zone">{row.strike_zone ? <span className={`guru-strike is-${row.strike_zone.state}`} title={row.strike_zone.reason}>⚾ {row.strike_zone.label}{row.strike_zone.score == null ? "" : ` ${row.strike_zone.score}`}</span> : "—"}</td>
+            <td data-label="Extension">{row.atr_to_sma50 == null ? "—" : `${row.atr_to_sma50.toFixed(1)}× ATR`}</td>
+          </tr>)}</tbody>
+        </table>
+      )}
+      <p className="panel-copy guru-board-note">Reported weight is the sum of published ETF weights, not a model portfolio allocation. ETF ownership is confirmation context, not an entry signal by itself.</p>
+    </section>
+  );
+}
 
 function PositionMap({ rows }: { rows: ScannerTopHitRow[] }) {
   return (

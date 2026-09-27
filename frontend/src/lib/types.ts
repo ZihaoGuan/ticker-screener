@@ -410,6 +410,51 @@ export type ScannerTopHitsResponse = ScannerBoardResponse & {
   snapshot?: SnapshotMetadata;
 };
 
+export type MomentumEtfPortfolioFund = {
+  ticker: string;
+  name: string;
+  provider: string;
+  source_url: string;
+  issuer_source_url: string;
+  source_kind: string;
+  as_of_date: string;
+  fetched_at: string;
+  holding_count: number;
+  reported_holding_count: number;
+  is_complete: boolean;
+  top_hits_count: number;
+  available: boolean;
+};
+
+export type MomentumEtfPortfolioRow = {
+  ticker: string;
+  company: string;
+  sector: string;
+  funds: Array<{ ticker: string; weight: number | null }>;
+  etf_count: number;
+  combined_weight: number;
+  top_hit: boolean;
+  scanner_count: number;
+  scanner_labels: string[];
+  daily_rs_rating?: number | null;
+  stage_analysis?: ScannerTopHitRow["stage_analysis"];
+  strike_zone?: ScannerTopHitRow["strike_zone"];
+  atr_to_sma50?: number | null;
+  earnings_date?: string | null;
+  earnings_days?: number | null;
+  change_pct?: number | null;
+};
+
+export type MomentumEtfPortfoliosResponse = {
+  generated_at: string;
+  holdings_generated_at: string | null;
+  source_data_as_of: string | null;
+  errors: Record<string, string>;
+  funds: MomentumEtfPortfolioFund[];
+  rows: MomentumEtfPortfolioRow[];
+  summary: { total_unique_holdings: number; overlap_holding_count: number; top_hits_count: number };
+};
+
 export type SnapshotMetadata = {
   snapshot_run_id: number | null;
   snapshot_generated_at: string | null;
