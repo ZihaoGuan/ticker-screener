@@ -19,12 +19,14 @@ class MomentumEtf:
     provider: str
     source_url: str
     fallback_url: str = ""
+    official_holdings_url: str = ""
+    full_fallback_url: str = ""
 
 
 MOMENTUM_ETFS: tuple[MomentumEtf, ...] = (
-    MomentumEtf("FMTM", "MarketDesk Focused U.S. Momentum ETF", "MarketDesk", "https://www.marketdeskindices.com/fmtm", "https://stockanalysis.com/etf/fmtm/holdings/"),
-    MomentumEtf("SPMO", "Invesco S&P 500 Momentum ETF", "Invesco", "https://www.invesco.com/us/en/financial-products/etfs/invesco-sp-500-momentum-etf.html", "https://stockanalysis.com/etf/spmo/holdings/"),
-    MomentumEtf("PTF", "Invesco Dorsey Wright Technology Momentum ETF", "Invesco", "https://www.invesco.com/us/en/financial-products/etfs/invesco-dorsey-wright-technology-momentum-etf.html", "https://stockanalysis.com/etf/ptf/holdings/"),
+    MomentumEtf("FMTM", "MarketDesk Focused U.S. Momentum ETF", "MarketDesk", "https://www.marketdeskindices.com/fmtm", "https://stockanalysis.com/etf/fmtm/holdings/", full_fallback_url="https://www.etfchannel.com/lists/?a=stockholdings&issuer=&reverse=&rpp=20&sortby=&start={page}&symbol=FMTM"),
+    MomentumEtf("SPMO", "Invesco S&P 500 Momentum ETF", "Invesco", "https://www.invesco.com/us/en/financial-products/etfs/invesco-sp-500-momentum-etf.html", "https://stockanalysis.com/etf/spmo/holdings/", official_holdings_url="https://dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/46138E339/holdings/fund?idType=cusip&productType=ETF", full_fallback_url="https://www.etfchannel.com/lists/?a=stockholdings&issuer=&reverse=&rpp=20&sortby=&start={page}&symbol=SPMO"),
+    MomentumEtf("PTF", "Invesco Dorsey Wright Technology Momentum ETF", "Invesco", "https://www.invesco.com/us/en/financial-products/etfs/invesco-dorsey-wright-technology-momentum-etf.html", "https://stockanalysis.com/etf/ptf/holdings/", official_holdings_url="https://dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/46137V811/holdings/fund?idType=cusip&productType=ETF", full_fallback_url="https://www.etfchannel.com/lists/?a=stockholdings&issuer=&reverse=&rpp=20&sortby=&start={page}&symbol=PTF"),
     MomentumEtf("FFTY", "CapForce IBD 50 ETF", "CapForce", "https://www.capforceetf.com/ffty/details"),
 )
 
@@ -63,24 +65,37 @@ def refresh_momentum_etf_holdings_cache(
     errors: dict[str, str] = {}
     for etf in etfs:
         failures: list[str] = []
-        # Some issuers render holdings client-side or geo-gate downloads. Prefer a
-        # configured public table when supplied, while retaining the issuer page as
-        # provenance and a final fallback.
-        for source_url in (etf.fallback_url, etf.source_url):
+        candidates: list[dict[str, Any]] = []
+        if etf.official_holdings_url:
+            try:
+                response = _get_holdings_response(get, etf.official_holdings_url, timeout_seconds)
+                result = parse_invesco_holdings_json(response.text, etf=etf, fetched_at=generated_at)
+                result.update(source_url=etf.official_holdings_url, issuer_source_url=etf.source_url, source_kind="issuer")
+                candidates.append(result)
+            except Exception as exc:
+                failures.append(str(exc))
+        for source_url, source_kind in ((etf.source_url, "issuer"), (etf.fallback_url, "fallback")):
             if not source_url:
                 continue
             try:
-                response = get(source_url, timeout=timeout_seconds, headers={"User-Agent": "ticker-screener/1.0"})
-                response.raise_for_status()
+                response = _get_holdings_response(get, source_url, timeout_seconds)
                 result = parse_momentum_etf_holdings_html(response.text, etf=etf, fetched_at=generated_at)
                 result["source_url"] = source_url
                 result["issuer_source_url"] = etf.source_url
-                result["source_kind"] = "issuer" if source_url == etf.source_url else "fallback"
-                results[etf.ticker] = result
-                break
+                result["source_kind"] = source_kind
+                candidates.append(result)
             except Exception as exc:
                 failures.append(str(exc))
-        if etf.ticker not in results:
+        if etf.full_fallback_url:
+            try:
+                result = fetch_paginated_holdings(etf=etf, url_template=etf.full_fallback_url, fetched_at=generated_at, timeout_seconds=timeout_seconds, get=get)
+                result.update(issuer_source_url=etf.source_url, source_kind="full_fallback")
+                candidates.append(result)
+            except Exception as exc:
+                failures.append(str(exc))
+        if candidates:
+            results[etf.ticker] = max(candidates, key=_holdings_candidate_rank)
+        else:
             errors[etf.ticker] = "; ".join(failures)
 
     output_dir = momentum_etf_holdings_cache_dir(artifacts_dir)
@@ -101,6 +116,115 @@ def refresh_momentum_etf_holdings_cache(
         latest_path.write_text(serialized, encoding="utf-8")
         dated_path.write_text(serialized, encoding="utf-8")
     return {**payload, "output_file": str(latest_path), "dated_output_file": str(dated_path), "updated_cache": bool(results)}
+
+
+def _get_holdings_response(get: Callable[..., Any], url: str, timeout_seconds: float) -> Any:
+    response = get(url, timeout=timeout_seconds, headers={
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        "Accept": "application/json,*/*",
+        "Referer": "https://www.invesco.com/",
+    })
+    response.raise_for_status()
+    return response
+
+
+def _holdings_candidate_rank(result: dict[str, Any]) -> tuple[int, int, int]:
+    source_priority = {"issuer": 2, "full_fallback": 1, "fallback": 0}
+    return (
+        int(bool(result.get("is_complete"))),
+        int(result.get("holding_count") or 0),
+        source_priority.get(str(result.get("source_kind") or ""), 0),
+    )
+
+
+def parse_invesco_holdings_json(raw: str, *, etf: MomentumEtf, fetched_at: str = "") -> dict[str, Any]:
+    payload = json.loads(raw)
+    rows = payload.get("holdings") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError(f"No recognizable Invesco holdings payload found for {etf.ticker}.")
+    normalized_rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ticker = _clean_ticker(row.get("ticker"))
+        name = _clean_text(row.get("issuerName"))
+        weight = _coerce_percent(row.get("percentageOfTotalNetAssets") if row.get("percentageOfTotalNetAssets") is not None else row.get("weight"))
+        if _is_equity_holding(ticker=ticker, name=name) and weight is not None and weight > 0:
+            normalized_rows.append({"ticker": ticker, "name": name, "weight": weight, "sector": _clean_text(row.get("sectorName"))})
+    holdings = _dedupe_holdings(normalized_rows)
+    if not holdings:
+        raise ValueError(f"No equity holdings found in Invesco payload for {etf.ticker}.")
+    reported_count = int(payload.get("totalNumberOfHoldings") or len(rows))
+    return {
+        "etf_ticker": etf.ticker,
+        "fund_name": etf.name,
+        "provider": etf.provider,
+        "source_url": etf.source_url,
+        "as_of_date": _normalize_date(payload.get("effectiveDate")),
+        "fetched_at": fetched_at,
+        "holding_count": len(holdings),
+        "reported_holding_count": reported_count,
+        "is_complete": True,
+        "holdings": holdings,
+    }
+
+
+def fetch_paginated_holdings(*, etf: MomentumEtf, url_template: str, fetched_at: str, timeout_seconds: float, get: Callable[..., Any]) -> dict[str, Any]:
+    first_url = url_template.format(page=0)
+    first_response = _get_holdings_response(get, first_url, timeout_seconds)
+    first_rows, page_count = parse_etf_channel_holdings_html(first_response.text)
+    rows = list(first_rows)
+    for page in range(1, page_count):
+        response = _get_holdings_response(get, url_template.format(page=page), timeout_seconds)
+        page_rows, _ = parse_etf_channel_holdings_html(response.text)
+        rows.extend(page_rows)
+    holdings = _dedupe_holdings(rows)
+    if not holdings:
+        raise ValueError(f"No paginated holdings found for {etf.ticker}.")
+    return {
+        "etf_ticker": etf.ticker,
+        "fund_name": etf.name,
+        "provider": etf.provider,
+        "source_url": first_url,
+        "as_of_date": "",
+        "fetched_at": fetched_at,
+        "holding_count": len(holdings),
+        "reported_holding_count": len(holdings),
+        "is_complete": True,
+        "holdings": holdings,
+    }
+
+
+def parse_etf_channel_holdings_html(html: str) -> tuple[list[dict[str, Any]], int]:
+    page_match = re.search(r"Stock Holdings Page\s+\d+\s+of\s+(\d+)", html, flags=re.IGNORECASE)
+    page_count = int(page_match.group(1)) if page_match else 1
+    pattern = re.compile(
+        r'<a\s+href="/symbol/([^/\"]+)/">([^<]+)</a>.*?</td>\s*'
+        r'<td[^>]*>.*?([0-9]+(?:\.[0-9]+)?)%.*?</td>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    rows = []
+    for ticker, name, weight in pattern.findall(html):
+        normalized_ticker = _clean_ticker(ticker)
+        normalized_name = _clean_text(name)
+        if _is_equity_holding(ticker=normalized_ticker, name=normalized_name):
+            rows.append({"ticker": normalized_ticker, "name": normalized_name, "weight": float(weight), "sector": ""})
+    if not rows:
+        raise ValueError("No recognizable paginated holdings table found.")
+    return rows, page_count
+
+
+def _normalize_date(value: object) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    for candidate in (text, text[:10]):
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"):
+            try:
+                return dt.datetime.strptime(candidate, fmt).date().isoformat()
+            except ValueError:
+                pass
+    return ""
 
 
 def parse_momentum_etf_holdings_html(html: str, *, etf: MomentumEtf, fetched_at: str = "") -> dict[str, Any]:
