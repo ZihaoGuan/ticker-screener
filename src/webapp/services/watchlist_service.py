@@ -24,6 +24,7 @@ import yfinance as yf
 from ...config import AppConfig
 from ...artifact_paths import strategy_id_from_legacy_stem, watchlist_stem_from_path
 from ...canslim_screen import CANSLIM_HISTORY_DAYS, CANSLIM_INSIDER_LOOKBACK_DAYS, compute_canslim_frame_metrics, evaluate_canslim_ticker
+from ...cookstock_bridge import load_configured_cookstock
 from ...etf_matcher import infer_theme_tags_for_ticker, load_etf_catalog, load_ticker_theme_overrides
 from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
 from ...finviz_screener_rows import is_ticker_like_finviz_company_name, repair_shifted_finviz_row
@@ -92,7 +93,8 @@ _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
-_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v2"
+_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v3"
+_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v5"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -1110,7 +1112,7 @@ class WatchlistService:
             return payload
         run_date = dt.date.fromisoformat(target_trading_date_text)
         summary_payload = {
-            "snapshot_schema_version": "top-hits-v4",
+            "snapshot_schema_version": _SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION,
             "generated_at": payload.get("generated_at"),
             "reference_now_new_york": payload.get("reference_now_new_york"),
             "target_trading_date": payload.get("target_trading_date"),
@@ -1478,6 +1480,7 @@ class WatchlistService:
             self._attach_relative_strength_evidence(rows_by_ticker, tickers)
             self._attach_latest_position_actions(rows_by_ticker, tickers, as_of_date=target_date)
             self._attach_strike_zone_scanner_evidence(rows_by_ticker, target_date=target_date)
+            self._attach_guru_upcoming_earnings_dates(rows_by_ticker, as_of_date=target_date)
         stage_map = self._load_latest_weinstein_stage_map(target_date)
         rmv_map = self._load_latest_rmv_map(target_date)
         rows: list[dict[str, Any]] = []
@@ -1500,6 +1503,41 @@ class WatchlistService:
             "confluence_ticker_count": sum(1 for row in rows if int(row.get("scanner_count") or 0) >= 2),
             "rows": rows,
         }
+
+    def _attach_guru_upcoming_earnings_dates(
+        self,
+        rows_by_ticker: dict[str, dict[str, Any]],
+        *,
+        as_of_date: dt.date | None,
+    ) -> None:
+        """Attach the next known calendar event during snapshot construction.
+
+        The board reads the persisted result afterwards, so this single calendar
+        lookup never becomes a per-card or request-path network dependency.
+        """
+        if not rows_by_ticker:
+            return
+        start_date = as_of_date or dt.date.today()
+        end_date = start_date + dt.timedelta(days=56)
+        try:
+            cookstock = load_configured_cookstock(load_app_config())
+            events = cookstock.fetch_earnings_calendar_watchlist(start_date, end_date)
+        except Exception as exc:
+            logger.warning("Guru upcoming earnings enrichment unavailable: %s", exc)
+            return
+        next_dates: dict[str, dt.date] = {}
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            ticker = normalize_ticker_symbol(str(event.get("ticker") or ""))
+            event_date = event.get("event_date")
+            if ticker not in rows_by_ticker or not isinstance(event_date, dt.date) or event_date < start_date:
+                continue
+            previous = next_dates.get(ticker)
+            if previous is None or event_date < previous:
+                next_dates[ticker] = event_date
+        for ticker, event_date in next_dates.items():
+            rows_by_ticker[ticker]["earnings_date"] = event_date.isoformat()
 
     def _attach_strike_zone_scanner_evidence(self, rows_by_ticker: dict[str, dict[str, Any]], *, target_date: dt.date | None) -> None:
         """Attach the latest relevant setup artifacts without adding extra Guru columns."""
@@ -3690,6 +3728,7 @@ def _scanner_top_hits_source_fingerprint(board_payload: dict[str, Any]) -> tuple
         )
         latest_source_at = max(latest_source_at, captured_at)
     payload = {
+        "snapshot_schema_version": _SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION,
         "target_trading_date": str(board_payload.get("target_trading_date") or ""),
         "manual_override_target_date": str(board_payload.get("manual_override_target_date") or ""),
         "source_cards": sorted(source_cards, key=lambda item: str(item["strategy_id"])),

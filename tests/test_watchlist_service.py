@@ -1302,6 +1302,27 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["snapshot"]["refresh_status"], "waiting")
         self.assertIn("active source jobs", payload["snapshot"]["refresh_message"])
 
+    def test_guru_snapshot_attaches_next_earnings_date_from_configured_calendar(self) -> None:
+        rows = {"MU": {"ticker": "MU"}, "NVDA": {"ticker": "NVDA"}}
+        cookstock = type(
+            "Cookstock",
+            (),
+            {
+                "fetch_earnings_calendar_watchlist": lambda *_: [
+                    {"ticker": "MU", "event_date": dt.date(2026, 9, 30)},
+                    {"ticker": "MU", "event_date": dt.date(2026, 10, 1)},
+                    {"ticker": "OTHER", "event_date": dt.date(2026, 9, 29)},
+                ]
+            },
+        )()
+        with patch("src.webapp.services.watchlist_service.load_app_config"), patch(
+            "src.webapp.services.watchlist_service.load_configured_cookstock", return_value=cookstock
+        ):
+            self.service._attach_guru_upcoming_earnings_dates(rows, as_of_date=dt.date(2026, 9, 25))
+
+        self.assertEqual(rows["MU"]["earnings_date"], "2026-09-30")
+        self.assertNotIn("earnings_date", rows["NVDA"])
+
     def test_top_hits_snapshot_read_removes_percentage_values_from_sector(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         run = {
