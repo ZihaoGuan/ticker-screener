@@ -196,7 +196,7 @@ export function ScannerTopHitsPage() {
         if (!controller.signal.aborted) setEtfLoading(false);
       });
     return () => controller.abort();
-  }, [etfLoading, etfPayload, viewMode]);
+  }, [etfPayload, viewMode]);
 
   useEffect(() => {
     if (!canManageMyPicks) {
