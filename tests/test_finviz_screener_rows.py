@@ -4,7 +4,13 @@ import unittest
 
 from lxml import html
 
-from src.finviz_screener_rows import _extract_rows, normalize_finviz_ticker, repair_shifted_finviz_row, sanitize_finviz_company_name
+from src.finviz_screener_rows import (
+    _extract_rows,
+    _filter_leveraged_fund_rows,
+    normalize_finviz_ticker,
+    repair_shifted_finviz_row,
+    sanitize_finviz_company_name,
+)
 
 
 class FinvizScreenerRowsTests(unittest.TestCase):
@@ -73,6 +79,18 @@ class FinvizScreenerRowsTests(unittest.TestCase):
         self.assertEqual(rows[0]["Company"], "Iovance Biotherapeutics Inc")
         self.assertEqual(rows[0]["Price"], "5.02")
         self.assertEqual(rows[0]["Volume"], "16,361,516")
+
+    def test_filter_leveraged_fund_rows_keeps_standard_etfs_and_stocks(self) -> None:
+        rows = _filter_leveraged_fund_rows(
+            [
+                {"Ticker": "MUU", "Company": "Direxion Daily MU Bull 2X Shares"},
+                {"Ticker": "MULL", "Company": "GraniteShares 2x Long MU Daily ETF"},
+                {"Ticker": "SPY", "Company": "SPDR S&P 500 ETF Trust"},
+                {"Ticker": "UCTT", "Company": "Ultra Clean Holdings, Inc."},
+            ]
+        )
+
+        self.assertEqual([row["Ticker"] for row in rows], ["SPY", "UCTT"])
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from lxml import html
 import requests
 
-from .ticker_filters import normalize_ticker_symbol
+from .ticker_filters import is_leveraged_or_inverse_fund_name, normalize_ticker_symbol
 
 try:
     from finviz.config import USER_AGENT
@@ -78,14 +78,14 @@ class SafeFinvizScreener:
             return []
 
         rows: list[dict[str, Any]] = []
-        for row in _extract_rows(first_tree, self.headers):
+        for row in _filter_leveraged_fund_rows(_extract_rows(first_tree, self.headers)):
             rows.append(row)
             if len(rows) >= row_limit:
                 return rows
 
         for start in range(21, row_limit + 1, 20):
             page_tree, _ = self._fetch_page(start, base_url=first_url)
-            for row in _extract_rows(page_tree, self.headers):
+            for row in _filter_leveraged_fund_rows(_extract_rows(page_tree, self.headers)):
                 rows.append(row)
                 if len(rows) >= row_limit:
                     return rows
@@ -185,6 +185,10 @@ def _extract_rows(tree: html.HtmlElement, headers: list[str]) -> list[dict[str, 
         values = [_extract_cell_value(header, cell) for header, cell in zip(headers, cells)]
         parsed_rows.append(dict(zip(headers, values)))
     return parsed_rows
+
+
+def _filter_leveraged_fund_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if not is_leveraged_or_inverse_fund_name(row.get("Company"))]
 
 
 def _extract_cell_value(header: str, cell: html.HtmlElement) -> str:

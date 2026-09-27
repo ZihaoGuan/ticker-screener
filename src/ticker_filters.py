@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import csv
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING, Iterable
 
 from .config import AppConfig, project_root
@@ -11,6 +12,13 @@ if TYPE_CHECKING:
     from .peg_screen import EarningsEvent
     from .pre_earnings_screen import PreEarningsEvent
     from .universe import UniverseTicker
+
+
+_FUND_NAME_PATTERN = re.compile(r"\b(?:ETF|FUND|SHARES|TRUST|PROSHARES)\b", re.IGNORECASE)
+_LEVERAGED_OR_INVERSE_NAME_PATTERN = re.compile(
+    r"\b(?:[2-9](?:\.\d+)?X|DAILY\s+(?:BULL|BEAR|LONG|SHORT)|ULTRA(?:PRO|SHORT)?|LEVERAGED|INVERSE)\b",
+    re.IGNORECASE,
+)
 
 
 def excluded_tickers_path(config: AppConfig) -> Path:
@@ -65,6 +73,19 @@ def special_security_tickers_path(config: AppConfig) -> Path:
 
 def normalize_ticker_symbol(symbol: str) -> str:
     return str(symbol).upper().strip().replace("/", ".")
+
+
+def is_leveraged_or_inverse_fund_name(name: object) -> bool:
+    text = str(name or "").strip()
+    return bool(text and _FUND_NAME_PATTERN.search(text) and _LEVERAGED_OR_INVERSE_NAME_PATTERN.search(text))
+
+
+def leveraged_or_inverse_catalog_symbols(catalog: Iterable[dict[str, object]]) -> set[str]:
+    return {
+        normalize_ticker_symbol(str(item.get("ticker") or ""))
+        for item in catalog
+        if normalize_ticker_symbol(str(item.get("ticker") or "")) and is_leveraged_or_inverse_fund_name(item.get("name"))
+    }
 
 
 def _load_ticker_file(path: Path) -> set[str]:
@@ -125,6 +146,12 @@ def load_excluded_tickers(config: AppConfig) -> set[str]:
     if auto_dir.exists():
         for path in sorted(auto_dir.glob("*.txt")):
             excluded.update(_load_ticker_file(path))
+    try:
+        from .etf_matcher import load_etf_catalog
+
+        excluded.update(leveraged_or_inverse_catalog_symbols(load_etf_catalog()))
+    except Exception:
+        pass
     excluded.update(_load_special_security_tickers(special_security_tickers_path(config)))
     excluded.difference_update(load_included_tickers(config))
     return excluded

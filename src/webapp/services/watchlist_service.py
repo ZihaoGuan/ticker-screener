@@ -780,7 +780,6 @@ class WatchlistService:
         self.database_url = resolve_database_url(database_url)
         self.market_data_source = resolve_market_data_source(market_data_source)
         self.benchmark_ticker = str(benchmark_ticker or "SPY").strip().upper() or "SPY"
-        self._excluded_tickers: set[str] | None = None
         self._scanner_board_override_path = self.repository.artifacts_dir / "status" / "scanner_board_override.json"
         self.position_decision_repository = PositionDecisionRepository(database_url=self.database_url or "")
         self.screener_history_service = ScreenerHistoryService(
@@ -3294,14 +3293,11 @@ class WatchlistService:
         return self._theme_catalog
 
     def _get_excluded_tickers(self) -> set[str]:
-        if self._excluded_tickers is not None:
-            return self._excluded_tickers
         try:
-            self._excluded_tickers = load_excluded_tickers(load_app_config())
+            return load_excluded_tickers(load_app_config())
         except Exception as exc:
             logger.warning("Watchlist exclusion filter unavailable; continuing without exclusions: %s", exc)
-            self._excluded_tickers = set()
-        return self._excluded_tickers
+            return set()
 
     def _filter_excluded_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         excluded = self._get_excluded_tickers()

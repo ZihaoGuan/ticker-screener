@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import unittest
 
-from src.ticker_filters import filter_earnings_events, filter_pre_earnings_events, filter_symbols, filter_universe_tickers
+from src.ticker_filters import (
+    filter_earnings_events,
+    filter_pre_earnings_events,
+    filter_symbols,
+    filter_universe_tickers,
+    is_leveraged_or_inverse_fund_name,
+    leveraged_or_inverse_catalog_symbols,
+)
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,23 @@ class TickerFiltersTests(unittest.TestCase):
 
         self.assertEqual([item.ticker for item in earnings], ["AAPL", "TSLA"])
         self.assertEqual([item.ticker for item in pre_earnings], ["AAPL", "TSLA"])
+
+    def test_detects_leveraged_or_inverse_fund_names_without_matching_common_stocks(self) -> None:
+        self.assertTrue(is_leveraged_or_inverse_fund_name("Direxion Daily MU Bull 2X Shares"))
+        self.assertTrue(is_leveraged_or_inverse_fund_name("GraniteShares 2x Long MU Daily ETF"))
+        self.assertTrue(is_leveraged_or_inverse_fund_name("ProShares UltraPro Short QQQ"))
+        self.assertFalse(is_leveraged_or_inverse_fund_name("SPDR S&P 500 ETF Trust"))
+        self.assertFalse(is_leveraged_or_inverse_fund_name("Ultra Clean Holdings, Inc."))
+
+    def test_extracts_only_leveraged_or_inverse_catalog_symbols(self) -> None:
+        symbols = leveraged_or_inverse_catalog_symbols(
+            [
+                {"ticker": "SOXL", "name": "Direxion Daily Semiconductor Bull 3X ETF"},
+                {"ticker": "SPY", "name": "SPDR S&P 500 ETF Trust"},
+            ]
+        )
+
+        self.assertEqual(symbols, {"SOXL"})
 
 
 if __name__ == "__main__":

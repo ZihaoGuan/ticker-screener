@@ -4,3 +4,6 @@
 # Example:
 # HUT
 # VIAV, SOUN
+
+MUU  # Leveraged ETF
+MULL  # Leveraged ETF
