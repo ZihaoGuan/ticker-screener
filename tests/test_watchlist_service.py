@@ -121,7 +121,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertNotIn("club_97", {item["id"] for item in payload["definitions"]})
         self.assertNotIn("liquid_growth", {item["id"] for item in payload["definitions"]})
         definitions = {item["id"]: item for item in payload["definitions"]}
-        self.assertTrue({"daily_rs_new_high", "rs", "rs_phase", "kai_s1", "kai_s2", "venu_scanner", "weekly_candidate_pool", "one_year_winners", "ma_pullback_retest"}.issubset(definitions))
+        self.assertTrue({"daily_rs_new_high", "rs", "rs_phase", "kai_s1", "kai_s2", "venu_scanner", "weekly_candidate_pool", "one_year_winners"}.issubset(definitions))
+        self.assertNotIn("ma_pullback_retest", definitions)
         self.assertEqual(definitions["one_year_winners"]["label"], "Wey How")
 
     def test_guru_board_excludes_extended_or_unverified_names(self) -> None:
@@ -1321,6 +1322,7 @@ class WatchlistServiceTests(unittest.TestCase):
             self.service._attach_guru_upcoming_earnings_dates(rows, as_of_date=dt.date(2026, 9, 25))
 
         self.assertEqual(rows["MU"]["earnings_date"], "2026-09-30")
+        self.assertEqual(rows["MU"]["earnings_days"], 5)
         self.assertNotIn("earnings_date", rows["NVDA"])
 
     def test_top_hits_snapshot_read_removes_percentage_values_from_sector(self) -> None:

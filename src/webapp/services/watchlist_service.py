@@ -130,7 +130,6 @@ _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "stockbee_4pct_daily_movers", "label": "SB 4% Daily", "accent": "teal", "available": True},
     {"id": "stockbee_20pct_weekly_movers", "label": "SB 20% Weekly", "accent": "teal", "available": True},
     {"id": "canslim", "label": "O'Neil", "accent": "blue", "available": True},
-    {"id": "ma_pullback_retest", "label": "Pullback / Retest", "accent": "lime", "available": True},
     {"id": "daily_rs_new_high", "label": "RS New High", "accent": "cyan", "available": True},
     {"id": "rs", "label": "RS NH Before Price", "accent": "cyan", "available": True},
     {"id": "rs_phase", "label": "RS Phase", "accent": "cyan", "available": True},
@@ -1537,7 +1536,9 @@ class WatchlistService:
             if previous is None or event_date < previous:
                 next_dates[ticker] = event_date
         for ticker, event_date in next_dates.items():
-            rows_by_ticker[ticker]["earnings_date"] = event_date.isoformat()
+            row = rows_by_ticker[ticker]
+            row["earnings_date"] = event_date.isoformat()
+            row["earnings_days"] = (event_date - start_date).days
 
     def _attach_strike_zone_scanner_evidence(self, rows_by_ticker: dict[str, dict[str, Any]], *, target_date: dt.date | None) -> None:
         """Attach the latest relevant setup artifacts without adding extra Guru columns."""
