@@ -9,7 +9,7 @@ import { fetchJson } from "../lib/api";
 import { buildChartCandles, buildExponentialMovingAverage } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
-import type { MomentumEtfPortfoliosResponse, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
+import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
@@ -35,6 +35,7 @@ type TopHitsPresetStore = { presets: Record<string, TopHitsFilterPreset>; defaul
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
 const GURU_COLUMN_PAGE_SIZE = 30;
+const MOMENTUM_ETF_ACCENTS: Record<string, string> = { FMTM: "amber", SPMO: "teal", PTF: "blue", FFTY: "cyan" };
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "qullamaggie", "sean_breakout", "venu_scanner"]);
 const PINNED_SCANNER_OPTIONS = [
   { id: "weekly_candidate_pool", label: "Weekly Candidate Pool" },
@@ -1108,16 +1109,18 @@ function MomentumEtfPortfolioBoard({
   onMinOverlapChange: (value: number) => void;
   onRetry: () => void;
 }) {
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const rows = useMemo(() => (payload?.rows ?? []).filter((row) => {
     if (selectedEtf !== "all" && !row.funds.some((fund) => fund.ticker === selectedEtf)) return false;
     if (topHitsOnly && !row.top_hit) return false;
     return row.etf_count >= minOverlap;
   }), [minOverlap, payload?.rows, selectedEtf, topHitsOnly]);
+  const funds = selectedEtf === "all" ? (payload?.funds ?? []) : (payload?.funds ?? []).filter((fund) => fund.ticker === selectedEtf);
   if (loading && !payload) return <LoadingBlock label="Loading momentum ETF portfolios…" />;
   if (notice) return <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={onRetry}>Retry</button></p>;
   if (!payload) return <p className="panel-copy">No momentum ETF holdings cache is available yet. Run “Refresh Momentum ETF Holdings”.</p>;
   return (
-    <section className="scanner-result-table-wrap" aria-label="Momentum ETF portfolios">
+    <section className="guru-board momentum-etf-board" aria-label="Momentum ETF portfolios">
       <div className="scanner-top-hits-toolbar">
         <span>{formatCount(payload.summary.total_unique_holdings)} unique holdings</span>
         <span>{formatCount(payload.summary.overlap_holding_count)} held by multiple ETFs</span>
@@ -1134,25 +1137,57 @@ function MomentumEtfPortfolioBoard({
         {payload.funds.map((fund) => <span key={fund.ticker}><a href={fund.source_url} target="_blank" rel="noreferrer"><strong>{fund.ticker}</strong></a> {fund.holding_count}{fund.is_complete ? "" : ` of ${fund.reported_holding_count}`} holdings · {fund.top_hits_count} Top Hits · {fund.as_of_date || "date TBD"}{fund.source_kind === "fallback" ? " · source fallback" : ""}</span>)}
       </div>
       {Object.keys(payload.errors).length > 0 ? <p className="panel-copy earnings-console-note">Using the last successful cache where available. Refresh issue: {Object.keys(payload.errors).join(", ")}.</p> : null}
-      {rows.length === 0 ? <p className="panel-copy">No holdings match these ETF filters.</p> : (
-        <table className="scanner-result-table">
-          <thead><tr><th>Stock</th><th>Held by</th><th>ETF count</th><th>Reported weight</th><th>Top Hits</th><th>RS</th><th>Stage</th><th>Strike Zone</th><th>Extension</th></tr></thead>
-          <tbody>{rows.map((row) => <tr key={row.ticker}>
-            <td data-label="Stock"><Link to={buildChartHref(row.ticker)}><strong>{row.ticker}</strong></Link><br /><span className="panel-copy">{row.company || "—"}</span></td>
-            <td data-label="Held by">{row.funds.map((fund) => <span className="scanner-score-pill" key={fund.ticker}>{fund.ticker} {fund.weight == null ? "—" : `${fund.weight.toFixed(2)}%`}</span>)}</td>
-            <td data-label="ETF count">{row.etf_count}</td>
-            <td data-label="Reported weight">{row.combined_weight.toFixed(2)}%</td>
-            <td data-label="Top Hits">{row.top_hit ? <span className="scanner-score-pill is-positive" title={row.scanner_labels.join(" · ")}>{row.scanner_count} scanners</span> : <span className="panel-copy">—</span>}</td>
-            <td data-label="RS">{row.daily_rs_rating == null ? "—" : row.daily_rs_rating}</td>
-            <td data-label="Stage">{row.stage_analysis?.alias || "—"}</td>
-            <td data-label="Strike Zone">{row.strike_zone ? <span className={`guru-strike is-${row.strike_zone.state}`} title={row.strike_zone.reason}>⚾ {row.strike_zone.label}{row.strike_zone.score == null ? "" : ` ${row.strike_zone.score}`}</span> : "—"}</td>
-            <td data-label="Extension">{row.atr_to_sma50 == null ? "—" : `${row.atr_to_sma50.toFixed(1)}× ATR`}</td>
-          </tr>)}</tbody>
-        </table>
-      )}
-      <p className="panel-copy guru-board-note">Reported weight is the sum of published ETF weights, not a model portfolio allocation. ETF ownership is confirmation context, not an entry signal by itself.</p>
+      {rows.length === 0 ? <p className="panel-copy">No holdings match these ETF filters.</p> : <div className="guru-board-scroll">
+        {funds.map((fund) => {
+          const fundRows = rows.filter((row) => row.funds.some((holding) => holding.ticker === fund.ticker));
+          const visibleCount = visibleCounts[fund.ticker] ?? GURU_COLUMN_PAGE_SIZE;
+          const remainingCount = Math.max(0, fundRows.length - visibleCount);
+          const accent = MOMENTUM_ETF_ACCENTS[fund.ticker] || "amber";
+          return <article className={`guru-column is-${accent}`} key={fund.ticker}>
+            <header title={fund.name}>
+              <strong>{formatCount(fundRows.length)}</strong>
+              <span>{fund.ticker}</span>
+            </header>
+            {!fund.available ? <p className="guru-column-unavailable">Holdings unavailable</p> : null}
+            <div className="guru-column-cards">
+              {fundRows.slice(0, visibleCount).map((row) => <MomentumEtfHoldingCard fundTicker={fund.ticker} key={row.ticker} row={row} />)}
+            </div>
+            {remainingCount > 0 ? <button className="ghost-button guru-column-load-more" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [fund.ticker]: visibleCount + GURU_COLUMN_PAGE_SIZE }))}>
+              Load 30 more ({formatCount(remainingCount)} remaining)
+            </button> : null}
+          </article>;
+        })}
+      </div>}
+      <p className="panel-copy guru-board-note">A ticker can appear in multiple ETF columns. Published ETF weight is ownership context, not a model allocation or entry signal.</p>
     </section>
   );
+}
+
+function MomentumEtfHoldingCard({ row, fundTicker }: { row: MomentumEtfPortfolioRow; fundTicker: string }) {
+  const holding = row.funds.find((fund) => fund.ticker === fundTicker);
+  const stage = row.stage_analysis?.alias || "--";
+  const atr = row.atr_to_sma50 == null ? "--" : `${row.atr_to_sma50 >= 0 ? "+" : ""}${row.atr_to_sma50.toFixed(1)} ATR`;
+  const strike = row.strike_zone?.label || "Context";
+  const strikeTone = row.strike_zone?.state || "context";
+  const strikeScore = row.strike_zone?.score;
+  const title = [row.company || row.ticker, row.scanner_labels.length ? `Top Hits: ${row.scanner_labels.join(" · ")}` : "Not currently in Top Hits"].join("\n");
+  return <Link className={`guru-ticker-card momentum-etf-card${row.top_hit ? " is-top-hit" : ""}`} to={buildChartHref(row.ticker)} title={title}>
+    <div className="guru-ticker-main">
+      <strong>{row.ticker}</strong>
+      <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
+    </div>
+    <div className="guru-ticker-badges">
+      <span title={`${fundTicker} published portfolio weight`}>{holding?.weight == null ? "Weight --" : `${holding.weight.toFixed(2)}%`}</span>
+      <span title="Number of selected momentum ETFs holding this stock">{row.etf_count}× ETFs</span>
+      <span title="Weinstein stage">{stage}</span>
+      <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
+    </div>
+    <div className="guru-ticker-context">
+      <span title="ATR distance from SMA50">📏 {atr}</span>
+      {row.top_hit ? <span title={row.scanner_labels.join(" · ")}>🔥 {row.scanner_count} hits</span> : null}
+      <span className={`guru-strike is-${strikeTone}`} title={buildStrikeZoneTitle(row.strike_zone)}>⚾ {strike}{strikeScore == null ? "" : ` ${strikeScore}`}</span>
+    </div>
+  </Link>;
 }
 
 function PositionMap({ rows }: { rows: ScannerTopHitRow[] }) {
