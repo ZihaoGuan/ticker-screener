@@ -25,6 +25,7 @@ from src.webapp.services.daily_report_service import DailyReportService
 from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.my_picks_service import MyPicksService
+from src.webapp.services.momentum_etf_portfolio_service import MomentumEtfPortfolioService
 from src.webapp.services.overlap_backtest_service import OverlapBacktestService
 from src.webapp.services.overlap_service import OverlapService
 from src.webapp.services.pair_trade_service import PairTradeService
@@ -123,6 +124,10 @@ def get_rrg_service() -> RrgService:
 
 def get_sector_leaderboard_service() -> SectorLeaderboardService:
     return SectorLeaderboardService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
+
+
+def get_momentum_etf_portfolio_service() -> MomentumEtfPortfolioService:
+    return MomentumEtfPortfolioService(artifacts_dir=config.artifacts_dir, watchlist_service=get_watchlist_service())
 
 
 def get_ad_hoc_screen_service() -> AdHocScreenService:
