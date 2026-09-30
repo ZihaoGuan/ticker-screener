@@ -6,7 +6,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
-import { buildChartCandles, buildExponentialMovingAverage } from "../lib/chartData";
+import { buildChartCandles, buildExponentialMovingAverage, buildSimpleMovingAverage } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
 import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPickRow, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
@@ -14,6 +14,19 @@ import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPickRow,
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
 type ViewMode = "list" | "charts" | "guru" | "position" | "etf-portfolios";
+type ChartGridColumns = 2 | 3 | 4;
+type ChartRange = "3m" | "6m" | "1y";
+type ChartType = "candles" | "bars" | "line";
+type ChartWorkspace = {
+  gridColumns: ChartGridColumns;
+  range: ChartRange;
+  chartType: ChartType;
+  showVolume: boolean;
+  showEma8: boolean;
+  showEma21: boolean;
+  showEma60: boolean;
+  showSma50: boolean;
+};
 type GuruSortKey = "default" | "stage" | "rs" | "rsPhase" | "strike";
 type TopHitsFilterPreset = {
   sectorFilter: string;
@@ -35,7 +48,17 @@ type TopHitsFilterPreset = {
 };
 type TopHitsPresetStore = { presets: Record<string, TopHitsFilterPreset>; defaultPresetName: string };
 const LIST_PAGE_SIZE = 50;
-const CHART_PAGE_SIZE = 9;
+const CHART_WORKSPACE_STORAGE_KEY = "top-hits-chart-workspace";
+const DEFAULT_CHART_WORKSPACE: ChartWorkspace = {
+  gridColumns: 2,
+  range: "6m",
+  chartType: "candles",
+  showVolume: true,
+  showEma8: true,
+  showEma21: true,
+  showEma60: false,
+  showSma50: false,
+};
 const GURU_COLUMN_PAGE_SIZE = 30;
 const MIN_TOP_HITS_MARKET_CAP = 1_000_000_000;
 const MIN_TOP_HITS_PRICE = 5;
@@ -133,6 +156,7 @@ export function ScannerTopHitsPage() {
   const [sortBy, setSortBy] = useState<SortKey>(initialFilters.sortBy);
   const [sortDirection, setSortDirection] = useState<SortDirection>(initialFilters.sortDirection);
   const [viewMode, setViewMode] = useState<ViewMode>(initialFilters.viewMode);
+  const [chartWorkspace, setChartWorkspace] = useState<ChartWorkspace>(loadChartWorkspace);
   const [currentPage, setCurrentPage] = useState(1);
   const [myPickTickers, setMyPickTickers] = useState<Set<string>>(new Set());
   const [myPickIdsByTicker, setMyPickIdsByTicker] = useState<Record<string, number>>({});
@@ -188,6 +212,18 @@ export function ScannerTopHitsPage() {
     sortDirection,
     viewMode,
   });
+
+  const updateChartWorkspace = (patch: Partial<ChartWorkspace>) => {
+    setChartWorkspace((current) => {
+      const next = { ...current, ...patch };
+      try {
+        localStorage.setItem(CHART_WORKSPACE_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Keep the selection for this visit when browser storage is unavailable.
+      }
+      return next;
+    });
+  };
 
   const updatePresetStore = (nextStore: TopHitsPresetStore, successMessage: string) => {
     setPresetStore(nextStore);
@@ -344,9 +380,9 @@ export function ScannerTopHitsPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, rsDaysMinPct, rsEvidenceMin, rsEvidenceOnly, scannerGroups, search, sectorFilter, sizePriceFloorOnly, sortBy, sortDirection, upOnDownDaysMin, viewMode]);
+  }, [chartWorkspace.gridColumns, eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, rsDaysMinPct, rsEvidenceMin, rsEvidenceOnly, scannerGroups, search, sectorFilter, sizePriceFloorOnly, sortBy, sortDirection, upOnDownDaysMin, viewMode]);
 
-  const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE : LIST_PAGE_SIZE;
+  const pageSize = viewMode === "charts" ? chartPageSize(chartWorkspace.gridColumns) : LIST_PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const normalizedPage = Math.min(currentPage, totalPages);
   const pagedRows = useMemo(() => {
@@ -889,10 +925,18 @@ export function ScannerTopHitsPage() {
                 onToggleMyPick={handleToggleMyPick}
               />
             ) : <>
-            <div className="scanner-top-hits-toolbar">
-              <span>{formatCount(filteredRows.length)} names</span>
-              <span>Latest board date {formatLocalDate(payload?.target_trading_date)}</span>
-            </div>
+            {viewMode === "charts" ? (
+              <ChartWorkspaceToolbar
+                totalRows={filteredRows.length}
+                workspace={chartWorkspace}
+                onChange={updateChartWorkspace}
+              />
+            ) : (
+              <div className="scanner-top-hits-toolbar">
+                <span>{formatCount(filteredRows.length)} names</span>
+                <span>Latest board date {formatLocalDate(payload?.target_trading_date)}</span>
+              </div>
+            )}
             <PaginationControls
               currentPage={normalizedPage}
               totalItems={filteredRows.length}
@@ -901,7 +945,7 @@ export function ScannerTopHitsPage() {
               onPageChange={setCurrentPage}
             />
             {viewMode === "charts" ? (
-              <div className="scanner-result-chart-grid is-3-col">
+              <div className={`scanner-result-chart-grid scanner-top-hit-chart-grid is-${chartWorkspace.gridColumns}-col`}>
                 {pagedRows.map((row) => (
                   <ScannerTopHitChartCard
                     key={row.ticker}
@@ -914,7 +958,8 @@ export function ScannerTopHitsPage() {
                     chartPayload={chartPayloads[row.ticker]}
                     chartError={chartErrors[row.ticker]}
                     isChartLoading={Boolean(chartLoadingTickers[row.ticker])}
-                    onAddToMyPicks={handleAddToMyPicks}
+                    workspace={chartWorkspace}
+                    onToggleMyPick={handleToggleMyPick}
                   />
                 ))}
               </div>
@@ -1581,6 +1626,74 @@ function PositionMap({
   );
 }
 
+function ChartWorkspaceToolbar({
+  totalRows,
+  workspace,
+  onChange,
+}: {
+  totalRows: number;
+  workspace: ChartWorkspace;
+  onChange: (patch: Partial<ChartWorkspace>) => void;
+}) {
+  return (
+    <section className="scanner-chart-workspace-toolbar" aria-label="Chart workspace controls">
+      <div className="scanner-chart-workspace-summary">
+        <strong>Chart workspace</strong>
+        <span>{formatCount(totalRows)} names</span>
+      </div>
+      <div className="scanner-chart-workspace-controls">
+        <div className="scanner-chart-control-group" role="group" aria-label="Chart grid density">
+          <span>Grid</span>
+          {([2, 3, 4] as ChartGridColumns[]).map((columns) => (
+            <button
+              key={columns}
+              type="button"
+              className={`scanner-result-view-chip${workspace.gridColumns === columns ? " is-active" : ""}`}
+              aria-pressed={workspace.gridColumns === columns}
+              onClick={() => onChange({ gridColumns: columns })}
+            >
+              {columns}
+            </button>
+          ))}
+        </div>
+        <div className="scanner-chart-control-group" role="group" aria-label="Chart time range">
+          <span>Range</span>
+          {(["3m", "6m", "1y"] as ChartRange[]).map((range) => (
+            <button
+              key={range}
+              type="button"
+              className={`scanner-result-view-chip${workspace.range === range ? " is-active" : ""}`}
+              aria-pressed={workspace.range === range}
+              onClick={() => onChange({ range })}
+            >
+              {range.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <label className="scanner-chart-select-control">
+          <span>Style</span>
+          <select value={workspace.chartType} onChange={(event) => onChange({ chartType: event.target.value as ChartType })}>
+            <option value="candles">Candles</option>
+            <option value="bars">Bars</option>
+            <option value="line">Line</option>
+          </select>
+        </label>
+        <label className="scanner-chart-toggle">
+          <input type="checkbox" checked={workspace.showVolume} onChange={(event) => onChange({ showVolume: event.target.checked })} />
+          <span>Volume</span>
+        </label>
+        <details className="scanner-chart-overlay-menu">
+          <summary>Overlays</summary>
+          <label><input type="checkbox" checked={workspace.showEma8} onChange={(event) => onChange({ showEma8: event.target.checked })} /> EMA 8</label>
+          <label><input type="checkbox" checked={workspace.showEma21} onChange={(event) => onChange({ showEma21: event.target.checked })} /> EMA 21</label>
+          <label><input type="checkbox" checked={workspace.showEma60} onChange={(event) => onChange({ showEma60: event.target.checked })} /> EMA 60</label>
+          <label><input type="checkbox" checked={workspace.showSma50} onChange={(event) => onChange({ showSma50: event.target.checked })} /> SMA 50</label>
+        </details>
+      </div>
+    </section>
+  );
+}
+
 function ScannerTopHitChartCard({
   row,
   selectedScannerIds,
@@ -1592,7 +1705,8 @@ function ScannerTopHitChartCard({
   chartPayload,
   chartError,
   isChartLoading,
-  onAddToMyPicks,
+  workspace,
+  onToggleMyPick,
 }: {
   row: ScannerTopHitRow;
   selectedScannerIds: string[];
@@ -1604,34 +1718,42 @@ function ScannerTopHitChartCard({
   chartPayload: WatchlistChartResponse | null | undefined;
   chartError: string | undefined;
   isChartLoading: boolean;
-  onAddToMyPicks: (ticker: string) => Promise<void>;
+  workspace: ChartWorkspace;
+  onToggleMyPick: (ticker: string) => Promise<void>;
 }) {
-  const chartCandles = buildChartCandles(chartPayload);
+  const allCandles = buildChartCandles(chartPayload);
+  const chartCandles = sliceCandlesToRange(allCandles, workspace.range);
   const latestCandle = chartCandles[chartCandles.length - 1] ?? null;
+  const firstChartTime = chartCandles[0]?.time;
+  const ema8 = workspace.showEma8 ? sliceChartSeries(buildExponentialMovingAverage(allCandles, 8), firstChartTime) : [];
+  const ema21 = workspace.showEma21 ? sliceChartSeries(buildExponentialMovingAverage(allCandles, 21), firstChartTime) : [];
+  const ema60 = workspace.showEma60 ? sliceChartSeries(buildExponentialMovingAverage(allCandles, 60), firstChartTime) : [];
+  const sma50 = workspace.showSma50 ? sliceChartSeries(buildSimpleMovingAverage(allCandles, 50), firstChartTime) : [];
+  const strikeLabel = row.strike_zone?.label || "Context";
+  const stage = row.stage_analysis?.alias || "--";
   return (
     <article className="scanner-chart-card scanner-top-hit-chart-card">
       <div className="scanner-chart-card-header">
         <div className="scanner-chart-card-heading">
           <div className="scanner-chart-card-symbol-row">
             {canManageMyPicks ? (
-              <input
-                type="checkbox"
-                checked={alreadyMyPick}
-                disabled={alreadyMyPick || savingMyPick}
-                aria-label={alreadyMyPick ? `${row.ticker} already in My Picks` : `Add ${row.ticker} to My Picks`}
-                onChange={(event) => {
-                  if (event.target.checked) {
-                    void onAddToMyPicks(row.ticker);
-                  }
-                }}
-              />
+              <button
+                type="button"
+                className={`scanner-chart-favorite${alreadyMyPick ? " is-selected" : ""}`}
+                aria-label={`${alreadyMyPick ? "Remove" : "Add"} ${row.ticker} ${alreadyMyPick ? "from" : "to"} My Picks`}
+                aria-pressed={alreadyMyPick}
+                disabled={savingMyPick}
+                title={alreadyMyPick ? "Remove from My Picks" : "Add to My Picks"}
+                onClick={() => void onToggleMyPick(row.ticker)}
+              >
+                {savingMyPick ? "…" : alreadyMyPick ? "★" : "☆"}
+              </button>
             ) : null}
             <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>
               <span>{row.ticker}</span>
             </Link>
+            <span className="scanner-chart-card-company" title={row.company || row.industry || "Scanner hit"}>{row.company || row.industry || "Scanner hit"}</span>
           </div>
-          <strong>{row.company || row.industry || "Scanner hit"}</strong>
-          <span>{[row.sector, row.industry].filter(Boolean).join(" / ") || "Unknown group"}</span>
         </div>
         <div className="scanner-chart-card-price">
           <strong>{latestCandle ? formatPrice(latestCandle.close) : formatPrice(row.day_close)}</strong>
@@ -1640,16 +1762,10 @@ function ScannerTopHitChartCard({
       </div>
       <div className="scanner-chart-card-score-row">
         <span className="scanner-score-pill is-strong">{formatCount(row.scanner_count)} hits</span>
-        {row.rs_evidence_score != null ? (
-          <span className={`scanner-score-pill ${toneForRating(row.rs_evidence_score, 5)}`}>Evidence {row.rs_evidence_score}/{row.rs_evidence_max_score ?? 9}</span>
-        ) : null}
-        {resolveRsPhaseBadge(row) ? <span className={`scanner-score-pill ${rsPhaseBadgeClass(row)}`}>{resolveRsPhaseBadge(row)}</span> : null}
+        <span className={`scanner-score-pill ${toneForStrikeZone(row.strike_zone?.state)}`}>⚾ {strikeLabel}</span>
+        <span className="scanner-score-pill">Stage {stage}</span>
         <span className={`scanner-score-pill ${toneForRating(row.daily_rs_rating ?? row.rs_rating, 90)}`}>RS {formatRating(row.daily_rs_rating ?? row.rs_rating)}</span>
-        <span className={`scanner-score-pill ${toneForRating(row.ta_rating, 80)}`}>TA {formatRating(row.ta_rating)}</span>
-        <span className={`scanner-score-pill ${toneForRating(row.fa_rating, 80)}`}>FA {formatRating(row.fa_rating)}</span>
-        <span className={`scanner-score-pill ${toneForPositionAction(row.position_action?.action)}`}>{humanizePositionAction(row.position_action?.action)}</span>
       </div>
-      <ScannerBadges scanners={row.scanners} selectedScannerIds={selectedScannerIds} scannerNames={scannerNames} />
       <div className="scanner-chart-card-body">
         {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
         {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
@@ -1658,13 +1774,22 @@ function ScannerTopHitChartCard({
           <ScannerMiniChart
             ticker={row.ticker}
             candles={chartCandles}
-            ema9={buildExponentialMovingAverage(chartCandles, 9)}
-            ema21={chartPayload?.ema21 ?? buildExponentialMovingAverage(chartCandles, 21)}
+            chartType={workspace.chartType}
+            height={workspace.gridColumns === 2 ? 360 : 300}
+            showVolume={workspace.showVolume}
+            ema8={ema8}
+            ema21={ema21}
+            ema60={ema60}
+            sma50={sma50}
           />
         ) : null}
       </div>
       <div className="scanner-chart-card-footer">
         <span>{chartPayload?.resolved_as_of_date ? `As of ${chartPayload.resolved_as_of_date}` : `Signal ${formatLocalDate(boardSignalDate)}`}</span>
+        <details className="scanner-chart-card-details">
+          <summary>Signals</summary>
+          <ScannerBadges scanners={row.scanners} selectedScannerIds={selectedScannerIds} scannerNames={scannerNames} />
+        </details>
         <Link to={buildChartHref(row.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>Analyze Full Chart</Link>
       </div>
     </article>
@@ -2028,6 +2153,42 @@ function meetsSizePriceFloor(row: { market_cap?: number | null; day_close?: numb
     && row.day_close != null && row.day_close >= MIN_TOP_HITS_PRICE;
 }
 
+function chartPageSize(columns: ChartGridColumns) {
+  return columns === 2 ? 8 : columns === 4 ? 12 : 9;
+}
+
+function loadChartWorkspace(): ChartWorkspace {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(CHART_WORKSPACE_STORAGE_KEY) || "{}");
+    const raw = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Partial<ChartWorkspace> : {};
+    return {
+      gridColumns: raw.gridColumns === 3 || raw.gridColumns === 4 ? raw.gridColumns : 2,
+      range: raw.range === "3m" || raw.range === "1y" ? raw.range : "6m",
+      chartType: raw.chartType === "bars" || raw.chartType === "line" ? raw.chartType : "candles",
+      showVolume: raw.showVolume !== false,
+      showEma8: raw.showEma8 !== false,
+      showEma21: raw.showEma21 !== false,
+      showEma60: raw.showEma60 === true,
+      showSma50: raw.showSma50 === true,
+    };
+  } catch {
+    return DEFAULT_CHART_WORKSPACE;
+  }
+}
+
+function sliceCandlesToRange<T extends { time: string }>(candles: T[], range: ChartRange): T[] {
+  if (candles.length === 0) return candles;
+  const latest = new Date(`${candles[candles.length - 1].time}T00:00:00Z`);
+  const lookbackDays = range === "3m" ? 92 : range === "6m" ? 184 : 366;
+  const cutoff = new Date(latest);
+  cutoff.setUTCDate(cutoff.getUTCDate() - lookbackDays);
+  return candles.filter((candle) => new Date(`${candle.time}T00:00:00Z`) >= cutoff);
+}
+
+function sliceChartSeries<T extends { time: string }>(points: T[], firstTime: string | undefined): T[] {
+  return firstTime ? points.filter((point) => point.time >= firstTime) : [];
+}
+
 function resolveTopHitsPreset(name: string, store: TopHitsPresetStore): TopHitsFilterPreset | undefined {
   return BUILT_IN_TOP_HITS_PRESETS[name]?.filters ?? store.presets[name];
 }
@@ -2168,4 +2329,13 @@ function toneForRating(value: number | null | undefined, strongThreshold: number
     return "is-caution";
   }
   return "is-weak";
+}
+
+function toneForStrikeZone(value: string | null | undefined) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "ready": return "is-strong";
+    case "active": return "is-warm";
+    case "caution": return "is-caution";
+    default: return "is-neutral";
+  }
 }
