@@ -133,13 +133,12 @@ _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "canslim", "label": "O'Neil", "accent": "blue", "available": True},
     {"id": "daily_rs_new_high", "label": "RS New High", "accent": "cyan", "available": True},
     {"id": "rs", "label": "RS NH Before Price", "accent": "cyan", "available": True},
-    {"id": "rs_phase", "label": "RS Phase", "accent": "cyan", "available": True},
     {"id": "weekly_candidate_pool", "label": "Weekly Candidate Pool", "accent": "indigo", "available": True},
     {"id": "one_year_winners", "label": "Wey How", "accent": "lime", "available": True},
     {"id": "kai_s1", "label": "Kai S1", "accent": "cyan", "available": True},
     {"id": "kai_s2", "label": "Kai S2", "accent": "cyan", "available": True},
     {"id": "venu_scanner", "label": "Venu Scanner", "accent": "emerald", "available": True},
-    {"id": "high_volume_close", "label": "High Volume Close (HVC)", "accent": "cyan", "available": False},
+    {"id": "elite_rs_hv1", "label": "Elite RS + HV1", "accent": "cyan", "available": True},
 )
 _GURU_AVAILABLE_SCANNER_IDS = frozenset(
     str(item["id"]) for item in _GURU_SCANNER_DEFINITIONS if bool(item.get("available"))
@@ -262,7 +261,7 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "id": "elite_rs_hv1",
         "strategy_id": "elite_rs_hv1",
         "label": "Elite RS + HV1",
-        "description": "Leaders with RS above the current threshold and a fresh HV1 or HVE volume signature inside the recent 5 to 10 bar window.",
+        "description": "Leaders with RS above the current threshold and an HV1 or HVE volume signature within the latest 3 trading bars.",
         "timeframe": "Daily",
         "accent": "cyan",
         "bias_group": "bullish",

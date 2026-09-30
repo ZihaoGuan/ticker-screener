@@ -112,6 +112,47 @@ class StrikeZoneTests(unittest.TestCase):
         self.assertEqual(trigger_group["signals"][0]["label"], "Wyckoff buy signal")
         self.assertEqual(trigger_group["signals"][0]["points"], 35)
 
+    def test_vcs_critical_tightness_adds_fresh_setup_points(self) -> None:
+        result = build_strike_zone(
+            {
+                "atr_to_sma50": 1.0,
+                "earnings_days": 14,
+                "scanners": [{"id": "vcs_critical_tightness", "sort_date": "2026-09-25"}],
+            },
+            as_of_date=dt.date(2026, 9, 27),
+        )
+
+        setup_group = next(item for item in result["score_breakdown"]["groups"] if item["id"] == "setup")
+        self.assertEqual(setup_group["awarded_points"], 20)
+        self.assertEqual(setup_group["signals"][0]["label"], "VCS Critical Tight")
+        self.assertEqual(result["primary_signal"], "VCS Critical Tight")
+
+    def test_macd_golden_cross_is_a_fresh_five_point_confirmation(self) -> None:
+        fresh = build_strike_zone(
+            {
+                "atr_to_sma50": 1.0,
+                "earnings_days": 14,
+                "scanners": [{"id": "macd_golden_cross", "sort_date": "2026-09-25"}],
+            },
+            as_of_date=dt.date(2026, 9, 27),
+        )
+        stale = build_strike_zone(
+            {
+                "atr_to_sma50": 1.0,
+                "earnings_days": 14,
+                "scanners": [{"id": "macd_golden_cross", "sort_date": "2026-09-10"}],
+            },
+            as_of_date=dt.date(2026, 9, 27),
+        )
+
+        fresh_group = next(item for item in fresh["score_breakdown"]["groups"] if item["id"] == "confirmation")
+        stale_group = next(item for item in stale["score_breakdown"]["groups"] if item["id"] == "confirmation")
+        self.assertEqual(fresh_group["awarded_points"], 5)
+        self.assertEqual(fresh_group["signals"][0]["label"], "MACD Golden Cross")
+        self.assertTrue(fresh_group["signals"][0]["fresh"])
+        self.assertEqual(stale_group["awarded_points"], 0)
+        self.assertFalse(stale_group["signals"][0]["fresh"])
+
 
 if __name__ == "__main__":
     unittest.main()

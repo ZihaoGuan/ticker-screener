@@ -117,11 +117,14 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["rmv"]["rank"], 1)
         self.assertEqual(payload["rows"][0]["stage_analysis"]["alias"], "2B")
         self.assertEqual(payload["rows"][0]["strike_zone"]["state"], "ready")
-        self.assertEqual(payload["definitions"][-1]["id"], "high_volume_close")
+        self.assertEqual(payload["definitions"][-1]["id"], "elite_rs_hv1")
         self.assertNotIn("club_97", {item["id"] for item in payload["definitions"]})
         self.assertNotIn("liquid_growth", {item["id"] for item in payload["definitions"]})
         definitions = {item["id"]: item for item in payload["definitions"]}
-        self.assertTrue({"daily_rs_new_high", "rs", "rs_phase", "kai_s1", "kai_s2", "venu_scanner", "weekly_candidate_pool", "one_year_winners"}.issubset(definitions))
+        self.assertTrue({"daily_rs_new_high", "rs", "kai_s1", "kai_s2", "venu_scanner", "weekly_candidate_pool", "one_year_winners"}.issubset(definitions))
+        self.assertNotIn("rs_phase", definitions)
+        self.assertIn("elite_rs_hv1", definitions)
+        self.assertNotIn("high_volume_close", definitions)
         self.assertNotIn("ma_pullback_retest", definitions)
         self.assertEqual(definitions["one_year_winners"]["label"], "Wey How")
 

@@ -108,7 +108,7 @@ class AppConfig:
     peg_min_adr_pct: float = 2.0
     peg_min_avg_volume: int = 500_000
     earnings_gap_signal_lookback_days: int = 15
-    elite_rs_recent_volume_window_days: int = 10
+    elite_rs_recent_volume_window_days: int = 3
     peg_sean_min_setup_age_days: int = 2
     peg_sean_min_adr_pct: float = 2.0
     peg_sean_min_avg_volume: int = 500_000
