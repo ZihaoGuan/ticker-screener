@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link } from "react-router-dom";
 import { preloadChartsPage } from "../App";
 import { useAuth } from "../auth/AuthContext";
@@ -9,11 +9,12 @@ import { fetchJson } from "../lib/api";
 import { buildChartCandles, buildExponentialMovingAverage } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
-import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
+import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPickRow, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
 type ViewMode = "list" | "charts" | "guru" | "position" | "etf-portfolios";
+type GuruSortKey = "default" | "stage" | "rs" | "rsPhase" | "strike";
 type TopHitsFilterPreset = {
   sectorFilter: string;
   sizePriceFloorOnly: boolean;
@@ -113,6 +114,7 @@ export function ScannerTopHitsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(initialFilters.viewMode);
   const [currentPage, setCurrentPage] = useState(1);
   const [myPickTickers, setMyPickTickers] = useState<Set<string>>(new Set());
+  const [myPickIdsByTicker, setMyPickIdsByTicker] = useState<Record<string, number>>({});
   const [savingMyPickTickers, setSavingMyPickTickers] = useState<Record<string, boolean>>({});
   const [chartPayloads, setChartPayloads] = useState<Record<string, WatchlistChartResponse | null | undefined>>({});
   const [chartErrors, setChartErrors] = useState<Record<string, string>>({});
@@ -211,14 +213,17 @@ export function ScannerTopHitsPage() {
   useEffect(() => {
     if (!canManageMyPicks) {
       setMyPickTickers(new Set());
+      setMyPickIdsByTicker({});
       return;
     }
     void fetchJson<MyPicksContextResponse>("/api/admin/my-picks")
       .then((response) => {
         setMyPickTickers(new Set(response.rows.map((row) => row.ticker.toUpperCase())));
+        setMyPickIdsByTicker(Object.fromEntries(response.rows.map((row) => [row.ticker.toUpperCase(), row.id])));
       })
       .catch(() => {
         setMyPickTickers(new Set());
+        setMyPickIdsByTicker({});
       });
   }, [canManageMyPicks]);
 
@@ -414,7 +419,7 @@ export function ScannerTopHitsPage() {
     setSavingMyPickTickers((current) => ({ ...current, [normalizedTicker]: true }));
     setMyPicksNotice("");
     try {
-      await fetchJson<{ ok: boolean; pick: { ticker: string } }>("/api/admin/my-picks", {
+      const response = await fetchJson<{ ok: boolean; pick: MyPickRow }>("/api/admin/my-picks", {
         method: "POST",
         body: JSON.stringify({
           ticker: normalizedTicker,
@@ -422,9 +427,48 @@ export function ScannerTopHitsPage() {
         }),
       });
       setMyPickTickers((current) => new Set([...current, normalizedTicker]));
+      setMyPickIdsByTicker((current) => ({ ...current, [normalizedTicker]: response.pick.id }));
       setMyPicksNotice(`${normalizedTicker} added to My Picks.`);
     } catch (error) {
       setMyPicksNotice(error instanceof Error ? error.message : "Failed to add ticker to My Picks.");
+    } finally {
+      setSavingMyPickTickers((current) => {
+        const next = { ...current };
+        delete next[normalizedTicker];
+        return next;
+      });
+    }
+  };
+
+  const handleToggleMyPick = async (ticker: string) => {
+    const normalizedTicker = ticker.trim().toUpperCase();
+    if (!normalizedTicker || savingMyPickTickers[normalizedTicker]) return;
+    if (!myPickTickers.has(normalizedTicker)) {
+      await handleAddToMyPicks(normalizedTicker);
+      return;
+    }
+    const pickId = myPickIdsByTicker[normalizedTicker];
+    if (pickId == null) {
+      setMyPicksNotice(`Could not resolve ${normalizedTicker} in My Picks. Refresh and try again.`);
+      return;
+    }
+    setSavingMyPickTickers((current) => ({ ...current, [normalizedTicker]: true }));
+    setMyPicksNotice("");
+    try {
+      await fetchJson<{ ok: boolean }>(`/api/admin/my-picks/${pickId}/delete`, { method: "POST" });
+      setMyPickTickers((current) => {
+        const next = new Set(current);
+        next.delete(normalizedTicker);
+        return next;
+      });
+      setMyPickIdsByTicker((current) => {
+        const next = { ...current };
+        delete next[normalizedTicker];
+        return next;
+      });
+      setMyPicksNotice(`${normalizedTicker} removed from My Picks.`);
+    } catch (error) {
+      setMyPicksNotice(error instanceof Error ? error.message : "Failed to remove ticker from My Picks.");
     } finally {
       setSavingMyPickTickers((current) => {
         const next = { ...current };
@@ -801,7 +845,10 @@ export function ScannerTopHitsPage() {
                 scannerGroupsOnly={guruScannerGroupsOnly}
                 selectedScannerGroupCount={nonEmptyScannerGroupCount}
                 myPickTickers={myPickTickers}
+                savingMyPickTickers={savingMyPickTickers}
+                canManageMyPicks={canManageMyPicks}
                 onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
+                onToggleMyPick={handleToggleMyPick}
               />
             ) : viewMode === "position" ? (
               <PositionMap
@@ -809,7 +856,10 @@ export function ScannerTopHitsPage() {
                 scannerGroupsOnly={guruScannerGroupsOnly}
                 selectedScannerGroupCount={nonEmptyScannerGroupCount}
                 myPickTickers={myPickTickers}
+                savingMyPickTickers={savingMyPickTickers}
+                canManageMyPicks={canManageMyPicks}
                 onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
+                onToggleMyPick={handleToggleMyPick}
               />
             ) : <>
             <div className="scanner-top-hits-toolbar">
@@ -1017,6 +1067,52 @@ function ScannerGroupsOnlyFilter({ checked, groupCount, onChange }: { checked: b
   );
 }
 
+function useHorizontalDragScroll() {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const drag = useRef({ pointerId: -1, startX: 0, startScrollLeft: 0, moved: false });
+  const suppressClick = useRef(false);
+
+  const finishDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (drag.current.pointerId !== event.pointerId) return;
+    suppressClick.current = drag.current.moved;
+    drag.current.pointerId = -1;
+    event.currentTarget.classList.remove("is-dragging");
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  return {
+    ref: scrollRef,
+    onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => {
+      const element = scrollRef.current;
+      if (event.pointerType !== "mouse" || event.button !== 0 || !element || element.scrollWidth <= element.clientWidth) return;
+      suppressClick.current = false;
+      drag.current = { pointerId: event.pointerId, startX: event.clientX, startScrollLeft: element.scrollLeft, moved: false };
+    },
+    onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => {
+      const element = scrollRef.current;
+      if (!element || drag.current.pointerId !== event.pointerId) return;
+      const distance = event.clientX - drag.current.startX;
+      if (!drag.current.moved && Math.abs(distance) < 5) return;
+      if (!drag.current.moved) element.setPointerCapture(event.pointerId);
+      drag.current.moved = true;
+      element.classList.add("is-dragging");
+      element.scrollLeft = drag.current.startScrollLeft - distance;
+      event.preventDefault();
+    },
+    onPointerUp: finishDrag,
+    onPointerCancel: finishDrag,
+    onClickCapture: (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!suppressClick.current) return;
+      suppressClick.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    onDragStart: (event: ReactDragEvent<HTMLDivElement>) => event.preventDefault(),
+  };
+}
+
 function GuruBoard({
   rows,
   definitions,
@@ -1025,7 +1121,10 @@ function GuruBoard({
   scannerGroupsOnly,
   selectedScannerGroupCount,
   myPickTickers,
+  savingMyPickTickers,
+  canManageMyPicks,
   onScannerGroupsOnlyChange,
+  onToggleMyPick,
 }: {
   rows: ScannerTopHitRow[];
   definitions: NonNullable<ScannerTopHitsResponse["guru_board"]>["definitions"];
@@ -1034,11 +1133,21 @@ function GuruBoard({
   scannerGroupsOnly: boolean;
   selectedScannerGroupCount: number;
   myPickTickers: Set<string>;
+  savingMyPickTickers: Record<string, boolean>;
+  canManageMyPicks: boolean;
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
+  onToggleMyPick: (ticker: string) => Promise<void>;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const [strikeFilter, setStrikeFilter] = useState<"all" | "active" | "ready" | "context" | "avoid">("all");
-  const visibleRows = strikeFilter === "all" ? rows : rows.filter((row) => row.strike_zone?.state === strikeFilter);
+  const [guruSortBy, setGuruSortBy] = useState<GuruSortKey>("default");
+  const [guruSortDirection, setGuruSortDirection] = useState<SortDirection>("desc");
+  const horizontalDragScroll = useHorizontalDragScroll();
+  const visibleRows = useMemo(() => {
+    const filtered = strikeFilter === "all" ? rows : rows.filter((row) => row.strike_zone?.state === strikeFilter);
+    if (guruSortBy === "default") return filtered;
+    return [...filtered].sort((left, right) => compareGuruRows(left, right, guruSortBy, guruSortDirection));
+  }, [guruSortBy, guruSortDirection, rows, strikeFilter]);
   return (
     <section className="guru-board" aria-label="Guru scanner board">
       <div className="guru-board-summary">
@@ -1054,10 +1163,36 @@ function GuruBoard({
             </button>
           ))}
         </div>
+        <div className="guru-sort-controls">
+          <label>
+            <span>Sort</span>
+            <select value={guruSortBy} onChange={(event) => {
+              const nextSort = event.target.value as GuruSortKey;
+              setGuruSortBy(nextSort);
+              setGuruSortDirection(nextSort === "stage" || nextSort === "rsPhase" ? "asc" : "desc");
+            }}>
+              <option value="default">Board priority</option>
+              <option value="stage">Stage</option>
+              <option value="rs">Daily RS score</option>
+              <option value="rsPhase">RS Phase</option>
+              <option value="strike">Strike score</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="ghost-button guru-sort-direction"
+            disabled={guruSortBy === "default"}
+            aria-label={guruSortDirection === "asc" ? "Sort ascending" : "Sort descending"}
+            title={guruSortDirection === "asc" ? "Ascending" : "Descending"}
+            onClick={() => setGuruSortDirection((current) => current === "asc" ? "desc" : "asc")}
+          >
+            {guruSortDirection === "asc" ? "↑" : "↓"}
+          </button>
+        </div>
         <ScannerGroupsOnlyFilter checked={scannerGroupsOnly} groupCount={selectedScannerGroupCount} onChange={onScannerGroupsOnlyChange} />
       </div>
       {scannerGroupsOnly && selectedScannerGroupCount > 0 && visibleRows.length === 0 ? <p className="panel-copy">No Guru names match the selected scanner groups and Strike Zone filter.</p> : null}
-      <div className="guru-board-scroll">
+      <div className="guru-board-scroll is-drag-scroll" {...horizontalDragScroll}>
         {definitions.map((definition) => {
           const columnRows = visibleRows.filter((row) => row.scanners.some((scanner) => normalizeScannerId(scanner.id) === definition.id));
           const visibleCount = visibleCounts[definition.id] ?? GURU_COLUMN_PAGE_SIZE;
@@ -1070,7 +1205,16 @@ function GuruBoard({
               </header>
               {!definition.available ? <p className="guru-column-unavailable">Rules not configured yet</p> : null}
               <div className="guru-column-cards">
-                {columnRows.slice(0, visibleCount).map((row) => <GuruTickerCard isMyPick={myPickTickers.has(row.ticker)} key={row.ticker} row={row} />)}
+                {columnRows.slice(0, visibleCount).map((row) => (
+                  <GuruTickerCard
+                    canManageMyPicks={canManageMyPicks}
+                    isMyPick={myPickTickers.has(row.ticker)}
+                    isSavingMyPick={Boolean(savingMyPickTickers[row.ticker])}
+                    key={row.ticker}
+                    onToggleMyPick={onToggleMyPick}
+                    row={row}
+                  />
+                ))}
               </div>
               {remainingCount > 0 ? <button className="ghost-button guru-column-load-more" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [definition.id]: visibleCount + GURU_COLUMN_PAGE_SIZE }))}>
                 Load 30 more ({formatCount(remainingCount)} remaining)
@@ -1084,7 +1228,19 @@ function GuruBoard({
   );
 }
 
-function GuruTickerCard({ row, isMyPick }: { row: ScannerTopHitRow; isMyPick: boolean }) {
+function GuruTickerCard({
+  row,
+  isMyPick,
+  isSavingMyPick,
+  canManageMyPicks,
+  onToggleMyPick,
+}: {
+  row: ScannerTopHitRow;
+  isMyPick: boolean;
+  isSavingMyPick: boolean;
+  canManageMyPicks: boolean;
+  onToggleMyPick: (ticker: string) => Promise<void>;
+}) {
   const stage = row.stage_analysis?.alias || "--";
   const strike = row.strike_zone?.label || "Context";
   const strikeTone = row.strike_zone?.state || "context";
@@ -1096,26 +1252,41 @@ function GuruTickerCard({ row, isMyPick }: { row: ScannerTopHitRow; isMyPick: bo
   const signalAge = row.strike_zone?.signal_age_days;
   const strikeTitle = buildStrikeZoneTitle(row.strike_zone);
   return (
-    <Link className="guru-ticker-card" to={buildChartHref(row.ticker)} title={`${row.ticker} chart`}>
-      <div className="guru-ticker-main">
-        <strong>{row.ticker}<MyPickIndicator ticker={row.ticker} visible={isMyPick} /></strong>
-        <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
-      </div>
-      <div className="guru-ticker-badges">
-        <span title="Guru scanner overlap">{row.scanner_count}×</span>
-        <SectorTag sector={row.sector} />
-        <span title="Weinstein stage">{stage}</span>
-        <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
-        {resolveRsPhaseBadge(row) ? <span className={rsPhaseBadgeClass(row)} title="RS Phase lifecycle">{resolveRsPhaseBadge(row)}</span> : null}
-        {rmv ? <span title="Relative Measured Volatility tightness rank">{rmv}</span> : null}
-      </div>
-      <div className="guru-ticker-context">
-        <span title="ATR distance from SMA50">📏 {atr}</span>
-        <span title={earnings}>📅 {row.earnings_days == null ? "TBD" : `${row.earnings_days}d`}</span>
-        <span className={`guru-strike is-${strikeTone}`} title={strikeTitle}>⚾ {strike}{strikeScore == null ? "" : ` ${strikeScore}`}</span>
-        {primarySignal ? <span className="guru-primary-signal" title={`Primary trigger${signalAge == null ? "" : ` · ${signalAge}d ago`}`}>⚡ {primarySignal}</span> : null}
-      </div>
-    </Link>
+    <article className="guru-ticker-card">
+      <Link className="guru-ticker-card-link" to={buildChartHref(row.ticker)} title={`${row.ticker} chart`}>
+        <div className="guru-ticker-main">
+          <strong>{row.ticker}</strong>
+          <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
+        </div>
+        <div className="guru-ticker-badges">
+          <span title={buildScannerHitsTitle(row)}>{row.scanner_count}×</span>
+          <SectorTag sector={row.sector} />
+          <span title="Weinstein stage">{stage}</span>
+          <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
+          {resolveRsPhaseBadge(row) ? <span className={rsPhaseBadgeClass(row)} title="RS Phase lifecycle">{resolveRsPhaseBadge(row)}</span> : null}
+          {rmv ? <span title="Relative Measured Volatility tightness rank">{rmv}</span> : null}
+        </div>
+        <div className="guru-ticker-context">
+          <span title="ATR distance from SMA50">📏 {atr}</span>
+          <span title={earnings}>📅 {row.earnings_days == null ? "TBD" : `${row.earnings_days}d`}</span>
+          <span className={`guru-strike is-${strikeTone}`} title={strikeTitle}>⚾ {strike}{strikeScore == null ? "" : ` ${strikeScore}`}</span>
+          {primarySignal ? <span className="guru-primary-signal" title={`Primary trigger${signalAge == null ? "" : ` · ${signalAge}d ago`}`}>⚡ {primarySignal}</span> : null}
+        </div>
+      </Link>
+      {canManageMyPicks ? (
+        <button
+          type="button"
+          className={`guru-my-pick-toggle${isMyPick ? " is-selected" : ""}`}
+          aria-label={`${isMyPick ? "Remove" : "Add"} ${row.ticker} ${isMyPick ? "from" : "to"} My Picks`}
+          aria-pressed={isMyPick}
+          disabled={isSavingMyPick}
+          title={isMyPick ? "Remove from My Picks" : "Add to My Picks"}
+          onClick={() => void onToggleMyPick(row.ticker)}
+        >
+          {isSavingMyPick ? "…" : isMyPick ? "★" : "☆"}
+        </button>
+      ) : null}
+    </article>
   );
 }
 
@@ -1147,6 +1318,43 @@ function buildStrikeZoneTitle(strikeZone: ScannerTopHitRow["strike_zone"]): stri
     lines.push("", "Warnings:", ...(strikeZone.warnings ?? []).map((warning) => `• ${warning}`));
   }
   return lines.filter((line): line is string => typeof line === "string").join("\n");
+}
+
+function buildScannerHitsTitle(row: ScannerTopHitRow): string {
+  const labels = Array.from(new Set(row.scanners.map((scanner) => scanner.label || scanner.id).filter(Boolean)));
+  if (labels.length === 0) return `${row.scanner_count} scanner hits`;
+  return [`${row.scanner_count} scanner hits`, ...labels.map((label) => `• ${label}`)].join("\n");
+}
+
+function compareGuruRows(left: ScannerTopHitRow, right: ScannerTopHitRow, sortBy: Exclude<GuruSortKey, "default">, direction: SortDirection) {
+  let comparison = 0;
+  if (sortBy === "stage") {
+    comparison = compareNullableNumber(guruStageRank(left), guruStageRank(right), direction);
+  } else if (sortBy === "rs") {
+    comparison = compareNullableNumber(left.daily_rs_rating ?? left.rs_rating, right.daily_rs_rating ?? right.rs_rating, direction);
+  } else if (sortBy === "rsPhase") {
+    comparison = compareNullableNumber(guruRsPhaseRank(left), guruRsPhaseRank(right), direction)
+      || compareNullableNumber(resolveRsPhaseActiveDays(left), resolveRsPhaseActiveDays(right), direction);
+  } else if (sortBy === "strike") {
+    comparison = compareNullableNumber(left.strike_zone?.score ?? null, right.strike_zone?.score ?? null, direction);
+  }
+  return comparison || left.ticker.localeCompare(right.ticker);
+}
+
+function guruStageRank(row: ScannerTopHitRow): number | null {
+  const match = String(row.stage_analysis?.alias || "").toUpperCase().match(/([1-4])\s*([A-Z])?/);
+  if (!match) return null;
+  const stage = Number(match[1]);
+  const stagePriority: Record<number, number> = { 2: 0, 1: 10, 3: 20, 4: 30 };
+  const substage = match[2] ? match[2].charCodeAt(0) - 65 : 0;
+  return (stagePriority[stage] ?? 40) + substage;
+}
+
+function guruRsPhaseRank(row: ScannerTopHitRow): number | null {
+  const state = String(row.rs_phase_state ?? row.relative_strength_evidence?.rs_phase_state ?? "").toLowerCase();
+  const ranks: Record<string, number> = { new: 0, quick_reclaim: 1, established: 2, mature: 3 };
+  if (state in ranks) return ranks[state];
+  return resolveRsPhaseActiveDays(row) == null ? null : 4;
 }
 
 const POSITION_BUCKETS = [
@@ -1300,13 +1508,19 @@ function PositionMap({
   scannerGroupsOnly,
   selectedScannerGroupCount,
   myPickTickers,
+  savingMyPickTickers,
+  canManageMyPicks,
   onScannerGroupsOnlyChange,
+  onToggleMyPick,
 }: {
   rows: ScannerTopHitRow[];
   scannerGroupsOnly: boolean;
   selectedScannerGroupCount: number;
   myPickTickers: Set<string>;
+  savingMyPickTickers: Record<string, boolean>;
+  canManageMyPicks: boolean;
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
+  onToggleMyPick: (ticker: string) => Promise<void>;
 }) {
   return (
     <section className="guru-board" aria-label="Market position map">
@@ -1323,7 +1537,16 @@ function PositionMap({
           const bucketRows = rows.filter((row) => (row.position_bucket || "no_data") === id);
           return <article className="guru-column position-map-column" key={id}>
             <header><strong>{formatCount(bucketRows.length)}</strong><span>{label}</span></header>
-            <div className="guru-column-cards">{bucketRows.slice(0, 30).map((row) => <GuruTickerCard isMyPick={myPickTickers.has(row.ticker)} key={row.ticker} row={row} />)}</div>
+            <div className="guru-column-cards">{bucketRows.slice(0, 30).map((row) => (
+              <GuruTickerCard
+                canManageMyPicks={canManageMyPicks}
+                isMyPick={myPickTickers.has(row.ticker)}
+                isSavingMyPick={Boolean(savingMyPickTickers[row.ticker])}
+                key={row.ticker}
+                onToggleMyPick={onToggleMyPick}
+                row={row}
+              />
+            ))}</div>
           </article>;
         })}
       </div>
