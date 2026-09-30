@@ -40,9 +40,10 @@ const GURU_COLUMN_PAGE_SIZE = 30;
 const MIN_TOP_HITS_MARKET_CAP = 1_000_000_000;
 const MIN_TOP_HITS_PRICE = 5;
 const MOMENTUM_ETF_ACCENTS: Record<string, string> = { FMTM: "amber", SPMO: "teal", PTF: "blue", FFTY: "cyan" };
-const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "qullamaggie", "sean_breakout", "venu_scanner"]);
+const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "best_winners", "qullamaggie", "sean_breakout", "venu_scanner"]);
 const PINNED_SCANNER_OPTIONS = [
   { id: "weekly_candidate_pool", label: "Weekly Candidate Pool" },
+  { id: "best_winners", label: "Best Winners" },
   { id: "qullamaggie", label: "Qullamaggie" },
 ];
 const FILTER_PRESETS_STORAGE_KEY = "top-hits-filter-presets";

@@ -5,6 +5,7 @@ import datetime as dt
 from typing import Callable
 
 from .bb_squeeze_screen import find_recent_bb_squeeze_hit
+from .best_winners_screen import BEST_WINNERS_HISTORY_DAYS, find_best_winners_hit
 from .bollinger_band_screen import find_recent_bollinger_band_breakout_hit
 from .config import AppConfig
 from .base_detection_screen import find_active_base_detection_hit
@@ -583,6 +584,31 @@ def _run_weekly_candidate_pool(bundle: ScreenerInputBundle) -> ScreenerEvaluatio
             "ticker": bundle.ticker,
             "daily_rs_rating": payload["daily_rs_rating"],
             "adr_pct_20": payload["adr_pct_20"],
+        },
+        reasons=tuple(str(item) for item in payload["reasons"]),
+        hit=payload,
+    )
+
+
+def _run_best_winners(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_best_winners_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        signal_date=bundle.as_of_date,
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "adr_pct_20": payload["adr_pct_20"],
+            "return_3m_pct": payload["return_3m_pct"],
+            "return_6m_pct": payload["return_6m_pct"],
+            "return_1y_pct": payload["return_1y_pct"],
+            "avg_dollar_volume_30": payload["avg_dollar_volume_30"],
+            "session_dollar_volume": payload["session_dollar_volume"],
         },
         reasons=tuple(str(item) for item in payload["reasons"]),
         hit=payload,
@@ -1893,6 +1919,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=WEEKLY_CANDIDATE_POOL_HISTORY_DAYS,
             warmup_trading_days=20,
             evaluator=_run_weekly_candidate_pool,
+        ),
+        "best_winners": ScreenerSpec(
+            id="best_winners",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=BEST_WINNERS_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_best_winners,
         ),
         "one_year_winners": ScreenerSpec(
             id="one_year_winners",

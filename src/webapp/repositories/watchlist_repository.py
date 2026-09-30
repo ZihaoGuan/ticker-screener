@@ -370,6 +370,7 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("lost_21ema", "lost_21ema", "Lost 21EMA"),
         ("trend_template", "trend_template", "Trend Template"),
         ("minervini_vcp_detector", "minervini_vcp_detector", "Minervini VCP Detector"),
+        ("best_winners", "best_winners", "Best Winners"),
         ("kai_s1", "kai_s1", "Kai S1"),
         ("kai_s2", "kai_s2", "Kai S2"),
         ("one_year_winners", "one_year_winners", "1Y Winners > $10B"),
