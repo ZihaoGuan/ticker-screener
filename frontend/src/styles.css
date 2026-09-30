@@ -5698,6 +5698,8 @@ a {
 .guru-board-summary { display: flex; flex-wrap: wrap; gap: 10px 20px; color: #a1a1aa; font-size: 13px; }
 .guru-board-summary strong { color: #f4f4f5; }
 .guru-board-scroll { display: flex; align-items: flex-start; gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.guru-board-scroll.is-drag-scroll { cursor: grab; overscroll-behavior-inline: contain; }
+.guru-board-scroll.is-dragging, .guru-board-scroll.is-dragging * { cursor: grabbing !important; user-select: none; }
 .guru-column { flex: 0 0 224px; min-height: 180px; border: 1px solid #30323a; border-radius: 10px; overflow: hidden; background: #101218; }
 .guru-column > header { display: grid; justify-items: center; gap: 2px; padding: 10px 8px; color: #111114; background: #fbbf24; }
 .guru-column > header strong { font-size: 18px; line-height: 1; }
@@ -5719,11 +5721,16 @@ a {
 .guru-column-cards { display: grid; gap: 5px; padding: 7px; }
 .guru-column-unavailable { margin: 10px; color: #71717a; font-size: 12px; text-align: center; }
 .guru-column-load-more { width: calc(100% - 14px); margin: 0 7px 7px; font-size: 11px; }
-.guru-ticker-card { display: grid; gap: 5px; padding: 8px; border-left: 3px solid #22c55e; border-radius: 5px; background: #202636; color: #e4e4e7; text-decoration: none; }
-.guru-ticker-card:hover, .guru-ticker-card:focus-visible { outline: 2px solid #fbbf24; outline-offset: 1px; }
+.guru-ticker-card { position: relative; padding: 8px; border-left: 3px solid #22c55e; border-radius: 5px; background: #202636; color: #e4e4e7; }
+.guru-ticker-card:hover, .guru-ticker-card:focus-within { outline: 2px solid #fbbf24; outline-offset: 1px; }
+.guru-ticker-card-link { display: grid; gap: 5px; color: inherit; text-decoration: none; }
 .guru-ticker-main, .guru-ticker-badges, .guru-ticker-context { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+.guru-ticker-main { padding-right: 24px; }
 .guru-ticker-main strong { font-size: 13px; }
 .guru-my-pick-indicator { margin-left: 5px; color: #facc15; font-size: 12px; text-shadow: 0 0 8px rgb(250 204 21 / 35%); }
+.guru-my-pick-toggle { position: absolute; top: 4px; right: 5px; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: #71717a; cursor: pointer; font-size: 17px; line-height: 1; }
+.guru-my-pick-toggle:hover, .guru-my-pick-toggle:focus-visible, .guru-my-pick-toggle.is-selected { color: #facc15; text-shadow: 0 0 8px rgb(250 204 21 / 35%); }
+.guru-my-pick-toggle:disabled { cursor: wait; opacity: 0.65; }
 .guru-ticker-main .ticker-change { font-size: 12px; }
 .guru-ticker-badges { flex-wrap: wrap; justify-content: flex-start; color: #a7f3d0; font-size: 10px; }
 .guru-ticker-badges span, .guru-strike { max-width: 100%; padding: 1px 4px; border: 1px solid #3f5567; border-radius: 4px; overflow-wrap: anywhere; }
@@ -5736,6 +5743,10 @@ a {
 .guru-primary-signal { max-width: 100%; color: #a7f3d0; overflow-wrap: anywhere; }
 .guru-board-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 0 0 10px; }
 .guru-strike-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.guru-sort-controls { display: flex; align-items: flex-end; gap: 6px; }
+.guru-sort-controls label { display: grid; gap: 4px; color: #a1a1aa; font-size: 11px; }
+.guru-sort-controls select { min-height: 34px; padding: 5px 28px 5px 8px; border: 1px solid #3f3f46; border-radius: 6px; background: #111114; color: #e4e4e7; }
+.guru-sort-direction { min-width: 34px; min-height: 34px; padding: 4px 8px; }
 .guru-scanner-group-filter { margin-left: auto; }
 .guru-board-note { margin: 0; }
 @media (min-width: 768px) {
