@@ -5749,6 +5749,9 @@ a {
 .guru-sort-direction { min-width: 34px; min-height: 34px; padding: 4px 8px; }
 .guru-scanner-group-filter { margin-left: auto; }
 .guru-board-note { margin: 0; }
+.my-picks-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); gap: 12px; padding: 12px 0; }
+.my-pick-guru-card { min-height: 132px; }
+.my-pick-card-note { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (min-width: 768px) {
   .data-table .pinned-ticker,
   .data-table .pinned-pick {

@@ -18,7 +18,8 @@ const EMPTY_CONTEXT: MyPicksContextResponse = {
 };
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
-type MyPicksViewMode = "list" | "charts";
+const CARD_PAGE_SIZE = 30;
+type MyPicksViewMode = "list" | "charts" | "cards";
 type MyPicksSortKey =
   | "added_at"
   | "ticker"
@@ -125,7 +126,7 @@ export function MyPicksPage() {
     setCurrentPage(1);
   }, [groupByDate, search, sortBy, sortDirection, viewMode]);
 
-  const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE : LIST_PAGE_SIZE;
+  const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE : viewMode === "cards" ? CARD_PAGE_SIZE : LIST_PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const normalizedPage = Math.min(currentPage, totalPages);
   const pagedRows = useMemo(() => {
@@ -300,7 +301,7 @@ export function MyPicksPage() {
           </div>
           <div className="earnings-metric">
             <span className="eyebrow">View</span>
-            <strong>{viewMode === "charts" ? "Charts" : "List"}</strong>
+            <strong>{viewMode === "charts" ? "Charts" : viewMode === "cards" ? "Cards" : "List"}</strong>
           </div>
           <div className="earnings-metric">
             <span className="eyebrow">Latest Added</span>
@@ -403,6 +404,7 @@ export function MyPicksPage() {
             <select value={viewMode} onChange={(event) => setViewMode(event.target.value as MyPicksViewMode)}>
               <option value="list">List</option>
               <option value="charts">Charts</option>
+              <option value="cards">Cards</option>
             </select>
           </label>
           <div className="weekly-watchlist-actions">
@@ -452,7 +454,7 @@ export function MyPicksPage() {
       <section className="panel earnings-calendar-panel">
         <div className="panel-head earnings-calendar-head">
           <div>
-            <h2>{viewMode === "charts" ? "Chart View" : groupByDate ? "Grouped Picks" : "All Picks"}</h2>
+            <h2>{viewMode === "charts" ? "Chart View" : viewMode === "cards" ? "Card View" : groupByDate ? "Grouped Picks" : "All Picks"}</h2>
             <span className="eyebrow">{formatCount(filteredRows.length)} names</span>
           </div>
         </div>
@@ -475,7 +477,7 @@ export function MyPicksPage() {
               const chartError = chartErrors[row.ticker];
               const latestCandle = chartCandles[chartCandles.length - 1] ?? null;
               return (
-                <article key={row.id} className="scanner-chart-card">
+                <article key={row.id} className="scanner-chart-card scanner-top-hit-chart-card">
                   <div className="scanner-chart-card-header">
                     <div className="scanner-chart-card-heading">
                       <div className="scanner-chart-card-symbol-row">
@@ -524,6 +526,14 @@ export function MyPicksPage() {
             })}
           </div>
         ) : null}
+        {viewMode === "cards" && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
+        {viewMode === "cards" && filteredRows.length > 0 ? (
+          <div className="my-picks-card-grid">
+            {pagedRows.map((row) => (
+              <MyPickGuruCard key={row.id} row={row} isSaving={isSaving} onDelete={handleDelete} />
+            ))}
+          </div>
+        ) : null}
         {viewMode === "list" && !groupByDate && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
         {viewMode === "list" && !groupByDate && filteredRows.length > 0 ? <PicksTable rows={pagedRows} checklistItems={context.fundamental_checklist ?? []} checklistSaving={checklistSaving} onToggleChecklist={handleChecklistToggle} onDelete={handleDelete} isSaving={isSaving} sortBy={sortBy} sortDirection={sortDirection} setSortBy={setSortBy} setSortDirection={setSortDirection} /> : null}
         {viewMode === "list" && groupByDate && groupedRows.length === 0 ? <p className="panel-copy">No grouped picks match current filter.</p> : null}
@@ -551,6 +561,64 @@ export function MyPicksPage() {
         ) : null}
       </section>
     </div>
+  );
+}
+
+function MyPickGuruCard({
+  row,
+  isSaving,
+  onDelete,
+}: {
+  row: MyPickRow;
+  isSaving: boolean;
+  onDelete: (row: MyPickRow) => void;
+}) {
+  const latestSignal = row.recent_signals[0];
+  const signalTitle = row.recent_signals.length > 0
+    ? [`${row.recent_signal_count} recent scanner hits`, ...row.recent_signals.map((signal) => `• ${humanizeSignalId(signal.strategy_id)}${signal.signal_date ? ` · ${formatLocalDate(signal.signal_date)}` : ""}`)].join("\n")
+    : "No recent scanner hits";
+  const trendTemplate = row.trend_template_match
+    ? "TT ✓"
+    : row.trend_template_criteria_passed != null
+      ? `TT ${row.trend_template_criteria_passed}/${row.trend_template_criteria_total ?? 10}`
+      : "TT --";
+  return (
+    <article className="guru-ticker-card my-pick-guru-card">
+      <Link className="guru-ticker-card-link" to={`/charts?ticker=${encodeURIComponent(row.ticker)}`} title={`${row.ticker} chart`}>
+        <div className="guru-ticker-main">
+          <strong>{row.ticker}</strong>
+          {renderChange(row.change_1d_pct)}
+        </div>
+        <div className="guru-ticker-badges">
+          <span title={signalTitle}>{row.recent_signal_count}×</span>
+          {row.sector ? <span className="guru-sector-tag" title={`Sector: ${row.sector}`}>{row.sector}</span> : null}
+          <span title={row.trend_template_label || "Minervini Trend Template"}>{trendTemplate}</span>
+          <span title="Daily relative strength rating">RS {formatScoreInteger(row.daily_rs_rating ?? row.leadership_score)}</span>
+          <span title="Fundamental rating">FA {formatScoreInteger(row.fundamental_rating)}</span>
+          {row.vcp_score != null ? <span title={row.vcp_rating || "VCP score"}>VCP {formatScore(row.vcp_score)}</span> : null}
+        </div>
+        <div className="guru-ticker-context">
+          <span title="Latest close">{row.latest_close == null ? "--" : `$${formatPrice(row.latest_close)}`}</span>
+          <span title={`Added ${formatLocalDateTime(row.added_at)}`}>📅 {formatLocalDate(row.added_date)}</span>
+          <span className={`guru-strike ${guruToneForPositionAction(row.position_action?.action)}`} title={row.position_action?.reason_summary || "Position guidance unavailable"}>
+            ⚾ {humanizePositionAction(row.position_action?.action)}
+          </span>
+          {latestSignal ? <span className="guru-primary-signal" title={latestSignal.signal_date ? `Latest signal · ${formatLocalDate(latestSignal.signal_date)}` : "Latest signal"}>⚡ {humanizeSignalId(latestSignal.strategy_id)}</span> : null}
+          {row.notes ? <span className="my-pick-card-note" title={row.notes}>📝 {row.notes}</span> : null}
+        </div>
+      </Link>
+      <button
+        type="button"
+        className="guru-my-pick-toggle is-selected"
+        aria-label={`Remove ${row.ticker} from My Picks`}
+        aria-pressed="true"
+        disabled={isSaving}
+        title="Remove from My Picks"
+        onClick={() => onDelete(row)}
+      >
+        ★
+      </button>
+    </article>
   );
 }
 
@@ -945,6 +1013,21 @@ function formatSignedPercent(value: number | null | undefined) {
   }
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(2)}%`;
+}
+
+function humanizeSignalId(value: string) {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.length <= 3 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function guruToneForPositionAction(action: string | null | undefined) {
+  if (action === "add_position") return "is-active";
+  if (action === "hold_position") return "is-ready";
+  if (action === "avoid_new" || action === "trim_reduce") return "is-avoid";
+  return "is-context";
 }
 
 function renderChange(value: number | null | undefined) {
