@@ -20,6 +20,7 @@ _TRIGGER_SIGNALS: dict[str, tuple[str, int]] = {
 
 _SETUP_SIGNALS: dict[str, tuple[str, int]] = {
     "qullamaggie": ("Qullamaggie setup", 20),
+    "vcs_critical_tightness": ("VCS Critical Tight", 20),
     "vcp": ("VCP setup", 20),
     "weekly_vcp": ("weekly VCP", 20),
     "vcp_v3": ("VCP setup", 20),
@@ -39,7 +40,13 @@ _SETUP_SIGNALS: dict[str, tuple[str, int]] = {
     "fearzone_zeiierman": ("Fearzone context", 8),
 }
 
-STRIKE_ZONE_SCANNER_IDS = frozenset({"ma_pullback_retest", *_TRIGGER_SIGNALS, *_SETUP_SIGNALS})
+_CONFIRMATION_SIGNALS: dict[str, tuple[str, int]] = {
+    "macd_golden_cross": ("MACD Golden Cross", 5),
+}
+
+STRIKE_ZONE_SCANNER_IDS = frozenset(
+    {"ma_pullback_retest", *_TRIGGER_SIGNALS, *_SETUP_SIGNALS, *_CONFIRMATION_SIGNALS}
+)
 
 
 def strike_zone_scanner_label(scanner_id: str) -> str:
@@ -49,6 +56,8 @@ def strike_zone_scanner_label(scanner_id: str) -> str:
         return _TRIGGER_SIGNALS[scanner_id][0]
     if scanner_id in _SETUP_SIGNALS:
         return _SETUP_SIGNALS[scanner_id][0]
+    if scanner_id in _CONFIRMATION_SIGNALS:
+        return _CONFIRMATION_SIGNALS[scanner_id][0]
     return scanner_id.replace("_", " ").title()
 
 
@@ -169,6 +178,9 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
         elif scanner_id in _SETUP_SIGNALS:
             label, points = _SETUP_SIGNALS[scanner_id]
             setups.append(_signal_entry(id=scanner_id, label=label, points=points, kind="setup", signal_date=signal_date, as_of_date=as_of_date))
+        elif scanner_id in _CONFIRMATION_SIGNALS:
+            label, points = _CONFIRMATION_SIGNALS[scanner_id]
+            confirmations.append(_signal_entry(id=scanner_id, label=label, points=points, kind="confirmation", signal_date=signal_date, as_of_date=as_of_date))
 
     rmv = row.get("rmv") if isinstance(row.get("rmv"), dict) else {}
     if _as_int(rmv.get("rank")) in {1, 2} and "rmv_tightness" not in scanner_ids:
@@ -198,9 +210,10 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
 
     fresh_triggers = [item for item in triggers if bool(item["fresh"])]
     fresh_setups = [item for item in setups if bool(item["fresh"])]
+    fresh_confirmations = [item for item in confirmations if bool(item.get("fresh", True))]
     trigger_points = max((int(item["points"]) for item in fresh_triggers), default=0)
     setup_points = min(25, max((int(item["points"]) for item in fresh_setups), default=0) + (5 if len(fresh_setups) >= 2 else 0))
-    confirmation_points = min(25, sum(int(item["points"]) for item in confirmations))
+    confirmation_points = min(25, sum(int(item["points"]) for item in fresh_confirmations))
     score = min(100, trigger_points + setup_points + confirmation_points)
     primary_trigger = max(fresh_triggers, key=lambda item: int(item["points"]), default=None)
     primary_signal = primary_trigger or max(fresh_setups, key=lambda item: int(item["points"]), default=None)
@@ -219,7 +232,7 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
     if earnings_days is None:
         warnings.append("Earnings date is unavailable.")
 
-    all_signals = [*fresh_triggers, *fresh_setups, *confirmations]
+    all_signals = [*fresh_triggers, *fresh_setups, *fresh_confirmations]
     score_breakdown = {
         "total": score,
         "blocked": False,
@@ -245,7 +258,7 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
                 "label": "Confirmation",
                 "awarded_points": confirmation_points,
                 "max_points": 25,
-                "scoring_rule": "Confirmation points summed; capped at 25",
+                "scoring_rule": "Fresh event and current-state confirmation points summed; capped at 25",
                 "signals": confirmations,
             },
         ],

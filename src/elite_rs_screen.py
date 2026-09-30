@@ -215,7 +215,7 @@ def run_elite_rs_screen(
                         signal = _find_recent_hv1_signal(
                             frame,
                             lookback_days=max(1, int(config.peg_volume_signal_lookback_days)),
-                            recent_window_days=max(5, int(config.elite_rs_recent_volume_window_days)),
+                            recent_window_days=max(1, int(config.elite_rs_recent_volume_window_days)),
                         )
                         if signal is None:
                             continue
