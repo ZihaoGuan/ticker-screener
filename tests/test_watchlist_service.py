@@ -121,7 +121,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertNotIn("club_97", {item["id"] for item in payload["definitions"]})
         self.assertNotIn("liquid_growth", {item["id"] for item in payload["definitions"]})
         definitions = {item["id"]: item for item in payload["definitions"]}
-        self.assertTrue({"daily_rs_new_high", "rs", "kai_s1", "kai_s2", "venu_scanner", "weekly_candidate_pool", "one_year_winners"}.issubset(definitions))
+        self.assertTrue({"daily_rs_new_high", "rs", "kai_s1", "kai_s2", "venu_scanner", "weekly_candidate_pool", "best_winners", "one_year_winners"}.issubset(definitions))
         self.assertNotIn("rs_phase", definitions)
         self.assertIn("elite_rs_hv1", definitions)
         self.assertNotIn("high_volume_close", definitions)
