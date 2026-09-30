@@ -684,6 +684,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "bias_group": "bullish",
     },
     {
+        "id": "best_winners",
+        "strategy_id": "best_winners",
+        "label": "Best Winners",
+        "description": "Liquid momentum winners above $1 with ADR20 above 4.5%, at least 70% above the 52-week low, positive 3M/6M/1Y performance, 8 EMA above 21 EMA, price above 60 EMA, 30D average dollar volume above $50M, and current dollar volume above $20M.",
+        "timeframe": "Daily",
+        "accent": "lime",
+        "bias_group": "bullish",
+    },
+    {
         "id": "kai_s1",
         "strategy_id": "kai_s1",
         "label": "Kai S1",

@@ -89,6 +89,11 @@ PIPELINES = (
         "filename": "kai_s1_{date}.json",
     },
     {
+        "id": "best_winners",
+        "label": "Best Winners",
+        "filename": "best_winners_{date}.json",
+    },
+    {
         "id": "kai_s2",
         "label": "Kai S2",
         "filename": "kai_s2_{date}.json",
@@ -332,6 +337,7 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "kai_s1": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "kai_s2": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "one_year_winners": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "best_winners": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "qullamaggie": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "stockbee_9m_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "stockbee_20pct_weekly_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
