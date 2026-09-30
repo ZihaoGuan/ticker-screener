@@ -24,3 +24,20 @@ export function buildExponentialMovingAverage(candles: CandlePoint[], length: nu
   }
   return points;
 }
+
+export function buildSimpleMovingAverage(candles: CandlePoint[], length: number): Array<{ time: string; value: number }> {
+  if (candles.length === 0 || length <= 0) {
+    return [];
+  }
+  let rollingTotal = 0;
+  return candles.map((candle, index) => {
+    rollingTotal += candle.close;
+    if (index >= length) {
+      rollingTotal -= candles[index - length].close;
+    }
+    return {
+      time: candle.time,
+      value: Number((rollingTotal / Math.min(index + 1, length)).toFixed(2)),
+    };
+  });
+}
