@@ -435,6 +435,7 @@ export type MomentumEtfPortfolioRow = {
   combined_weight: number;
   top_hit: boolean;
   scanner_count: number;
+  scanner_ids: string[];
   scanner_labels: string[];
   daily_rs_rating?: number | null;
   stage_analysis?: ScannerTopHitRow["stage_analysis"];

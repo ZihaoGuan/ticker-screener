@@ -84,6 +84,11 @@ class MomentumEtfPortfolioService:
                 row.update({
                     "top_hit": True,
                     "scanner_count": int(top_hit.get("scanner_count") or 0),
+                    "scanner_ids": [
+                        str(scanner.get("id") or "")
+                        for scanner in top_hit.get("scanners") or []
+                        if isinstance(scanner, dict) and str(scanner.get("id") or "").strip()
+                    ],
                     "scanner_labels": list(top_hit.get("scanner_labels") or []),
                     "daily_rs_rating": top_hit.get("daily_rs_rating"),
                     "stage_analysis": top_hit.get("stage_analysis"),
@@ -96,7 +101,7 @@ class MomentumEtfPortfolioService:
                 row["company"] = str(top_hit.get("company") or row["company"])
                 row["sector"] = str(top_hit.get("sector") or row["sector"])
             else:
-                row.update({"top_hit": False, "scanner_count": 0, "scanner_labels": []})
+                row.update({"top_hit": False, "scanner_count": 0, "scanner_ids": [], "scanner_labels": []})
             row["funds"].sort(key=lambda item: str(item["ticker"]))
             row["combined_weight"] = round(float(row["combined_weight"]), 4)
             rows.append(row)
