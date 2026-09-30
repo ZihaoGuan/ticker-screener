@@ -767,6 +767,10 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["vcp_rating"], "Strong VCP")
         self.assertEqual(pltr["sector_momentum"]["quadrant"], "Leading")
         self.assertEqual(pltr["sector_momentum"]["etf_ticker"], "XLK")
+        guru_definitions = {item["id"] for item in payload["guru_board"]["definitions"]}
+        self.assertNotIn("rs_phase", guru_definitions)
+        guru_pltr = next(row for row in payload["guru_board"]["rows"] if row["ticker"] == "PLTR")
+        self.assertEqual(guru_pltr["rs_phase_active_days"], 8)
 
     def test_get_scanner_top_hits_payload_suppresses_ticker_like_company_names(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
