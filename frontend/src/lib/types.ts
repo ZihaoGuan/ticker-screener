@@ -284,6 +284,7 @@ export type ScannerTopHitRow = {
   company: string;
   sector: string;
   industry: string;
+  market_cap?: number | null;
   day_close: number | null;
   change_pct: number | null;
   change_from_52wk_low_pct: number | null;
@@ -437,6 +438,8 @@ export type MomentumEtfPortfolioRow = {
   scanner_count: number;
   scanner_ids: string[];
   scanner_labels: string[];
+  market_cap?: number | null;
+  day_close?: number | null;
   daily_rs_rating?: number | null;
   stage_analysis?: ScannerTopHitRow["stage_analysis"];
   strike_zone?: ScannerTopHitRow["strike_zone"];

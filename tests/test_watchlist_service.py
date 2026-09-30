@@ -691,6 +691,9 @@ class WatchlistServiceTests(unittest.TestCase):
             "src.webapp.services.watchlist_service.load_many_ticker_windows",
             return_value={"PLTR": pltr_market_frame, "SPY": spy_market_frame},
         ), patch(
+            "src.webapp.services.watchlist_service.load_latest_market_caps",
+            return_value={"PLTR": 3_000_000_000.0, "CRWD": 80_000_000_000.0, "TSLA": 900_000_000_000.0},
+        ), patch(
             "src.ratings.repository.RatingsRepository.load_latest_rating_snapshots_for_tickers",
             return_value={
                 "PLTR": {"overall_rating": 91.0, "current_rank": 7, "sector": "Information Technology", "industry": "Software"},
@@ -734,6 +737,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["scanner_count"], 3)
         self.assertEqual(pltr["scanner_labels"], ["RS New High Before Price", "RS Phase", "Fearzone"])
         self.assertEqual(pltr["day_close"], 132.45)
+        self.assertEqual(pltr["market_cap"], 3_000_000_000.0)
         self.assertEqual(pltr["change_pct"], 2.1)
         self.assertIsInstance(pltr["change_from_52wk_low_pct"], float)
         self.assertGreater(pltr["change_from_52wk_low_pct"], 0.0)

@@ -16,6 +16,7 @@ type SortDirection = "asc" | "desc";
 type ViewMode = "list" | "charts" | "guru" | "position" | "etf-portfolios";
 type TopHitsFilterPreset = {
   sectorFilter: string;
+  sizePriceFloorOnly: boolean;
   eliteOnly: boolean;
   hasLeadershipScannerOnly: boolean;
   hasFundamentalQualityOnly: boolean;
@@ -35,6 +36,8 @@ type TopHitsPresetStore = { presets: Record<string, TopHitsFilterPreset>; defaul
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
 const GURU_COLUMN_PAGE_SIZE = 30;
+const MIN_TOP_HITS_MARKET_CAP = 1_000_000_000;
+const MIN_TOP_HITS_PRICE = 5;
 const MOMENTUM_ETF_ACCENTS: Record<string, string> = { FMTM: "amber", SPMO: "teal", PTF: "blue", FFTY: "cyan" };
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "qullamaggie", "sean_breakout", "venu_scanner"]);
 const PINNED_SCANNER_OPTIONS = [
@@ -44,6 +47,7 @@ const PINNED_SCANNER_OPTIONS = [
 const FILTER_PRESETS_STORAGE_KEY = "top-hits-filter-presets";
 const EMPTY_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   sectorFilter: "all",
+  sizePriceFloorOnly: false,
   eliteOnly: false,
   hasLeadershipScannerOnly: false,
   hasFundamentalQualityOnly: false,
@@ -61,6 +65,7 @@ const EMPTY_TOP_HITS_FILTERS: TopHitsFilterPreset = {
 };
 const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   ...EMPTY_TOP_HITS_FILTERS,
+  sizePriceFloorOnly: true,
   scannerGroups: [
     ["qullamaggie", "weekly_candidate_pool", "kai_s2"],
     ["venu_scanner", "trend_template", "one_year_winners", "finviz_smallover_sales_growth_trend", "sean_breakout"],
@@ -89,6 +94,7 @@ export function ScannerTopHitsPage() {
   });
   const [nameNotice, setNameNotice] = useState("");
   const [sectorFilter, setSectorFilter] = useState(initialFilters.sectorFilter);
+  const [sizePriceFloorOnly, setSizePriceFloorOnly] = useState(initialFilters.sizePriceFloorOnly);
   const [eliteOnly, setEliteOnly] = useState(initialFilters.eliteOnly);
   const [hasLeadershipScannerOnly, setHasLeadershipScannerOnly] = useState(initialFilters.hasLeadershipScannerOnly);
   const [hasFundamentalQualityOnly, setHasFundamentalQualityOnly] = useState(initialFilters.hasFundamentalQualityOnly);
@@ -121,6 +127,7 @@ export function ScannerTopHitsPage() {
 
   const applyFilterPreset = (preset: TopHitsFilterPreset) => {
     setSectorFilter(preset.sectorFilter);
+    setSizePriceFloorOnly(preset.sizePriceFloorOnly);
     setEliteOnly(preset.eliteOnly);
     setHasLeadershipScannerOnly(preset.hasLeadershipScannerOnly);
     setHasFundamentalQualityOnly(preset.hasFundamentalQualityOnly);
@@ -142,6 +149,7 @@ export function ScannerTopHitsPage() {
 
   const currentFilterPreset = (): TopHitsFilterPreset => ({
     sectorFilter,
+    sizePriceFloorOnly,
     eliteOnly,
     hasLeadershipScannerOnly,
     hasFundamentalQualityOnly,
@@ -252,12 +260,13 @@ export function ScannerTopHitsPage() {
   const guruRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     return (guruBoard?.rows ?? []).filter((row) => {
+      if (sizePriceFloorOnly && !meetsSizePriceFloor(row)) return false;
       if (sectorFilter !== "all" && row.sector !== sectorFilter) return false;
       if (query && ![row.ticker, row.company, row.sector, row.industry, row.scanners.map((scanner) => scanner.label).join(" ")].join(" ").toLowerCase().includes(query)) return false;
       if (leaderRsOnly && !hasDailyRsRatingInRange(row, normalizedLeaderRsRange.min, normalizedLeaderRsRange.max)) return false;
       return true;
     });
-  }, [guruBoard?.rows, leaderRsOnly, normalizedLeaderRsRange, search, sectorFilter]);
+  }, [guruBoard?.rows, leaderRsOnly, normalizedLeaderRsRange, search, sectorFilter, sizePriceFloorOnly]);
   const visibleGuruRows = useMemo(() => {
     if (!guruScannerGroupsOnly || nonEmptyScannerGroupCount === 0) return guruRows;
     return guruRows.filter((row) => hasScannerGroupSignals(row, scannerGroups, scannerIdsByTicker.get(row.ticker)));
@@ -266,6 +275,9 @@ export function ScannerTopHitsPage() {
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     let nextRows = rows;
+    if (sizePriceFloorOnly) {
+      nextRows = nextRows.filter(meetsSizePriceFloor);
+    }
     if (sectorFilter !== "all") {
       nextRows = nextRows.filter((row) => row.sector === sectorFilter);
     }
@@ -302,11 +314,11 @@ export function ScannerTopHitsPage() {
       sectorLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeSectorKey(item.sector)) : new Map<string, string>(),
       industryLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeIndustryKey(item.industry)) : new Map<string, string>(),
     }));
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, nonEmptyScannerGroupCount, normalizedLeaderRsRange, normalizedRsDaysMinPct, normalizedRsEvidenceMin, normalizedUpOnDownDaysMin, rows, rsEvidenceOnly, scannerGroups, scannerNames, search, sectorFilter, sortBy, sortDirection]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, nonEmptyScannerGroupCount, normalizedLeaderRsRange, normalizedRsDaysMinPct, normalizedRsEvidenceMin, normalizedUpOnDownDaysMin, rows, rsEvidenceOnly, scannerGroups, scannerNames, search, sectorFilter, sizePriceFloorOnly, sortBy, sortDirection]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, rsDaysMinPct, rsEvidenceMin, rsEvidenceOnly, scannerGroups, search, sectorFilter, sortBy, sortDirection, upOnDownDaysMin, viewMode]);
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, rsDaysMinPct, rsEvidenceMin, rsEvidenceOnly, scannerGroups, search, sectorFilter, sizePriceFloorOnly, sortBy, sortDirection, upOnDownDaysMin, viewMode]);
 
   const pageSize = viewMode === "charts" ? CHART_PAGE_SIZE : LIST_PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
@@ -520,8 +532,16 @@ export function ScannerTopHitsPage() {
           </select>
         </label>
         <details className="panel top-hits-filter-group">
-          <summary>Quality &amp; leadership · {[eliteOnly, hasLeadershipScannerOnly, hasFundamentalQualityOnly].filter(Boolean).length} active</summary>
+          <summary>Quality &amp; leadership · {[sizePriceFloorOnly, eliteOnly, hasLeadershipScannerOnly, hasFundamentalQualityOnly].filter(Boolean).length} active</summary>
           <div className="top-hits-filter-group-body">
+            <label className="scanner-result-filter">
+              <span>Size &amp; Price Floor</span>
+              <span className="scanner-result-check">
+                <input type="checkbox" checked={sizePriceFloorOnly} onChange={(event) => setSizePriceFloorOnly(event.target.checked)} />
+                <span>Market cap $1B+ and price $5+</span>
+              </span>
+              <span className="panel-copy">Enabled by default across every Top Hits view. Names with missing size or price data are excluded.</span>
+            </label>
             <label className="scanner-result-filter">
               <span>Elite Pick</span>
               <span className="scanner-result-check">
@@ -758,6 +778,7 @@ export function ScannerTopHitsPage() {
             selectedEtf={selectedEtf}
             topHitsOnly={etfTopHitsOnly}
             minOverlap={etfMinOverlap}
+            sizePriceFloorOnly={sizePriceFloorOnly}
             scannerGroups={scannerGroups}
             scannerGroupsOnly={guruScannerGroupsOnly}
             selectedScannerGroupCount={nonEmptyScannerGroupCount}
@@ -1139,6 +1160,7 @@ function MomentumEtfPortfolioBoard({
   selectedEtf,
   topHitsOnly,
   minOverlap,
+  sizePriceFloorOnly,
   scannerGroups,
   scannerGroupsOnly,
   selectedScannerGroupCount,
@@ -1155,6 +1177,7 @@ function MomentumEtfPortfolioBoard({
   selectedEtf: string;
   topHitsOnly: boolean;
   minOverlap: number;
+  sizePriceFloorOnly: boolean;
   scannerGroups: string[][];
   scannerGroupsOnly: boolean;
   selectedScannerGroupCount: number;
@@ -1169,12 +1192,13 @@ function MomentumEtfPortfolioBoard({
   const rows = useMemo(() => (payload?.rows ?? []).filter((row) => {
     if (selectedEtf !== "all" && !row.funds.some((fund) => fund.ticker === selectedEtf)) return false;
     if (topHitsOnly && !row.top_hit) return false;
+    if (sizePriceFloorOnly && !meetsSizePriceFloor(row)) return false;
     if (scannerGroupsOnly && selectedScannerGroupCount > 0 && !scannerIdsMatchGroups(
       [...(row.scanner_ids ?? []), ...(scannerIdsByTicker.get(row.ticker) ?? [])],
       scannerGroups,
     )) return false;
     return row.etf_count >= minOverlap;
-  }), [minOverlap, payload?.rows, scannerGroups, scannerGroupsOnly, scannerIdsByTicker, selectedEtf, selectedScannerGroupCount, topHitsOnly]);
+  }), [minOverlap, payload?.rows, scannerGroups, scannerGroupsOnly, scannerIdsByTicker, selectedEtf, selectedScannerGroupCount, sizePriceFloorOnly, topHitsOnly]);
   const funds = selectedEtf === "all" ? (payload?.funds ?? []) : (payload?.funds ?? []).filter((fund) => fund.ticker === selectedEtf);
   if (loading && !payload) return <LoadingBlock label="Loading momentum ETF portfolios…" />;
   if (notice) return <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={onRetry}>Retry</button></p>;
@@ -1727,6 +1751,11 @@ function scannerIdsMatchGroups(scannerIds: string[], scannerGroups: string[][]) 
   return scannerGroups.filter((group) => group.length > 0).every((group) => group.some((scannerId) => rowScannerIds.has(scannerId)));
 }
 
+function meetsSizePriceFloor(row: { market_cap?: number | null; day_close?: number | null }) {
+  return row.market_cap != null && row.market_cap >= MIN_TOP_HITS_MARKET_CAP
+    && row.day_close != null && row.day_close >= MIN_TOP_HITS_PRICE;
+}
+
 function loadTopHitsPresetStore(): TopHitsPresetStore {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "{}");
@@ -1755,6 +1784,7 @@ function normalizeTopHitsFilterPreset(value: unknown): TopHitsFilterPreset {
     : [[]];
   return {
     sectorFilter: typeof preset.sectorFilter === "string" ? preset.sectorFilter : "all",
+    sizePriceFloorOnly: preset.sizePriceFloorOnly !== false,
     eliteOnly: preset.eliteOnly === true,
     hasLeadershipScannerOnly: preset.hasLeadershipScannerOnly === true,
     hasFundamentalQualityOnly: preset.hasFundamentalQualityOnly === true,

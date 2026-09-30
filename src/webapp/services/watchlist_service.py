@@ -34,6 +34,7 @@ from ...bollinger_band_screen import compute_latest_bollinger_snapshot
 from ...market_data_access import (
     db_frame_has_recent_coverage,
     load_daily_bars_frame_from_db,
+    load_latest_market_caps,
     load_many_ticker_windows,
     load_many_ticker_windows_for_range,
     load_ticker_metadata_map,
@@ -94,7 +95,7 @@ _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
 _SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v3"
-_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v5"
+_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v6"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -1334,6 +1335,7 @@ class WatchlistService:
                         "company": "",
                         "sector": "",
                         "industry": "",
+                        "market_cap": None,
                         "day_close": None,
                         "change_pct": None,
                         "change_from_52wk_low_pct": None,
@@ -1370,6 +1372,22 @@ class WatchlistService:
 
         self._append_canslim_guru_candidates(guru_aggregated, board_payload)
 
+        target_trading_date = _coerce_optional_date(board_payload.get("target_trading_date")) or _coerce_optional_date(board_payload.get("latest_signal_date"))
+        market_cap_tickers = sorted(set(aggregated) | set(guru_aggregated))
+        market_caps: dict[str, float] = {}
+        if self.database_url and market_cap_tickers:
+            try:
+                market_caps = load_latest_market_caps(
+                    market_cap_tickers,
+                    as_of_date=target_trading_date,
+                    database_url=self.database_url,
+                )
+            except Exception as exc:
+                logger.warning("Scanner top hits market-cap enrichment unavailable; continuing without it: %s", exc)
+        for rows_by_ticker in (aggregated, guru_aggregated):
+            for ticker, row in rows_by_ticker.items():
+                row["market_cap"] = market_caps.get(ticker) or _coerce_optional_float(row.get("market_cap"))
+
         total_unique_tickers = len(aggregated)
         for row in aggregated.values():
             row["scanner_count"] = len(row["scanners"])
@@ -1383,7 +1401,6 @@ class WatchlistService:
             self._attach_latest_market_snapshots(aggregated, top_hit_tickers)
             self._attach_latest_rating_snapshots(aggregated, top_hit_tickers)
             self._attach_relative_strength_evidence(aggregated, top_hit_tickers)
-            target_trading_date = _coerce_optional_date(board_payload.get("target_trading_date")) or _coerce_optional_date(board_payload.get("latest_signal_date"))
             self._attach_latest_position_actions(aggregated, top_hit_tickers, as_of_date=target_trading_date)
         sector_momentum_map = self._load_sector_momentum_map(rrg_service) if top_hit_tickers else {}
 
@@ -1418,6 +1435,7 @@ class WatchlistService:
             "company": "",
             "sector": "",
             "industry": "",
+            "market_cap": None,
             "day_close": None,
             "change_pct": None,
             "change_from_52wk_low_pct": None,
@@ -2840,6 +2858,9 @@ class WatchlistService:
         company = _coalesce_company_name(ticker, bucket.get("company"), entry.get("company_name"), entry.get("company"))
         sector = _coalesce_sector(bucket.get("sector"), entry.get("sector"))
         industry = _coalesce_text(bucket.get("industry"), entry.get("industry"))
+        market_cap = _coerce_optional_float(bucket.get("market_cap"))
+        if market_cap is None:
+            market_cap = _coerce_optional_float(entry.get("market_cap"))
         day_close = bucket.get("day_close")
         if day_close is None:
             day_close = _resolve_entry_display_price(entry)
@@ -2899,6 +2920,7 @@ class WatchlistService:
             bucket["sector"] = sector
         if industry:
             bucket["industry"] = industry
+        bucket["market_cap"] = market_cap
         bucket["day_close"] = day_close
         bucket["change_pct"] = change_pct
         bucket["perf_year_pct"] = perf_year_pct

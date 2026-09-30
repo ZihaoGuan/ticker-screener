@@ -15,6 +15,7 @@ class _WatchlistService:
             "ticker": "EXM", "company": "Example Corp", "sector": "Technology", "scanner_count": 3,
             "scanners": [{"id": "qullamaggie", "label": "Qullamaggie"}],
             "scanner_labels": ["Qullamaggie"], "daily_rs_rating": 98,
+            "market_cap": 2_500_000_000.0, "day_close": 42.0,
             "stage_analysis": {"alias": "2A"}, "strike_zone": {"state": "active", "label": "Active", "score": 84, "reason": "fresh"},
             "atr_to_sma50": 2.1,
         }]}
@@ -41,6 +42,8 @@ class MomentumEtfPortfolioServiceTests(unittest.TestCase):
             self.assertTrue(row["top_hit"])
             self.assertEqual(row["scanner_count"], 3)
             self.assertEqual(row["scanner_ids"], ["qullamaggie"])
+            self.assertEqual(row["market_cap"], 2_500_000_000.0)
+            self.assertEqual(row["day_close"], 42.0)
 
 
 if __name__ == "__main__":
