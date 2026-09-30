@@ -79,7 +79,7 @@ const ENTRY_CONFLUENCE_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   ...DEFAULT_TOP_HITS_FILTERS,
   scannerGroups: [
     [
-      "qullamaggie", "weekly_candidate_pool", "kai_s2", "kai_s1", "one_year_winners", "venu_scanner",
+      "qullamaggie", "weekly_candidate_pool", "best_winners", "kai_s2", "kai_s1", "one_year_winners", "venu_scanner",
       "trend_template", "finviz_smallover_sales_growth_trend", "sean_gap_up", "sean_breakout",
       "fundamental_quality", "stockbee_momentum_burst", "daily_rs_new_high", "eight_week_100_runup",
       "stockbee_4pct_daily_movers", "stockbee_20pct_weekly_movers", "stockbee_9m_movers",
