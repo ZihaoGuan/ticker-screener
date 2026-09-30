@@ -783,6 +783,7 @@ export function ScannerTopHitsPage() {
             scannerGroupsOnly={guruScannerGroupsOnly}
             selectedScannerGroupCount={nonEmptyScannerGroupCount}
             scannerIdsByTicker={scannerIdsByTicker}
+            myPickTickers={myPickTickers}
             onSelectedEtfChange={setSelectedEtf}
             onTopHitsOnlyChange={setEtfTopHitsOnly}
             onMinOverlapChange={setEtfMinOverlap}
@@ -799,6 +800,7 @@ export function ScannerTopHitsPage() {
                 confluenceTickerCount={guruBoard?.confluence_ticker_count ?? 0}
                 scannerGroupsOnly={guruScannerGroupsOnly}
                 selectedScannerGroupCount={nonEmptyScannerGroupCount}
+                myPickTickers={myPickTickers}
                 onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
               />
             ) : viewMode === "position" ? (
@@ -806,6 +808,7 @@ export function ScannerTopHitsPage() {
                 rows={visibleGuruRows}
                 scannerGroupsOnly={guruScannerGroupsOnly}
                 selectedScannerGroupCount={nonEmptyScannerGroupCount}
+                myPickTickers={myPickTickers}
                 onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
               />
             ) : <>
@@ -1021,6 +1024,7 @@ function GuruBoard({
   confluenceTickerCount,
   scannerGroupsOnly,
   selectedScannerGroupCount,
+  myPickTickers,
   onScannerGroupsOnlyChange,
 }: {
   rows: ScannerTopHitRow[];
@@ -1029,6 +1033,7 @@ function GuruBoard({
   confluenceTickerCount: number;
   scannerGroupsOnly: boolean;
   selectedScannerGroupCount: number;
+  myPickTickers: Set<string>;
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
@@ -1065,7 +1070,7 @@ function GuruBoard({
               </header>
               {!definition.available ? <p className="guru-column-unavailable">Rules not configured yet</p> : null}
               <div className="guru-column-cards">
-                {columnRows.slice(0, visibleCount).map((row) => <GuruTickerCard key={row.ticker} row={row} />)}
+                {columnRows.slice(0, visibleCount).map((row) => <GuruTickerCard isMyPick={myPickTickers.has(row.ticker)} key={row.ticker} row={row} />)}
               </div>
               {remainingCount > 0 ? <button className="ghost-button guru-column-load-more" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [definition.id]: visibleCount + GURU_COLUMN_PAGE_SIZE }))}>
                 Load 30 more ({formatCount(remainingCount)} remaining)
@@ -1079,7 +1084,7 @@ function GuruBoard({
   );
 }
 
-function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
+function GuruTickerCard({ row, isMyPick }: { row: ScannerTopHitRow; isMyPick: boolean }) {
   const stage = row.stage_analysis?.alias || "--";
   const strike = row.strike_zone?.label || "Context";
   const strikeTone = row.strike_zone?.state || "context";
@@ -1093,11 +1098,12 @@ function GuruTickerCard({ row }: { row: ScannerTopHitRow }) {
   return (
     <Link className="guru-ticker-card" to={buildChartHref(row.ticker)} title={`${row.ticker} chart`}>
       <div className="guru-ticker-main">
-        <strong>{row.ticker}</strong>
+        <strong>{row.ticker}<MyPickIndicator ticker={row.ticker} visible={isMyPick} /></strong>
         <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
       </div>
       <div className="guru-ticker-badges">
         <span title="Guru scanner overlap">{row.scanner_count}×</span>
+        <SectorTag sector={row.sector} />
         <span title="Weinstein stage">{stage}</span>
         <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
         {resolveRsPhaseBadge(row) ? <span className={rsPhaseBadgeClass(row)} title="RS Phase lifecycle">{resolveRsPhaseBadge(row)}</span> : null}
@@ -1165,6 +1171,7 @@ function MomentumEtfPortfolioBoard({
   scannerGroupsOnly,
   selectedScannerGroupCount,
   scannerIdsByTicker,
+  myPickTickers,
   onSelectedEtfChange,
   onTopHitsOnlyChange,
   onMinOverlapChange,
@@ -1182,6 +1189,7 @@ function MomentumEtfPortfolioBoard({
   scannerGroupsOnly: boolean;
   selectedScannerGroupCount: number;
   scannerIdsByTicker: Map<string, string[]>;
+  myPickTickers: Set<string>;
   onSelectedEtfChange: (value: string) => void;
   onTopHitsOnlyChange: (value: boolean) => void;
   onMinOverlapChange: (value: number) => void;
@@ -1235,7 +1243,7 @@ function MomentumEtfPortfolioBoard({
             </header>
             {!fund.available ? <p className="guru-column-unavailable">Holdings unavailable</p> : null}
             <div className="guru-column-cards">
-              {fundRows.slice(0, visibleCount).map((row) => <MomentumEtfHoldingCard fundTicker={fund.ticker} key={row.ticker} row={row} />)}
+              {fundRows.slice(0, visibleCount).map((row) => <MomentumEtfHoldingCard fundTicker={fund.ticker} isMyPick={myPickTickers.has(row.ticker)} key={row.ticker} row={row} />)}
             </div>
             {remainingCount > 0 ? <button className="ghost-button guru-column-load-more" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [fund.ticker]: visibleCount + GURU_COLUMN_PAGE_SIZE }))}>
               Load 30 more ({formatCount(remainingCount)} remaining)
@@ -1248,7 +1256,7 @@ function MomentumEtfPortfolioBoard({
   );
 }
 
-function MomentumEtfHoldingCard({ row, fundTicker }: { row: MomentumEtfPortfolioRow; fundTicker: string }) {
+function MomentumEtfHoldingCard({ row, fundTicker, isMyPick }: { row: MomentumEtfPortfolioRow; fundTicker: string; isMyPick: boolean }) {
   const holding = row.funds.find((fund) => fund.ticker === fundTicker);
   const stage = row.stage_analysis?.alias || "--";
   const atr = row.atr_to_sma50 == null ? "--" : `${row.atr_to_sma50 >= 0 ? "+" : ""}${row.atr_to_sma50.toFixed(1)} ATR`;
@@ -1258,12 +1266,13 @@ function MomentumEtfHoldingCard({ row, fundTicker }: { row: MomentumEtfPortfolio
   const title = [row.company || row.ticker, row.scanner_labels.length ? `Top Hits: ${row.scanner_labels.join(" · ")}` : "Not currently in Top Hits"].join("\n");
   return <Link className={`guru-ticker-card momentum-etf-card${row.top_hit ? " is-top-hit" : ""}`} to={buildChartHref(row.ticker)} title={title}>
     <div className="guru-ticker-main">
-      <strong>{row.ticker}</strong>
+      <strong>{row.ticker}<MyPickIndicator ticker={row.ticker} visible={isMyPick} /></strong>
       <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
     </div>
     <div className="guru-ticker-badges">
       <span title={`${fundTicker} published portfolio weight`}>{holding?.weight == null ? "Weight --" : `${holding.weight.toFixed(2)}%`}</span>
       <span title="Number of selected momentum ETFs holding this stock">{row.etf_count}× ETFs</span>
+      <SectorTag sector={row.sector} />
       <span title="Weinstein stage">{stage}</span>
       <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
     </div>
@@ -1275,15 +1284,28 @@ function MomentumEtfHoldingCard({ row, fundTicker }: { row: MomentumEtfPortfolio
   </Link>;
 }
 
+function SectorTag({ sector }: { sector: string | null | undefined }) {
+  const label = String(sector || "").trim();
+  if (!label || label === "Unknown sector") return null;
+  return <span className="guru-sector-tag" title={`Sector: ${label}`}>{label}</span>;
+}
+
+function MyPickIndicator({ ticker, visible }: { ticker: string; visible: boolean }) {
+  if (!visible) return null;
+  return <span aria-label={`${ticker} is in My Picks`} className="guru-my-pick-indicator" role="img" title="In My Picks">★</span>;
+}
+
 function PositionMap({
   rows,
   scannerGroupsOnly,
   selectedScannerGroupCount,
+  myPickTickers,
   onScannerGroupsOnlyChange,
 }: {
   rows: ScannerTopHitRow[];
   scannerGroupsOnly: boolean;
   selectedScannerGroupCount: number;
+  myPickTickers: Set<string>;
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
 }) {
   return (
@@ -1301,7 +1323,7 @@ function PositionMap({
           const bucketRows = rows.filter((row) => (row.position_bucket || "no_data") === id);
           return <article className="guru-column position-map-column" key={id}>
             <header><strong>{formatCount(bucketRows.length)}</strong><span>{label}</span></header>
-            <div className="guru-column-cards">{bucketRows.slice(0, 30).map((row) => <GuruTickerCard key={row.ticker} row={row} />)}</div>
+            <div className="guru-column-cards">{bucketRows.slice(0, 30).map((row) => <GuruTickerCard isMyPick={myPickTickers.has(row.ticker)} key={row.ticker} row={row} />)}</div>
           </article>;
         })}
       </div>
