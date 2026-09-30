@@ -72,6 +72,25 @@ const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
     ["venu_scanner", "trend_template", "one_year_winners", "finviz_smallover_sales_growth_trend", "sean_breakout"],
   ],
 };
+const BUILT_IN_LEADERSHIP_PRESET_ID = "built-in:leadership-trend";
+const BUILT_IN_ENTRY_CONFLUENCE_PRESET_ID = "built-in:entry-confluence";
+const ENTRY_CONFLUENCE_TOP_HITS_FILTERS: TopHitsFilterPreset = {
+  ...DEFAULT_TOP_HITS_FILTERS,
+  scannerGroups: [
+    [
+      "qullamaggie", "weekly_candidate_pool", "kai_s2", "kai_s1", "one_year_winners", "venu_scanner",
+      "trend_template", "finviz_smallover_sales_growth_trend", "sean_gap_up", "sean_breakout",
+      "fundamental_quality", "stockbee_momentum_burst", "daily_rs_new_high", "eight_week_100_runup",
+      "stockbee_4pct_daily_movers", "stockbee_20pct_weekly_movers", "stockbee_9m_movers",
+    ],
+    ["ftd_sweep", "wyckoff_buy_signal", "cup_detection", "macd_golden_cross", "elite_rs_hv1", "elite_rs_recent_peg"],
+    ["rti", "rmv_tightness", "vcs_critical_tightness"],
+  ],
+};
+const BUILT_IN_TOP_HITS_PRESETS: Record<string, { label: string; filters: TopHitsFilterPreset }> = {
+  [BUILT_IN_LEADERSHIP_PRESET_ID]: { label: "Leadership + Trend", filters: DEFAULT_TOP_HITS_FILTERS },
+  [BUILT_IN_ENTRY_CONFLUENCE_PRESET_ID]: { label: "Momentum + Entry Confluence", filters: ENTRY_CONFLUENCE_TOP_HITS_FILTERS },
+};
 
 export function ScannerTopHitsPage() {
   const auth = useAuth();
@@ -81,8 +100,9 @@ export function ScannerTopHitsPage() {
   const [notice, setNotice] = useState("");
   const [myPicksNotice, setMyPicksNotice] = useState("");
   const [presetStore, setPresetStore] = useState<TopHitsPresetStore>(loadTopHitsPresetStore);
-  const initialFilters = presetStore.presets[presetStore.defaultPresetName] ?? DEFAULT_TOP_HITS_FILTERS;
-  const [selectedPresetName, setSelectedPresetName] = useState(presetStore.defaultPresetName);
+  const initialPresetName = presetStore.defaultPresetName || BUILT_IN_LEADERSHIP_PRESET_ID;
+  const initialFilters = resolveTopHitsPreset(initialPresetName, presetStore) ?? DEFAULT_TOP_HITS_FILTERS;
+  const [selectedPresetName, setSelectedPresetName] = useState(initialPresetName);
   const [presetNotice, setPresetNotice] = useState("");
   const [search, setSearch] = useState("");
   const [scannerSearch, setScannerSearch] = useState("");
@@ -522,25 +542,31 @@ export function ScannerTopHitsPage() {
           <select aria-label="Saved filter preset" value={selectedPresetName} onChange={(event) => {
             const name = event.target.value;
             setSelectedPresetName(name);
-            applyFilterPreset(name ? presetStore.presets[name] : DEFAULT_TOP_HITS_FILTERS);
-            setPresetNotice(name ? `${name} loaded.` : "Built-in default loaded.");
+            const builtIn = BUILT_IN_TOP_HITS_PRESETS[name];
+            applyFilterPreset(name ? resolveTopHitsPreset(name, presetStore) ?? DEFAULT_TOP_HITS_FILTERS : EMPTY_TOP_HITS_FILTERS);
+            setPresetNotice(name ? `${builtIn?.label ?? name} loaded.` : "Filters cleared.");
           }}>
-            <option value="">No preset</option>
+            <option value="">Custom / cleared filters</option>
+            {Object.entries(BUILT_IN_TOP_HITS_PRESETS).map(([id, preset]) => (
+              <option key={id} value={id}>{preset.label} · Built-in{id === (presetStore.defaultPresetName || BUILT_IN_LEADERSHIP_PRESET_ID) ? " · Default" : ""}</option>
+            ))}
             {Object.keys(presetStore.presets).sort().map((name) => (
               <option key={name} value={name}>{name}{name === presetStore.defaultPresetName ? " · Default" : ""}</option>
             ))}
           </select>
           <button type="button" className="ghost-button" onClick={() => {
-            const name = (window.prompt("Preset name", selectedPresetName) || "").trim().slice(0, 60);
+            const suggestedName = BUILT_IN_TOP_HITS_PRESETS[selectedPresetName] ? "" : selectedPresetName;
+            const name = (window.prompt("Preset name", suggestedName) || "").trim().slice(0, 60);
             if (!name) return;
             const nextStore = { ...presetStore, presets: { ...presetStore.presets, [name]: currentFilterPreset() } };
             setSelectedPresetName(name);
             updatePresetStore(nextStore, `${name} saved.`);
           }}>Save preset</button>
-          {selectedPresetName ? <button type="button" className="ghost-button" disabled={selectedPresetName === presetStore.defaultPresetName} onClick={() => {
-            updatePresetStore({ ...presetStore, defaultPresetName: selectedPresetName }, `${selectedPresetName} will load by default.`);
-          }}>{selectedPresetName === presetStore.defaultPresetName ? "Default" : "Set default"}</button> : null}
-          {selectedPresetName ? <button type="button" className="ghost-button" onClick={() => {
+          {selectedPresetName ? <button type="button" className="ghost-button" disabled={selectedPresetName === (presetStore.defaultPresetName || BUILT_IN_LEADERSHIP_PRESET_ID)} onClick={() => {
+            const label = BUILT_IN_TOP_HITS_PRESETS[selectedPresetName]?.label ?? selectedPresetName;
+            updatePresetStore({ ...presetStore, defaultPresetName: selectedPresetName }, `${label} will load by default.`);
+          }}>{selectedPresetName === (presetStore.defaultPresetName || BUILT_IN_LEADERSHIP_PRESET_ID) ? "Default" : "Set default"}</button> : null}
+          {selectedPresetName && !BUILT_IN_TOP_HITS_PRESETS[selectedPresetName] ? <button type="button" className="ghost-button" onClick={() => {
             const remainingPresets = { ...presetStore.presets };
             delete remainingPresets[selectedPresetName];
             const nextStore = {
@@ -2001,6 +2027,10 @@ function meetsSizePriceFloor(row: { market_cap?: number | null; day_close?: numb
     && row.day_close != null && row.day_close >= MIN_TOP_HITS_PRICE;
 }
 
+function resolveTopHitsPreset(name: string, store: TopHitsPresetStore): TopHitsFilterPreset | undefined {
+  return BUILT_IN_TOP_HITS_PRESETS[name]?.filters ?? store.presets[name];
+}
+
 function loadTopHitsPresetStore(): TopHitsPresetStore {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "{}");
@@ -2011,7 +2041,8 @@ function loadTopHitsPresetStore(): TopHitsPresetStore {
     const presets = Object.fromEntries(
       Object.entries(rawPresets).map(([name, value]) => [name, normalizeTopHitsFilterPreset(value)]),
     );
-    const defaultPresetName = typeof rawStore.defaultPresetName === "string" && presets[rawStore.defaultPresetName]
+    const defaultPresetName = typeof rawStore.defaultPresetName === "string"
+      && (presets[rawStore.defaultPresetName] || BUILT_IN_TOP_HITS_PRESETS[rawStore.defaultPresetName])
       ? rawStore.defaultPresetName : "";
     return { presets, defaultPresetName };
   } catch {
