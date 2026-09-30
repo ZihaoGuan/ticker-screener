@@ -101,6 +101,7 @@ export function ScannerTopHitsPage() {
   const [upOnDownDaysMin, setUpOnDownDaysMin] = useState(initialFilters.upOnDownDaysMin);
   const [scannerGroups, setScannerGroups] = useState<string[][]>(() => initialFilters.scannerGroups.map((group) => [...group]));
   const [activeScannerGroupIndex, setActiveScannerGroupIndex] = useState(0);
+  const [guruScannerGroupsOnly, setGuruScannerGroupsOnly] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>(initialFilters.sortBy);
   const [sortDirection, setSortDirection] = useState<SortDirection>(initialFilters.sortDirection);
   const [viewMode, setViewMode] = useState<ViewMode>(initialFilters.viewMode);
@@ -240,6 +241,10 @@ export function ScannerTopHitsPage() {
   const selectedScannerIds = useMemo(() => Array.from(new Set(scannerGroups.flat())), [scannerGroups]);
   const activeScannerGroup = scannerGroups[activeScannerGroupIndex] ?? [];
   const nonEmptyScannerGroupCount = scannerGroups.filter((group) => group.length > 0).length;
+  const scannerIdsByTicker = useMemo(
+    () => new Map(rows.map((row) => [row.ticker, row.scanners.map((scanner) => normalizeScannerId(scanner.id))])),
+    [rows],
+  );
   const normalizedLeaderRsRange = useMemo(() => normalizeRsRatingRange(leaderRsMin, leaderRsMax), [leaderRsMin, leaderRsMax]);
   const normalizedRsEvidenceMin = useMemo(() => normalizeBoundedInteger(rsEvidenceMin, 0, 9, 5), [rsEvidenceMin]);
   const normalizedRsDaysMinPct = useMemo(() => normalizeBoundedInteger(rsDaysMinPct, 0, 100, 60), [rsDaysMinPct]);
@@ -253,6 +258,10 @@ export function ScannerTopHitsPage() {
       return true;
     });
   }, [guruBoard?.rows, leaderRsOnly, normalizedLeaderRsRange, search, sectorFilter]);
+  const visibleGuruRows = useMemo(() => {
+    if (!guruScannerGroupsOnly || nonEmptyScannerGroupCount === 0) return guruRows;
+    return guruRows.filter((row) => hasScannerGroupSignals(row, scannerGroups, scannerIdsByTicker.get(row.ticker)));
+  }, [guruRows, guruScannerGroupsOnly, nonEmptyScannerGroupCount, scannerGroups, scannerIdsByTicker]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -749,17 +758,35 @@ export function ScannerTopHitsPage() {
             selectedEtf={selectedEtf}
             topHitsOnly={etfTopHitsOnly}
             minOverlap={etfMinOverlap}
+            scannerGroups={scannerGroups}
+            scannerGroupsOnly={guruScannerGroupsOnly}
+            selectedScannerGroupCount={nonEmptyScannerGroupCount}
+            scannerIdsByTicker={scannerIdsByTicker}
             onSelectedEtfChange={setSelectedEtf}
             onTopHitsOnlyChange={setEtfTopHitsOnly}
             onMinOverlapChange={setEtfMinOverlap}
+            onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
             onRetry={() => setEtfPayload(null)}
           />
         ) : ((viewMode === "guru" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
           <>
             {viewMode === "guru" ? (
-              <GuruBoard rows={guruRows} definitions={guruBoard?.definitions ?? []} totalScannerMatches={guruBoard?.total_scanner_matches ?? 0} confluenceTickerCount={guruBoard?.confluence_ticker_count ?? 0} />
+              <GuruBoard
+                rows={visibleGuruRows}
+                definitions={guruBoard?.definitions ?? []}
+                totalScannerMatches={guruBoard?.total_scanner_matches ?? 0}
+                confluenceTickerCount={guruBoard?.confluence_ticker_count ?? 0}
+                scannerGroupsOnly={guruScannerGroupsOnly}
+                selectedScannerGroupCount={nonEmptyScannerGroupCount}
+                onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
+              />
             ) : viewMode === "position" ? (
-              <PositionMap rows={guruRows} />
+              <PositionMap
+                rows={visibleGuruRows}
+                scannerGroupsOnly={guruScannerGroupsOnly}
+                selectedScannerGroupCount={nonEmptyScannerGroupCount}
+                onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
+              />
             ) : <>
             <div className="scanner-top-hits-toolbar">
               <span>{formatCount(filteredRows.length)} names</span>
@@ -957,16 +984,31 @@ function ScannerBadges({ scanners, selectedScannerIds, scannerNames }: { scanner
   );
 }
 
+function ScannerGroupsOnlyFilter({ checked, groupCount, onChange }: { checked: boolean; groupCount: number; onChange: (enabled: boolean) => void }) {
+  return (
+    <label className={`scanner-result-check guru-scanner-group-filter${checked ? " is-selected" : ""}`} title={groupCount > 0 ? "Use the scanner groups selected above" : "Select at least one scanner group first"}>
+      <input type="checkbox" checked={checked} disabled={groupCount === 0} onChange={(event) => onChange(event.target.checked)} />
+      <span>Match selected scanner groups{groupCount > 0 ? ` · ${groupCount}` : ""}</span>
+    </label>
+  );
+}
+
 function GuruBoard({
   rows,
   definitions,
   totalScannerMatches,
   confluenceTickerCount,
+  scannerGroupsOnly,
+  selectedScannerGroupCount,
+  onScannerGroupsOnlyChange,
 }: {
   rows: ScannerTopHitRow[];
   definitions: NonNullable<ScannerTopHitsResponse["guru_board"]>["definitions"];
   totalScannerMatches: number;
   confluenceTickerCount: number;
+  scannerGroupsOnly: boolean;
+  selectedScannerGroupCount: number;
+  onScannerGroupsOnlyChange: (enabled: boolean) => void;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const [strikeFilter, setStrikeFilter] = useState<"all" | "active" | "ready" | "context" | "avoid">("all");
@@ -978,13 +1020,17 @@ function GuruBoard({
         <span><strong>{formatCount(totalScannerMatches)}</strong> scanner matches</span>
         <span><strong>{formatCount(confluenceTickerCount)}</strong> confluence names</span>
       </div>
-      <div className="guru-strike-filters" role="group" aria-label="Strike Zone status">
-        {(["all", "active", "ready", "context", "avoid"] as const).map((state) => (
-          <button key={state} type="button" className={`scanner-result-view-chip${strikeFilter === state ? " is-active" : ""}`} onClick={() => setStrikeFilter(state)}>
-            {state === "all" ? "All" : state[0].toUpperCase() + state.slice(1)}
-          </button>
-        ))}
+      <div className="guru-board-filters">
+        <div className="guru-strike-filters" role="group" aria-label="Strike Zone status">
+          {(["all", "active", "ready", "context", "avoid"] as const).map((state) => (
+            <button key={state} type="button" className={`scanner-result-view-chip${strikeFilter === state ? " is-active" : ""}`} onClick={() => setStrikeFilter(state)}>
+              {state === "all" ? "All" : state[0].toUpperCase() + state.slice(1)}
+            </button>
+          ))}
+        </div>
+        <ScannerGroupsOnlyFilter checked={scannerGroupsOnly} groupCount={selectedScannerGroupCount} onChange={onScannerGroupsOnlyChange} />
       </div>
+      {scannerGroupsOnly && selectedScannerGroupCount > 0 && visibleRows.length === 0 ? <p className="panel-copy">No Guru names match the selected scanner groups and Strike Zone filter.</p> : null}
       <div className="guru-board-scroll">
         {definitions.map((definition) => {
           const columnRows = visibleRows.filter((row) => row.scanners.some((scanner) => normalizeScannerId(scanner.id) === definition.id));
@@ -1093,9 +1139,14 @@ function MomentumEtfPortfolioBoard({
   selectedEtf,
   topHitsOnly,
   minOverlap,
+  scannerGroups,
+  scannerGroupsOnly,
+  selectedScannerGroupCount,
+  scannerIdsByTicker,
   onSelectedEtfChange,
   onTopHitsOnlyChange,
   onMinOverlapChange,
+  onScannerGroupsOnlyChange,
   onRetry,
 }: {
   payload: MomentumEtfPortfoliosResponse | null;
@@ -1104,17 +1155,26 @@ function MomentumEtfPortfolioBoard({
   selectedEtf: string;
   topHitsOnly: boolean;
   minOverlap: number;
+  scannerGroups: string[][];
+  scannerGroupsOnly: boolean;
+  selectedScannerGroupCount: number;
+  scannerIdsByTicker: Map<string, string[]>;
   onSelectedEtfChange: (value: string) => void;
   onTopHitsOnlyChange: (value: boolean) => void;
   onMinOverlapChange: (value: number) => void;
+  onScannerGroupsOnlyChange: (enabled: boolean) => void;
   onRetry: () => void;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const rows = useMemo(() => (payload?.rows ?? []).filter((row) => {
     if (selectedEtf !== "all" && !row.funds.some((fund) => fund.ticker === selectedEtf)) return false;
     if (topHitsOnly && !row.top_hit) return false;
+    if (scannerGroupsOnly && selectedScannerGroupCount > 0 && !scannerIdsMatchGroups(
+      [...(row.scanner_ids ?? []), ...(scannerIdsByTicker.get(row.ticker) ?? [])],
+      scannerGroups,
+    )) return false;
     return row.etf_count >= minOverlap;
-  }), [minOverlap, payload?.rows, selectedEtf, topHitsOnly]);
+  }), [minOverlap, payload?.rows, scannerGroups, scannerGroupsOnly, scannerIdsByTicker, selectedEtf, selectedScannerGroupCount, topHitsOnly]);
   const funds = selectedEtf === "all" ? (payload?.funds ?? []) : (payload?.funds ?? []).filter((fund) => fund.ticker === selectedEtf);
   if (loading && !payload) return <LoadingBlock label="Loading momentum ETF portfolios…" />;
   if (notice) return <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={onRetry}>Retry</button></p>;
@@ -1131,6 +1191,7 @@ function MomentumEtfPortfolioBoard({
         <button className={`scanner-result-view-chip${selectedEtf === "all" ? " is-active" : ""}`} type="button" onClick={() => onSelectedEtfChange("all")}>All</button>
         {payload.funds.map((fund) => <button className={`scanner-result-view-chip${selectedEtf === fund.ticker ? " is-active" : ""}`} type="button" key={fund.ticker} onClick={() => onSelectedEtfChange(fund.ticker)}>{fund.ticker}</button>)}
         <label className="scanner-result-checkbox"><input type="checkbox" checked={topHitsOnly} onChange={(event) => onTopHitsOnlyChange(event.target.checked)} /> Top Hits only</label>
+        <ScannerGroupsOnlyFilter checked={scannerGroupsOnly} groupCount={selectedScannerGroupCount} onChange={onScannerGroupsOnlyChange} />
         <label className="field"><span>ETF overlap</span><select value={minOverlap} onChange={(event) => onMinOverlapChange(Number(event.target.value))}><option value={1}>Any ETF</option><option value={2}>2+ ETFs</option><option value={3}>3+ ETFs</option><option value={4}>All 4 ETFs</option></select></label>
       </div>
       <div className="guru-board-summary">
@@ -1190,10 +1251,27 @@ function MomentumEtfHoldingCard({ row, fundTicker }: { row: MomentumEtfPortfolio
   </Link>;
 }
 
-function PositionMap({ rows }: { rows: ScannerTopHitRow[] }) {
+function PositionMap({
+  rows,
+  scannerGroupsOnly,
+  selectedScannerGroupCount,
+  onScannerGroupsOnlyChange,
+}: {
+  rows: ScannerTopHitRow[];
+  scannerGroupsOnly: boolean;
+  selectedScannerGroupCount: number;
+  onScannerGroupsOnlyChange: (enabled: boolean) => void;
+}) {
   return (
     <section className="guru-board" aria-label="Market position map">
-      <div className="guru-board-summary"><span>Each Guru ticker appears once, based on its latest moving-average position.</span></div>
+      <div className="guru-board-summary">
+        <span>Each Guru ticker appears once, based on its latest moving-average position.</span>
+        <span><strong>{formatCount(rows.length)}</strong> names shown</span>
+      </div>
+      <div className="guru-board-filters">
+        <ScannerGroupsOnlyFilter checked={scannerGroupsOnly} groupCount={selectedScannerGroupCount} onChange={onScannerGroupsOnlyChange} />
+      </div>
+      {scannerGroupsOnly && selectedScannerGroupCount > 0 && rows.length === 0 ? <p className="panel-copy">No Position Map names match the selected scanner groups.</p> : null}
       <div className="guru-board-scroll position-map-scroll">
         {POSITION_BUCKETS.map(([id, label]) => {
           const bucketRows = rows.filter((row) => (row.position_bucket || "no_data") === id);
@@ -1637,8 +1715,15 @@ function normalizeBoundedInteger(value: string, minValue: number, maxValue: numb
   return Math.max(minValue, Math.min(maxValue, parsed));
 }
 
-function hasScannerGroupSignals(row: ScannerTopHitRow, scannerGroups: string[][]) {
-  const rowScannerIds = new Set(row.scanners.map((scanner) => normalizeScannerId(scanner.id)).filter(Boolean));
+function hasScannerGroupSignals(row: ScannerTopHitRow, scannerGroups: string[][], additionalScannerIds: string[] = []) {
+  return scannerIdsMatchGroups([
+    ...row.scanners.map((scanner) => normalizeScannerId(scanner.id)).filter(Boolean),
+    ...additionalScannerIds,
+  ], scannerGroups);
+}
+
+function scannerIdsMatchGroups(scannerIds: string[], scannerGroups: string[][]) {
+  const rowScannerIds = new Set(scannerIds.map(normalizeScannerId).filter(Boolean));
   return scannerGroups.filter((group) => group.length > 0).every((group) => group.some((scannerId) => rowScannerIds.has(scannerId)));
 }
 

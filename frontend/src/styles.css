@@ -5732,7 +5732,9 @@ a {
 .guru-strike.is-context { color: #c4b5fd; border-color: #7c3aed; }
 .guru-strike.is-avoid { color: #fca5a5; border-color: #dc2626; }
 .guru-primary-signal { max-width: 100%; color: #a7f3d0; overflow-wrap: anywhere; }
-.guru-strike-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 10px; }
+.guru-board-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 0 0 10px; }
+.guru-strike-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.guru-scanner-group-filter { margin-left: auto; }
 .guru-board-note { margin: 0; }
 @media (min-width: 768px) {
   .data-table .pinned-ticker,
