@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import logging
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
+from ...market_data_access import load_latest_market_caps, load_many_ticker_windows
 from ...momentum_etf_holdings import MOMENTUM_ETFS, load_momentum_etf_holdings_cache
 from .watchlist_service import WatchlistService
 
@@ -14,6 +16,7 @@ from .watchlist_service import WatchlistService
 _CACHE_TTL_SECONDS = 10 * 60
 _cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 _cache_lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 class MomentumEtfPortfolioService:
@@ -77,9 +80,22 @@ class MomentumEtfPortfolioService:
                 bucket["etf_count"] += 1
                 bucket["combined_weight"] += weight or 0.0
 
+        database_url = str(getattr(self.watchlist_service, "database_url", "") or "")
+        market_as_of = _coerce_date((top_hits.get("snapshot") or {}).get("source_data_as_of")) or dt.date.today()
+        market_caps: dict[str, float] = {}
+        market_frames: dict[str, Any] = {}
+        if database_url and by_ticker:
+            try:
+                market_caps = load_latest_market_caps(by_ticker, as_of_date=market_as_of, database_url=database_url)
+                market_frames = load_many_ticker_windows(by_ticker, market_as_of, 5, database_url=database_url)
+            except Exception as exc:
+                logger.warning("Momentum ETF size/price enrichment unavailable; continuing with Top Hits context: %s", exc)
+
         rows: list[dict[str, Any]] = []
         for ticker, row in by_ticker.items():
             top_hit = top_hit_by_ticker.get(ticker)
+            frame = market_frames.get(ticker)
+            latest_close = _coerce_float(frame.iloc[-1].get("Close")) if frame is not None and not frame.empty else None
             if top_hit:
                 row.update({
                     "top_hit": True,
@@ -90,6 +106,8 @@ class MomentumEtfPortfolioService:
                         if isinstance(scanner, dict) and str(scanner.get("id") or "").strip()
                     ],
                     "scanner_labels": list(top_hit.get("scanner_labels") or []),
+                    "market_cap": market_caps.get(ticker) or _coerce_float(top_hit.get("market_cap")),
+                    "day_close": latest_close or _coerce_float(top_hit.get("day_close")),
                     "daily_rs_rating": top_hit.get("daily_rs_rating"),
                     "stage_analysis": top_hit.get("stage_analysis"),
                     "strike_zone": top_hit.get("strike_zone"),
@@ -101,7 +119,14 @@ class MomentumEtfPortfolioService:
                 row["company"] = str(top_hit.get("company") or row["company"])
                 row["sector"] = str(top_hit.get("sector") or row["sector"])
             else:
-                row.update({"top_hit": False, "scanner_count": 0, "scanner_ids": [], "scanner_labels": []})
+                row.update({
+                    "top_hit": False,
+                    "scanner_count": 0,
+                    "scanner_ids": [],
+                    "scanner_labels": [],
+                    "market_cap": market_caps.get(ticker),
+                    "day_close": latest_close,
+                })
             row["funds"].sort(key=lambda item: str(item["ticker"]))
             row["combined_weight"] = round(float(row["combined_weight"]), 4)
             rows.append(row)
@@ -127,6 +152,13 @@ def _coerce_float(value: object) -> float | None:
     try:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
+        return None
+
+
+def _coerce_date(value: object) -> dt.date | None:
+    try:
+        return dt.date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
         return None
 
 
