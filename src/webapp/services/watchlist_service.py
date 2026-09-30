@@ -1307,6 +1307,7 @@ class WatchlistService:
         live_cards = self._select_scanner_top_hit_live_cards(board_payload)
         aggregated: dict[str, dict[str, Any]] = {}
         guru_aggregated: dict[str, dict[str, Any]] = {}
+        rs_phase_context: dict[str, dict[str, Any]] = {}
 
         for card in live_cards:
             stem = str(card.get("stem") or "").strip()
@@ -1362,6 +1363,8 @@ class WatchlistService:
                 scanners = bucket["scanners"]
                 if scanner_meta["id"] and not any(str(item.get("id") or "") == scanner_meta["id"] for item in scanners):
                     scanners.append(dict(scanner_meta))
+                if scanner_meta["id"] == "rs_phase":
+                    rs_phase_context[ticker] = entry
                 if scanner_meta["id"] in _GURU_AVAILABLE_SCANNER_IDS:
                     guru_bucket = guru_aggregated.setdefault(ticker, self._new_scanner_top_hit_bucket(ticker))
                     self._merge_scanner_top_hit_entry(guru_bucket, entry)
@@ -1370,6 +1373,10 @@ class WatchlistService:
                         guru_scanners.append(dict(scanner_meta))
 
         self._append_canslim_guru_candidates(guru_aggregated, board_payload)
+        for ticker, entry in rs_phase_context.items():
+            guru_bucket = guru_aggregated.get(ticker)
+            if guru_bucket is not None:
+                self._merge_rs_phase_context(guru_bucket, entry)
 
         target_trading_date = _coerce_optional_date(board_payload.get("target_trading_date")) or _coerce_optional_date(board_payload.get("latest_signal_date"))
         market_cap_tickers = sorted(set(aggregated) | set(guru_aggregated))
@@ -2954,6 +2961,24 @@ class WatchlistService:
             bucket["active_profiles"] = list(entry_active_profiles)
         if isinstance(entry_ready_profiles, list):
             bucket["ready_profiles"] = list(entry_ready_profiles)
+
+    @staticmethod
+    def _merge_rs_phase_context(bucket: dict[str, Any], entry: dict[str, Any]) -> None:
+        active_days = _resolve_rs_phase_active_days(entry)
+        if active_days is not None:
+            bucket["rs_phase_active_days"] = max(
+                _coerce_optional_int(bucket.get("rs_phase_active_days")) or 0,
+                active_days,
+            )
+        for key in (
+            "rs_phase_state",
+            "rs_phase_badge_label",
+            "rs_phase_quick_reclaim",
+            "rs_phase_below_days_before_reclaim",
+            "rs_phase_recent_reclaim_days_ago",
+        ):
+            if entry.get(key) is not None:
+                bucket[key] = entry[key]
 
     def _select_scanner_top_hit_live_cards(self, board_payload: dict[str, Any]) -> list[dict[str, Any]]:
         cards = [dict(item) for item in board_payload.get("cards", []) if isinstance(item, dict)]
