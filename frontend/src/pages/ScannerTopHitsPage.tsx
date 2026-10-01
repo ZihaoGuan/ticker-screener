@@ -13,7 +13,7 @@ import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPickRow,
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
-type ViewMode = "list" | "charts" | "guru" | "position" | "etf-portfolios";
+type ViewMode = "list" | "charts" | "guru" | "sectors" | "position" | "etf-portfolios";
 type ChartGridColumns = 2 | 3 | 4;
 type ChartRange = "3m" | "6m" | "1y";
 type ChartType = "candles" | "bars" | "line";
@@ -854,6 +854,13 @@ export function ScannerTopHitsPage() {
               Guru Board
             </button>
             <button
+              className={`scanner-result-view-chip${viewMode === "sectors" ? " is-active" : ""}`}
+              type="button"
+              onClick={() => setViewMode("sectors")}
+            >
+              Sectors
+            </button>
+            <button
               className={`scanner-result-view-chip${viewMode === "position" ? " is-active" : ""}`}
               type="button"
               onClick={() => setViewMode("position")}
@@ -876,7 +883,7 @@ export function ScannerTopHitsPage() {
         {isLoading && !payload ? <LoadingBlock label="Loading scanner top hits…" /> : null}
         {notice ? <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></p> : null}
         {!notice && myPicksNotice ? <p className="panel-copy earnings-console-note">{myPicksNotice}</p> : null}
-        {!isLoading && !notice && !etfLoading && viewMode !== "etf-portfolios" && ((viewMode === "guru" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
+        {!isLoading && !notice && !etfLoading && viewMode !== "etf-portfolios" && ((viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
         {viewMode === "etf-portfolios" ? (
           <MomentumEtfPortfolioBoard
             payload={etfPayload}
@@ -897,7 +904,7 @@ export function ScannerTopHitsPage() {
             onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
             onRetry={() => setEtfPayload(null)}
           />
-        ) : ((viewMode === "guru" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
+        ) : ((viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
           <>
             {viewMode === "guru" ? (
               <GuruBoard
@@ -905,6 +912,17 @@ export function ScannerTopHitsPage() {
                 definitions={guruBoard?.definitions ?? []}
                 totalScannerMatches={guruBoard?.total_scanner_matches ?? 0}
                 confluenceTickerCount={guruBoard?.confluence_ticker_count ?? 0}
+                scannerGroupsOnly={guruScannerGroupsOnly}
+                selectedScannerGroupCount={nonEmptyScannerGroupCount}
+                myPickTickers={myPickTickers}
+                savingMyPickTickers={savingMyPickTickers}
+                canManageMyPicks={canManageMyPicks}
+                onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
+                onToggleMyPick={handleToggleMyPick}
+              />
+            ) : viewMode === "sectors" ? (
+              <SectorBoard
+                rows={visibleGuruRows}
                 scannerGroupsOnly={guruScannerGroupsOnly}
                 selectedScannerGroupCount={nonEmptyScannerGroupCount}
                 myPickTickers={myPickTickers}
@@ -1296,6 +1314,124 @@ function GuruBoard({
         })}
       </div>
       <p className="panel-copy guru-board-note">A ticker can appear in multiple columns. Strike Zone is chart-review guidance, not an automatic buy signal.</p>
+    </section>
+  );
+}
+
+const SECTOR_BOARD_ACCENTS = ["amber", "yellow", "teal", "blue", "sky", "cyan", "gold"];
+
+function SectorBoard({
+  rows,
+  scannerGroupsOnly,
+  selectedScannerGroupCount,
+  myPickTickers,
+  savingMyPickTickers,
+  canManageMyPicks,
+  onScannerGroupsOnlyChange,
+  onToggleMyPick,
+}: {
+  rows: ScannerTopHitRow[];
+  scannerGroupsOnly: boolean;
+  selectedScannerGroupCount: number;
+  myPickTickers: Set<string>;
+  savingMyPickTickers: Record<string, boolean>;
+  canManageMyPicks: boolean;
+  onScannerGroupsOnlyChange: (enabled: boolean) => void;
+  onToggleMyPick: (ticker: string) => Promise<void>;
+}) {
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
+  const [strikeFilter, setStrikeFilter] = useState<"all" | "active" | "ready" | "context" | "avoid">("all");
+  const [sectorSortBy, setSectorSortBy] = useState<GuruSortKey>("default");
+  const [sectorSortDirection, setSectorSortDirection] = useState<SortDirection>("desc");
+  const horizontalDragScroll = useHorizontalDragScroll();
+  const visibleRows = useMemo(() => {
+    const filtered = strikeFilter === "all" ? rows : rows.filter((row) => row.strike_zone?.state === strikeFilter);
+    if (sectorSortBy === "default") return filtered;
+    return [...filtered].sort((left, right) => compareGuruRows(left, right, sectorSortBy, sectorSortDirection));
+  }, [rows, sectorSortBy, sectorSortDirection, strikeFilter]);
+  const sectors = useMemo(() => {
+    const grouped = new Map<string, ScannerTopHitRow[]>();
+    for (const row of visibleRows) {
+      const sector = String(row.sector || "").trim() || "Unclassified";
+      grouped.set(sector, [...(grouped.get(sector) ?? []), row]);
+    }
+    return Array.from(grouped.entries())
+      .map(([sector, sectorRows]) => ({ sector, rows: sectorRows }))
+      .sort((left, right) => right.rows.length - left.rows.length || left.sector.localeCompare(right.sector));
+  }, [visibleRows]);
+  return (
+    <section className="guru-board sector-board" aria-label="Top Hits by sector">
+      <div className="guru-board-summary">
+        <span><strong>{formatCount(visibleRows.length)}</strong> Guru names across <strong>{formatCount(sectors.length)}</strong> sectors</span>
+        <span>Each ticker appears once in its latest sector.</span>
+      </div>
+      <div className="guru-board-filters">
+        <div className="guru-strike-filters" role="group" aria-label="Strike Zone status">
+          {(["all", "active", "ready", "context", "avoid"] as const).map((state) => (
+            <button key={state} type="button" className={`scanner-result-view-chip${strikeFilter === state ? " is-active" : ""}`} onClick={() => setStrikeFilter(state)}>
+              {state === "all" ? "All" : state[0].toUpperCase() + state.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div className="guru-sort-controls">
+          <label>
+            <span>Sort cards</span>
+            <select value={sectorSortBy} onChange={(event) => {
+              const nextSort = event.target.value as GuruSortKey;
+              setSectorSortBy(nextSort);
+              setSectorSortDirection(nextSort === "stage" || nextSort === "rsPhase" ? "asc" : "desc");
+            }}>
+              <option value="default">Board priority</option>
+              <option value="stage">Stage</option>
+              <option value="rs">Daily RS score</option>
+              <option value="rsPhase">RS Phase</option>
+              <option value="strike">Strike score</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="ghost-button guru-sort-direction"
+            disabled={sectorSortBy === "default"}
+            aria-label={sectorSortDirection === "asc" ? "Sort ascending" : "Sort descending"}
+            title={sectorSortDirection === "asc" ? "Ascending" : "Descending"}
+            onClick={() => setSectorSortDirection((current) => current === "asc" ? "desc" : "asc")}
+          >
+            {sectorSortDirection === "asc" ? "↑" : "↓"}
+          </button>
+        </div>
+        <ScannerGroupsOnlyFilter checked={scannerGroupsOnly} groupCount={selectedScannerGroupCount} onChange={onScannerGroupsOnlyChange} />
+      </div>
+      {scannerGroupsOnly && selectedScannerGroupCount > 0 && visibleRows.length === 0 ? <p className="panel-copy">No sector names match the selected scanner groups and Strike Zone filter.</p> : null}
+      <div className="guru-board-scroll is-drag-scroll" {...horizontalDragScroll}>
+        {sectors.map(({ sector, rows: sectorRows }, index) => {
+          const visibleCount = visibleCounts[sector] ?? GURU_COLUMN_PAGE_SIZE;
+          const remainingCount = Math.max(0, sectorRows.length - visibleCount);
+          return (
+            <article className={`guru-column is-${SECTOR_BOARD_ACCENTS[index % SECTOR_BOARD_ACCENTS.length]}`} key={sector}>
+              <header title={sector}>
+                <strong>{formatCount(sectorRows.length)}</strong>
+                <span>{sector}</span>
+              </header>
+              <div className="guru-column-cards">
+                {sectorRows.slice(0, visibleCount).map((row) => (
+                  <GuruTickerCard
+                    canManageMyPicks={canManageMyPicks}
+                    isMyPick={myPickTickers.has(row.ticker)}
+                    isSavingMyPick={Boolean(savingMyPickTickers[row.ticker])}
+                    key={row.ticker}
+                    onToggleMyPick={onToggleMyPick}
+                    row={row}
+                  />
+                ))}
+              </div>
+              {remainingCount > 0 ? <button className="ghost-button guru-column-load-more" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [sector]: visibleCount + GURU_COLUMN_PAGE_SIZE }))}>
+                Load 30 more ({formatCount(remainingCount)} remaining)
+              </button> : null}
+            </article>
+          );
+        })}
+      </div>
+      <p className="panel-copy guru-board-note">Sector columns help compare leadership breadth. Strike Zone remains chart-review guidance, not an automatic buy signal.</p>
     </section>
   );
 }
