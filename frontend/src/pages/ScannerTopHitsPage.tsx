@@ -404,7 +404,6 @@ export function ScannerTopHitsPage() {
         setChartErrors((current) => ({ ...current, [selectedBoardTicker]: error instanceof Error ? error.message : "Failed to load chart." }));
       })
       .finally(() => {
-        if (ignore) return;
         setChartLoadingTickers((current) => {
           const next = { ...current };
           delete next[selectedBoardTicker];
@@ -412,7 +411,7 @@ export function ScannerTopHitsPage() {
         });
       });
     return () => { ignore = true; };
-  }, [chartLoadingTickers, chartPayloads, isColumnView, selectedBoardTicker]);
+  }, [isColumnView, selectedBoardTicker]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
