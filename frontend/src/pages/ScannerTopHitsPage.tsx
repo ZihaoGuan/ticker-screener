@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { preloadChartsPage } from "../App";
 import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
@@ -28,6 +28,20 @@ type ChartWorkspace = {
   showSma50: boolean;
 };
 type GuruSortKey = "default" | "stage" | "rs" | "rsPhase" | "strike";
+type BoardChartSelection = {
+  ticker: string;
+  company: string;
+  sector: string;
+  close: number | null;
+  changePct: number | null;
+  dailyRs: number | null;
+  stage: string;
+  strikeLabel: string;
+  strikeState: string;
+  strikeScore: number | null;
+  scannerSummary: string;
+  context?: string;
+};
 type TopHitsFilterPreset = {
   sectorFilter: string;
   sizePriceFloorOnly: boolean;
@@ -118,6 +132,7 @@ const BUILT_IN_TOP_HITS_PRESETS: Record<string, { label: string; filters: TopHit
 
 export function ScannerTopHitsPage() {
   const auth = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [payload, setPayload] = useState<ScannerTopHitsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -170,7 +185,26 @@ export function ScannerTopHitsPage() {
   const [selectedEtf, setSelectedEtf] = useState("all");
   const [etfTopHitsOnly, setEtfTopHitsOnly] = useState(false);
   const [etfMinOverlap, setEtfMinOverlap] = useState(1);
+  const [selectedBoardTicker, setSelectedBoardTicker] = useState(() => searchParams.get("ticker")?.trim().toUpperCase() || "");
   const canManageMyPicks = auth.hasCapability("manage_exclusions");
+
+  const selectBoardTicker = (ticker: string) => {
+    const nextTicker = ticker.trim().toUpperCase();
+    if (!nextTicker) return;
+    setSelectedBoardTicker(nextTicker);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("ticker", nextTicker);
+      return next;
+    }, { replace: true });
+  };
+
+  useEffect(() => {
+    const tickerFromUrl = searchParams.get("ticker")?.trim().toUpperCase() || "";
+    if (tickerFromUrl && tickerFromUrl !== selectedBoardTicker) {
+      setSelectedBoardTicker(tickerFromUrl);
+    }
+  }, [searchParams, selectedBoardTicker]);
 
   const applyFilterPreset = (preset: TopHitsFilterPreset) => {
     setSectorFilter(preset.sectorFilter);
@@ -333,6 +367,52 @@ export function ScannerTopHitsPage() {
     if (!guruScannerGroupsOnly || nonEmptyScannerGroupCount === 0) return guruRows;
     return guruRows.filter((row) => hasScannerGroupSignals(row, scannerGroups, scannerIdsByTicker.get(row.ticker)));
   }, [guruRows, guruScannerGroupsOnly, nonEmptyScannerGroupCount, scannerGroups, scannerIdsByTicker]);
+  const isColumnView = viewMode === "guru" || viewMode === "sectors" || viewMode === "position" || viewMode === "etf-portfolios";
+  const selectedBoardSelection = useMemo(() => {
+    const guruRow = visibleGuruRows.find((row) => row.ticker === selectedBoardTicker)
+      ?? guruRows.find((row) => row.ticker === selectedBoardTicker)
+      ?? rows.find((row) => row.ticker === selectedBoardTicker);
+    if (guruRow) return toBoardChartSelection(guruRow);
+    const etfRow = (etfPayload?.rows ?? []).find((row) => row.ticker === selectedBoardTicker);
+    return etfRow ? toEtfBoardChartSelection(etfRow) : null;
+  }, [etfPayload?.rows, guruRows, rows, selectedBoardTicker, visibleGuruRows]);
+
+  useEffect(() => {
+    if (viewMode === "etf-portfolios" || !isColumnView || visibleGuruRows.length === 0) return;
+    if (!visibleGuruRows.some((row) => row.ticker === selectedBoardTicker)) {
+      selectBoardTicker(visibleGuruRows[0].ticker);
+    }
+  }, [isColumnView, selectedBoardTicker, viewMode, visibleGuruRows]);
+
+  useEffect(() => {
+    if (!isColumnView || !selectedBoardTicker || chartPayloads[selectedBoardTicker] !== undefined || chartLoadingTickers[selectedBoardTicker]) return;
+    let ignore = false;
+    setChartLoadingTickers((current) => ({ ...current, [selectedBoardTicker]: true }));
+    void fetchJson<WatchlistChartResponse>(`/api/charts/${encodeURIComponent(selectedBoardTicker)}/preview?period=18mo`)
+      .then((chartPayload) => {
+        if (ignore) return;
+        setChartPayloads((current) => ({ ...current, [selectedBoardTicker]: chartPayload }));
+        setChartErrors((current) => {
+          const next = { ...current };
+          delete next[selectedBoardTicker];
+          return next;
+        });
+      })
+      .catch((error) => {
+        if (ignore) return;
+        setChartPayloads((current) => ({ ...current, [selectedBoardTicker]: null }));
+        setChartErrors((current) => ({ ...current, [selectedBoardTicker]: error instanceof Error ? error.message : "Failed to load chart." }));
+      })
+      .finally(() => {
+        if (ignore) return;
+        setChartLoadingTickers((current) => {
+          const next = { ...current };
+          delete next[selectedBoardTicker];
+          return next;
+        });
+      });
+    return () => { ignore = true; };
+  }, [chartLoadingTickers, chartPayloads, isColumnView, selectedBoardTicker]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -885,63 +965,79 @@ export function ScannerTopHitsPage() {
         {!notice && myPicksNotice ? <p className="panel-copy earnings-console-note">{myPicksNotice}</p> : null}
         {!isLoading && !notice && !etfLoading && viewMode !== "etf-portfolios" && ((viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
         {viewMode === "etf-portfolios" ? (
-          <MomentumEtfPortfolioBoard
-            payload={etfPayload}
-            loading={etfLoading}
-            notice={etfNotice}
-            selectedEtf={selectedEtf}
-            topHitsOnly={etfTopHitsOnly}
-            minOverlap={etfMinOverlap}
-            sizePriceFloorOnly={sizePriceFloorOnly}
-            scannerGroups={scannerGroups}
-            scannerGroupsOnly={guruScannerGroupsOnly}
-            selectedScannerGroupCount={nonEmptyScannerGroupCount}
-            scannerIdsByTicker={scannerIdsByTicker}
-            myPickTickers={myPickTickers}
-            onSelectedEtfChange={setSelectedEtf}
-            onTopHitsOnlyChange={setEtfTopHitsOnly}
-            onMinOverlapChange={setEtfMinOverlap}
-            onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
-            onRetry={() => setEtfPayload(null)}
-          />
+          <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
+            <MomentumEtfPortfolioBoard
+              payload={etfPayload}
+              loading={etfLoading}
+              notice={etfNotice}
+              selectedEtf={selectedEtf}
+              topHitsOnly={etfTopHitsOnly}
+              minOverlap={etfMinOverlap}
+              sizePriceFloorOnly={sizePriceFloorOnly}
+              scannerGroups={scannerGroups}
+              scannerGroupsOnly={guruScannerGroupsOnly}
+              selectedScannerGroupCount={nonEmptyScannerGroupCount}
+              scannerIdsByTicker={scannerIdsByTicker}
+              myPickTickers={myPickTickers}
+              selectedTicker={selectedBoardTicker}
+              onSelectedEtfChange={setSelectedEtf}
+              onTopHitsOnlyChange={setEtfTopHitsOnly}
+              onMinOverlapChange={setEtfMinOverlap}
+              onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
+              onSelectTicker={selectBoardTicker}
+              onRetry={() => setEtfPayload(null)}
+            />
+          </BoardChartWorkspace>
         ) : ((viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
           <>
             {viewMode === "guru" ? (
-              <GuruBoard
-                rows={visibleGuruRows}
-                definitions={guruBoard?.definitions ?? []}
-                totalScannerMatches={guruBoard?.total_scanner_matches ?? 0}
-                confluenceTickerCount={guruBoard?.confluence_ticker_count ?? 0}
-                scannerGroupsOnly={guruScannerGroupsOnly}
-                selectedScannerGroupCount={nonEmptyScannerGroupCount}
-                myPickTickers={myPickTickers}
-                savingMyPickTickers={savingMyPickTickers}
-                canManageMyPicks={canManageMyPicks}
-                onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
-                onToggleMyPick={handleToggleMyPick}
-              />
+              <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
+                <GuruBoard
+                  rows={visibleGuruRows}
+                  definitions={guruBoard?.definitions ?? []}
+                  totalScannerMatches={guruBoard?.total_scanner_matches ?? 0}
+                  confluenceTickerCount={guruBoard?.confluence_ticker_count ?? 0}
+                  scannerGroupsOnly={guruScannerGroupsOnly}
+                  selectedScannerGroupCount={nonEmptyScannerGroupCount}
+                  myPickTickers={myPickTickers}
+                  savingMyPickTickers={savingMyPickTickers}
+                  canManageMyPicks={canManageMyPicks}
+                  selectedTicker={selectedBoardTicker}
+                  onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
+                  onSelectTicker={selectBoardTicker}
+                  onToggleMyPick={handleToggleMyPick}
+                />
+              </BoardChartWorkspace>
             ) : viewMode === "sectors" ? (
-              <SectorBoard
-                rows={visibleGuruRows}
-                scannerGroupsOnly={guruScannerGroupsOnly}
-                selectedScannerGroupCount={nonEmptyScannerGroupCount}
-                myPickTickers={myPickTickers}
-                savingMyPickTickers={savingMyPickTickers}
-                canManageMyPicks={canManageMyPicks}
-                onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
-                onToggleMyPick={handleToggleMyPick}
-              />
+              <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
+                <SectorBoard
+                  rows={visibleGuruRows}
+                  scannerGroupsOnly={guruScannerGroupsOnly}
+                  selectedScannerGroupCount={nonEmptyScannerGroupCount}
+                  myPickTickers={myPickTickers}
+                  savingMyPickTickers={savingMyPickTickers}
+                  canManageMyPicks={canManageMyPicks}
+                  selectedTicker={selectedBoardTicker}
+                  onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
+                  onSelectTicker={selectBoardTicker}
+                  onToggleMyPick={handleToggleMyPick}
+                />
+              </BoardChartWorkspace>
             ) : viewMode === "position" ? (
-              <PositionMap
-                rows={visibleGuruRows}
-                scannerGroupsOnly={guruScannerGroupsOnly}
-                selectedScannerGroupCount={nonEmptyScannerGroupCount}
-                myPickTickers={myPickTickers}
-                savingMyPickTickers={savingMyPickTickers}
-                canManageMyPicks={canManageMyPicks}
-                onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
-                onToggleMyPick={handleToggleMyPick}
-              />
+              <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
+                <PositionMap
+                  rows={visibleGuruRows}
+                  scannerGroupsOnly={guruScannerGroupsOnly}
+                  selectedScannerGroupCount={nonEmptyScannerGroupCount}
+                  myPickTickers={myPickTickers}
+                  savingMyPickTickers={savingMyPickTickers}
+                  canManageMyPicks={canManageMyPicks}
+                  selectedTicker={selectedBoardTicker}
+                  onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
+                  onSelectTicker={selectBoardTicker}
+                  onToggleMyPick={handleToggleMyPick}
+                />
+              </BoardChartWorkspace>
             ) : <>
             {viewMode === "charts" ? (
               <ChartWorkspaceToolbar
@@ -1203,6 +1299,103 @@ function useHorizontalDragScroll() {
   };
 }
 
+function toBoardChartSelection(row: ScannerTopHitRow): BoardChartSelection {
+  return {
+    ticker: row.ticker,
+    company: row.company || row.industry || "",
+    sector: row.sector || "",
+    close: row.day_close,
+    changePct: row.change_pct,
+    dailyRs: row.daily_rs_rating ?? row.rs_rating,
+    stage: row.stage_analysis?.alias || "--",
+    strikeLabel: row.strike_zone?.label || "Context",
+    strikeState: row.strike_zone?.state || "context",
+    strikeScore: row.strike_zone?.score ?? null,
+    scannerSummary: buildScannerHitsTitle(row),
+    context: row.position_bucket ? row.position_bucket.replace(/_/g, " ") : undefined,
+  };
+}
+
+function toEtfBoardChartSelection(row: MomentumEtfPortfolioRow): BoardChartSelection {
+  return {
+    ticker: row.ticker,
+    company: row.company || "",
+    sector: row.sector || "",
+    close: row.day_close ?? null,
+    changePct: row.change_pct ?? null,
+    dailyRs: row.daily_rs_rating ?? null,
+    stage: row.stage_analysis?.alias || "--",
+    strikeLabel: row.strike_zone?.label || "Context",
+    strikeState: row.strike_zone?.state || "context",
+    strikeScore: row.strike_zone?.score ?? null,
+    scannerSummary: row.scanner_labels.length ? `Top Hits: ${row.scanner_labels.join(" · ")}` : "Not currently in Top Hits",
+    context: `${row.etf_count} momentum ETF${row.etf_count === 1 ? "" : "s"}`,
+  };
+}
+
+function BoardChartWorkspace({
+  children,
+  selection,
+  chartPayload,
+  chartError,
+  isChartLoading,
+  workspace,
+  onWorkspaceChange,
+}: {
+  children: ReactNode;
+  selection: BoardChartSelection | null;
+  chartPayload: WatchlistChartResponse | null | undefined;
+  chartError: string | undefined;
+  isChartLoading: boolean;
+  workspace: ChartWorkspace;
+  onWorkspaceChange: (patch: Partial<ChartWorkspace>) => void;
+}) {
+  const allCandles = buildChartCandles(chartPayload);
+  const chartCandles = sliceCandlesToRange(allCandles, workspace.range);
+  const firstChartTime = chartCandles[0]?.time;
+  const ema8 = sliceChartSeries(buildExponentialMovingAverage(allCandles, 8), firstChartTime);
+  const ema21 = sliceChartSeries(buildExponentialMovingAverage(allCandles, 21), firstChartTime);
+  return (
+    <div className="board-chart-split">
+      <div className="board-chart-split-board">{children}</div>
+      <aside className="board-chart-panel" aria-label="Selected ticker chart">
+        {!selection ? <p className="panel-copy">Select a ticker card to review its chart.</p> : <>
+          <div className="board-chart-panel-head">
+            <div>
+              <Link to={buildChartHref(selection.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>{selection.ticker}</Link>
+              <strong title={selection.company}>{selection.company || selection.sector || "Selected ticker"}</strong>
+            </div>
+            <div>
+              <strong>{formatPrice(selection.close)}</strong>
+              {renderChange(selection.changePct)}
+            </div>
+          </div>
+          <div className="scanner-chart-card-score-row board-chart-panel-scores">
+            <span className="scanner-score-pill">Stage {selection.stage}</span>
+            <span className={`scanner-score-pill ${toneForRating(selection.dailyRs, 90)}`}>RS {formatRating(selection.dailyRs)}</span>
+            <span className={`scanner-score-pill ${toneForStrikeZone(selection.strikeState)}`}>⚾ {selection.strikeLabel}{selection.strikeScore == null ? "" : ` ${selection.strikeScore}`}</span>
+          </div>
+          <div className="board-chart-panel-controls" role="group" aria-label="Selected chart range">
+            {(["3m", "6m", "1y"] as ChartRange[]).map((range) => <button key={range} type="button" className={`scanner-result-view-chip${workspace.range === range ? " is-active" : ""}`} onClick={() => onWorkspaceChange({ range })}>{range.toUpperCase()}</button>)}
+          </div>
+          <div className="board-chart-panel-chart">
+            {isChartLoading ? <LoadingBlock label={`Loading ${selection.ticker} chart...`} /> : null}
+            {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
+            {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
+            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={selection.ticker} candles={chartCandles} chartType={workspace.chartType} height={330} showVolume={workspace.showVolume} ema8={workspace.showEma8 ? ema8 : []} ema21={workspace.showEma21 ? ema21 : []} /> : null}
+          </div>
+          <div className="board-chart-panel-context">
+            <span>{selection.sector || "Sector unavailable"}</span>
+            {selection.context ? <span>{selection.context}</span> : null}
+            <span title={selection.scannerSummary}>{selection.scannerSummary}</span>
+          </div>
+          <Link className="ghost-button board-chart-panel-link" to={buildChartHref(selection.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>Open full chart</Link>
+        </>}
+      </aside>
+    </div>
+  );
+}
+
 function GuruBoard({
   rows,
   definitions,
@@ -1213,7 +1406,9 @@ function GuruBoard({
   myPickTickers,
   savingMyPickTickers,
   canManageMyPicks,
+  selectedTicker,
   onScannerGroupsOnlyChange,
+  onSelectTicker,
   onToggleMyPick,
 }: {
   rows: ScannerTopHitRow[];
@@ -1225,7 +1420,9 @@ function GuruBoard({
   myPickTickers: Set<string>;
   savingMyPickTickers: Record<string, boolean>;
   canManageMyPicks: boolean;
+  selectedTicker: string;
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
+  onSelectTicker: (ticker: string) => void;
   onToggleMyPick: (ticker: string) => Promise<void>;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
@@ -1300,7 +1497,9 @@ function GuruBoard({
                     canManageMyPicks={canManageMyPicks}
                     isMyPick={myPickTickers.has(row.ticker)}
                     isSavingMyPick={Boolean(savingMyPickTickers[row.ticker])}
+                    isSelected={row.ticker === selectedTicker}
                     key={row.ticker}
+                    onSelect={onSelectTicker}
                     onToggleMyPick={onToggleMyPick}
                     row={row}
                   />
@@ -1327,7 +1526,9 @@ function SectorBoard({
   myPickTickers,
   savingMyPickTickers,
   canManageMyPicks,
+  selectedTicker,
   onScannerGroupsOnlyChange,
+  onSelectTicker,
   onToggleMyPick,
 }: {
   rows: ScannerTopHitRow[];
@@ -1336,7 +1537,9 @@ function SectorBoard({
   myPickTickers: Set<string>;
   savingMyPickTickers: Record<string, boolean>;
   canManageMyPicks: boolean;
+  selectedTicker: string;
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
+  onSelectTicker: (ticker: string) => void;
   onToggleMyPick: (ticker: string) => Promise<void>;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
@@ -1418,7 +1621,9 @@ function SectorBoard({
                     canManageMyPicks={canManageMyPicks}
                     isMyPick={myPickTickers.has(row.ticker)}
                     isSavingMyPick={Boolean(savingMyPickTickers[row.ticker])}
+                    isSelected={row.ticker === selectedTicker}
                     key={row.ticker}
+                    onSelect={onSelectTicker}
                     onToggleMyPick={onToggleMyPick}
                     row={row}
                   />
@@ -1441,12 +1646,16 @@ function GuruTickerCard({
   isMyPick,
   isSavingMyPick,
   canManageMyPicks,
+  isSelected = false,
+  onSelect,
   onToggleMyPick,
 }: {
   row: ScannerTopHitRow;
   isMyPick: boolean;
   isSavingMyPick: boolean;
   canManageMyPicks: boolean;
+  isSelected?: boolean;
+  onSelect?: (ticker: string) => void;
   onToggleMyPick: (ticker: string) => Promise<void>;
 }) {
   const stage = row.stage_analysis?.alias || "--";
@@ -1460,8 +1669,12 @@ function GuruTickerCard({
   const signalAge = row.strike_zone?.signal_age_days;
   const strikeTitle = buildStrikeZoneTitle(row.strike_zone);
   return (
-    <article className="guru-ticker-card">
-      <Link className="guru-ticker-card-link" to={buildChartHref(row.ticker)} title={`${row.ticker} chart`}>
+    <article className={`guru-ticker-card${isSelected ? " is-selected" : ""}`}>
+      <Link className="guru-ticker-card-link" to={buildChartHref(row.ticker)} title={onSelect ? `Select ${row.ticker}` : `${row.ticker} chart`} onClick={(event) => {
+        if (!onSelect) return;
+        event.preventDefault();
+        onSelect(row.ticker);
+      }}>
         <div className="guru-ticker-main">
           <strong>{row.ticker}</strong>
           <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
@@ -1588,10 +1801,12 @@ function MomentumEtfPortfolioBoard({
   selectedScannerGroupCount,
   scannerIdsByTicker,
   myPickTickers,
+  selectedTicker,
   onSelectedEtfChange,
   onTopHitsOnlyChange,
   onMinOverlapChange,
   onScannerGroupsOnlyChange,
+  onSelectTicker,
   onRetry,
 }: {
   payload: MomentumEtfPortfoliosResponse | null;
@@ -1606,10 +1821,12 @@ function MomentumEtfPortfolioBoard({
   selectedScannerGroupCount: number;
   scannerIdsByTicker: Map<string, string[]>;
   myPickTickers: Set<string>;
+  selectedTicker: string;
   onSelectedEtfChange: (value: string) => void;
   onTopHitsOnlyChange: (value: boolean) => void;
   onMinOverlapChange: (value: number) => void;
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
+  onSelectTicker: (ticker: string) => void;
   onRetry: () => void;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
@@ -1624,6 +1841,11 @@ function MomentumEtfPortfolioBoard({
     return row.etf_count >= minOverlap;
   }), [minOverlap, payload?.rows, scannerGroups, scannerGroupsOnly, scannerIdsByTicker, selectedEtf, selectedScannerGroupCount, sizePriceFloorOnly, topHitsOnly]);
   const funds = selectedEtf === "all" ? (payload?.funds ?? []) : (payload?.funds ?? []).filter((fund) => fund.ticker === selectedEtf);
+  useEffect(() => {
+    if (rows.length > 0 && !rows.some((row) => row.ticker === selectedTicker)) {
+      onSelectTicker(rows[0].ticker);
+    }
+  }, [onSelectTicker, rows, selectedTicker]);
   if (loading && !payload) return <LoadingBlock label="Loading momentum ETF portfolios…" />;
   if (notice) return <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={onRetry}>Retry</button></p>;
   if (!payload) return <p className="panel-copy">No momentum ETF holdings cache is available yet. Run “Refresh Momentum ETF Holdings”.</p>;
@@ -1659,7 +1881,7 @@ function MomentumEtfPortfolioBoard({
             </header>
             {!fund.available ? <p className="guru-column-unavailable">Holdings unavailable</p> : null}
             <div className="guru-column-cards">
-              {fundRows.slice(0, visibleCount).map((row) => <MomentumEtfHoldingCard fundTicker={fund.ticker} isMyPick={myPickTickers.has(row.ticker)} key={row.ticker} row={row} />)}
+              {fundRows.slice(0, visibleCount).map((row) => <MomentumEtfHoldingCard fundTicker={fund.ticker} isMyPick={myPickTickers.has(row.ticker)} isSelected={row.ticker === selectedTicker} key={row.ticker} onSelect={onSelectTicker} row={row} />)}
             </div>
             {remainingCount > 0 ? <button className="ghost-button guru-column-load-more" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [fund.ticker]: visibleCount + GURU_COLUMN_PAGE_SIZE }))}>
               Load 30 more ({formatCount(remainingCount)} remaining)
@@ -1672,7 +1894,7 @@ function MomentumEtfPortfolioBoard({
   );
 }
 
-function MomentumEtfHoldingCard({ row, fundTicker, isMyPick }: { row: MomentumEtfPortfolioRow; fundTicker: string; isMyPick: boolean }) {
+function MomentumEtfHoldingCard({ row, fundTicker, isMyPick, isSelected, onSelect }: { row: MomentumEtfPortfolioRow; fundTicker: string; isMyPick: boolean; isSelected: boolean; onSelect: (ticker: string) => void }) {
   const holding = row.funds.find((fund) => fund.ticker === fundTicker);
   const stage = row.stage_analysis?.alias || "--";
   const atr = row.atr_to_sma50 == null ? "--" : `${row.atr_to_sma50 >= 0 ? "+" : ""}${row.atr_to_sma50.toFixed(1)} ATR`;
@@ -1680,7 +1902,7 @@ function MomentumEtfHoldingCard({ row, fundTicker, isMyPick }: { row: MomentumEt
   const strikeTone = row.strike_zone?.state || "context";
   const strikeScore = row.strike_zone?.score;
   const title = [row.company || row.ticker, row.scanner_labels.length ? `Top Hits: ${row.scanner_labels.join(" · ")}` : "Not currently in Top Hits"].join("\n");
-  return <Link className={`guru-ticker-card momentum-etf-card${row.top_hit ? " is-top-hit" : ""}`} to={buildChartHref(row.ticker)} title={title}>
+  return <Link className={`guru-ticker-card momentum-etf-card${row.top_hit ? " is-top-hit" : ""}${isSelected ? " is-selected" : ""}`} to={buildChartHref(row.ticker)} title={`Select ${row.ticker}`} onClick={(event) => { event.preventDefault(); onSelect(row.ticker); }}>
     <div className="guru-ticker-main">
       <strong>{row.ticker}<MyPickIndicator ticker={row.ticker} visible={isMyPick} /></strong>
       <span className={row.change_pct != null && row.change_pct < 0 ? "ticker-change down" : "ticker-change up"}>{row.change_pct == null ? "--" : `${row.change_pct >= 0 ? "+" : ""}${row.change_pct.toFixed(1)}%`}</span>
@@ -1718,7 +1940,9 @@ function PositionMap({
   myPickTickers,
   savingMyPickTickers,
   canManageMyPicks,
+  selectedTicker,
   onScannerGroupsOnlyChange,
+  onSelectTicker,
   onToggleMyPick,
 }: {
   rows: ScannerTopHitRow[];
@@ -1727,7 +1951,9 @@ function PositionMap({
   myPickTickers: Set<string>;
   savingMyPickTickers: Record<string, boolean>;
   canManageMyPicks: boolean;
+  selectedTicker: string;
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
+  onSelectTicker: (ticker: string) => void;
   onToggleMyPick: (ticker: string) => Promise<void>;
 }) {
   return (
@@ -1750,7 +1976,9 @@ function PositionMap({
                 canManageMyPicks={canManageMyPicks}
                 isMyPick={myPickTickers.has(row.ticker)}
                 isSavingMyPick={Boolean(savingMyPickTickers[row.ticker])}
+                isSelected={row.ticker === selectedTicker}
                 key={row.ticker}
+                onSelect={onSelectTicker}
                 onToggleMyPick={onToggleMyPick}
                 row={row}
               />

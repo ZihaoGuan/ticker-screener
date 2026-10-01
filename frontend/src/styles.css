@@ -6019,6 +6019,25 @@ a {
 .guru-sort-direction { min-width: 34px; min-height: 34px; padding: 4px 8px; }
 .guru-scanner-group-filter { margin-left: auto; }
 .guru-board-note { margin: 0; }
+.guru-ticker-card.is-selected { outline: 2px solid #fbbf24; outline-offset: 1px; box-shadow: 0 0 0 3px rgb(251 191 36 / 14%); }
+.board-chart-split { display: grid; gap: 14px; padding: 12px; }
+.board-chart-split-board { min-width: 0; }
+.board-chart-panel { display: grid; align-content: start; gap: 12px; min-width: 0; padding: 14px; border: 1px solid #3f3f46; border-radius: 10px; background: #111114; }
+.board-chart-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.board-chart-panel-head > div { display: grid; gap: 3px; min-width: 0; }
+.board-chart-panel-head > div:last-child { justify-items: end; }
+.board-chart-panel-head a { color: #fbbf24; font-size: 20px; font-weight: 800; text-decoration: none; }
+.board-chart-panel-head strong { overflow: hidden; color: #f4f4f5; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.board-chart-panel-scores { margin: 0; }
+.board-chart-panel-controls { display: flex; gap: 6px; }
+.board-chart-panel-controls .scanner-result-view-chip { width: auto; min-width: 48px; padding: 6px 8px; font-size: 11px; }
+.board-chart-panel-chart { min-height: 250px; }
+.board-chart-panel-context { display: grid; gap: 4px; color: #a1a1aa; font-size: 12px; }
+.board-chart-panel-link { justify-self: start; }
+@media (min-width: 1100px) {
+  .board-chart-split { grid-template-columns: minmax(0, 1fr) minmax(330px, 0.42fr); align-items: start; }
+  .board-chart-panel { position: sticky; top: 16px; }
+}
 .my-picks-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); gap: 12px; padding: 12px 0; }
 .my-pick-guru-card { min-height: 132px; }
 .my-pick-card-note { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
