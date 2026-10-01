@@ -19,7 +19,7 @@ const EMPTY_CONTEXT: MyPicksContextResponse = {
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
 const CARD_PAGE_SIZE = 30;
-type MyPicksViewMode = "list" | "charts" | "cards";
+type MyPicksViewMode = "list" | "charts" | "cards" | "sectors";
 type MyPicksSortKey =
   | "added_at"
   | "ticker"
@@ -68,6 +68,7 @@ export function MyPicksPage() {
   const [chartErrors, setChartErrors] = useState<Record<string, string>>({});
   const [chartLoadingTickers, setChartLoadingTickers] = useState<Record<string, boolean>>({});
   const [checklistSaving, setChecklistSaving] = useState<Record<string, boolean>>({});
+  const [visibleSectorCounts, setVisibleSectorCounts] = useState<Record<string, number>>({});
 
   const loadPicks = () => {
     setIsLoading(true);
@@ -301,7 +302,7 @@ export function MyPicksPage() {
           </div>
           <div className="earnings-metric">
             <span className="eyebrow">View</span>
-            <strong>{viewMode === "charts" ? "Charts" : viewMode === "cards" ? "Cards" : "List"}</strong>
+            <strong>{viewMode === "charts" ? "Charts" : viewMode === "cards" ? "Cards" : viewMode === "sectors" ? "Sectors" : "List"}</strong>
           </div>
           <div className="earnings-metric">
             <span className="eyebrow">Latest Added</span>
@@ -405,6 +406,7 @@ export function MyPicksPage() {
               <option value="list">List</option>
               <option value="charts">Charts</option>
               <option value="cards">Cards</option>
+              <option value="sectors">Sectors</option>
             </select>
           </label>
           <div className="weekly-watchlist-actions">
@@ -454,11 +456,11 @@ export function MyPicksPage() {
       <section className="panel earnings-calendar-panel">
         <div className="panel-head earnings-calendar-head">
           <div>
-            <h2>{viewMode === "charts" ? "Chart View" : viewMode === "cards" ? "Card View" : groupByDate ? "Grouped Picks" : "All Picks"}</h2>
+            <h2>{viewMode === "charts" ? "Chart View" : viewMode === "cards" ? "Card View" : viewMode === "sectors" ? "Sector View" : groupByDate ? "Grouped Picks" : "All Picks"}</h2>
             <span className="eyebrow">{formatCount(filteredRows.length)} names</span>
           </div>
         </div>
-        {filteredRows.length > 0 ? (
+        {viewMode !== "sectors" && filteredRows.length > 0 ? (
           <PaginationControls
             currentPage={normalizedPage}
             totalItems={filteredRows.length}
@@ -534,6 +536,16 @@ export function MyPicksPage() {
             ))}
           </div>
         ) : null}
+        {viewMode === "sectors" && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
+        {viewMode === "sectors" && filteredRows.length > 0 ? (
+          <MyPicksSectorBoard
+            rows={filteredRows}
+            isSaving={isSaving}
+            visibleCounts={visibleSectorCounts}
+            onDelete={handleDelete}
+            onLoadMore={(sector) => setVisibleSectorCounts((current) => ({ ...current, [sector]: (current[sector] ?? CARD_PAGE_SIZE) + CARD_PAGE_SIZE }))}
+          />
+        ) : null}
         {viewMode === "list" && !groupByDate && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
         {viewMode === "list" && !groupByDate && filteredRows.length > 0 ? <PicksTable rows={pagedRows} checklistItems={context.fundamental_checklist ?? []} checklistSaving={checklistSaving} onToggleChecklist={handleChecklistToggle} onDelete={handleDelete} isSaving={isSaving} sortBy={sortBy} sortDirection={sortDirection} setSortBy={setSortBy} setSortDirection={setSortDirection} /> : null}
         {viewMode === "list" && groupByDate && groupedRows.length === 0 ? <p className="panel-copy">No grouped picks match current filter.</p> : null}
@@ -550,7 +562,7 @@ export function MyPicksPage() {
               </div>
             ))
           : null}
-        {filteredRows.length > 0 ? (
+        {viewMode !== "sectors" && filteredRows.length > 0 ? (
           <PaginationControls
             currentPage={normalizedPage}
             totalItems={filteredRows.length}
@@ -560,6 +572,63 @@ export function MyPicksPage() {
           />
         ) : null}
       </section>
+    </div>
+  );
+}
+
+const MY_PICKS_SECTOR_ACCENTS = ["amber", "yellow", "teal", "blue", "sky", "cyan", "gold"];
+
+function MyPicksSectorBoard({
+  rows,
+  isSaving,
+  visibleCounts,
+  onDelete,
+  onLoadMore,
+}: {
+  rows: MyPickRow[];
+  isSaving: boolean;
+  visibleCounts: Record<string, number>;
+  onDelete: (row: MyPickRow) => void;
+  onLoadMore: (sector: string) => void;
+}) {
+  const sectors = useMemo(() => {
+    const grouped = new Map<string, MyPickRow[]>();
+    for (const row of rows) {
+      const sector = String(row.sector || "").trim() || "Unclassified";
+      grouped.set(sector, [...(grouped.get(sector) ?? []), row]);
+    }
+    return Array.from(grouped.entries())
+      .map(([sector, sectorRows]) => ({ sector, rows: sectorRows }))
+      .sort((left, right) => right.rows.length - left.rows.length || left.sector.localeCompare(right.sector));
+  }, [rows]);
+  return (
+    <div className="guru-board my-picks-sector-board" aria-label="My Picks by sector">
+      <div className="guru-board-summary">
+        <span><strong>{formatCount(rows.length)}</strong> picks across <strong>{formatCount(sectors.length)}</strong> sectors</span>
+        <span>Cards retain the selected My Picks sort order within each sector.</span>
+      </div>
+      <div className="guru-board-scroll">
+        {sectors.map(({ sector, rows: sectorRows }, index) => {
+          const visibleCount = visibleCounts[sector] ?? CARD_PAGE_SIZE;
+          const remainingCount = Math.max(0, sectorRows.length - visibleCount);
+          return (
+            <article className={`guru-column is-${MY_PICKS_SECTOR_ACCENTS[index % MY_PICKS_SECTOR_ACCENTS.length]}`} key={sector}>
+              <header title={sector}>
+                <strong>{formatCount(sectorRows.length)}</strong>
+                <span>{sector}</span>
+              </header>
+              <div className="guru-column-cards">
+                {sectorRows.slice(0, visibleCount).map((row) => (
+                  <MyPickGuruCard key={row.id} row={row} isSaving={isSaving} onDelete={onDelete} />
+                ))}
+              </div>
+              {remainingCount > 0 ? <button className="ghost-button guru-column-load-more" type="button" disabled={isSaving} onClick={() => onLoadMore(sector)}>
+                Load 30 more ({formatCount(remainingCount)} remaining)
+              </button> : null}
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 }
