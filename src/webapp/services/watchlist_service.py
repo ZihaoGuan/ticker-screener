@@ -44,6 +44,7 @@ from ...market_data_access import (
 from ...ratings.finviz_insider import load_finviz_insider_signal_map
 from ...ratings.repository import RatingsRepository
 from ...rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
+from ...relative_trend_strength import build_leadership_health
 from ...rs_phase_screen import classify_rs_phase_lifecycle
 from ...sepa_vcp_screen import build_sepa_dashboard_snapshot
 from ...ticker_filters import is_excluded_ticker, load_excluded_tickers, normalize_ticker_symbol
@@ -54,6 +55,7 @@ from ...wyckoff_analysis import compute_wyckoff_markers
 from ...config import load_app_config
 from ..repositories.insider_repository import InsiderRepository
 from ..repositories.position_decision_repository import PositionDecisionRepository
+from ..repositories.relative_trend_strength_repository import RelativeTrendStrengthRepository
 from ..repositories.watchlist_repository import WatchlistRepository
 from .insider_fetcher import fetch_insider_trades_window
 from .screener_history_service import ScreenerHistoryService
@@ -1280,6 +1282,7 @@ class WatchlistService:
                 self._attach_latest_rating_snapshots(rows_by_ticker, sorted(rows_by_ticker))
                 self._attach_relative_strength_evidence(rows_by_ticker, sorted_tickers)
                 self._attach_latest_position_actions(rows_by_ticker, sorted_tickers, as_of_date=run_date)
+                self._attach_relative_trend_strength(rows_by_ticker, sorted_tickers, as_of_date=run_date)
             sector_momentum_map = self._load_sector_momentum_map(None) if rows_by_ticker else {}
             for row_payload in rows_payload:
                 if not isinstance(row_payload, dict):
@@ -1418,6 +1421,7 @@ class WatchlistService:
             self._attach_latest_rating_snapshots(aggregated, top_hit_tickers)
             self._attach_relative_strength_evidence(aggregated, top_hit_tickers)
             self._attach_latest_position_actions(aggregated, top_hit_tickers, as_of_date=target_trading_date)
+            self._attach_relative_trend_strength(aggregated, top_hit_tickers, as_of_date=target_trading_date)
         sector_momentum_map = self._load_sector_momentum_map(rrg_service) if top_hit_tickers else {}
 
         rows = []
@@ -1511,6 +1515,7 @@ class WatchlistService:
             self._attach_latest_rating_snapshots(rows_by_ticker, tickers)
             self._attach_relative_strength_evidence(rows_by_ticker, tickers)
             self._attach_latest_position_actions(rows_by_ticker, tickers, as_of_date=target_date)
+            self._attach_relative_trend_strength(rows_by_ticker, tickers, as_of_date=target_date)
             self._attach_strike_zone_scanner_evidence(rows_by_ticker, target_date=target_date)
             self._attach_guru_upcoming_earnings_dates(rows_by_ticker, as_of_date=target_date)
         stage_map = self._load_latest_weinstein_stage_map(target_date)
@@ -1857,12 +1862,14 @@ class WatchlistService:
             "rs_markers": [],
             "setup_markers": [],
             "position_action": _empty_position_action_snapshot(),
+            "relative_trend_strength": None,
             "fearzone_panel": {"rows": [], "signals": []},
             "trend_template": None,
             "vcs": None,
             "sepa_dashboard": None,
         }
         payload["position_action"] = self._load_latest_position_action(normalized_ticker, resolved_as_of_date)
+        payload["relative_trend_strength"] = self._load_relative_trend_strength(normalized_ticker, resolved_as_of_date)
         if payload["candles"]:
             _write_chart_payload_cache(cache_key, payload)
         return payload
@@ -2165,6 +2172,7 @@ class WatchlistService:
             market_extension=market_extension,
         )
         position_action = self._load_latest_position_action(normalized_ticker, resolved_as_of_date)
+        relative_trend_strength = self._load_relative_trend_strength(normalized_ticker, resolved_as_of_date)
 
         rs_points: list[dict[str, Any]] = []
         rs_ema21_points: list[dict[str, Any]] = []
@@ -2238,6 +2246,7 @@ class WatchlistService:
             "rs_phase_markers": rs_phase_markers,
             "setup_markers": setup_markers,
             "position_action": position_action,
+            "relative_trend_strength": relative_trend_strength,
             "danger_signals": danger_signals,
             "fearzone_panel": fearzone_panel,
             "trend_template": trend_template_snapshot.to_dict() if trend_template_snapshot is not None else None,
@@ -2253,6 +2262,16 @@ class WatchlistService:
         except Exception:
             return None
         return _serialize_position_action_snapshot(decision_map.get(str(ticker or "").strip().upper()))
+
+    def _load_relative_trend_strength(self, ticker: str, as_of_date: dt.date) -> dict[str, Any] | None:
+        normalized = str(ticker or "").strip().upper()
+        try:
+            repository = RelativeTrendStrengthRepository(database_url=self.database_url)
+            snapshot = repository.load_latest_snapshot_map([normalized], as_of_date=as_of_date).get(normalized)
+            history = repository.load_recent_snapshot_map([normalized], as_of_date=as_of_date).get(normalized, [])
+        except Exception:
+            return None
+        return _serialize_relative_trend_strength_snapshot(snapshot, leadership_health=build_leadership_health(history))
 
     def _attach_latest_position_actions(
         self,
@@ -2272,6 +2291,34 @@ class WatchlistService:
             if not isinstance(row, dict):
                 continue
             row["position_action"] = _serialize_position_action_snapshot(decision_map.get(ticker))
+
+    def _attach_relative_trend_strength(
+        self,
+        rows_by_ticker: dict[str, dict[str, Any]],
+        tickers: list[str],
+        *,
+        as_of_date: dt.date | None = None,
+    ) -> None:
+        if not self.database_url or not tickers:
+            return
+        try:
+            repository = RelativeTrendStrengthRepository(database_url=self.database_url)
+            snapshot_map = repository.load_latest_snapshot_map(
+                tickers,
+                as_of_date=as_of_date,
+            )
+            history_map = repository.load_recent_snapshot_map(tickers, as_of_date=as_of_date)
+        except Exception:
+            snapshot_map = {}
+            history_map = {}
+        for ticker in tickers:
+            row = rows_by_ticker.get(ticker)
+            if not isinstance(row, dict):
+                continue
+            row["relative_trend_strength"] = _serialize_relative_trend_strength_snapshot(
+                snapshot_map.get(ticker),
+                leadership_health=build_leadership_health(history_map.get(ticker, [])),
+            )
 
     def get_chart_fundamentals_payload(self, ticker: str, *, earnings_limit: int = 4) -> dict[str, Any]:
         normalized_ticker = str(ticker or "").strip().upper()
@@ -5187,6 +5234,36 @@ def _serialize_position_action_snapshot(row: dict[str, Any] | None) -> dict[str,
         "danger_signal_count": int(row.get("danger_signal_count") or 0),
         "reason_summary": str(row.get("reason_summary") or ""),
         "evidence": dict(row.get("evidence_json") or {}),
+    }
+
+
+def _serialize_relative_trend_strength_snapshot(
+    row: dict[str, Any] | None,
+    *,
+    leadership_health: dict[str, object] | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    evidence = row.get("evidence_json")
+    if not isinstance(evidence, dict):
+        evidence = {}
+    return {
+        "as_of_date": _coerce_iso_date(row.get("as_of_date")),
+        "score": _coerce_optional_float(row.get("rts_score")),
+        "state": _coalesce_text(row.get("rts_state")),
+        "confidence": _coalesce_text(row.get("confidence")),
+        "close_price": _coerce_optional_float(row.get("close_price")),
+        "sector_etf": _coalesce_text(row.get("sector_etf")),
+        "stock_vs_spy_21d_pct": _coerce_optional_float(row.get("stock_vs_spy_21d_pct")),
+        "stock_vs_spy_63d_pct": _coerce_optional_float(row.get("stock_vs_spy_63d_pct")),
+        "stock_vs_sector_63d_pct": _coerce_optional_float(row.get("stock_vs_sector_63d_pct")),
+        "alpha_acceleration_pct": _coerce_optional_float(row.get("alpha_acceleration_pct")),
+        "market_relative_score": _coerce_optional_float(row.get("market_relative_score")),
+        "sector_relative_score": _coerce_optional_float(row.get("sector_relative_score")),
+        "acceleration_score": _coerce_optional_float(row.get("acceleration_score")),
+        "structure_score": _coerce_optional_float(row.get("structure_score")),
+        "evidence": evidence,
+        "leadership_health": leadership_health,
     }
 
 

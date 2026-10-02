@@ -360,6 +360,8 @@ export function ChartsPage() {
   const latestMarketExtension = chartPayload?.market_extension?.latest ?? null;
   const marketExtensionLabel = chartPayload?.market_extension?.config?.label ?? "10W SMA";
   const latestPositionAction = chartPayload?.position_action ?? null;
+  const relativeTrendStrength = chartPayload?.relative_trend_strength ?? null;
+  const leadershipHealth = relativeTrendStrength?.leadership_health ?? null;
   const trendTemplate = chartPayload?.trend_template ?? null;
   const low52Week = useMemo(() => {
     if (trendTemplate?.low_52wk != null && Number.isFinite(trendTemplate.low_52wk)) {
@@ -621,6 +623,19 @@ export function ChartsPage() {
         ],
       },
       {
+        id: "leadership-health",
+        title: "Leadership Health",
+        description: "RTS tracks leadership versus SPY and the stock's sector. It is context for monitoring trend quality and does not change Strike Zone or Position Action scoring.",
+        items: [
+          { label: "RTS", value: formatScore(relativeTrendStrength?.score) },
+          { label: "State", value: relativeTrendStrength?.state ? relativeTrendStrength.state.replace(/_/g, " ") : "-" },
+          { label: "5D Change", value: formatSignedScore(leadershipHealth?.score_change_5d) },
+          { label: "Weak Sessions", value: leadershipHealth ? String(leadershipHealth.deterioration_sessions) : "-" },
+          { label: "Persistent Warning", value: leadershipHealth?.persistent_warning ? "Yes" : "No", className: leadershipHealth?.persistent_warning ? "status-pill status-queued" : undefined },
+          { label: "Price / RTS Divergence", value: leadershipHealth?.price_high_rts_divergence ? "Detected" : "None", className: leadershipHealth?.price_high_rts_divergence ? "status-pill status-queued" : undefined },
+        ],
+      },
+      {
         id: "position-action",
         title: "Position Action",
         description:
@@ -672,6 +687,8 @@ export function ChartsPage() {
       highestDangerSeverity,
       latestMarketExtension,
       latestPositionAction,
+      leadershipHealth,
+      relativeTrendStrength,
       marketExtensionLabel,
       latestFundamentalRank,
       sepaDashboard,
@@ -1606,6 +1623,11 @@ function formatPrice(value: number | null) {
 
 function formatScore(value: number | null | undefined) {
   return value == null ? "--" : value.toFixed(1);
+}
+
+function formatSignedScore(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}`;
 }
 
 function vcsStageClass(stage: "critical" | "setup" | "base"): string {

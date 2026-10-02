@@ -739,6 +739,38 @@ CREATE INDEX IF NOT EXISTS idx_daily_position_decisions_date_action
 CREATE INDEX IF NOT EXISTS idx_daily_position_decisions_ticker_date
   ON daily_position_decisions(ticker, as_of_date DESC);
 
+CREATE TABLE IF NOT EXISTS ticker_relative_trend_strength_snapshots (
+  ticker TEXT NOT NULL,
+  as_of_date DATE NOT NULL,
+  sector TEXT,
+  sector_etf TEXT,
+  rts_score NUMERIC(12,6) NOT NULL,
+  rts_state TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  close_price NUMERIC(18,6),
+  stock_vs_spy_21d_pct NUMERIC(18,6),
+  stock_vs_spy_63d_pct NUMERIC(18,6),
+  stock_vs_sector_63d_pct NUMERIC(18,6),
+  alpha_acceleration_pct NUMERIC(18,6),
+  market_relative_score NUMERIC(12,6) NOT NULL,
+  sector_relative_score NUMERIC(12,6) NOT NULL,
+  acceleration_score NUMERIC(12,6) NOT NULL,
+  structure_score NUMERIC(12,6) NOT NULL,
+  evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (ticker, as_of_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_rts_date_score
+  ON ticker_relative_trend_strength_snapshots(as_of_date DESC, rts_score DESC);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_rts_ticker_date
+  ON ticker_relative_trend_strength_snapshots(ticker, as_of_date DESC);
+
+ALTER TABLE ticker_relative_trend_strength_snapshots
+  ADD COLUMN IF NOT EXISTS close_price NUMERIC(18,6);
+
 CREATE TABLE IF NOT EXISTS tiger_account_settings (
   user_id BIGINT PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
   display_name TEXT NOT NULL DEFAULT '',

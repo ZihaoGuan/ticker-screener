@@ -303,6 +303,7 @@ export type ScannerTopHitRow = {
   up_on_down_days_21d?: number | null;
   up_on_down_days_21d_pct?: number | null;
   relative_strength_evidence?: RelativeStrengthEvidence | null;
+  relative_trend_strength?: RelativeTrendStrengthSnapshot | null;
   ta_rating: number | null;
   fa_rating: number | null;
   daily_rs_rating?: number | null;
@@ -1189,6 +1190,7 @@ export type WatchlistChartResponse = {
     recent_vcp_signal_close?: number | null;
   } | null;
   position_action?: PositionActionSnapshot | null;
+  relative_trend_strength?: RelativeTrendStrengthSnapshot | null;
   danger_signals?: {
     as_of_date: string | null;
     active_count: number;
@@ -2051,6 +2053,7 @@ export type PortfolioAdvice = {
   signal_context?: Record<string, unknown>;
   refreshed_at?: string | null;
   position_action?: PositionActionSnapshot | null;
+  relative_trend_strength?: RelativeTrendStrengthSnapshot | null;
 };
 
 export type PositionActionSnapshot = {
@@ -2199,6 +2202,7 @@ export type TigerPositionRow = {
   captured_at?: string | null;
   raw_json?: Record<string, unknown>;
   position_action?: TigerPositionAction | null;
+  relative_trend_strength?: RelativeTrendStrengthSnapshot | null;
 };
 
 export type TigerPositionsSettings = {
@@ -2289,8 +2293,72 @@ export type MyPickRow = {
   trend_template_criteria_total: number | null;
   trend_template_label: string | null;
   position_action?: PositionActionSnapshot | null;
+  relative_trend_strength?: RelativeTrendStrengthSnapshot | null;
   position_bucket?: string | null;
   atr_to_sma50?: number | null;
+};
+
+export type RelativeTrendStrengthSnapshot = {
+  as_of_date: string | null;
+  score: number | null;
+  state: string | null;
+  confidence: string | null;
+  close_price?: number | null;
+  sector_etf: string | null;
+  stock_vs_spy_21d_pct: number | null;
+  stock_vs_spy_63d_pct: number | null;
+  stock_vs_sector_63d_pct: number | null;
+  alpha_acceleration_pct: number | null;
+  market_relative_score: number | null;
+  sector_relative_score: number | null;
+  acceleration_score: number | null;
+  structure_score: number | null;
+  evidence: Record<string, unknown>;
+  leadership_health?: LeadershipHealth | null;
+};
+
+export type LeadershipHealth = {
+  state: string;
+  status: "healthy" | "neutral" | "warning" | string;
+  transition: string | null;
+  deterioration_sessions: number;
+  persistent_warning: boolean;
+  price_high_rts_divergence: boolean;
+  score_change_5d: number | null;
+  history: Array<{ as_of_date: string; score: number | null; state: string; close_price: number | null }>;
+  note: string;
+};
+
+export type RtsValidationSummary = {
+  count: number;
+  horizons: Record<string, {
+    count: number;
+    average_return_pct: number | null;
+    median_return_pct: number | null;
+    win_rate_pct: number | null;
+    average_excess_return_pct: number | null;
+    excess_win_rate_pct: number | null;
+    average_max_drawdown_pct: number | null;
+  }>;
+};
+
+export type RtsValidationReportResponse = {
+  available: boolean;
+  report: null | {
+    formula_version: string;
+    generated_at: string;
+    start_date: string;
+    end_date: string;
+    snapshot_count: number;
+    observation_count: number;
+    skipped_count: number;
+    overall: RtsValidationSummary;
+    by_score_bucket: Record<string, RtsValidationSummary>;
+    by_state: Record<string, RtsValidationSummary>;
+    by_sector: Record<string, RtsValidationSummary>;
+    by_market_regime: Record<string, RtsValidationSummary>;
+    limitations: string[];
+  };
 };
 
 export type MyPicksContextResponse = {

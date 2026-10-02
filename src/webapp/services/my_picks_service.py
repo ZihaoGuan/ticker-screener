@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from src.market_data_access import load_many_ticker_windows_for_range
+from src.relative_trend_strength import build_leadership_health
 from src.bollinger_band_screen import compute_latest_bollinger_snapshot
 from src.ratings.repository import RatingsRepository
 from src.ticker_filters import normalize_ticker_symbol
@@ -14,6 +15,7 @@ from src.trend_template_screen import evaluate_trend_template
 from src.trendline_snapshots import load_latest_trendline_snapshot_map
 from src.webapp.config import load_webapp_config
 from src.webapp.repositories.position_decision_repository import PositionDecisionRepository
+from src.webapp.repositories.relative_trend_strength_repository import RelativeTrendStrengthRepository
 from src.webapp.repositories.watchlist_repository import WatchlistRepository
 from src.webapp.repositories.my_picks_repository import MyPicksRepository
 
@@ -87,6 +89,7 @@ class MyPicksService:
         self.ratings_repository = RatingsRepository(self.database_url)
         self.watchlist_repository = WatchlistRepository(artifacts_dir=load_webapp_config().artifacts_dir, database_url=self.database_url)
         self.position_decision_repository = PositionDecisionRepository(database_url=self.database_url)
+        self.relative_trend_strength_repository = RelativeTrendStrengthRepository(database_url=self.database_url)
 
     def get_context(self) -> dict[str, Any]:
         picks = [self._serialize_pick(row) for row in self.repository.list_picks()]
@@ -97,6 +100,7 @@ class MyPicksService:
         self._attach_price_change_context(picks, price_frames)
         self._attach_trend_template_context(picks, price_frames)
         self._attach_latest_position_actions(picks)
+        self._attach_relative_trend_strength(picks)
         return {
             "database_configured": self.repository.is_configured(),
             "total_count": len(picks),
@@ -139,6 +143,7 @@ class MyPicksService:
         self._attach_price_change_context([row], price_frames)
         self._attach_trend_template_context([row], price_frames)
         self._attach_latest_position_actions([row])
+        self._attach_relative_trend_strength([row])
         return row
 
     def delete_pick(self, pick_id: int) -> None:
@@ -168,6 +173,7 @@ class MyPicksService:
         self._attach_price_change_context([row], price_frames)
         self._attach_trend_template_context([row], price_frames)
         self._attach_latest_position_actions([row])
+        self._attach_relative_trend_strength([row])
         return row
 
     def _attach_latest_position_actions(self, rows: list[dict[str, Any]]) -> None:
@@ -181,6 +187,23 @@ class MyPicksService:
         for row in rows:
             ticker = str(row.get("ticker") or "").upper()
             row["position_action"] = _serialize_position_action_snapshot(decision_map.get(ticker))
+
+    def _attach_relative_trend_strength(self, rows: list[dict[str, Any]]) -> None:
+        tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
+        if not tickers:
+            return
+        try:
+            snapshot_map = self.relative_trend_strength_repository.load_latest_snapshot_map(tickers)
+            history_map = self.relative_trend_strength_repository.load_recent_snapshot_map(tickers)
+        except Exception:
+            snapshot_map = {}
+            history_map = {}
+        for row in rows:
+            ticker = str(row.get("ticker") or "").upper()
+            row["relative_trend_strength"] = _serialize_relative_trend_strength_snapshot(
+                snapshot_map.get(ticker),
+                leadership_health=build_leadership_health(history_map.get(ticker, [])),
+            )
 
     def _attach_rating_context(self, rows: list[dict[str, Any]]) -> None:
         tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
@@ -514,6 +537,36 @@ def _serialize_position_action_snapshot(row: dict[str, Any] | None) -> dict[str,
         "danger_signal_count": _safe_int(row.get("danger_signal_count")) or 0,
         "reason_summary": str(row.get("reason_summary") or "") or None,
         "evidence": dict(row.get("evidence_json") or {}),
+    }
+
+
+def _serialize_relative_trend_strength_snapshot(
+    row: dict[str, Any] | None,
+    *,
+    leadership_health: dict[str, object] | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    evidence = row.get("evidence_json")
+    if not isinstance(evidence, dict):
+        evidence = {}
+    return {
+        "as_of_date": _to_iso_date(row.get("as_of_date")),
+        "score": _safe_float(row.get("rts_score")),
+        "state": str(row.get("rts_state") or "") or None,
+        "confidence": str(row.get("confidence") or "") or None,
+        "close_price": _safe_float(row.get("close_price")),
+        "sector_etf": str(row.get("sector_etf") or "") or None,
+        "stock_vs_spy_21d_pct": _safe_float(row.get("stock_vs_spy_21d_pct")),
+        "stock_vs_spy_63d_pct": _safe_float(row.get("stock_vs_spy_63d_pct")),
+        "stock_vs_sector_63d_pct": _safe_float(row.get("stock_vs_sector_63d_pct")),
+        "alpha_acceleration_pct": _safe_float(row.get("alpha_acceleration_pct")),
+        "market_relative_score": _safe_float(row.get("market_relative_score")),
+        "sector_relative_score": _safe_float(row.get("sector_relative_score")),
+        "acceleration_score": _safe_float(row.get("acceleration_score")),
+        "structure_score": _safe_float(row.get("structure_score")),
+        "evidence": evidence,
+        "leadership_health": leadership_health,
     }
 
 

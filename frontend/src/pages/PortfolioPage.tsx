@@ -3,7 +3,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
 import { fetchJson } from "../lib/api";
 import { formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type { PortfolioContextResponse, PortfolioImportResponse, PortfolioPosition, PortfolioRefreshResponse } from "../lib/types";
+import type { PortfolioContextResponse, PortfolioImportResponse, PortfolioPosition, PortfolioRefreshResponse, RelativeTrendStrengthSnapshot } from "../lib/types";
 
 const EMPTY_PORTFOLIO_CONTEXT: PortfolioContextResponse = {
   database_configured: false,
@@ -457,6 +457,11 @@ export function PortfolioPage() {
                     value={humanizePositionAction(selectedPosition.advice.position_action?.action)}
                     status={normalizePositionActionClass(selectedPosition.advice.position_action?.action)}
                   />
+                  <AdviceMetric
+                    label="Leadership Health"
+                    value={formatLeadershipHealth(selectedPosition.advice.relative_trend_strength)}
+                    status={selectedPosition.advice.relative_trend_strength?.leadership_health?.status || "neutral"}
+                  />
                   <AdviceMetric label="Close" value={formatCurrency(selectedPosition.advice.close_price)} />
                   <AdviceMetric label="Current Shares" value={formatNumber(selectedPosition.shares)} />
                   <AdviceMetric label="Average Cost" value={formatCurrency(selectedPosition.entry_price)} />
@@ -534,6 +539,18 @@ export function PortfolioPage() {
                         <div className="range-item">
                           <span>Decision As Of</span>
                           <span>{formatLocalDate(selectedPosition.advice.position_action.as_of_date)}</span>
+                        </div>
+                      </>
+                    ) : null}
+                    {selectedPosition.advice.relative_trend_strength ? (
+                      <>
+                        <div className="range-item">
+                          <span>Relative Trend Strength</span>
+                          <span>{formatScore(selectedPosition.advice.relative_trend_strength.score)} · {selectedPosition.advice.relative_trend_strength.state || "unknown"}</span>
+                        </div>
+                        <div className="range-item">
+                          <span>Leadership Warning</span>
+                          <span>{leadershipWarningText(selectedPosition.advice.relative_trend_strength)}</span>
                         </div>
                       </>
                     ) : null}
@@ -814,6 +831,20 @@ function formatScore(value: number | null | undefined): string {
     return "-";
   }
   return value.toFixed(1);
+}
+
+function formatLeadershipHealth(rts: RelativeTrendStrengthSnapshot | null | undefined): string {
+  if (!rts) return "Unavailable";
+  const warning = rts.leadership_health?.persistent_warning || rts.leadership_health?.price_high_rts_divergence;
+  return `${rts.state || "Unknown"}${warning ? " · Warning" : ""}`;
+}
+
+function leadershipWarningText(rts: RelativeTrendStrengthSnapshot): string {
+  const health = rts.leadership_health;
+  if (!health) return "Insufficient daily history.";
+  if (health.price_high_rts_divergence) return "Price is at a recent high while RTS is at least 10 points below its recent peak.";
+  if (health.persistent_warning) return `Leadership has weakened for ${health.deterioration_sessions} consecutive sessions.`;
+  return "No persistent leadership warning. This is context, not an exit signal.";
 }
 
 function normalizeSignalClass(value: string): string {

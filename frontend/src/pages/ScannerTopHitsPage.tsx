@@ -29,7 +29,7 @@ type ChartWorkspace = {
   showEma60: boolean;
   showSma50: boolean;
 };
-type GuruSortKey = "default" | "stage" | "rs" | "rsPhase" | "strike";
+type GuruSortKey = "default" | "stage" | "rs" | "rts" | "rsPhase" | "strike";
 type BoardChartSelection = {
   ticker: string;
   company: string;
@@ -1467,6 +1467,7 @@ function GuruBoard({
               <option value="default">Board priority</option>
               <option value="stage">Stage</option>
               <option value="rs">Daily RS score</option>
+              <option value="rts">RTS score</option>
               <option value="rsPhase">RS Phase</option>
               <option value="strike">Strike score</option>
             </select>
@@ -1593,6 +1594,7 @@ function SectorBoard({
               <option value="default">Board priority</option>
               <option value="stage">Stage</option>
               <option value="rs">Daily RS score</option>
+              <option value="rts">RTS score</option>
               <option value="rsPhase">RS Phase</option>
               <option value="strike">Strike score</option>
             </select>
@@ -1674,6 +1676,7 @@ function GuruTickerCard({
   const primarySignal = row.strike_zone?.primary_signal;
   const signalAge = row.strike_zone?.signal_age_days;
   const strikeTitle = buildStrikeZoneTitle(row.strike_zone);
+  const rts = row.relative_trend_strength;
   return (
     <article className={`guru-ticker-card${isSelected ? " is-selected" : ""}`}>
       <Link className="guru-ticker-card-link" to={buildChartHref(row.ticker)} title={onSelect ? `Select ${row.ticker}` : `${row.ticker} chart`} onClick={(event) => {
@@ -1691,6 +1694,7 @@ function GuruTickerCard({
           <span title="Weinstein stage">{stage}</span>
           <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
           <span title="Latest fundamental ratings leaderboard rank">FA Rank {row.fa_current_rank == null ? "#--" : `#${formatCount(row.fa_current_rank)}`}</span>
+          {rts ? <span title={buildRtsTitle(rts)}>RTS {Math.round(rts.score ?? 0)} {rtsStateGlyph(rts.state)}</span> : null}
           {resolveRsPhaseBadge(row) ? <span className={rsPhaseBadgeClass(row)} title="RS Phase lifecycle">{resolveRsPhaseBadge(row)}</span> : null}
           {rmv ? <span title="Relative Measured Volatility tightness rank">{rmv}</span> : null}
         </div>
@@ -1699,6 +1703,8 @@ function GuruTickerCard({
           <span title={earnings}>📅 {row.earnings_days == null ? "TBD" : `${row.earnings_days}d`}</span>
           <span className={`guru-strike is-${strikeTone}`} title={strikeTitle}>⚾ {strike}{strikeScore == null ? "" : ` ${strikeScore}`}</span>
           {primarySignal ? <span className="guru-primary-signal" title={`Primary trigger${signalAge == null ? "" : ` · ${signalAge}d ago`}`}>⚡ {primarySignal}</span> : null}
+          {rts?.leadership_health?.persistent_warning ? <span title="Leadership has weakened for at least three consecutive sessions.">⚠ RTS weak {rts.leadership_health.deterioration_sessions}d</span> : null}
+          {rts?.leadership_health?.price_high_rts_divergence ? <span title="Price is at a recent high while RTS is below its recent peak.">⚠ RTS divergence</span> : null}
         </div>
       </Link>
       {canManageMyPicks ? (
@@ -1716,6 +1722,28 @@ function GuruTickerCard({
       ) : null}
     </article>
   );
+}
+
+function rtsStateGlyph(state: string | null | undefined): string {
+  if (state === "expanding") return "↑";
+  if (state === "contracting") return "↓";
+  if (state === "lagging") return "↓";
+  return "→";
+}
+
+function buildRtsTitle(rts: NonNullable<ScannerTopHitRow["relative_trend_strength"]>): string {
+  const format = (value: number | null) => value == null ? "--" : `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+  return [
+    `Relative Trend Strength: ${rts.score == null ? "--" : Math.round(rts.score)}/100 · ${rts.state || "unavailable"}`,
+    `21d vs SPY: ${format(rts.stock_vs_spy_21d_pct)}`,
+    `63d vs SPY: ${format(rts.stock_vs_spy_63d_pct)}`,
+    `63d vs ${rts.sector_etf || "sector"}: ${format(rts.stock_vs_sector_63d_pct)}`,
+    `Acceleration: ${format(rts.alpha_acceleration_pct)}`,
+    `Components: market ${rts.market_relative_score ?? 0}/30 · sector ${rts.sector_relative_score ?? 0}/20 · acceleration ${rts.acceleration_score ?? 0}/20 · structure ${rts.structure_score ?? 0}/30`,
+    `Confidence: ${rts.confidence || "--"} · as of ${rts.as_of_date || "--"}`,
+    rts.leadership_health ? `Health: ${rts.leadership_health.status} · weak ${rts.leadership_health.deterioration_sessions} session(s) · 5D ${rts.leadership_health.score_change_5d ?? "--"}` : "Health: insufficient history",
+    "Leadership context only; Strike Zone and Position Action are unchanged.",
+  ].join("\n");
 }
 
 function buildStrikeZoneTitle(strikeZone: ScannerTopHitRow["strike_zone"]): string {
@@ -1760,6 +1788,8 @@ function compareGuruRows(left: ScannerTopHitRow, right: ScannerTopHitRow, sortBy
     comparison = compareNullableNumber(guruStageRank(left), guruStageRank(right), direction);
   } else if (sortBy === "rs") {
     comparison = compareNullableNumber(left.daily_rs_rating ?? left.rs_rating, right.daily_rs_rating ?? right.rs_rating, direction);
+  } else if (sortBy === "rts") {
+    comparison = compareNullableNumber(left.relative_trend_strength?.score ?? null, right.relative_trend_strength?.score ?? null, direction);
   } else if (sortBy === "rsPhase") {
     comparison = compareNullableNumber(guruRsPhaseRank(left), guruRsPhaseRank(right), direction)
       || compareNullableNumber(resolveRsPhaseActiveDays(left), resolveRsPhaseActiveDays(right), direction);
