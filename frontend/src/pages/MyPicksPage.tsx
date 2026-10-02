@@ -4,7 +4,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
-import { buildChartCandles, buildExponentialMovingAverage } from "../lib/chartData";
+import { aggregateCandlesWeekly, buildChartCandles, buildExponentialMovingAverage } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
 import type { FundamentalChecklistItem, MyPickRow, MyPicksContextResponse, WatchlistChartResponse } from "../lib/types";
 
@@ -22,6 +22,7 @@ const CARD_PAGE_SIZE = 30;
 type MyPicksViewMode = "list" | "charts" | "cards" | "sectors" | "position";
 type MyPicksChartRange = "3m" | "6m" | "1y";
 type MyPicksChartType = "candles" | "bars" | "line";
+type MyPicksChartTimeframe = "daily" | "weekly";
 type MyPicksSortKey =
   | "added_at"
   | "ticker"
@@ -74,6 +75,7 @@ export function MyPicksPage() {
   const [visibleSectorCounts, setVisibleSectorCounts] = useState<Record<string, number>>({});
   const [chartRange, setChartRange] = useState<MyPicksChartRange>("6m");
   const [chartType, setChartType] = useState<MyPicksChartType>("bars");
+  const [chartTimeframe, setChartTimeframe] = useState<MyPicksChartTimeframe>("daily");
   const [showChartVolume, setShowChartVolume] = useState(true);
   const selectedBoardTicker = searchParams.get("ticker")?.trim().toUpperCase() || "";
   const isColumnView = viewMode === "sectors" || viewMode === "position";
@@ -255,7 +257,15 @@ export function MyPicksPage() {
       setNotice(`Added ${payload.pick.ticker} to My Picks.`);
       setTicker("");
       setNotes("");
-      loadPicks();
+      setContext((current) => {
+        const rows = [payload.pick, ...current.rows.filter((entry) => entry.id !== payload.pick.id)];
+        return {
+          ...current,
+          rows,
+          total_count: rows.length,
+          available_added_dates: Array.from(new Set(rows.map((entry) => entry.added_date).filter((value): value is string => Boolean(value)))),
+        };
+      });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to add pick.");
     } finally {
@@ -298,8 +308,16 @@ export function MyPicksPage() {
       await fetchJson<{ ok: boolean }>(`/api/admin/my-picks/${row.id}/delete`, {
         method: "POST",
       });
+      setContext((current) => {
+        const rows = current.rows.filter((entry) => entry.id !== row.id);
+        return {
+          ...current,
+          rows,
+          total_count: rows.length,
+          available_added_dates: Array.from(new Set(rows.map((entry) => entry.added_date).filter((value): value is string => Boolean(value)))),
+        };
+      });
       setNotice(`Deleted ${row.ticker}.`);
-      loadPicks();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to delete pick.");
     } finally {
@@ -578,9 +596,11 @@ export function MyPicksPage() {
             isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])}
             range={chartRange}
             chartType={chartType}
+            timeframe={chartTimeframe}
             showVolume={showChartVolume}
             onRangeChange={setChartRange}
             onChartTypeChange={setChartType}
+            onTimeframeChange={setChartTimeframe}
             onShowVolumeChange={setShowChartVolume}
           >
             <MyPicksSectorBoard
@@ -603,9 +623,11 @@ export function MyPicksPage() {
             isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])}
             range={chartRange}
             chartType={chartType}
+            timeframe={chartTimeframe}
             showVolume={showChartVolume}
             onRangeChange={setChartRange}
             onChartTypeChange={setChartType}
+            onTimeframeChange={setChartTimeframe}
             onShowVolumeChange={setShowChartVolume}
           >
             <MyPicksPositionBoard
@@ -666,9 +688,11 @@ function MyPicksBoardChartWorkspace({
   isChartLoading,
   range,
   chartType,
+  timeframe,
   showVolume,
   onRangeChange,
   onChartTypeChange,
+  onTimeframeChange,
   onShowVolumeChange,
 }: {
   children: ReactNode;
@@ -678,13 +702,16 @@ function MyPicksBoardChartWorkspace({
   isChartLoading: boolean;
   range: MyPicksChartRange;
   chartType: MyPicksChartType;
+  timeframe: MyPicksChartTimeframe;
   showVolume: boolean;
   onRangeChange: (range: MyPicksChartRange) => void;
   onChartTypeChange: (chartType: MyPicksChartType) => void;
+  onTimeframeChange: (timeframe: MyPicksChartTimeframe) => void;
   onShowVolumeChange: (showVolume: boolean) => void;
 }) {
-  const allCandles = buildChartCandles(chartPayload);
-  const rangeSize = range === "3m" ? 66 : range === "6m" ? 132 : 264;
+  const dailyCandles = buildChartCandles(chartPayload);
+  const allCandles = timeframe === "weekly" ? aggregateCandlesWeekly(dailyCandles) : dailyCandles;
+  const rangeSize = range === "3m" ? (timeframe === "weekly" ? 14 : 66) : range === "6m" ? (timeframe === "weekly" ? 27 : 132) : (timeframe === "weekly" ? 53 : 264);
   const chartCandles = allCandles.slice(-rangeSize);
   const firstChartTime = chartCandles[0]?.time;
   const ema9 = buildExponentialMovingAverage(allCandles, 9).filter((point) => !firstChartTime || point.time >= firstChartTime);
@@ -710,6 +737,9 @@ function MyPicksBoardChartWorkspace({
             <span className={`scanner-score-pill ${guruToneForPositionAction(row.position_action?.action)}`}>⚾ {humanizePositionAction(row.position_action?.action)}</span>
           </div>
           <div className="board-chart-panel-controls" role="group" aria-label="Selected chart controls">
+            {(["daily", "weekly"] as MyPicksChartTimeframe[]).map((item) => (
+              <button key={item} type="button" title={item === "daily" ? "Daily" : "Weekly"} aria-pressed={timeframe === item} className={`scanner-result-view-chip${timeframe === item ? " is-active" : ""}`} onClick={() => onTimeframeChange(item)}>{item === "daily" ? "D" : "W"}</button>
+            ))}
             {(["3m", "6m", "1y"] as MyPicksChartRange[]).map((item) => (
               <button key={item} type="button" className={`scanner-result-view-chip${range === item ? " is-active" : ""}`} onClick={() => onRangeChange(item)}>{item.toUpperCase()}</button>
             ))}

@@ -6,7 +6,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
-import { buildChartCandles, buildExponentialMovingAverage, buildSimpleMovingAverage } from "../lib/chartData";
+import { aggregateCandlesWeekly, buildChartCandles, buildExponentialMovingAverage, buildSimpleMovingAverage } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
 import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPickRow, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
@@ -17,10 +17,12 @@ type ViewMode = "list" | "charts" | "guru" | "sectors" | "position" | "etf-portf
 type ChartGridColumns = 2 | 3 | 4;
 type ChartRange = "3m" | "6m" | "1y";
 type ChartType = "candles" | "bars" | "line";
+type ChartTimeframe = "daily" | "weekly";
 type ChartWorkspace = {
   gridColumns: ChartGridColumns;
   range: ChartRange;
   chartType: ChartType;
+  timeframe: ChartTimeframe;
   showVolume: boolean;
   showEma8: boolean;
   showEma21: boolean;
@@ -67,6 +69,7 @@ const DEFAULT_CHART_WORKSPACE: ChartWorkspace = {
   gridColumns: 2,
   range: "6m",
   chartType: "candles",
+  timeframe: "daily",
   showVolume: true,
   showEma8: true,
   showEma21: true,
@@ -1341,7 +1344,8 @@ function BoardChartWorkspace({
   workspace: ChartWorkspace;
   onWorkspaceChange: (patch: Partial<ChartWorkspace>) => void;
 }) {
-  const allCandles = buildChartCandles(chartPayload);
+  const dailyCandles = buildChartCandles(chartPayload);
+  const allCandles = workspace.timeframe === "weekly" ? aggregateCandlesWeekly(dailyCandles) : dailyCandles;
   const chartCandles = sliceCandlesToRange(allCandles, workspace.range);
   const firstChartTime = chartCandles[0]?.time;
   const ema8 = sliceChartSeries(buildExponentialMovingAverage(allCandles, 8), firstChartTime);
@@ -1366,7 +1370,8 @@ function BoardChartWorkspace({
             <span className={`scanner-score-pill ${toneForRating(selection.dailyRs, 90)}`}>RS {formatRating(selection.dailyRs)}</span>
             <span className={`scanner-score-pill ${toneForStrikeZone(selection.strikeState)}`}>⚾ {selection.strikeLabel}{selection.strikeScore == null ? "" : ` ${selection.strikeScore}`}</span>
           </div>
-          <div className="board-chart-panel-controls" role="group" aria-label="Selected chart range">
+          <div className="board-chart-panel-controls" role="group" aria-label="Selected chart controls">
+            {(["daily", "weekly"] as ChartTimeframe[]).map((timeframe) => <button key={timeframe} type="button" title={timeframe === "daily" ? "Daily" : "Weekly"} aria-pressed={workspace.timeframe === timeframe} className={`scanner-result-view-chip${workspace.timeframe === timeframe ? " is-active" : ""}`} onClick={() => onWorkspaceChange({ timeframe })}>{timeframe === "daily" ? "D" : "W"}</button>)}
             {(["3m", "6m", "1y"] as ChartRange[]).map((range) => <button key={range} type="button" className={`scanner-result-view-chip${workspace.range === range ? " is-active" : ""}`} onClick={() => onWorkspaceChange({ range })}>{range.toUpperCase()}</button>)}
           </div>
           <div className="board-chart-panel-chart">
@@ -2520,6 +2525,7 @@ function loadChartWorkspace(): ChartWorkspace {
       gridColumns: raw.gridColumns === 3 || raw.gridColumns === 4 ? raw.gridColumns : 2,
       range: raw.range === "3m" || raw.range === "1y" ? raw.range : "6m",
       chartType: raw.chartType === "bars" || raw.chartType === "line" ? raw.chartType : "candles",
+      timeframe: raw.timeframe === "weekly" ? "weekly" : "daily",
       showVolume: raw.showVolume !== false,
       showEma8: raw.showEma8 !== false,
       showEma21: raw.showEma21 !== false,

@@ -90,11 +90,12 @@ class MyPicksService:
 
     def get_context(self) -> dict[str, Any]:
         picks = [self._serialize_pick(row) for row in self.repository.list_picks()]
+        price_frames = self._load_price_frames(picks)
         self._attach_rating_context(picks)
         self._attach_signal_context(picks)
         self._attach_trendline_context(picks)
-        self._attach_price_change_context(picks)
-        self._attach_trend_template_context(picks)
+        self._attach_price_change_context(picks, price_frames)
+        self._attach_trend_template_context(picks, price_frames)
         self._attach_latest_position_actions(picks)
         return {
             "database_configured": self.repository.is_configured(),
@@ -131,11 +132,12 @@ class MyPicksService:
         if created is None:
             raise ValueError("Failed to add pick.")
         row = self._serialize_pick(created)
+        price_frames = self._load_price_frames([row])
         self._attach_rating_context([row])
         self._attach_signal_context([row])
         self._attach_trendline_context([row])
-        self._attach_price_change_context([row])
-        self._attach_trend_template_context([row])
+        self._attach_price_change_context([row], price_frames)
+        self._attach_trend_template_context([row], price_frames)
         self._attach_latest_position_actions([row])
         return row
 
@@ -159,11 +161,12 @@ class MyPicksService:
         if updated is None:
             raise ValueError("Pick not found.")
         row = self._serialize_pick(updated)
+        price_frames = self._load_price_frames([row])
         self._attach_rating_context([row])
         self._attach_signal_context([row])
         self._attach_trendline_context([row])
-        self._attach_price_change_context([row])
-        self._attach_trend_template_context([row])
+        self._attach_price_change_context([row], price_frames)
+        self._attach_trend_template_context([row], price_frames)
         self._attach_latest_position_actions([row])
         return row
 
@@ -249,23 +252,27 @@ class MyPicksService:
             row["distance_to_ema9_pct"] = _percent_distance(close, daily_ema9)
             row["distance_to_ema21_pct"] = _percent_distance(close, daily_ema21)
 
-    def _attach_price_change_context(self, rows: list[dict[str, Any]]) -> None:
+    def _load_price_frames(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
         if not tickers:
-            return
+            return {}
         today = dt.date.today()
         current_year_start = dt.date(today.year, 1, 1)
         added_dates = [_to_date(row.get("added_at")) for row in rows]
         baseline_dates = [item for item in [current_year_start, *added_dates] if item is not None]
         if not baseline_dates:
-            return
-        frames = load_many_ticker_windows_for_range(
+            return {}
+        return load_many_ticker_windows_for_range(
             tickers,
             start_date=min(baseline_dates),
             end_date=today,
-            trading_days_needed=max(_SMA50_LOOKBACK_DAYS, _FIFTY_TWO_WEEK_LOOKBACK_DAYS),
+            trading_days_needed=max(_SMA50_LOOKBACK_DAYS, _FIFTY_TWO_WEEK_LOOKBACK_DAYS, TREND_TEMPLATE_PRICE_HISTORY_DAYS),
             database_url=self.database_url,
         )
+
+    def _attach_price_change_context(self, rows: list[dict[str, Any]], frames: dict[str, Any]) -> None:
+        today = dt.date.today()
+        current_year_start = dt.date(today.year, 1, 1)
         for row in rows:
             ticker = str(row.get("ticker") or "").upper()
             frame = frames.get(ticker)
@@ -305,18 +312,7 @@ class MyPicksService:
             row["sma50_tested_since_added"] = _was_sma_tested_since_date(frame, added_date, 50)
             _attach_position_context(row, frame)
 
-    def _attach_trend_template_context(self, rows: list[dict[str, Any]]) -> None:
-        tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
-        if not tickers:
-            return
-        today = dt.date.today()
-        frames = load_many_ticker_windows_for_range(
-            tickers,
-            start_date=today,
-            end_date=today,
-            trading_days_needed=TREND_TEMPLATE_PRICE_HISTORY_DAYS,
-            database_url=self.database_url,
-        )
+    def _attach_trend_template_context(self, rows: list[dict[str, Any]], frames: dict[str, Any]) -> None:
         for row in rows:
             row["trend_template_match"] = None
             row["trend_template_criteria_passed"] = None
