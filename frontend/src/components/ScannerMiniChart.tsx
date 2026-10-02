@@ -12,6 +12,7 @@ type ScannerMiniChartProps = {
   ema9?: Array<{ time: string; value: number }>;
   ema21?: Array<{ time: string; value: number }>;
   ema60?: Array<{ time: string; value: number }>;
+  ema200?: Array<{ time: string; value: number }>;
   sma50?: Array<{ time: string; value: number }>;
 };
 
@@ -25,6 +26,7 @@ export function ScannerMiniChart({
   ema9 = [],
   ema21 = [],
   ema60 = [],
+  ema200 = [],
   sma50 = [],
 }: ScannerMiniChartProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -123,6 +125,12 @@ export function ScannerMiniChart({
       priceLineVisible: false,
       lastValueVisible: false,
     });
+    const ema200Series = chart.addLineSeries({
+      color: "#ef4444",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
     const sma50Series = chart.addLineSeries({
       color: "#fb7185",
       lineWidth: 2,
@@ -146,6 +154,7 @@ export function ScannerMiniChart({
     ema9Series.setData(ema9);
     ema21Series.setData(ema21);
     ema60Series.setData(ema60);
+    ema200Series.setData(ema200);
     sma50Series.setData(sma50);
     chart.timeScale().fitContent();
 
@@ -161,7 +170,7 @@ export function ScannerMiniChart({
       resizeObserver.disconnect();
       chart.remove();
     };
-  }, [candles, chartType, ema8, ema9, ema21, ema60, height, showVolume, sma50, ticker]);
+  }, [candles, chartType, ema8, ema9, ema21, ema60, ema200, height, showVolume, sma50, ticker]);
 
   return <div ref={rootRef} className="scanner-mini-chart" aria-label={`${ticker} candlestick chart`} />;
 }

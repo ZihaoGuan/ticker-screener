@@ -183,7 +183,12 @@ export function MyPicksPage() {
     }
     const missingTickers = requestedRows
       .map((row) => row.ticker)
-      .filter((ticker) => chartPayloads[ticker] === undefined && !chartLoadingTickers[ticker]);
+      .filter((ticker) => {
+        const cachedPayload = chartPayloads[ticker];
+        const needsLongHistory = isColumnView && chartTimeframe === "weekly"
+          && aggregateCandlesWeekly(buildChartCandles(cachedPayload)).length < 200;
+        return (cachedPayload === undefined || needsLongHistory) && !chartLoadingTickers[ticker];
+      });
     if (missingTickers.length === 0) {
       return;
     }
@@ -197,7 +202,10 @@ export function MyPicksPage() {
     });
     void Promise.allSettled(
       missingTickers.map(async (ticker) => {
-        const payload = await fetchJson<WatchlistChartResponse>(`/api/charts/${ticker}?period=18mo`);
+        const needsLongHistory = isColumnView && chartTimeframe === "weekly";
+        const period = needsLongHistory ? "5y" : "18mo";
+        const previewPath = isColumnView ? "/preview" : "";
+        const payload = await fetchJson<WatchlistChartResponse>(`/api/charts/${ticker}${previewPath}?period=${period}`);
         return { ticker, payload };
       }),
     ).then((results) => {
@@ -236,7 +244,7 @@ export function MyPicksPage() {
     return () => {
       ignore = true;
     };
-  }, [isColumnView, pagedTickerKey, selectedBoardTicker, viewMode]);
+  }, [chartTimeframe, isColumnView, pagedTickerKey, selectedBoardTicker, viewMode]);
 
   useEffect(() => {
     if (!isColumnView || filteredRows.length === 0) return;
@@ -716,6 +724,7 @@ function MyPicksBoardChartWorkspace({
   const firstChartTime = chartCandles[0]?.time;
   const ema9 = buildExponentialMovingAverage(allCandles, 9).filter((point) => !firstChartTime || point.time >= firstChartTime);
   const ema21 = buildExponentialMovingAverage(allCandles, 21).filter((point) => !firstChartTime || point.time >= firstChartTime);
+  const ema200 = buildExponentialMovingAverage(allCandles, 200).filter((point) => !firstChartTime || point.time >= firstChartTime);
   return (
     <div className="board-chart-split">
       <div className="board-chart-split-board">{children}</div>
@@ -750,11 +759,16 @@ function MyPicksBoardChartWorkspace({
             </select>
             <label className="scanner-chart-toggle"><input type="checkbox" checked={showVolume} onChange={(event) => onShowVolumeChange(event.target.checked)} /><span>Volume</span></label>
           </div>
+          <div className="board-chart-ma-legend" aria-label="Moving average legend">
+            <span className="is-ema9">EMA 9</span>
+            <span className="is-ema21">EMA 21</span>
+            <span className="is-ema200">EMA 200</span>
+          </div>
           <div className="board-chart-panel-chart">
             {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
             {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
             {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
-            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={row.ticker} candles={chartCandles} chartType={chartType} height={330} showVolume={showVolume} ema9={ema9} ema21={ema21} /> : null}
+            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={row.ticker} candles={chartCandles} chartType={chartType} height={330} showVolume={showVolume} ema9={ema9} ema21={ema21} ema200={ema200} /> : null}
           </div>
           <div className="board-chart-panel-context">
             <span>{positionBucketLabel(row.position_bucket)}</span>

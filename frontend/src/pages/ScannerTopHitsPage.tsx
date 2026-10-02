@@ -380,10 +380,14 @@ export function ScannerTopHitsPage() {
   }, [isColumnView, selectedBoardTicker, viewMode, visibleGuruRows]);
 
   useEffect(() => {
-    if (!isColumnView || !selectedBoardTicker || chartPayloads[selectedBoardTicker] !== undefined || chartLoadingTickers[selectedBoardTicker]) return;
+    const cachedPayload = chartPayloads[selectedBoardTicker];
+    const needsLongHistory = chartWorkspace.timeframe === "weekly"
+      && aggregateCandlesWeekly(buildChartCandles(cachedPayload)).length < 200;
+    if (!isColumnView || !selectedBoardTicker || (cachedPayload !== undefined && !needsLongHistory) || chartLoadingTickers[selectedBoardTicker]) return;
     let ignore = false;
     setChartLoadingTickers((current) => ({ ...current, [selectedBoardTicker]: true }));
-    void fetchJson<WatchlistChartResponse>(`/api/charts/${encodeURIComponent(selectedBoardTicker)}/preview?period=18mo`)
+    const period = needsLongHistory ? "5y" : "18mo";
+    void fetchJson<WatchlistChartResponse>(`/api/charts/${encodeURIComponent(selectedBoardTicker)}/preview?period=${period}`)
       .then((chartPayload) => {
         if (ignore) return;
         setChartPayloads((current) => ({ ...current, [selectedBoardTicker]: chartPayload }));
@@ -406,7 +410,7 @@ export function ScannerTopHitsPage() {
         });
       });
     return () => { ignore = true; };
-  }, [isColumnView, selectedBoardTicker]);
+  }, [chartWorkspace.timeframe, isColumnView, selectedBoardTicker]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1350,6 +1354,7 @@ function BoardChartWorkspace({
   const firstChartTime = chartCandles[0]?.time;
   const ema8 = sliceChartSeries(buildExponentialMovingAverage(allCandles, 8), firstChartTime);
   const ema21 = sliceChartSeries(buildExponentialMovingAverage(allCandles, 21), firstChartTime);
+  const ema200 = sliceChartSeries(buildExponentialMovingAverage(allCandles, 200), firstChartTime);
   return (
     <div className="board-chart-split">
       <div className="board-chart-split-board">{children}</div>
@@ -1374,11 +1379,16 @@ function BoardChartWorkspace({
             {(["daily", "weekly"] as ChartTimeframe[]).map((timeframe) => <button key={timeframe} type="button" title={timeframe === "daily" ? "Daily" : "Weekly"} aria-pressed={workspace.timeframe === timeframe} className={`scanner-result-view-chip${workspace.timeframe === timeframe ? " is-active" : ""}`} onClick={() => onWorkspaceChange({ timeframe })}>{timeframe === "daily" ? "D" : "W"}</button>)}
             {(["3m", "6m", "1y"] as ChartRange[]).map((range) => <button key={range} type="button" className={`scanner-result-view-chip${workspace.range === range ? " is-active" : ""}`} onClick={() => onWorkspaceChange({ range })}>{range.toUpperCase()}</button>)}
           </div>
+          <div className="board-chart-ma-legend" aria-label="Moving average legend">
+            <span className="is-ema8">EMA 8</span>
+            <span className="is-ema21">EMA 21</span>
+            <span className="is-ema200">EMA 200</span>
+          </div>
           <div className="board-chart-panel-chart">
             {isChartLoading ? <LoadingBlock label={`Loading ${selection.ticker} chart...`} /> : null}
             {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
             {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
-            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={selection.ticker} candles={chartCandles} chartType={workspace.chartType} height={330} showVolume={workspace.showVolume} ema8={workspace.showEma8 ? ema8 : []} ema21={workspace.showEma21 ? ema21 : []} /> : null}
+            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={selection.ticker} candles={chartCandles} chartType={workspace.chartType} height={330} showVolume={workspace.showVolume} ema8={workspace.showEma8 ? ema8 : []} ema21={workspace.showEma21 ? ema21 : []} ema200={ema200} /> : null}
           </div>
           <div className="board-chart-panel-context">
             <span>{selection.sector || "Sector unavailable"}</span>
