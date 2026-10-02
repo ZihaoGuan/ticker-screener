@@ -3,7 +3,7 @@ import { chromium } from "playwright";
 const baseUrl = process.env.TOP_HITS_TEST_URL || "http://127.0.0.1:5174";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage();
-let chartRequests = 0;
+const chartRequests = new Map();
 
 const row = {
   ticker: "TEST",
@@ -20,6 +20,13 @@ const row = {
   stage_analysis: { alias: "Stage 2A" },
   strike_zone: { state: "ready", label: "Ready", score: 88, reason: "Test" },
 };
+const nextRow = {
+  ...row,
+  ticker: "NEXT",
+  company: "Next Leader",
+  day_close: 202,
+  scanners: [{ id: "qullamaggie", label: "Qullamaggie" }],
+};
 
 await page.route("**/api/**", (route) => route.fulfill({ contentType: "application/json", body: "{}" }));
 await page.route("**/api/auth/me", (route) => route.fulfill({
@@ -32,25 +39,26 @@ await page.route("**/api/scanner-board/top-hits", (route) => route.fulfill({
     target_trading_date: "2026-10-01",
     latest_signal_date: "2026-10-01",
     total_live_scanners: 1,
-    total_unique_tickers: 1,
-    overlapping_ticker_count: 1,
-    rows: [row],
+    total_unique_tickers: 2,
+    overlapping_ticker_count: 2,
+    rows: [row, nextRow],
     guru_board: {
       definitions: [{ id: "qullamaggie", label: "Qullamaggie", accent: "amber", available: true }],
-      total_unique_tickers: 1,
-      total_scanner_matches: 1,
+      total_unique_tickers: 2,
+      total_scanner_matches: 2,
       confluence_ticker_count: 0,
-      rows: [row],
+      rows: [row, nextRow],
     },
   }),
 }));
-await page.route("**/api/charts/TEST/preview?period=18mo", async (route) => {
-  chartRequests += 1;
+await page.route("**/api/charts/*/preview?period=18mo", async (route) => {
+  const ticker = new URL(route.request().url()).pathname.split("/")[3];
+  chartRequests.set(ticker, (chartRequests.get(ticker) ?? 0) + 1);
   await new Promise((resolve) => setTimeout(resolve, 100));
   await route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
-      ticker: "TEST",
+      ticker,
       benchmark_ticker: "SPY",
       resolved_as_of_date: "2026-10-01",
       candles: [
@@ -68,9 +76,16 @@ try {
   await page.getByRole("button", { name: "Guru Board" }).click();
   await page.getByText("Loading TEST chart...").waitFor({ state: "visible", timeout: 2000 });
   await page.getByText("Loading TEST chart...").waitFor({ state: "hidden", timeout: 2000 });
-  if (chartRequests !== 1) throw new Error(`Expected one chart request, received ${chartRequests}`);
+  if (chartRequests.get("TEST") !== 1) throw new Error(`Expected one TEST chart request, received ${chartRequests.get("TEST") ?? 0}`);
   if (!(await page.locator(".board-chart-panel-chart canvas").count())) throw new Error("Selected chart did not render");
-  console.log("PASS selected board chart leaves loading state");
+  await page.getByTitle("Select NEXT").click();
+  await page.getByText("Loading NEXT chart...").waitFor({ state: "visible", timeout: 2000 });
+  await page.getByText("Loading NEXT chart...").waitFor({ state: "hidden", timeout: 2000 });
+  if (chartRequests.get("NEXT") !== 1) throw new Error(`Expected one NEXT chart request, received ${chartRequests.get("NEXT") ?? 0}`);
+  const noData = page.getByText("No chart data.");
+  if (await noData.count() && await noData.first().isVisible()) throw new Error("Second ticker remained in the no-data state");
+  if (!(await page.locator(".board-chart-panel-chart canvas").count())) throw new Error("Second selected chart did not render");
+  console.log("PASS selected board charts load initially and after card switch");
 } finally {
   await browser.close();
 }

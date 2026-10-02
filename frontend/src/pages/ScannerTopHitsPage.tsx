@@ -185,26 +185,18 @@ export function ScannerTopHitsPage() {
   const [selectedEtf, setSelectedEtf] = useState("all");
   const [etfTopHitsOnly, setEtfTopHitsOnly] = useState(false);
   const [etfMinOverlap, setEtfMinOverlap] = useState(1);
-  const [selectedBoardTicker, setSelectedBoardTicker] = useState(() => searchParams.get("ticker")?.trim().toUpperCase() || "");
+  const selectedBoardTicker = searchParams.get("ticker")?.trim().toUpperCase() || "";
   const canManageMyPicks = auth.hasCapability("manage_exclusions");
 
   const selectBoardTicker = (ticker: string) => {
     const nextTicker = ticker.trim().toUpperCase();
     if (!nextTicker) return;
-    setSelectedBoardTicker(nextTicker);
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       next.set("ticker", nextTicker);
       return next;
     }, { replace: true });
   };
-
-  useEffect(() => {
-    const tickerFromUrl = searchParams.get("ticker")?.trim().toUpperCase() || "";
-    if (tickerFromUrl && tickerFromUrl !== selectedBoardTicker) {
-      setSelectedBoardTicker(tickerFromUrl);
-    }
-  }, [searchParams, selectedBoardTicker]);
 
   const applyFilterPreset = (preset: TopHitsFilterPreset) => {
     setSectorFilter(preset.sectorFilter);
