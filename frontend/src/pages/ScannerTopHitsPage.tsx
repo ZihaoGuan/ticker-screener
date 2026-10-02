@@ -1690,6 +1690,7 @@ function GuruTickerCard({
           <SectorTag sector={row.sector} />
           <span title="Weinstein stage">{stage}</span>
           <span title="Daily RS">RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span>
+          <span title="Latest fundamental ratings leaderboard rank">FA Rank {row.fa_current_rank == null ? "#--" : `#${formatCount(row.fa_current_rank)}`}</span>
           {resolveRsPhaseBadge(row) ? <span className={rsPhaseBadgeClass(row)} title="RS Phase lifecycle">{resolveRsPhaseBadge(row)}</span> : null}
           {rmv ? <span title="Relative Measured Volatility tightness rank">{rmv}</span> : null}
         </div>
@@ -2135,6 +2136,7 @@ function ScannerTopHitChartCard({
         <span className={`scanner-score-pill ${toneForStrikeZone(row.strike_zone?.state)}`}>⚾ {strikeLabel}</span>
         <span className="scanner-score-pill">Stage {stage}</span>
         <span className={`scanner-score-pill ${toneForRating(row.daily_rs_rating ?? row.rs_rating, 90)}`}>RS {formatRating(row.daily_rs_rating ?? row.rs_rating)}</span>
+        <span className="scanner-score-pill" title="Latest fundamental ratings leaderboard rank">FA Rank {row.fa_current_rank == null ? "#--" : `#${formatCount(row.fa_current_rank)}`}</span>
       </div>
       <div className="scanner-chart-card-body">
         {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}

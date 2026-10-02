@@ -558,6 +558,7 @@ export function MyPicksPage() {
                   </div>
                   <div className="scanner-chart-card-score-row">
                     <span className={`scanner-score-pill ${toneForScore(row.fundamental_rating, 100)}`}>FA {formatScoreInteger(row.fundamental_rating)}</span>
+                    <span className="scanner-score-pill" title="Latest fundamental ratings leaderboard rank">FA Rank {row.fundamental_rank == null ? "#--" : `#${formatCount(row.fundamental_rank)}`}</span>
                     <span className={`scanner-score-pill ${toneForTrendTemplate(row)}`}>TT {formatTrendTemplate(row)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.leadership_score, 100)}`}>RS {formatScoreInteger(row.leadership_score)}</span>
                     <span className={`scanner-score-pill ${toneForScore(row.canslim_score, row.canslim_max_score ?? 14)}`}>CAN V2 {formatScoreFraction(row.canslim_score, row.canslim_max_score)}</span>
@@ -911,6 +912,7 @@ function MyPickGuruCard({
           <span title={row.trend_template_label || "Minervini Trend Template"}>{trendTemplate}</span>
           <span title="Daily relative strength rating">RS {formatScoreInteger(row.daily_rs_rating ?? row.leadership_score)}</span>
           <span title="Fundamental rating">FA {formatScoreInteger(row.fundamental_rating)}</span>
+          <span title="Latest fundamental ratings leaderboard rank">FA Rank {row.fundamental_rank == null ? "#--" : `#${formatCount(row.fundamental_rank)}`}</span>
           {row.vcp_score != null ? <span title={row.vcp_rating || "VCP score"}>VCP {formatScore(row.vcp_score)}</span> : null}
         </div>
         <div className="guru-ticker-context">
