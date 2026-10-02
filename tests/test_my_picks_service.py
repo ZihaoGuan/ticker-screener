@@ -124,18 +124,18 @@ class _FakeWatchlistRepository:
 def _build_price_frame_map(*tickers: str):
     import pandas as pd
 
-    index = pd.bdate_range(end="2026-06-24", periods=60)
-    close = [100.0] * 58 + [100.0, 110.0]
-    open_values = [99.5] * 58 + [99.5, 101.0]
-    high = [100.5] * 58 + [100.5, 111.0]
-    low = [99.0] * 58 + [99.5, 100.0]
+    index = pd.bdate_range(end="2026-06-24", periods=252)
+    close = [100.0] * 250 + [100.0, 110.0]
+    open_values = [99.5] * 250 + [99.5, 101.0]
+    high = [100.5] * 250 + [100.5, 111.0]
+    low = [99.0] * 250 + [99.5, 100.0]
     frame = pd.DataFrame(
         {
             "Open": open_values,
             "High": high,
             "Low": low,
             "Close": close,
-            "Volume": [1_000_000.0] * 60,
+            "Volume": [1_000_000.0] * 252,
         },
         index=index,
     )
@@ -196,6 +196,8 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertTrue(row["ema9_tested_since_added"])
         self.assertTrue(row["ema21_tested_since_added"])
         self.assertTrue(row["sma50_tested_since_added"])
+        self.assertEqual(row["position_bucket"], "extended")
+        self.assertIsNotNone(row["atr_to_sma50"])
 
     def test_create_pick_attaches_latest_position_action(self) -> None:
         with patch("src.webapp.services.my_picks_service.load_many_ticker_windows_for_range", return_value=_build_price_frame_map("MSFT")), patch(

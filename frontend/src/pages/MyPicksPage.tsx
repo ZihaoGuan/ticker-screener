@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PaginationControls } from "../components/PaginationControls";
 import { ScannerMiniChart } from "../components/ScannerMiniChart";
@@ -19,7 +19,9 @@ const EMPTY_CONTEXT: MyPicksContextResponse = {
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 9;
 const CARD_PAGE_SIZE = 30;
-type MyPicksViewMode = "list" | "charts" | "cards" | "sectors";
+type MyPicksViewMode = "list" | "charts" | "cards" | "sectors" | "position";
+type MyPicksChartRange = "3m" | "6m" | "1y";
+type MyPicksChartType = "candles" | "bars" | "line";
 type MyPicksSortKey =
   | "added_at"
   | "ticker"
@@ -52,6 +54,7 @@ type MyPicksSortKey =
 type SortDirection = "desc" | "asc";
 
 export function MyPicksPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [context, setContext] = useState<MyPicksContextResponse>(EMPTY_CONTEXT);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -69,6 +72,19 @@ export function MyPicksPage() {
   const [chartLoadingTickers, setChartLoadingTickers] = useState<Record<string, boolean>>({});
   const [checklistSaving, setChecklistSaving] = useState<Record<string, boolean>>({});
   const [visibleSectorCounts, setVisibleSectorCounts] = useState<Record<string, number>>({});
+  const [chartRange, setChartRange] = useState<MyPicksChartRange>("6m");
+  const [chartType, setChartType] = useState<MyPicksChartType>("bars");
+  const [showChartVolume, setShowChartVolume] = useState(true);
+  const selectedBoardTicker = searchParams.get("ticker")?.trim().toUpperCase() || "";
+  const isColumnView = viewMode === "sectors" || viewMode === "position";
+
+  const selectBoardTicker = (nextTicker: string) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("ticker", nextTicker.trim().toUpperCase());
+      return next;
+    }, { replace: true });
+  };
 
   const loadPicks = () => {
     setIsLoading(true);
@@ -143,6 +159,10 @@ export function MyPicksPage() {
     return Array.from(groups.entries()).map(([label, rows]) => ({ label, rows }));
   }, [pagedRows]);
   const pagedTickerKey = useMemo(() => pagedRows.map((row) => row.ticker).join("|"), [pagedRows]);
+  const selectedBoardRow = useMemo(
+    () => filteredRows.find((row) => row.ticker === selectedBoardTicker) ?? null,
+    [filteredRows, selectedBoardTicker],
+  );
 
   useEffect(() => {
     if (currentPage !== normalizedPage) {
@@ -151,10 +171,15 @@ export function MyPicksPage() {
   }, [currentPage, normalizedPage]);
 
   useEffect(() => {
-    if (viewMode !== "charts" || pagedRows.length === 0) {
+    const requestedRows = viewMode === "charts"
+      ? pagedRows
+      : isColumnView && selectedBoardRow
+        ? [selectedBoardRow]
+        : [];
+    if (requestedRows.length === 0) {
       return;
     }
-    const missingTickers = pagedRows
+    const missingTickers = requestedRows
       .map((row) => row.ticker)
       .filter((ticker) => chartPayloads[ticker] === undefined && !chartLoadingTickers[ticker]);
     if (missingTickers.length === 0) {
@@ -209,7 +234,14 @@ export function MyPicksPage() {
     return () => {
       ignore = true;
     };
-  }, [pagedTickerKey, viewMode]);
+  }, [isColumnView, pagedTickerKey, selectedBoardTicker, viewMode]);
+
+  useEffect(() => {
+    if (!isColumnView || filteredRows.length === 0) return;
+    if (!filteredRows.some((row) => row.ticker === selectedBoardTicker)) {
+      selectBoardTicker(filteredRows[0].ticker);
+    }
+  }, [filteredRows, isColumnView, selectedBoardTicker]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -302,7 +334,7 @@ export function MyPicksPage() {
           </div>
           <div className="earnings-metric">
             <span className="eyebrow">View</span>
-            <strong>{viewMode === "charts" ? "Charts" : viewMode === "cards" ? "Cards" : viewMode === "sectors" ? "Sectors" : "List"}</strong>
+            <strong>{viewMode === "charts" ? "Charts" : viewMode === "cards" ? "Cards" : viewMode === "sectors" ? "Sectors" : viewMode === "position" ? "Position" : "List"}</strong>
           </div>
           <div className="earnings-metric">
             <span className="eyebrow">Latest Added</span>
@@ -407,6 +439,7 @@ export function MyPicksPage() {
               <option value="charts">Charts</option>
               <option value="cards">Cards</option>
               <option value="sectors">Sectors</option>
+              <option value="position">Position Map</option>
             </select>
           </label>
           <div className="weekly-watchlist-actions">
@@ -456,11 +489,11 @@ export function MyPicksPage() {
       <section className="panel earnings-calendar-panel">
         <div className="panel-head earnings-calendar-head">
           <div>
-            <h2>{viewMode === "charts" ? "Chart View" : viewMode === "cards" ? "Card View" : viewMode === "sectors" ? "Sector View" : groupByDate ? "Grouped Picks" : "All Picks"}</h2>
+            <h2>{viewMode === "charts" ? "Chart View" : viewMode === "cards" ? "Card View" : viewMode === "sectors" ? "Sector View" : viewMode === "position" ? "Position Map" : groupByDate ? "Grouped Picks" : "All Picks"}</h2>
             <span className="eyebrow">{formatCount(filteredRows.length)} names</span>
           </div>
         </div>
-        {viewMode !== "sectors" && filteredRows.length > 0 ? (
+        {!isColumnView && filteredRows.length > 0 ? (
           <PaginationControls
             currentPage={normalizedPage}
             totalItems={filteredRows.length}
@@ -538,13 +571,51 @@ export function MyPicksPage() {
         ) : null}
         {viewMode === "sectors" && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
         {viewMode === "sectors" && filteredRows.length > 0 ? (
-          <MyPicksSectorBoard
-            rows={filteredRows}
-            isSaving={isSaving}
-            visibleCounts={visibleSectorCounts}
-            onDelete={handleDelete}
-            onLoadMore={(sector) => setVisibleSectorCounts((current) => ({ ...current, [sector]: (current[sector] ?? CARD_PAGE_SIZE) + CARD_PAGE_SIZE }))}
-          />
+          <MyPicksBoardChartWorkspace
+            row={selectedBoardRow}
+            chartPayload={chartPayloads[selectedBoardTicker]}
+            chartError={chartErrors[selectedBoardTicker]}
+            isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])}
+            range={chartRange}
+            chartType={chartType}
+            showVolume={showChartVolume}
+            onRangeChange={setChartRange}
+            onChartTypeChange={setChartType}
+            onShowVolumeChange={setShowChartVolume}
+          >
+            <MyPicksSectorBoard
+              rows={filteredRows}
+              isSaving={isSaving}
+              selectedTicker={selectedBoardTicker}
+              visibleCounts={visibleSectorCounts}
+              onDelete={handleDelete}
+              onSelectTicker={selectBoardTicker}
+              onLoadMore={(sector) => setVisibleSectorCounts((current) => ({ ...current, [sector]: (current[sector] ?? CARD_PAGE_SIZE) + CARD_PAGE_SIZE }))}
+            />
+          </MyPicksBoardChartWorkspace>
+        ) : null}
+        {viewMode === "position" && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
+        {viewMode === "position" && filteredRows.length > 0 ? (
+          <MyPicksBoardChartWorkspace
+            row={selectedBoardRow}
+            chartPayload={chartPayloads[selectedBoardTicker]}
+            chartError={chartErrors[selectedBoardTicker]}
+            isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])}
+            range={chartRange}
+            chartType={chartType}
+            showVolume={showChartVolume}
+            onRangeChange={setChartRange}
+            onChartTypeChange={setChartType}
+            onShowVolumeChange={setShowChartVolume}
+          >
+            <MyPicksPositionBoard
+              rows={filteredRows}
+              isSaving={isSaving}
+              selectedTicker={selectedBoardTicker}
+              onDelete={handleDelete}
+              onSelectTicker={selectBoardTicker}
+            />
+          </MyPicksBoardChartWorkspace>
         ) : null}
         {viewMode === "list" && !groupByDate && filteredRows.length === 0 ? <p className="panel-copy">No picks match current filter.</p> : null}
         {viewMode === "list" && !groupByDate && filteredRows.length > 0 ? <PicksTable rows={pagedRows} checklistItems={context.fundamental_checklist ?? []} checklistSaving={checklistSaving} onToggleChecklist={handleChecklistToggle} onDelete={handleDelete} isSaving={isSaving} sortBy={sortBy} sortDirection={sortDirection} setSortBy={setSortBy} setSortDirection={setSortDirection} /> : null}
@@ -562,7 +633,7 @@ export function MyPicksPage() {
               </div>
             ))
           : null}
-        {viewMode !== "sectors" && filteredRows.length > 0 ? (
+        {!isColumnView && filteredRows.length > 0 ? (
           <PaginationControls
             currentPage={normalizedPage}
             totalItems={filteredRows.length}
@@ -577,18 +648,141 @@ export function MyPicksPage() {
 }
 
 const MY_PICKS_SECTOR_ACCENTS = ["amber", "yellow", "teal", "blue", "sky", "cyan", "gold"];
+const MY_PICKS_POSITION_BUCKETS = [
+  ["extended", "Extended"],
+  ["above_ema10", "Above EMA10"],
+  ["ema10_ema21", "EMA10–EMA21"],
+  ["ema21_sma50", "EMA21–SMA50"],
+  ["below_sma50_above_sma200", "Below SMA50 · Above SMA200"],
+  ["below_sma200", "Below SMA200"],
+  ["no_data", "No Data"],
+] as const;
+
+function MyPicksBoardChartWorkspace({
+  children,
+  row,
+  chartPayload,
+  chartError,
+  isChartLoading,
+  range,
+  chartType,
+  showVolume,
+  onRangeChange,
+  onChartTypeChange,
+  onShowVolumeChange,
+}: {
+  children: ReactNode;
+  row: MyPickRow | null;
+  chartPayload: WatchlistChartResponse | null | undefined;
+  chartError: string | undefined;
+  isChartLoading: boolean;
+  range: MyPicksChartRange;
+  chartType: MyPicksChartType;
+  showVolume: boolean;
+  onRangeChange: (range: MyPicksChartRange) => void;
+  onChartTypeChange: (chartType: MyPicksChartType) => void;
+  onShowVolumeChange: (showVolume: boolean) => void;
+}) {
+  const allCandles = buildChartCandles(chartPayload);
+  const rangeSize = range === "3m" ? 66 : range === "6m" ? 132 : 264;
+  const chartCandles = allCandles.slice(-rangeSize);
+  const firstChartTime = chartCandles[0]?.time;
+  const ema9 = buildExponentialMovingAverage(allCandles, 9).filter((point) => !firstChartTime || point.time >= firstChartTime);
+  const ema21 = buildExponentialMovingAverage(allCandles, 21).filter((point) => !firstChartTime || point.time >= firstChartTime);
+  return (
+    <div className="board-chart-split">
+      <div className="board-chart-split-board">{children}</div>
+      <aside className="board-chart-panel" aria-label="Selected My Pick chart">
+        {!row ? <p className="panel-copy">Select a ticker card to review its chart.</p> : <>
+          <div className="board-chart-panel-head">
+            <div>
+              <Link to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
+              <strong title={[row.sector, row.industry].filter(Boolean).join(" / ")}>{[row.sector, row.industry].filter(Boolean).join(" / ") || "My Pick"}</strong>
+            </div>
+            <div>
+              <strong>{formatPrice(row.latest_close)}</strong>
+              {renderChange(row.change_1d_pct)}
+            </div>
+          </div>
+          <div className="scanner-chart-card-score-row board-chart-panel-scores">
+            <span className={`scanner-score-pill ${toneForScore(row.daily_rs_rating ?? row.leadership_score, 100)}`}>RS {formatScoreInteger(row.daily_rs_rating ?? row.leadership_score)}</span>
+            <span className={`scanner-score-pill ${toneForScore(row.fundamental_rating, 100)}`}>FA {formatScoreInteger(row.fundamental_rating)}</span>
+            <span className={`scanner-score-pill ${guruToneForPositionAction(row.position_action?.action)}`}>⚾ {humanizePositionAction(row.position_action?.action)}</span>
+          </div>
+          <div className="board-chart-panel-controls" role="group" aria-label="Selected chart controls">
+            {(["3m", "6m", "1y"] as MyPicksChartRange[]).map((item) => (
+              <button key={item} type="button" className={`scanner-result-view-chip${range === item ? " is-active" : ""}`} onClick={() => onRangeChange(item)}>{item.toUpperCase()}</button>
+            ))}
+            <select aria-label="Selected chart style" value={chartType} onChange={(event) => onChartTypeChange(event.target.value as MyPicksChartType)}>
+              <option value="candles">Candles</option>
+              <option value="bars">Bars</option>
+              <option value="line">Line</option>
+            </select>
+            <label className="scanner-chart-toggle"><input type="checkbox" checked={showVolume} onChange={(event) => onShowVolumeChange(event.target.checked)} /><span>Volume</span></label>
+          </div>
+          <div className="board-chart-panel-chart">
+            {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
+            {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
+            {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
+            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={row.ticker} candles={chartCandles} chartType={chartType} height={330} showVolume={showVolume} ema9={ema9} ema21={ema21} /> : null}
+          </div>
+          <div className="board-chart-panel-context">
+            <span>{positionBucketLabel(row.position_bucket)}</span>
+            <span>{row.recent_signal_count} recent scanner hit{row.recent_signal_count === 1 ? "" : "s"}</span>
+            {row.notes ? <span title={row.notes}>{row.notes}</span> : null}
+          </div>
+          <Link className="ghost-button board-chart-panel-link" to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>Open full chart</Link>
+        </>}
+      </aside>
+    </div>
+  );
+}
+
+function MyPicksPositionBoard({ rows, isSaving, selectedTicker, onDelete, onSelectTicker }: {
+  rows: MyPickRow[];
+  isSaving: boolean;
+  selectedTicker: string;
+  onDelete: (row: MyPickRow) => void;
+  onSelectTicker: (ticker: string) => void;
+}) {
+  return (
+    <div className="guru-board" aria-label="My Picks position map">
+      <div className="guru-board-summary">
+        <span>Each pick appears once, based on its latest moving-average position.</span>
+        <span><strong>{formatCount(rows.length)}</strong> names shown</span>
+      </div>
+      <div className="guru-board-scroll position-map-scroll">
+        {MY_PICKS_POSITION_BUCKETS.map(([id, label]) => {
+          const bucketRows = rows.filter((row) => (row.position_bucket || "no_data") === id);
+          return (
+            <article className="guru-column position-map-column" key={id}>
+              <header><strong>{formatCount(bucketRows.length)}</strong><span>{label}</span></header>
+              <div className="guru-column-cards">
+                {bucketRows.map((row) => <MyPickGuruCard key={row.id} row={row} isSaving={isSaving} isSelected={row.ticker === selectedTicker} onDelete={onDelete} onSelect={onSelectTicker} />)}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function MyPicksSectorBoard({
   rows,
   isSaving,
+  selectedTicker,
   visibleCounts,
   onDelete,
+  onSelectTicker,
   onLoadMore,
 }: {
   rows: MyPickRow[];
   isSaving: boolean;
+  selectedTicker: string;
   visibleCounts: Record<string, number>;
   onDelete: (row: MyPickRow) => void;
+  onSelectTicker: (ticker: string) => void;
   onLoadMore: (sector: string) => void;
 }) {
   const sectors = useMemo(() => {
@@ -619,7 +813,7 @@ function MyPicksSectorBoard({
               </header>
               <div className="guru-column-cards">
                 {sectorRows.slice(0, visibleCount).map((row) => (
-                  <MyPickGuruCard key={row.id} row={row} isSaving={isSaving} onDelete={onDelete} />
+                  <MyPickGuruCard key={row.id} row={row} isSaving={isSaving} isSelected={row.ticker === selectedTicker} onDelete={onDelete} onSelect={onSelectTicker} />
                 ))}
               </div>
               {remainingCount > 0 ? <button className="ghost-button guru-column-load-more" type="button" disabled={isSaving} onClick={() => onLoadMore(sector)}>
@@ -636,11 +830,15 @@ function MyPicksSectorBoard({
 function MyPickGuruCard({
   row,
   isSaving,
+  isSelected = false,
   onDelete,
+  onSelect,
 }: {
   row: MyPickRow;
   isSaving: boolean;
+  isSelected?: boolean;
   onDelete: (row: MyPickRow) => void;
+  onSelect?: (ticker: string) => void;
 }) {
   const latestSignal = row.recent_signals[0];
   const signalTitle = row.recent_signals.length > 0
@@ -652,8 +850,13 @@ function MyPickGuruCard({
       ? `TT ${row.trend_template_criteria_passed}/${row.trend_template_criteria_total ?? 10}`
       : "TT --";
   return (
-    <article className="guru-ticker-card my-pick-guru-card">
-      <Link className="guru-ticker-card-link" to={`/charts?ticker=${encodeURIComponent(row.ticker)}`} title={`${row.ticker} chart`}>
+    <article className={`guru-ticker-card my-pick-guru-card${isSelected ? " is-selected" : ""}`}>
+      <Link
+        className="guru-ticker-card-link"
+        to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}
+        title={onSelect ? `Select ${row.ticker}` : `${row.ticker} chart`}
+        onClick={onSelect ? (event) => { event.preventDefault(); onSelect(row.ticker); } : undefined}
+      >
         <div className="guru-ticker-main">
           <strong>{row.ticker}</strong>
           {renderChange(row.change_1d_pct)}
@@ -689,6 +892,10 @@ function MyPickGuruCard({
       </button>
     </article>
   );
+}
+
+function positionBucketLabel(bucket: string | null | undefined) {
+  return MY_PICKS_POSITION_BUCKETS.find(([id]) => id === bucket)?.[1] || "No position data";
 }
 
 function PicksTable({

@@ -2289,6 +2289,8 @@ export type MyPickRow = {
   trend_template_criteria_total: number | null;
   trend_template_label: string | null;
   position_action?: PositionActionSnapshot | null;
+  position_bucket?: string | null;
+  atr_to_sma50?: number | null;
 };
 
 export type MyPicksContextResponse = {
