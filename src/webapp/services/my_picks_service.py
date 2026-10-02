@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
+import pandas as pd
+
 from src.market_data_access import load_many_ticker_windows_for_range
 from src.bollinger_band_screen import compute_latest_bollinger_snapshot
 from src.ratings.repository import RatingsRepository
@@ -274,6 +276,8 @@ class MyPicksService:
             row["ema9_tested_since_added"] = None
             row["ema21_tested_since_added"] = None
             row["sma50_tested_since_added"] = None
+            row["position_bucket"] = "no_data"
+            row["atr_to_sma50"] = None
             if frame is None or frame.empty or "Close" not in frame:
                 continue
             close_series = frame["Close"].dropna()
@@ -299,6 +303,7 @@ class MyPicksService:
             row["ema9_tested_since_added"] = _was_ema_tested_since_date(frame, added_date, 9)
             row["ema21_tested_since_added"] = _was_ema_tested_since_date(frame, added_date, 21)
             row["sma50_tested_since_added"] = _was_sma_tested_since_date(frame, added_date, 50)
+            _attach_position_context(row, frame)
 
     def _attach_trend_template_context(self, rows: list[dict[str, Any]]) -> None:
         tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
@@ -378,6 +383,8 @@ class MyPicksService:
             "trend_template_criteria_total": None,
             "trend_template_label": None,
             "position_action": None,
+            "position_bucket": "no_data",
+            "atr_to_sma50": None,
         }
 
     def _normalize_ticker(self, ticker: str) -> str:
@@ -444,6 +451,49 @@ def _safe_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _attach_position_context(row: dict[str, Any], frame: pd.DataFrame) -> None:
+    if len(frame) < 200 or not {"High", "Low", "Close"}.issubset(frame.columns):
+        return
+    close_series = frame["Close"]
+    close = _safe_float(close_series.iloc[-1])
+    ema10 = _safe_float(close_series.ewm(span=10, adjust=False).mean().iloc[-1])
+    ema21 = _safe_float(close_series.ewm(span=21, adjust=False).mean().iloc[-1])
+    sma50 = _safe_float(close_series.rolling(50).mean().iloc[-1])
+    sma200 = _safe_float(close_series.rolling(200).mean().iloc[-1])
+    previous_close = close_series.shift(1)
+    true_range = pd.concat(
+        [frame["High"] - frame["Low"], (frame["High"] - previous_close).abs(), (frame["Low"] - previous_close).abs()],
+        axis=1,
+    ).max(axis=1)
+    atr20 = _safe_float(true_range.rolling(20).mean().iloc[-1])
+    row["atr_to_sma50"] = ((close - sma50) / atr20) if close is not None and sma50 is not None and atr20 and atr20 > 0 else None
+    row["position_bucket"] = _classify_position_bucket(close, ema10, ema21, sma50, sma200, atr20)
+
+
+def _classify_position_bucket(
+    close: float | None,
+    ema10: float | None,
+    ema21: float | None,
+    sma50: float | None,
+    sma200: float | None,
+    atr20: float | None,
+) -> str:
+    if None in {close, ema10, ema21, sma50, sma200}:
+        return "no_data"
+    assert close is not None and ema10 is not None and ema21 is not None and sma50 is not None and sma200 is not None
+    if atr20 and atr20 > 0 and close >= ema10 + (2 * atr20):
+        return "extended"
+    if close >= ema10:
+        return "above_ema10"
+    if close >= ema21:
+        return "ema10_ema21"
+    if close >= sma50:
+        return "ema21_sma50"
+    if close >= sma200:
+        return "below_sma50_above_sma200"
+    return "below_sma200"
 
 
 def _serialize_position_action_snapshot(row: dict[str, Any] | None) -> dict[str, Any] | None:
