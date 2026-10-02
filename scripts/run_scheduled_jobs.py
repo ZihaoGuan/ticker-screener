@@ -291,6 +291,8 @@ def _resolve_template_value(value: object, *, local_now: dt.datetime) -> object:
             "{{local_date}}": local_now.date().isoformat(),
             "{{local_date_minus_7}}": (local_now.date() - dt.timedelta(days=7)).isoformat(),
             "{{local_date_minus_14}}": (local_now.date() - dt.timedelta(days=14)).isoformat(),
+            "{{local_date_minus_100}}": (local_now.date() - dt.timedelta(days=100)).isoformat(),
+            "{{local_date_minus_465}}": (local_now.date() - dt.timedelta(days=465)).isoformat(),
             "{{local_date_plus_7}}": (local_now.date() + dt.timedelta(days=7)).isoformat(),
             "{{local_date_plus_14}}": (local_now.date() + dt.timedelta(days=14)).isoformat(),
         }

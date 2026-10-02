@@ -18,6 +18,7 @@ import type {
   ScheduledJobSummary,
   ScreenerActionActivity,
   ScreenerActivityEntry,
+  RtsValidationReportResponse,
 } from "../lib/types";
 import "./RunsPage.css";
 
@@ -107,6 +108,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [selectedBacktestId, setSelectedBacktestId] = useState<number | null>(null);
   const [selectedBacktest, setSelectedBacktest] = useState<BacktestRunDetailV1 | null>(null);
   const [isLoadingBacktestDetail, setIsLoadingBacktestDetail] = useState(false);
+  const [rtsValidation, setRtsValidation] = useState<RtsValidationReportResponse | null>(null);
   const [batchRunNotice, setBatchRunNotice] = useState("");
   const consoleRef = useRef<HTMLPreElement | null>(null);
   const shouldAutoScrollConsoleRef = useRef(true);
@@ -208,12 +210,22 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       return actions.filter((action) => action.id === "signal_warm_batch");
     }
     if (mode === "backtests") {
-      return actions.filter((action) => action.id === "overlap_backtest_v1");
+      return actions.filter((action) => ["overlap_backtest_v1", "rts_validation"].includes(action.id));
     }
     if (mode === "schedules") {
       return [];
     }
-    return actions.filter((action) => !["signal_warm_batch", "overlap_backtest_v1"].includes(action.id));
+    return actions.filter((action) => !["signal_warm_batch", "overlap_backtest_v1", "rts_validation"].includes(action.id));
+  }, [mode, payload]);
+
+  useEffect(() => {
+    if (mode !== "backtests") {
+      setRtsValidation(null);
+      return;
+    }
+    void fetchJson<RtsValidationReportResponse>("/api/rts-validation/latest")
+      .then(setRtsValidation)
+      .catch(() => setRtsValidation({ available: false, report: null }));
   }, [mode, payload]);
   const actionActivityById = useMemo(
     () => new Map((payload?.action_activity ?? []).map((activity) => [activity.action_id, activity])),
@@ -226,12 +238,12 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       return jobs.filter((job) => ["signal_warm_batch", "screener_history_batch"].includes(job.action_id));
     }
     if (mode === "backtests") {
-      return jobs.filter((job) => job.action_id === "overlap_backtest_v1");
+      return jobs.filter((job) => ["overlap_backtest_v1", "rts_validation"].includes(job.action_id));
     }
     if (mode === "schedules") {
       return [];
     }
-    return jobs.filter((job) => !["signal_warm_batch", "screener_history_batch", "overlap_backtest_v1"].includes(job.action_id));
+    return jobs.filter((job) => !["signal_warm_batch", "screener_history_batch", "overlap_backtest_v1", "rts_validation"].includes(job.action_id));
   }, [mode, payload]);
 
   const visibleActiveJob = useMemo(() => visibleJobs.find((job) => job.status === "running") ?? null, [visibleJobs]);
@@ -246,7 +258,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         return current;
       }
       return (payload?.actions ?? [])
-        .filter((item) => !["signal_warm_batch", "overlap_backtest_v1"].includes(item.id))
+        .filter((item) => !["signal_warm_batch", "overlap_backtest_v1", "rts_validation"].includes(item.id))
         .slice(0, 4)
         .map((item) => item.id)
         .join(",");
@@ -898,7 +910,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     {section.actions.map((action) => (
                       <div key={action.id} className="screener-card">
                         {(() => {
-                          const configureOnly = ["signal_warm_batch", "overlap_backtest_v1"].includes(action.id);
+                          const configureOnly = ["signal_warm_batch", "overlap_backtest_v1", "rts_validation"].includes(action.id);
                           const timing = availableScheduledActions.find((item) => item.id === action.id);
                           const activity = actionActivityById.get(action.id);
                           const actionIsActive = Boolean(activity?.adhoc_current || activity?.scheduled_current);
@@ -1042,6 +1054,42 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
               </tbody>
             </table>
           </div>
+        </Panel>
+        ) : null}
+
+        {mode === "backtests" ? (
+        <Panel title="RTS Validation" aside={<span className="eyebrow">{rtsValidation?.report?.observation_count ?? 0} observations</span>}>
+          {!rtsValidation?.available || !rtsValidation.report ? (
+            <p className="panel-copy">Run “Validate Relative Trend Strength” after enough daily RTS snapshots have accumulated.</p>
+          ) : (
+            <>
+              <p className="panel-copy">Descriptive forward-return evidence for persisted RTS v1 snapshots. This report does not modify live trading scores.</p>
+              <div className="backtest-detail-grid">
+                {(["5", "10", "20", "63"] as const).map((horizon) => {
+                  const metrics = rtsValidation.report?.overall.horizons[horizon];
+                  return (
+                    <article className="metric-card" key={horizon}>
+                      <h3>{horizon}D Excess</h3>
+                      <div className="metric-value">{metrics?.average_excess_return_pct == null ? "-" : `${metrics.average_excess_return_pct.toFixed(2)}%`}</div>
+                      <p className="card-meta">Win {metrics?.excess_win_rate_pct == null ? "-" : `${metrics.excess_win_rate_pct.toFixed(1)}%`} · n={metrics?.count ?? 0}</p>
+                    </article>
+                  );
+                })}
+              </div>
+              <div className="data-table-responsive">
+                <table className="data-table">
+                  <thead><tr><th>RTS Cohort</th><th>Count</th><th>20D Avg</th><th>20D Excess</th><th>20D Drawdown</th></tr></thead>
+                  <tbody>
+                    {Object.entries(rtsValidation.report.by_score_bucket).map(([bucket, summary]) => {
+                      const metrics = summary.horizons["20"];
+                      return <tr key={bucket}><td>{bucket}</td><td>{summary.count}</td><td>{formatMaybePercent(metrics?.average_return_pct)}</td><td>{formatMaybePercent(metrics?.average_excess_return_pct)}</td><td>{formatMaybePercent(metrics?.average_max_drawdown_pct)}</td></tr>;
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="panel-copy">Range {rtsValidation.report.start_date} to {rtsValidation.report.end_date}. {rtsValidation.report.limitations[0]}</p>
+            </>
+          )}
         </Panel>
         ) : null}
 
@@ -1725,7 +1773,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     <p className="file-meta">Existing cron does not match simplified daily/weekly rules yet. Save keeps raw cron unless you change schedule above.</p>
                   ) : null}
                   <p className="panel-copy">
-                    Supported date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_minus_7}}'}</code>, <code>{'{{local_date_minus_14}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
+                    Supported date templates: <code>{'{{local_date}}'}</code>, <code>{'{{local_date_minus_7}}'}</code>, <code>{'{{local_date_minus_14}}'}</code>, <code>{'{{local_date_minus_100}}'}</code>, <code>{'{{local_date_minus_465}}'}</code>, <code>{'{{local_date_plus_7}}'}</code>, <code>{'{{local_date_plus_14}}'}</code>.
                   </p>
                   <p className="panel-copy">Action Options JSON may be left blank or set to <code>null</code> when no options are needed.</p>
                   {selectedScheduledAction ? (
@@ -2427,7 +2475,10 @@ function buildScheduleOptionsTemplate(action: ScheduledActionOption | null): str
   if (action.id === "legacy_peg" || action.id === "sean_peg" || action.id === "sean_gap_up") {
     template.source = "earnings-watchlist";
   }
-  if (action.id === "signal_warm_batch" || action.id === "overlap_backtest_v1" || action.id === "screener_history_batch") {
+  if (action.id === "rts_validation") {
+    template.start_date = "{{local_date_minus_465}}";
+    template.end_date = "{{local_date_minus_100}}";
+  } else if (action.id === "signal_warm_batch" || action.id === "overlap_backtest_v1" || action.id === "screener_history_batch") {
     template.start_date = "{{local_date_minus_14}}";
     template.end_date = "{{local_date}}";
   } else if (fieldIds.has("start_date") || fieldIds.has("end_date")) {
@@ -2458,4 +2509,8 @@ function parseScheduleNumericPlaceholder(value?: string | null): number | null {
   }
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatMaybePercent(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? "-" : `${value.toFixed(2)}%`;
 }

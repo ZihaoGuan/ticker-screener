@@ -12,10 +12,12 @@ from src.ftd_sweep_screen import find_recent_ftd_sweep_hit
 from src.hve_screen import find_recent_hve_hit
 from src.inside_dryup_screen import find_recent_inside_dryup_hit
 from src.market_data_access import db_frame_has_recent_coverage, load_many_ticker_windows, load_ticker_metadata_map
+from src.relative_trend_strength import build_leadership_health
 from src.ticker_filters import normalize_ticker_symbol
 from src.universe import UniverseTicker
 from src.webapp.repositories.portfolio_repository import PortfolioRepository
 from src.webapp.repositories.position_decision_repository import PositionDecisionRepository
+from src.webapp.repositories.relative_trend_strength_repository import RelativeTrendStrengthRepository
 
 
 DEFAULT_PORTFOLIO_NAME = "Main"
@@ -32,11 +34,13 @@ class PortfolioService:
         self.database_url = self.repository.database_url
         self.config = load_app_config()
         self.position_decision_repository = PositionDecisionRepository(database_url=self.database_url)
+        self.relative_trend_strength_repository = RelativeTrendStrengthRepository(database_url=self.database_url)
 
     def get_context(self) -> dict[str, Any]:
         base_rows = self.repository.list_positions()
         positions = [self._serialize_position(row) for row in self._build_positions_with_transactions(base_rows)]
         self._attach_latest_position_actions(positions)
+        self._attach_relative_trend_strength(positions)
         summary = self._build_summary(positions)
         return {
             "database_configured": self.repository.is_configured(),
@@ -63,6 +67,25 @@ class PortfolioService:
             if not isinstance(advice, dict):
                 continue
             advice["position_action"] = _serialize_position_action_snapshot(decision_map.get(str(item.get("ticker") or "").upper()))
+
+    def _attach_relative_trend_strength(self, positions: list[dict[str, Any]]) -> None:
+        tickers = [str(item.get("ticker") or "").upper() for item in positions if str(item.get("ticker") or "").strip()]
+        if not tickers:
+            return
+        try:
+            snapshot_map = self.relative_trend_strength_repository.load_latest_snapshot_map(tickers)
+            history_map = self.relative_trend_strength_repository.load_recent_snapshot_map(tickers)
+        except Exception:
+            return
+        for item in positions:
+            advice = item.get("advice")
+            if not isinstance(advice, dict):
+                continue
+            ticker = str(item.get("ticker") or "").upper()
+            advice["relative_trend_strength"] = _serialize_relative_trend_strength(
+                snapshot_map.get(ticker),
+                build_leadership_health(history_map.get(ticker, [])),
+            )
 
     def record_transaction(
         self,
@@ -791,6 +814,26 @@ def _serialize_position_action_snapshot(row: dict[str, Any] | None) -> dict[str,
         "danger_signal_count": int(row.get("danger_signal_count") or 0),
         "reason_summary": str(row.get("reason_summary") or ""),
         "evidence": dict(row.get("evidence_json") or {}),
+    }
+
+
+def _serialize_relative_trend_strength(
+    row: dict[str, Any] | None,
+    leadership_health: dict[str, object] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    return {
+        "as_of_date": str(row.get("as_of_date") or "") or None,
+        "score": _safe_float(row.get("rts_score")),
+        "state": str(row.get("rts_state") or "") or None,
+        "confidence": str(row.get("confidence") or "") or None,
+        "sector_etf": str(row.get("sector_etf") or "") or None,
+        "stock_vs_spy_21d_pct": _safe_float(row.get("stock_vs_spy_21d_pct")),
+        "stock_vs_spy_63d_pct": _safe_float(row.get("stock_vs_spy_63d_pct")),
+        "stock_vs_sector_63d_pct": _safe_float(row.get("stock_vs_sector_63d_pct")),
+        "alpha_acceleration_pct": _safe_float(row.get("alpha_acceleration_pct")),
+        "leadership_health": leadership_health,
     }
 
 

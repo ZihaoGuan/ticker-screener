@@ -7,7 +7,9 @@ from typing import Any
 
 import pandas as pd
 
+from src.relative_trend_strength import build_leadership_health
 from src.webapp.repositories.position_decision_repository import PositionDecisionRepository
+from src.webapp.repositories.relative_trend_strength_repository import RelativeTrendStrengthRepository
 from src.webapp.repositories.tiger_positions_repository import TigerPositionsRepository
 
 
@@ -31,11 +33,13 @@ class TigerPositionsService:
     ) -> None:
         self.repository = repository or TigerPositionsRepository(database_url=database_url)
         self.decision_repository = decision_repository or PositionDecisionRepository(database_url=database_url)
+        self.rts_repository = RelativeTrendStrengthRepository(database_url=database_url)
 
     def get_context(self, *, user_id: int) -> dict[str, Any]:
         settings = self.repository.get_user_settings(user_id) or self._default_settings(user_id=user_id)
         positions = [self._serialize_position(item) for item in self.repository.list_latest_positions(user_id)]
         self._attach_position_actions(positions)
+        self._attach_relative_trend_strength(positions)
         return {
             "database_configured": self.repository.is_configured(),
             "settings": self._serialize_settings(settings),
@@ -187,6 +191,19 @@ class TigerPositionsService:
         for item in positions:
             decision = decision_map.get(str(item.get("ticker") or "").upper())
             item["position_action"] = _serialize_position_action(decision)
+
+    def _attach_relative_trend_strength(self, positions: list[dict[str, Any]]) -> None:
+        tickers = [str(item.get("ticker") or "").upper() for item in positions if str(item.get("ticker") or "").strip()]
+        if not tickers:
+            return
+        snapshot_map = self.rts_repository.load_latest_snapshot_map(tickers)
+        history_map = self.rts_repository.load_recent_snapshot_map(tickers)
+        for item in positions:
+            ticker = str(item.get("ticker") or "").upper()
+            item["relative_trend_strength"] = _serialize_relative_trend_strength(
+                snapshot_map.get(ticker),
+                build_leadership_health(history_map.get(ticker, [])),
+            )
 
     def _build_summary(self, positions: list[dict[str, Any]], *, settings: dict[str, Any]) -> dict[str, Any]:
         total_market_value = sum(float(item.get("market_value") or 0.0) for item in positions)
@@ -353,4 +370,19 @@ def _serialize_position_action(row: dict[str, Any] | None) -> dict[str, Any] | N
         "danger_signal_count": int(row.get("danger_signal_count") or 0),
         "reason_summary": row.get("reason_summary"),
         "evidence": evidence if isinstance(evidence, dict) else {},
+    }
+
+
+def _serialize_relative_trend_strength(
+    row: dict[str, Any] | None,
+    leadership_health: dict[str, object] | None,
+) -> dict[str, Any] | None:
+    if not row:
+        return None
+    return {
+        "as_of_date": str(row.get("as_of_date") or "") or None,
+        "score": _to_float(row.get("rts_score")),
+        "state": row.get("rts_state"),
+        "confidence": row.get("confidence"),
+        "leadership_health": leadership_health,
     }

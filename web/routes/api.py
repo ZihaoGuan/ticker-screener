@@ -947,6 +947,20 @@ def backtest_v1_detail(
     return JSONResponse(jsonable_encoder(payload))
 
 
+@router.get("/rts-validation/latest", response_class=JSONResponse)
+def latest_rts_validation(
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    report_path = config.artifacts_dir / "reports" / "rts_validation_latest.json"
+    if not report_path.exists():
+        return JSONResponse({"available": False, "report": None})
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise HTTPException(status_code=500, detail="RTS validation report is unreadable")
+    return JSONResponse({"available": True, "report": jsonable_encoder(payload)})
+
+
 @router.get("/watchlists", response_class=JSONResponse)
 def watchlists_data(
     service: WatchlistService = Depends(get_watchlist_service),

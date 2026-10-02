@@ -742,6 +742,7 @@ function MyPicksBoardChartWorkspace({
           </div>
           <div className="scanner-chart-card-score-row board-chart-panel-scores">
             <span className={`scanner-score-pill ${toneForScore(row.daily_rs_rating ?? row.leadership_score, 100)}`}>RS {formatScoreInteger(row.daily_rs_rating ?? row.leadership_score)}</span>
+            {row.relative_trend_strength ? <span className={`scanner-score-pill ${row.relative_trend_strength.leadership_health?.status === "warning" ? "is-negative" : toneForScore(row.relative_trend_strength.score, 100)}`} title={buildMyPickRtsTitle(row)}>RTS {formatScoreInteger(row.relative_trend_strength.score)}</span> : null}
             <span className={`scanner-score-pill ${toneForScore(row.fundamental_rating, 100)}`}>FA {formatScoreInteger(row.fundamental_rating)}</span>
             <span className={`scanner-score-pill ${guruToneForPositionAction(row.position_action?.action)}`}>⚾ {humanizePositionAction(row.position_action?.action)}</span>
           </div>
@@ -910,6 +911,7 @@ function MyPickGuruCard({
           {row.sector ? <span className="guru-sector-tag" title={`Sector: ${row.sector}`}>{row.sector}</span> : null}
           <span title={row.trend_template_label || "Minervini Trend Template"}>{trendTemplate}</span>
           <span title="Daily relative strength rating">RS {formatScoreInteger(row.daily_rs_rating ?? row.leadership_score)}</span>
+          {row.relative_trend_strength ? <span title={buildMyPickRtsTitle(row)}>RTS {Math.round(row.relative_trend_strength.score ?? 0)} {myPickRtsGlyph(row.relative_trend_strength.state)}</span> : null}
           <span title="Fundamental rating">FA {formatScoreInteger(row.fundamental_rating)}</span>
           {row.vcp_score != null ? <span title={row.vcp_rating || "VCP score"}>VCP {formatScore(row.vcp_score)}</span> : null}
         </div>
@@ -920,6 +922,8 @@ function MyPickGuruCard({
             ⚾ {humanizePositionAction(row.position_action?.action)}
           </span>
           {latestSignal ? <span className="guru-primary-signal" title={latestSignal.signal_date ? `Latest signal · ${formatLocalDate(latestSignal.signal_date)}` : "Latest signal"}>⚡ {humanizeSignalId(latestSignal.strategy_id)}</span> : null}
+          {row.relative_trend_strength?.leadership_health?.persistent_warning ? <span title="Leadership has weakened for at least three consecutive sessions.">⚠ RTS weak {row.relative_trend_strength.leadership_health.deterioration_sessions}d</span> : null}
+          {row.relative_trend_strength?.leadership_health?.price_high_rts_divergence ? <span title="Price is at a recent high while RTS is below its recent peak.">⚠ RTS divergence</span> : null}
           {row.notes ? <span className="my-pick-card-note" title={row.notes}>📝 {row.notes}</span> : null}
         </div>
       </Link>
@@ -936,6 +940,26 @@ function MyPickGuruCard({
       </button>
     </article>
   );
+}
+
+function myPickRtsGlyph(state: string | null | undefined): string {
+  if (state === "expanding") return "↑";
+  if (state === "contracting" || state === "lagging") return "↓";
+  return "→";
+}
+
+function buildMyPickRtsTitle(row: MyPickRow): string {
+  const rts = row.relative_trend_strength;
+  if (!rts) return "Relative Trend Strength unavailable.";
+  const format = (value: number | null) => value == null ? "--" : `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+  return [
+    `Relative Trend Strength: ${rts.score == null ? "--" : Math.round(rts.score)}/100 · ${rts.state || "unavailable"}`,
+    `21d vs SPY: ${format(rts.stock_vs_spy_21d_pct)} · 63d vs SPY: ${format(rts.stock_vs_spy_63d_pct)}`,
+    `63d vs ${rts.sector_etf || "sector"}: ${format(rts.stock_vs_sector_63d_pct)} · acceleration: ${format(rts.alpha_acceleration_pct)}`,
+    `Confidence: ${rts.confidence || "--"} · as of ${rts.as_of_date || "--"}`,
+    rts.leadership_health ? `Health: ${rts.leadership_health.status} · weak ${rts.leadership_health.deterioration_sessions} session(s) · 5D ${rts.leadership_health.score_change_5d ?? "--"}` : "Health: insufficient history",
+    "Leadership context only; Strike Zone and Position Action are unchanged.",
+  ].join("\n");
 }
 
 function positionBucketLabel(bucket: string | null | undefined) {

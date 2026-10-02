@@ -194,6 +194,7 @@ export function TigerPositionsPage() {
                     <th>Mkt Value</th>
                     <th>Unrlzd</th>
                     <th>Action</th>
+                    <th>Leadership</th>
                     <th>Why</th>
                   </tr>
                 </thead>
@@ -205,6 +206,9 @@ export function TigerPositionsPage() {
                       <td>{formatMoney(position.market_value)}</td>
                       <td>{formatMoney(position.unrealized_pl)}</td>
                       <td>{humanizeAction(position.position_action?.action)}</td>
+                      <td title={position.relative_trend_strength?.leadership_health?.note || "RTS leadership context"}>
+                        {position.relative_trend_strength ? `RTS ${Math.round(position.relative_trend_strength.score ?? 0)} · ${position.relative_trend_strength.state || "unknown"}` : "--"}
+                      </td>
                       <td>{position.position_action?.reason_summary || "No position-action snapshot yet."}</td>
                     </tr>
                   ))}
