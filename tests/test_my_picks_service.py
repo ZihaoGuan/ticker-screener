@@ -258,6 +258,22 @@ class MyPicksServiceTests(unittest.TestCase):
         self.assertTrue(payload["rows"][0]["ema21_tested_since_added"])
         self.assertTrue(payload["rows"][0]["sma50_tested_since_added"])
 
+    def test_get_context_loads_price_history_once(self) -> None:
+        self.repo.create_pick(ticker="AAPL", notes="", checklist={}, created_by_user_id=7)
+        with patch(
+            "src.webapp.services.my_picks_service.load_many_ticker_windows_for_range",
+            return_value=_build_price_frame_map("AAPL"),
+        ) as load_history, patch(
+            "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
+            return_value=_build_trendline_snapshot_map("AAPL"),
+        ), patch(
+            "src.webapp.services.my_picks_service.evaluate_trend_template",
+            return_value=SimpleNamespace(matched=True, criteria_passed=8, criteria_total=8),
+        ):
+            self.service.get_context()
+
+        self.assertEqual(load_history.call_count, 1)
+
     def test_delete_pick_requires_existing_id(self) -> None:
         row = self.service.create_pick(ticker="PLTR")
         self.service.delete_pick(row["id"])

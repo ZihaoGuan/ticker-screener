@@ -78,6 +78,9 @@ try {
   await page.getByText("Loading TEST chart...").waitFor({ state: "hidden", timeout: 2000 });
   if (chartRequests.get("TEST") !== 1) throw new Error(`Expected one TEST chart request, received ${chartRequests.get("TEST") ?? 0}`);
   if (!(await page.locator(".board-chart-panel-chart canvas").count())) throw new Error("Selected chart did not render");
+  const weeklyButton = page.getByRole("button", { name: "W", exact: true });
+  await weeklyButton.click();
+  if (await weeklyButton.getAttribute("aria-pressed") !== "true") throw new Error("Weekly chart timeframe did not activate");
   await page.getByTitle("Select NEXT").click();
   await page.getByText("Loading NEXT chart...").waitFor({ state: "visible", timeout: 2000 });
   await page.getByText("Loading NEXT chart...").waitFor({ state: "hidden", timeout: 2000 });
