@@ -775,6 +775,51 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     },
 )
 
+_SCANNER_FEATURED_IDS = {
+    "weekly_rs_new_high",
+    "weekly_rs_before_price",
+    "daily_rs_new_high",
+    "weekly_vcp",
+    "vcp_scored",
+    "sean_gap_up",
+    "fundamental_quality",
+    "qullamaggie",
+}
+
+
+def _scanner_family(strategy_id: str) -> str:
+    """Keep board discovery labels deterministic without a second scanner registry."""
+    value = strategy_id.lower()
+    if "rs" in value or value in {"weekly_rs", "rs", "rs_phase"}:
+        return "Relative strength"
+    if any(token in value for token in ("vcp", "tight", "inside", "cup", "double", "darvas", "wedg", "channel", "horizontal", "tlsupport")):
+        return "Setups"
+    if any(token in value for token in ("gap", "peg", "earnings", "ftd")):
+        return "Earnings & gaps"
+    if any(token in value for token in ("finviz", "fundamental", "canslim", "target_price", "analyst")):
+        return "Fundamentals"
+    return "Momentum"
+
+
+def _scanner_freshness(*, run_date: str, target_date: dt.date, timeframe: str) -> str:
+    parsed_text = _coerce_iso_date(run_date)
+    if not parsed_text:
+        return "not_run"
+    parsed = dt.date.fromisoformat(parsed_text)
+    if parsed >= target_date:
+        return "current"
+    if "weekly" in timeframe.lower() and parsed >= target_date - dt.timedelta(days=7):
+        return "current"
+    return "stale"
+
+
+def _scanner_card_metadata(config: dict[str, str], *, run_date: str, target_date: dt.date) -> dict[str, Any]:
+    return {
+        "family": _scanner_family(str(config["strategy_id"])),
+        "featured": str(config["id"]) in _SCANNER_FEATURED_IDS,
+        "freshness": _scanner_freshness(run_date=run_date, target_date=target_date, timeframe=str(config["timeframe"])),
+    }
+
 
 class WatchlistService:
     def __init__(
@@ -862,6 +907,8 @@ class WatchlistService:
                     "timeframe": config["timeframe"],
                     "accent": config["accent"],
                     "available": selected_meta is not None and len(entries) > 0,
+                    "has_run": selected_meta is not None,
+                    "has_results": len(entries) > 0,
                     "stem": str(selected_meta.get("stem") or "") if selected_meta else "",
                     "group_label": str(selected_meta.get("group_label") or "") if selected_meta else "",
                     "captured_at": str(selected_meta.get("captured_at") or "") if selected_meta else "",
@@ -872,6 +919,12 @@ class WatchlistService:
                         f"/watchlists?stem={selected_meta.get('stem')}"
                         if selected_meta and selected_meta.get("stem")
                         else None
+                    ),
+                    "hit_count_history": [],
+                    **_scanner_card_metadata(
+                        config,
+                        run_date=str(selected_meta.get("sort_date") or "") if selected_meta else "",
+                        target_date=target_trading_date,
                     ),
                 }
             )
@@ -916,6 +969,12 @@ class WatchlistService:
         )
         if previews is None:
             return None
+        history_by_strategy = self.repository.history_repository.list_recent_screen_run_counts_by_strategy(
+            strategy_ids=strategy_ids,
+            target_date=target_trading_date,
+        )
+        if history_by_strategy is None:
+            history_by_strategy = {}
 
         cards: list[dict[str, Any]] = []
         for config in _SCANNER_BOARD_CONFIG:
@@ -936,6 +995,8 @@ class WatchlistService:
                     "timeframe": config["timeframe"],
                     "accent": config["accent"],
                     "available": bool(run_id and entry_count > 0),
+                    "has_run": bool(run_id),
+                    "has_results": entry_count > 0,
                     "stem": stem,
                     "group_label": "Database snapshot" if run_id else "",
                     "captured_at": captured_at,
@@ -943,6 +1004,8 @@ class WatchlistService:
                     "entry_count": entry_count,
                     "preview_tickers": preview_tickers,
                     "list_href": f"/watchlists?stem={stem}" if stem else None,
+                    "hit_count_history": history_by_strategy.get(str(config["strategy_id"]), []),
+                    **_scanner_card_metadata(config, run_date=run_date, target_date=target_trading_date),
                 }
             )
         available_cards = [item for item in cards if item["available"]]

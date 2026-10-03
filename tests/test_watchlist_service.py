@@ -17,6 +17,7 @@ from src.webapp.services.watchlist_service import (
     _clear_chart_payload_cache,
     _classify_position_bucket,
     _filter_scanner_top_hits_payload,
+    _scanner_freshness,
     _scanner_top_hits_source_fingerprint,
 )
 
@@ -1747,6 +1748,13 @@ class WatchlistServiceTests(unittest.TestCase):
         cards = {item["id"]: item for item in payload["cards"]}
         self.assertEqual(cards["sepa_vcp"]["entry_count"], 1)
         self.assertEqual(cards["sepa_vcp"]["preview_tickers"], ["NVDA"])
+
+    def test_scanner_freshness_respects_daily_and_weekly_cadence(self) -> None:
+        target = dt.date(2026, 10, 2)
+        self.assertEqual(_scanner_freshness(run_date="2026-10-02", target_date=target, timeframe="Daily"), "current")
+        self.assertEqual(_scanner_freshness(run_date="2026-09-26", target_date=target, timeframe="Weekly"), "current")
+        self.assertEqual(_scanner_freshness(run_date="2026-09-26", target_date=target, timeframe="Daily"), "stale")
+        self.assertEqual(_scanner_freshness(run_date="", target_date=target, timeframe="Daily"), "not_run")
 
     def test_get_scanner_board_includes_trend_template_card(self) -> None:
         self._write_watchlist(

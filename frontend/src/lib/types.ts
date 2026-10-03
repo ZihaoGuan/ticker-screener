@@ -248,6 +248,11 @@ export type ScannerBoardCard = {
   timeframe: string;
   accent: "amber" | "cyan" | "lime" | "violet" | string;
   available: boolean;
+  has_run: boolean;
+  has_results: boolean;
+  family: string;
+  featured: boolean;
+  freshness: "current" | "stale" | "not_run" | string;
   stem: string;
   group_label: string;
   captured_at: string;
@@ -255,6 +260,7 @@ export type ScannerBoardCard = {
   entry_count: number;
   preview_tickers: string[];
   list_href?: string | null;
+  hit_count_history: Array<{ run_date: string; hit_count: number }>;
 };
 
 export type ScannerBoardResponse = {
