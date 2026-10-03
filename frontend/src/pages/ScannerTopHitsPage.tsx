@@ -1672,6 +1672,7 @@ function GuruTickerCard({
   const atr = row.atr_to_sma50 == null ? "--" : `${row.atr_to_sma50 >= 0 ? "+" : ""}${row.atr_to_sma50.toFixed(1)} ATR`;
   const earnings = row.earnings_days == null ? "Earnings TBD" : row.earnings_days === 0 ? "Earnings today" : `Earnings ${row.earnings_days}d`;
   const rmv = row.rmv ? `RMV ${row.rmv.value.toFixed(0)} · R${row.rmv.rank || "–"}` : null;
+  const pullbackQuality = row.pullback_quality;
   const strikeScore = row.strike_zone?.score;
   const primarySignal = row.strike_zone?.primary_signal;
   const signalAge = row.strike_zone?.signal_age_days;
@@ -1697,6 +1698,7 @@ function GuruTickerCard({
           {rts ? <span title={buildRtsTitle(rts)}>RTS {Math.round(rts.score ?? 0)} {rtsStateGlyph(rts.state)}</span> : null}
           {resolveRsPhaseBadge(row) ? <span className={rsPhaseBadgeClass(row)} title="RS Phase lifecycle">{resolveRsPhaseBadge(row)}</span> : null}
           {rmv ? <span title="Relative Measured Volatility tightness rank">{rmv}</span> : null}
+          {pullbackQuality ? <span className={`guru-pullback is-${pullbackQuality.state}`} title={buildPullbackQualityTitle(pullbackQuality)}>PB {pullbackQuality.score} · {humanizePullbackQualityState(pullbackQuality.state)}</span> : null}
         </div>
         <div className="guru-ticker-context">
           <span title="ATR distance from SMA50">📏 {atr}</span>
@@ -1746,6 +1748,21 @@ function buildRtsTitle(rts: NonNullable<ScannerTopHitRow["relative_trend_strengt
   ].join("\n");
 }
 
+function humanizePullbackQualityState(state: string): string {
+  return state ? `${state.slice(0, 1).toUpperCase()}${state.slice(1)}` : "Unavailable";
+}
+
+function buildPullbackQualityTitle(quality: NonNullable<ScannerTopHitRow["pullback_quality"]>): string {
+  const ratio = (value: number | null) => value == null ? "--" : `${Math.round(value * 100)}%`;
+  return [
+    `Pullback Quality: ${humanizePullbackQualityState(quality.state)} ${quality.score}/100`,
+    `Selling pressure: ${quality.selling_pressure_score}/30 · Volume: ${quality.volume_score}/30 · Support: ${quality.support_score}/25 · Structure: ${quality.structure_score}/15`,
+    `Down-day volume: ${ratio(quality.down_volume_ratio)} of baseline · Recent volume: ${ratio(quality.volume_trend_ratio)} of earlier pullback`,
+    `Aggressive downside: ${quality.aggressive_downside_days} day(s) · Distribution: ${quality.distribution_days} day(s)`,
+    ...quality.reasons,
+  ].join("\n");
+}
+
 function buildStrikeZoneTitle(strikeZone: ScannerTopHitRow["strike_zone"]): string {
   if (!strikeZone) {
     return "Strike Zone context is unavailable.";
@@ -1763,7 +1780,8 @@ function buildStrikeZoneTitle(strikeZone: ScannerTopHitRow["strike_zone"]): stri
     for (const signal of group.signals) {
       const age = signal.age_days == null ? "" : ` · ${signal.age_days}d ago`;
       const freshness = signal.fresh === false ? " · stale, not counted" : age;
-      lines.push(`• ${signal.label}: +${signal.points}${freshness}`);
+      lines.push(signal.kind === "quality" ? `• ${signal.label}${freshness}` : `• ${signal.label}: +${signal.points}${freshness}`);
+      if (signal.detail) lines.push(`  ${signal.detail}`);
     }
     if (group.signals.length === 0) {
       lines.push("• None");

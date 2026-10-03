@@ -345,6 +345,7 @@ export type ScannerTopHitRow = {
   position_bucket?: string | null;
   stage_analysis?: { alias: string; maturity?: string | null; as_of_date?: string | null } | null;
   rmv?: { value: number; rank: number; signal_kind: string } | null;
+  pullback_quality?: PullbackQuality | null;
   strike_zone?: {
     state: "active" | "ready" | "context" | "avoid" | string;
     label: string;
@@ -353,7 +354,7 @@ export type ScannerTopHitRow = {
     primary_signal?: string | null;
     trigger_date?: string | null;
     signal_age_days?: number | null;
-    supporting_signals?: Array<{ label: string; points: number; kind: string; signal_date?: string | null; age_days?: number | null; fresh?: boolean }>;
+    supporting_signals?: Array<{ label: string; points: number; kind: string; detail?: string; signal_date?: string | null; age_days?: number | null; fresh?: boolean }>;
     score_breakdown?: {
       total: number;
       blocked: boolean;
@@ -363,11 +364,28 @@ export type ScannerTopHitRow = {
         awarded_points: number;
         max_points: number;
         scoring_rule: string;
-        signals: Array<{ label: string; points: number; kind: string; signal_date?: string | null; age_days?: number | null; fresh?: boolean }>;
+        signals: Array<{ label: string; points: number; kind: string; detail?: string; signal_date?: string | null; age_days?: number | null; fresh?: boolean }>;
       }>;
     };
     warnings?: string[];
   } | null;
+};
+
+export type PullbackQuality = {
+  score: number;
+  state: "constructive" | "neutral" | "warning" | "failed" | string;
+  selling_pressure_score: number;
+  volume_score: number;
+  support_score: number;
+  structure_score: number;
+  down_volume_ratio: number | null;
+  volume_trend_ratio: number | null;
+  downside_range_atr: number | null;
+  aggressive_downside_days: number;
+  distribution_days: number;
+  support_distance_atr: number;
+  close_location_pct: number | null;
+  reasons: string[];
 };
 
 export type GuruScannerDefinition = {
@@ -2294,6 +2312,7 @@ export type MyPickRow = {
   trend_template_label: string | null;
   position_action?: PositionActionSnapshot | null;
   relative_trend_strength?: RelativeTrendStrengthSnapshot | null;
+  pullback_quality?: PullbackQuality | null;
   position_bucket?: string | null;
   atr_to_sma50?: number | null;
 };

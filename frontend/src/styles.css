@@ -6190,6 +6190,11 @@ dialog.modal-backdrop:not([open]) {
 .guru-strike.is-ready { color: #fde68a; border-color: #d97706; }
 .guru-strike.is-context { color: #c4b5fd; border-color: #7c3aed; }
 .guru-strike.is-avoid { color: #fca5a5; border-color: #dc2626; }
+.guru-pullback { max-width: 100%; padding: 1px 4px; border: 1px solid #3f5567; border-radius: 4px; overflow-wrap: anywhere; }
+.guru-pullback.is-constructive { color: #86efac; border-color: #16a34a; }
+.guru-pullback.is-neutral { color: #fde68a; border-color: #d97706; }
+.guru-pullback.is-warning { color: #fdba74; border-color: #ea580c; }
+.guru-pullback.is-failed { color: #fca5a5; border-color: #dc2626; }
 .guru-primary-signal { max-width: 100%; color: #a7f3d0; overflow-wrap: anywhere; }
 .guru-board-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 0 0 10px; }
 .guru-strike-filters { display: flex; flex-wrap: wrap; gap: 6px; }

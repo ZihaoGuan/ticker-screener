@@ -119,6 +119,9 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
     extension = _as_float(row.get("atr_to_sma50"))
     stage = row.get("stage_analysis") if isinstance(row.get("stage_analysis"), dict) else {}
     stage_alias = str(stage.get("alias") or "")
+    pullback_quality = row.get("pullback_quality") if isinstance(row.get("pullback_quality"), dict) else {}
+    pullback_quality_state = str(pullback_quality.get("state") or "").strip().lower()
+    pullback_quality_score = _as_int(pullback_quality.get("score"))
 
     hard_risks: list[str] = []
     if position_action == "avoid_new":
@@ -129,6 +132,8 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
         hard_risks.append(f"Price is {extension:.1f} ATR above SMA50.")
     if stage_alias.startswith(("3", "4")):
         hard_risks.append(f"Weinstein Stage {stage_alias} is not a preferred entry regime.")
+    if pullback_quality_state == "failed":
+        hard_risks.append("Pullback quality failed: support broke with expanding selling pressure.")
     if hard_risks:
         return {
             "state": "avoid",
@@ -165,7 +170,11 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
     if "ma_pullback_retest" in scanner_ids:
         profiles = row.get("active_profiles") if ma_state == "active" else row.get("ready_profiles")
         profile_label = ", ".join(str(item) for item in profiles if str(item).strip()) if isinstance(profiles, list) else "moving-average"
-        if ma_state == "active":
+        if pullback_quality_state == "warning":
+            warnings.append("Pullback quality is warning: MA support is present, but selling pressure is not constructive.")
+        elif pullback_quality_state == "neutral":
+            setups.append(_signal_entry(id="ma_pullback_retest", label=f"{profile_label} pullback · neutral quality", points=10, kind="setup", signal_date=ma_date, as_of_date=as_of_date))
+        elif ma_state == "active":
             triggers.append(_signal_entry(id="ma_pullback_retest", label=f"{profile_label} reclaim", points=40, kind="trigger", signal_date=ma_date, as_of_date=as_of_date))
         else:
             setups.append(_signal_entry(id="ma_pullback_retest", label=f"{profile_label} pullback", points=22, kind="setup", signal_date=ma_date, as_of_date=as_of_date))
@@ -233,35 +242,56 @@ def build_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None) -> dic
         warnings.append("Earnings date is unavailable.")
 
     all_signals = [*fresh_triggers, *fresh_setups, *fresh_confirmations]
+    breakdown_groups: list[dict[str, object]] = [
+        {
+            "id": "trigger",
+            "label": "Trigger",
+            "awarded_points": trigger_points,
+            "max_points": max((int(item["points"]) for item in triggers), default=0),
+            "scoring_rule": "Best fresh trigger",
+            "signals": triggers,
+        },
+        {
+            "id": "setup",
+            "label": "Setup",
+            "awarded_points": setup_points,
+            "max_points": 25,
+            "scoring_rule": "Best fresh setup, plus 5 for multiple fresh setups; capped at 25",
+            "signals": setups,
+        },
+        {
+            "id": "confirmation",
+            "label": "Confirmation",
+            "awarded_points": confirmation_points,
+            "max_points": 25,
+            "scoring_rule": "Fresh event and current-state confirmation points summed; capped at 25",
+            "signals": confirmations,
+        },
+    ]
+    if pullback_quality:
+        quality_label = pullback_quality_state.title() or "Unavailable"
+        details = [str(item) for item in pullback_quality.get("reasons", []) if str(item).strip()]
+        breakdown_groups.append(
+            {
+                "id": "pullback_quality",
+                "label": "Pullback Quality",
+                "awarded_points": 0,
+                "max_points": 100,
+                "scoring_rule": "Quality gates MA Pullback & Retest; it does not add Strike Zone points.",
+                "signals": [
+                    {
+                        "label": f"{quality_label} pullback {pullback_quality_score if pullback_quality_score is not None else '--'}/100",
+                        "points": 0,
+                        "kind": "quality",
+                        "detail": " ".join(details),
+                    }
+                ],
+            }
+        )
     score_breakdown = {
         "total": score,
         "blocked": False,
-        "groups": [
-            {
-                "id": "trigger",
-                "label": "Trigger",
-                "awarded_points": trigger_points,
-                "max_points": max((int(item["points"]) for item in triggers), default=0),
-                "scoring_rule": "Best fresh trigger",
-                "signals": triggers,
-            },
-            {
-                "id": "setup",
-                "label": "Setup",
-                "awarded_points": setup_points,
-                "max_points": 25,
-                "scoring_rule": "Best fresh setup, plus 5 for multiple fresh setups; capped at 25",
-                "signals": setups,
-            },
-            {
-                "id": "confirmation",
-                "label": "Confirmation",
-                "awarded_points": confirmation_points,
-                "max_points": 25,
-                "scoring_rule": "Fresh event and current-state confirmation points summed; capped at 25",
-                "signals": confirmations,
-            },
-        ],
+        "groups": breakdown_groups,
     }
     return {
         "state": state,

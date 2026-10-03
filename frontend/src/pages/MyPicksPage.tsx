@@ -6,7 +6,7 @@ import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { aggregateCandlesWeekly, buildChartCandles, buildExponentialMovingAverage } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
-import type { FundamentalChecklistItem, MyPickRow, MyPicksContextResponse, WatchlistChartResponse } from "../lib/types";
+import type { FundamentalChecklistItem, MyPickRow, MyPicksContextResponse, PullbackQuality, WatchlistChartResponse } from "../lib/types";
 
 const EMPTY_CONTEXT: MyPicksContextResponse = {
   database_configured: false,
@@ -913,6 +913,7 @@ function MyPickGuruCard({
           <span title={row.trend_template_label || "Minervini Trend Template"}>{trendTemplate}</span>
           <span title="Daily relative strength rating">RS {formatScoreInteger(row.daily_rs_rating ?? row.leadership_score)}</span>
           {row.relative_trend_strength ? <span title={buildMyPickRtsTitle(row)}>RTS {Math.round(row.relative_trend_strength.score ?? 0)} {myPickRtsGlyph(row.relative_trend_strength.state)}</span> : null}
+          {row.pullback_quality ? <span className={`guru-pullback is-${row.pullback_quality.state}`} title={buildMyPickPullbackQualityTitle(row.pullback_quality)}>PB {row.pullback_quality.score} · {humanizeMyPickPullbackQualityState(row.pullback_quality.state)}</span> : null}
           <span title="Fundamental rating">FA {formatScoreInteger(row.fundamental_rating)}</span>
           <span title="Latest fundamental ratings leaderboard rank">FA Rank {row.fundamental_rank == null ? "#--" : `#${formatCount(row.fundamental_rank)}`}</span>
           {row.vcp_score != null ? <span title={row.vcp_rating || "VCP score"}>VCP {formatScore(row.vcp_score)}</span> : null}
@@ -942,6 +943,20 @@ function MyPickGuruCard({
       </button>
     </article>
   );
+}
+
+function humanizeMyPickPullbackQualityState(state: string): string {
+  return state ? `${state.slice(0, 1).toUpperCase()}${state.slice(1)}` : "Unavailable";
+}
+
+function buildMyPickPullbackQualityTitle(quality: PullbackQuality): string {
+  const ratio = (value: number | null) => value == null ? "--" : `${Math.round(value * 100)}%`;
+  return [
+    `Pullback Quality: ${humanizeMyPickPullbackQualityState(quality.state)} ${quality.score}/100`,
+    `Selling pressure: ${quality.selling_pressure_score}/30 · Volume: ${quality.volume_score}/30 · Support: ${quality.support_score}/25 · Structure: ${quality.structure_score}/15`,
+    `Down-day volume: ${ratio(quality.down_volume_ratio)} of baseline · Recent volume: ${ratio(quality.volume_trend_ratio)} of earlier pullback`,
+    ...quality.reasons,
+  ].join("\n");
 }
 
 function myPickRtsGlyph(state: string | null | undefined): string {

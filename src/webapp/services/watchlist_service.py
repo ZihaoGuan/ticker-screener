@@ -2978,6 +2978,7 @@ class WatchlistService:
             bucket_signal_state = entry_signal_state
         entry_active_profiles = entry.get("active_profiles")
         entry_ready_profiles = entry.get("ready_profiles")
+        entry_pullback_quality = entry.get("pullback_quality")
         bucket["company"] = company or ""
         if sector:
             bucket["sector"] = sector
@@ -3018,6 +3019,8 @@ class WatchlistService:
             bucket["active_profiles"] = list(entry_active_profiles)
         if isinstance(entry_ready_profiles, list):
             bucket["ready_profiles"] = list(entry_ready_profiles)
+        if isinstance(entry_pullback_quality, dict):
+            bucket["pullback_quality"] = copy.deepcopy(entry_pullback_quality)
 
     @staticmethod
     def _merge_rs_phase_context(bucket: dict[str, Any], entry: dict[str, Any]) -> None:

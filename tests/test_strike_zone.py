@@ -79,6 +79,41 @@ class StrikeZoneTests(unittest.TestCase):
         self.assertEqual(result["state"], "context")
         self.assertIsNone(result["primary_signal"])
 
+    def test_warning_pullback_does_not_promote_an_ma_reclaim(self) -> None:
+        result = build_strike_zone(
+            {
+                "atr_to_sma50": 1.0,
+                "earnings_days": 14,
+                "daily_rs_rating": 95,
+                "stage_analysis": {"alias": "2A"},
+                "signal_state": "active",
+                "active_profiles": ["D EMA21"],
+                "pullback_quality": {"state": "warning", "score": 35, "reasons": ["Selling pressure expanded."]},
+                "scanners": [{"id": "ma_pullback_retest", "sort_date": "2026-09-25"}],
+            },
+            as_of_date=dt.date(2026, 9, 27),
+        )
+
+        self.assertNotEqual(result["state"], "active")
+        trigger_group = next(item for item in result["score_breakdown"]["groups"] if item["id"] == "trigger")
+        self.assertEqual(trigger_group["awarded_points"], 0)
+        quality_group = next(item for item in result["score_breakdown"]["groups"] if item["id"] == "pullback_quality")
+        self.assertEqual(quality_group["signals"][0]["label"], "Warning pullback 35/100")
+
+    def test_failed_pullback_blocks_other_entry_evidence(self) -> None:
+        result = build_strike_zone(
+            {
+                "atr_to_sma50": 1.0,
+                "earnings_days": 14,
+                "pullback_quality": {"state": "failed", "score": 10},
+                "scanners": [{"id": "darvas_box_breakout", "sort_date": "2026-09-25"}],
+            },
+            as_of_date=dt.date(2026, 9, 27),
+        )
+
+        self.assertEqual(result["state"], "avoid")
+        self.assertTrue(result["score_breakdown"]["blocked"])
+
     def test_rs_phase_lifecycle_confirms_but_does_not_create_an_active_entry(self) -> None:
         result = build_strike_zone(
             {

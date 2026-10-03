@@ -33,6 +33,8 @@ class MaPullbackRetestScreenTests(unittest.TestCase):
         self.assertEqual(hit.signal_state, "active")
         self.assertIn("D EMA8", hit.active_profiles)
         self.assertGreater(hit.stop_price, 0)
+        self.assertIn(hit.pullback_quality["state"], {"constructive", "neutral", "warning", "failed"})
+        self.assertIn("score", hit.pullback_quality)
 
     def test_requires_enough_history_for_long_term_supports(self) -> None:
         hit = find_ma_pullback_retest_hit(_support_reclaim_frame().tail(200), ticker=UniverseTicker(symbol="TEST"))

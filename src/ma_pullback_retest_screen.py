@@ -7,6 +7,7 @@ import pandas as pd
 
 from .config import AppConfig
 from .market_data_access import db_frame_has_recent_coverage, load_many_ticker_windows, load_ticker_metadata_map, resolve_database_url
+from .pullback_quality import evaluate_pullback_quality
 from .universe import UniverseTicker
 
 
@@ -54,6 +55,7 @@ class MaPullbackRetestHit:
     active_profiles: list[str]
     ready_profiles: list[str]
     stop_price: float
+    pullback_quality: dict[str, object]
     reasons: list[str]
 
     def to_dict(self) -> dict[str, object]:
@@ -150,12 +152,16 @@ def find_ma_pullback_retest_hit(frame: pd.DataFrame, *, ticker: UniverseTicker) 
     stop = min(float(bars["Low"].tail(SIGNAL_LOOKBACK_DAYS).min()), support - float(atr14.iloc[-1]))
     labels = [item[0].label for item in matches]
     state = "active" if active else "ready"
+    pullback_quality = evaluate_pullback_quality(bars, support_price=support, atr14=float(atr14.iloc[-1]))
+    quality_payload = pullback_quality.to_dict() if pullback_quality is not None else {}
+    quality_label = str(quality_payload.get("state") or "unavailable").title()
     return MaPullbackRetestHit(
         ticker=ticker.symbol, sector=ticker.sector, industry=ticker.industry, exchange=ticker.exchange,
         signal_date=bars.index[-1].date().isoformat(), signal_state=state, current_price=current,
         support_price=support, atr14=float(atr14.iloc[-1]), distance_atr=distance, matched_profiles=labels,
         active_profiles=active, ready_profiles=ready, stop_price=stop,
-        reasons=[f"{state.title()} pullback/retest: {', '.join(labels)}", f"Nearest support {profile.label} {support:.2f}; {distance:+.2f} ATR", f"Signal is within the last {SIGNAL_LOOKBACK_DAYS} sessions"],
+        pullback_quality=quality_payload,
+        reasons=[f"{state.title()} pullback/retest: {', '.join(labels)}", f"Pullback Quality: {quality_label} {quality_payload.get('score', '--')}/100", f"Nearest support {profile.label} {support:.2f}; {distance:+.2f} ATR", f"Signal is within the last {SIGNAL_LOOKBACK_DAYS} sessions"],
     )
 
 
