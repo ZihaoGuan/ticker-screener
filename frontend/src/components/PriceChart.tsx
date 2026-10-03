@@ -1,5 +1,5 @@
 import { ColorType, LineStyle, createChart, type IChartApi, type ISeriesApi } from "lightweight-charts";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createGapZonePrimitive } from "./GapZonePrimitive";
 import { createHighTightFlagPrimitive } from "./HighTightFlagPrimitive";
 import type { CandlePoint, ChartAnnotations, WatchlistChartResponse } from "../lib/types";
@@ -213,6 +213,7 @@ export function PriceChart({
   const annotationLines = useMemo(() => buildHorizontalAnnotations(annotations, resolvedExtraAnnotations), [annotations, resolvedExtraAnnotations]);
   const flexibleSrOverlay = useMemo(() => (options.flexSr ? buildFlexibleSrOverlay(candles) : null), [candles, options.flexSr]);
   const channelOverlay = useMemo(() => (options.channelLines ? buildPriceChannelOverlay(candles) : null), [candles, options.channelLines]);
+  const recentCandles = useMemo(() => candles.slice(-5).reverse(), [candles]);
   const updateHoverGuideFromSurface = (param: { point: { x: number; y: number } | undefined; time: unknown }, width: number) => {
     const point = param.point;
     const normalizedTime = normalizeCrosshairTime(param.time);
@@ -789,18 +790,23 @@ export function PriceChart({
       updateHoverGuideFromSurface({ point: param.point, time: param.time }, width);
     });
 
+    let resizeFrame = 0;
     const resizeObserver = new ResizeObserver(() => {
-      const width = priceRootRef.current?.clientWidth ?? 0;
-      if (width > 0) {
-        priceChart.applyOptions({ width });
-        rsChart.applyOptions({ width });
-        fibChart.applyOptions({ width });
-      }
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => {
+        const width = priceRootRef.current?.clientWidth ?? 0;
+        if (width > 0) {
+          priceChart.applyOptions({ width });
+          rsChart.applyOptions({ width });
+          fibChart.applyOptions({ width });
+        }
+      });
     });
     resizeObserver.observe(priceRootRef.current);
 
     return () => {
       resizeObserver.disconnect();
+      cancelAnimationFrame(resizeFrame);
       candleSeriesRef.current = null;
       priceChartApiRef.current = null;
       rsChartApiRef.current = null;
@@ -908,31 +914,105 @@ export function PriceChart({
     });
   };
 
+  const handlePan = (direction: -1 | 1) => {
+    const priceChart = priceChartApiRef.current;
+    const logicalRange = priceChart?.timeScale().getVisibleLogicalRange();
+    if (!priceChart || !logicalRange || candles.length === 0) {
+      return;
+    }
+    const span = logicalRange.to - logicalRange.from;
+    const shift = Math.max(1, Math.round(span * 0.15));
+    const maxFrom = Math.max(0, candles.length - 1 - span);
+    const nextFrom = Math.min(maxFrom, Math.max(0, logicalRange.from + direction * shift));
+    priceChart.timeScale().setVisibleLogicalRange({ from: nextFrom, to: nextFrom + span });
+  };
+
+  const handleChartKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      handlePan(-1);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      handlePan(1);
+    } else if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      handleZoom("in");
+    } else if (event.key === "-" || event.key === "_") {
+      event.preventDefault();
+      handleZoom("out");
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      handleZoom("reset");
+    }
+  };
+
   return (
     <div className="chart-stack">
       <div className="chart-zoom-row">
-        <button className="chart-zoom-button" type="button" onClick={() => handleZoom("out")}>
+        <button className="chart-zoom-button" type="button" aria-label="Zoom out" onClick={() => handleZoom("out")}>
           -
         </button>
-        <button className="chart-zoom-button" type="button" onClick={() => handleZoom("reset")}>
+        <button className="chart-zoom-button" type="button" aria-label="Reset chart zoom" onClick={() => handleZoom("reset")}>
           Reset
         </button>
-        <button className="chart-zoom-button" type="button" onClick={() => handleZoom("in")}>
+        <button className="chart-zoom-button" type="button" aria-label="Zoom in" onClick={() => handleZoom("in")}>
           +
         </button>
       </div>
-      <div className="chart-pane">
-        <div ref={priceRootRef} className="chart-card chart-card-price" />
+      <div
+        className="chart-pane"
+        role="region"
+        tabIndex={0}
+        aria-label={`${ticker} price chart`}
+        aria-describedby={`chart-summary-${ticker}`}
+        aria-keyshortcuts="ArrowLeft ArrowRight + - Home"
+        onKeyDown={handleChartKeyDown}
+      >
+        <div ref={priceRootRef} className="chart-card chart-card-price" aria-hidden="true" />
         {hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
+      </div>
+      <div className="chart-data-summary">
+        <p id={`chart-summary-${ticker}`} className="sr-only">
+          Use Left and Right Arrow to pan, plus or minus to zoom, and Home to reset. The data summary lists the five latest sessions.
+        </p>
+        <details>
+          <summary>Chart data summary</summary>
+          <div className="data-table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col">Open</th>
+                  <th scope="col">High</th>
+                  <th scope="col">Low</th>
+                  <th scope="col">Close</th>
+                  <th scope="col">Volume</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentCandles.map((candle) => (
+                  <tr key={candle.time}>
+                    <td>{candle.time}</td>
+                    <td>{formatChartValue(candle.open)}</td>
+                    <td>{formatChartValue(candle.high)}</td>
+                    <td>{formatChartValue(candle.low)}</td>
+                    <td>{formatChartValue(candle.close)}</td>
+                    <td>{formatChartValue(candle.volume, 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </div>
       {showFibPane ? <div className="chart-rs-header">Fib structure pane</div> : null}
       <div className="chart-pane">
-        <div ref={fibRootRef} className="chart-card chart-card-rs" />
+        <div ref={fibRootRef} className="chart-card chart-card-rs" aria-hidden="true" />
         {showFibPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker} · 21 EMA</div> : null}
       <div className="chart-pane">
-        <div ref={rsRootRef} className="chart-card chart-card-rs" />
+        <div ref={rsRootRef} className="chart-card chart-card-rs" aria-hidden="true" />
         {showRsPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showFearzonePanel ? (
@@ -958,6 +1038,10 @@ export function PriceChart({
       ) : null}
     </div>
   );
+}
+
+function formatChartValue(value: number, fractionDigits = 2) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: fractionDigits, minimumFractionDigits: fractionDigits }).format(value);
 }
 
 function FearzonePanel({

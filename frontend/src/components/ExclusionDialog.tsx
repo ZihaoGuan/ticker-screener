@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 type ExclusionDialogProps = {
   isOpen: boolean;
@@ -25,6 +25,9 @@ export function ExclusionDialog({
   onClose,
   onSubmit,
 }: ExclusionDialogProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const [selectedReason, setSelectedReason] = useState("");
   const [customReason, setCustomReason] = useState("");
 
@@ -35,9 +38,27 @@ export function ExclusionDialog({
     }
   }, [isOpen]);
 
-  if (!isOpen) {
-    return null;
-  }
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) {
+      return;
+    }
+    if (isOpen) {
+      if (!dialog.open) {
+        returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        dialog.showModal();
+      }
+      closeButtonRef.current?.focus();
+      return;
+    }
+    if (dialog.open) {
+      dialog.close();
+    }
+    const returnFocus = returnFocusRef.current;
+    if (returnFocus?.isConnected) {
+      returnFocus.focus();
+    }
+  }, [isOpen]);
 
   const reason = selectedReason === "__custom__" ? customReason.trim() : selectedReason.trim() || customReason.trim();
 
@@ -47,13 +68,24 @@ export function ExclusionDialog({
   };
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <dialog
+      ref={dialogRef}
+      className="modal-backdrop"
+      aria-labelledby="exclusion-dialog-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!submitting) {
+          onClose();
+        }
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !submitting) {
+          onClose();
+        }
+      }}
+    >
       <div
         className="modal-shell"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="exclusion-dialog-title"
-        onClick={(event) => event.stopPropagation()}
       >
         <form className="modal-content" onSubmit={(event) => void handleSubmit(event)}>
           <div className="modal-header">
@@ -61,7 +93,7 @@ export function ExclusionDialog({
               <div className="eyebrow">{mode === "add" ? "Add exclusion" : "Remove exclusion"}</div>
               <h2 id="exclusion-dialog-title">{title}</h2>
             </div>
-            <button className="ghost-button" type="button" onClick={onClose}>
+            <button ref={closeButtonRef} className="ghost-button" type="button" onClick={onClose} disabled={submitting}>
               Close
             </button>
           </div>
@@ -120,6 +152,6 @@ export function ExclusionDialog({
           </div>
         </form>
       </div>
-    </div>
+    </dialog>
   );
 }

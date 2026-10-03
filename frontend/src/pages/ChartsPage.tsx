@@ -30,6 +30,67 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   flexSr: false,
   channelLines: false,
 };
+
+type ChartToggle = { key: keyof ChartVisibility; label: string };
+
+const COMMON_CHART_TOGGLES: ChartToggle[] = [
+  { key: "ema8", label: "EMA 8" },
+  { key: "ema21", label: "EMA 21" },
+  { key: "rsLine", label: "RS line" },
+  { key: "sellSignals", label: "Sell signals" },
+];
+
+const ADVANCED_CHART_TOGGLE_GROUPS: Array<{ label: string; toggles: ChartToggle[] }> = [
+  {
+    label: "Moving averages",
+    toggles: [
+      { key: "sma50", label: "SMA 50" },
+      { key: "sma200", label: "SMA 200" },
+      { key: "bollingerBands", label: "Bollinger Bands" },
+      { key: "weeklyEma8", label: "Weekly 8 EMA" },
+    ],
+  },
+  {
+    label: "Levels",
+    toggles: [
+      { key: "ipoVwap", label: "IPO VWAP" },
+      { key: "anchoredVwap52wLow", label: "AVWAP from 52W low" },
+      { key: "marketExtension", label: "10W extension" },
+      { key: "fibOverlay", label: "Fib overlay (exp)" },
+      { key: "gapZones", label: "Gap zones" },
+      { key: "htfBox", label: "HTF box" },
+      { key: "flexSr", label: "Flex SR (exp)" },
+      { key: "channelLines", label: "Channel lines" },
+    ],
+  },
+  { label: "Relative strength", toggles: [{ key: "rsSignals", label: "RS markers" }] },
+  {
+    label: "Events",
+    toggles: [
+      { key: "wyckoffSignals", label: "Wyckoff signals" },
+      { key: "wyckoffHoldSignals", label: "Wyckoff hold" },
+    ],
+  },
+];
+
+const CHART_PRESETS: Array<{ id: string; label: string; visibility: ChartVisibility }> = [
+  {
+    id: "clean",
+    label: "Clean",
+    visibility: { ...DEFAULT_CHART_VISIBILITY, sma50: false, sma200: false, weeklyEma8: false, ipoVwap: false, marketExtension: false, gapZones: false, htfBox: false, rsLine: false, rsSignals: false, sellSignals: false, wyckoffSignals: false, wyckoffHoldSignals: false },
+  },
+  {
+    id: "trend",
+    label: "Trend",
+    visibility: { ...DEFAULT_CHART_VISIBILITY, rsLine: false, rsSignals: false, sellSignals: false, wyckoffSignals: false, wyckoffHoldSignals: false },
+  },
+  {
+    id: "relative-strength",
+    label: "Relative Strength",
+    visibility: { ...DEFAULT_CHART_VISIBILITY, weeklyEma8: false, ipoVwap: false, marketExtension: false, gapZones: false, htfBox: false, rsLine: true, rsSignals: true, sellSignals: false, wyckoffSignals: false, wyckoffHoldSignals: false },
+  },
+  { id: "signals", label: "Signals", visibility: DEFAULT_CHART_VISIBILITY },
+];
 const CHART_CACHE_PREFIX = "chart-screen-cache-v6";
 const EXCLUSION_REASON_OPTIONS = [
   "Bad data quality",
@@ -462,27 +523,12 @@ export function ChartsPage() {
       wyckoffPrimaryMarkers,
     ],
   );
-  const chartToggles: Array<{ key: keyof ChartVisibility; label: string }> = [
-    { key: "ema8", label: "EMA 8" },
-    { key: "ema21", label: "EMA 21" },
-    { key: "sma50", label: "SMA 50" },
-    { key: "sma200", label: "SMA 200" },
-    { key: "bollingerBands", label: "Bollinger Bands" },
-    { key: "weeklyEma8", label: "Weekly 8 EMA" },
-    { key: "ipoVwap", label: "IPO VWAP" },
-    { key: "anchoredVwap52wLow", label: "AVWAP from 52W low" },
-    { key: "marketExtension", label: "10W extension" },
-    { key: "fibOverlay", label: "Fib overlay (exp)" },
-    { key: "gapZones", label: "Gap zones" },
-    { key: "htfBox", label: "HTF box" },
-    { key: "rsLine", label: "RS line" },
-    { key: "rsSignals", label: "RS markers" },
-    { key: "sellSignals", label: "Sell signals" },
-    { key: "wyckoffSignals", label: "Wyckoff signals" },
-    { key: "wyckoffHoldSignals", label: "Wyckoff hold" },
-    { key: "flexSr", label: "Flex SR (exp)" },
-    { key: "channelLines", label: "Channel lines" },
-  ];
+  const activeChartPreset =
+    CHART_PRESETS.find((preset) =>
+      (Object.keys(DEFAULT_CHART_VISIBILITY) as Array<keyof ChartVisibility>).every(
+        (key) => chartVisibility[key] === preset.visibility[key],
+      ),
+    )?.id ?? "custom";
   const canManageExclusions = auth.hasCapability("manage_exclusions");
   const canSyncHistory = auth.hasCapability("sync_history");
   const isAdmin = auth.role === "admin";
@@ -697,6 +743,37 @@ export function ChartsPage() {
     ],
   );
 
+  const renderHeroStatGroup = (group: (typeof heroStatGroups)[number]) => {
+    const isExpanded = expandedHeroGroup === group.id;
+    return (
+      <div key={group.id} className="hero-stat-group">
+        <div className="hero-stat-group-head">
+          <span className="eyebrow">{group.title}</span>
+          <button
+            type="button"
+            className="hero-stat-help"
+            title={group.description}
+            aria-label={`${group.title} meaning`}
+            aria-controls={`hero-stat-help-${group.id}`}
+            aria-expanded={isExpanded}
+            onClick={() => setExpandedHeroGroup((current) => (current === group.id ? null : group.id))}
+          >
+            ?
+          </button>
+        </div>
+        <div className="hero-stat-group-grid">
+          {group.items.map((item) => (
+            <div key={`${group.id}-${item.label}`} className="hero-stat-item">
+              <span className="eyebrow">{item.label}</span>
+              <strong className={item.className}>{item.value}</strong>
+            </div>
+          ))}
+        </div>
+        {isExpanded ? <p id={`hero-stat-help-${group.id}`} className="hero-stat-help-copy">{group.description}</p> : null}
+      </div>
+    );
+  };
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const nextTicker = tickerInput.trim().toUpperCase();
@@ -855,18 +932,21 @@ export function ChartsPage() {
               </p>
               {needsSectorAssignment ? (
                 <div className="button-row" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                  <select
-                    value={selectedSectorOption}
-                    onChange={(event) => setSelectedSectorOption(event.target.value)}
-                    disabled={isSectorOptionsLoading || isSavingSector || availableSectorOptions.length === 0}
-                  >
-                    <option value="">Select sector</option>
-                    {availableSectorOptions.map((sector) => (
-                      <option key={sector} value={sector}>
-                        {sector}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="field charts-sector-field">
+                    <span>Select sector</span>
+                    <select
+                      value={selectedSectorOption}
+                      onChange={(event) => setSelectedSectorOption(event.target.value)}
+                      disabled={isSectorOptionsLoading || isSavingSector || availableSectorOptions.length === 0}
+                    >
+                      <option value="">Select sector</option>
+                      {availableSectorOptions.map((sector) => (
+                        <option key={sector} value={sector}>
+                          {sector}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     className="ghost-button"
                     type="button"
@@ -880,7 +960,7 @@ export function ChartsPage() {
                   </span>
                 </div>
               ) : null}
-              {sectorNotice ? <p className="panel-copy">{sectorNotice}</p> : null}
+              {sectorNotice ? <p className="panel-copy" role="status">{sectorNotice}</p> : null}
             </div>
           ) : null}
           {canManageExclusions ? (
@@ -921,8 +1001,21 @@ export function ChartsPage() {
               ) : null}
             </div>
           ) : null}
-          {myPickNotice ? <p className="panel-copy">{myPickNotice}</p> : null}
-          {notice ? <p className="panel-copy">{notice}</p> : <p className="panel-copy">Standalone ticker chart with RS line, SMA overlays, 10W extension overlay, gap zones, HTF box, fearzone panel, and SEPA dashboard snapshot.</p>}
+          {latestPositionAction ? (
+            <div className="charts-decision-summary">
+              <span className={`status-pill ${positionActionClass(latestPositionAction.action)}`}>{formatPositionAction(latestPositionAction.action)}</span>
+              <p className="panel-copy">
+                Trend {formatPositionTrend(latestPositionAction.trend_state)} · Extension {formatPositionExtension(latestPositionAction.extension_state)} · {latestPositionAction.danger_signal_count} active danger signal{latestPositionAction.danger_signal_count === 1 ? "" : "s"}
+              </p>
+            </div>
+          ) : null}
+          {requestedTicker ? (
+            <p className="charts-freshness-row">
+              Price {chartPayload?.resolved_as_of_date ?? "--"} · Position action {latestPositionAction?.as_of_date ?? "--"} · Rating {latestRatingSnapshot?.as_of_date ?? "--"} · GEX {gexPayload?.as_of ?? "--"}
+            </p>
+          ) : null}
+          {myPickNotice ? <p className="panel-copy" role="status">{myPickNotice}</p> : null}
+          {notice ? <p className="panel-copy" role="status">{notice}</p> : <p className="panel-copy">Load a ticker to review price structure, relative strength, and risk signals.</p>}
           {canManageExclusions && requestedTicker ? (
             <p className="panel-copy">
               {isTickerListLoading
@@ -936,36 +1029,6 @@ export function ChartsPage() {
         <div className="hero-as-of">
           <span className="eyebrow">As Of</span>
           <strong>{chartPayload?.resolved_as_of_date ?? "Latest trading day"}</strong>
-        </div>
-        <div className="hero-stats">
-          {heroStatGroups.map((group) => {
-            const isExpanded = expandedHeroGroup === group.id;
-            return (
-              <div key={group.id} className="hero-stat-group">
-                <div className="hero-stat-group-head">
-                  <span className="eyebrow">{group.title}</span>
-                  <button
-                    type="button"
-                    className="hero-stat-help"
-                    title={group.description}
-                    aria-label={`${group.title} meaning`}
-                    onClick={() => setExpandedHeroGroup((current) => (current === group.id ? null : group.id))}
-                  >
-                    ?
-                  </button>
-                </div>
-                <div className="hero-stat-group-grid">
-                  {group.items.map((item) => (
-                    <div key={`${group.id}-${item.label}`} className="hero-stat-item">
-                      <span className="eyebrow">{item.label}</span>
-                      <strong className={item.className}>{item.value}</strong>
-                    </div>
-                  ))}
-                </div>
-                {isExpanded ? <p className="hero-stat-help-copy">{group.description}</p> : null}
-              </div>
-            );
-          })}
         </div>
       </section>
 
@@ -1001,34 +1064,202 @@ export function ChartsPage() {
         {requestedTicker ? <p className="panel-copy">Refresh re-runs live chart, fundamentals, and insider requests for this ticker.</p> : null}
       </Panel>
 
+      <Panel
+        title="Candles"
+        aside={
+          <div className="watchlist-panel-aside">
+            <div className="legend-row legend-row-compact">
+              <span className="legend-marker legend-marker-gap" aria-hidden="true" />
+              <span>Gap</span>
+              <span className="legend-marker legend-marker-rs" aria-hidden="true" />
+              <span>RS NH</span>
+              <span className="legend-marker legend-marker-rs-before" aria-hidden="true" />
+              <span>RS NH before price</span>
+              <span className="legend-marker legend-marker-support" aria-hidden="true" />
+              <span>RS reclaim/loss</span>
+            </div>
+            <Link className="ghost-button" to="/guide">
+              Open Guide
+            </Link>
+          </div>
+        }
+      >
+        {isLoading ? <LoadingBlock label={`Loading chart for ${requestedTicker}…`} /> : null}
+        {!isLoading && !requestedTicker ? <p className="panel-copy">Enter ticker, pick date if needed, load chart.</p> : null}
+        {!isLoading && requestedTicker && chartData.length === 0 ? <p className="panel-copy">No chart data returned for this request.</p> : null}
+        {chartData.length > 0 ? (
+          <>
+            <PriceChart
+              ticker={requestedTicker}
+              candles={chartData}
+              overlays={chartPayload ?? undefined}
+              extraMarkers={priceChartExtraMarkers}
+              visibility={chartVisibility}
+              forceFearzonePanel
+              hoveredTime={syncedHoverTime}
+              onHoverTimeChange={setSyncedHoverTime}
+            />
+            <div className="chart-annotation-strip">
+              {chartPayload?.resolved_as_of_date ? <span className="chart-pill chart-pill-event">As Of {chartPayload.resolved_as_of_date}</span> : null}
+              {chartPayload?.benchmark_ticker ? <span className="chart-pill chart-pill-rs">RS vs {chartPayload.benchmark_ticker}</span> : null}
+              {latestRsMarker ? (
+                <span className="chart-pill chart-pill-rs">
+                  {latestRsMarker.kind === "daily_new_high_before_price" ? "RS new high before price" : "RS new high"}
+                </span>
+              ) : null}
+              {rsPhase ? (
+                <span className={`chart-pill ${rsPhase.active ? "chart-pill-rs" : "chart-pill-event"} ${rsPhase.state ? `is-rs-phase-${rsPhase.state}` : ""}`}>
+                  {rsPhase.badge_label ?? (rsPhase.active ? `RS Phase ${rsPhase.active_days}D` : rsPhase.loss_confirmed ? "RS Lost" : "RS Inactive")}
+                </span>
+              ) : null}
+              {rsPhase?.recent_reclaim_days_ago === 0 ? <span className="chart-pill chart-pill-rs">RS reclaim today</span> : null}
+              {rsPhase?.recent_loss_days_ago === 0 ? <span className="chart-pill chart-pill-event">RS phase lost today</span> : null}
+              {rsEvidence ? <span className="chart-pill chart-pill-rs">RS Evidence {rsEvidence.score}/{rsEvidence.max_score}</span> : null}
+              {rsEvidence?.rs_days_21d_pct != null ? <span className="chart-pill chart-pill-setup">RS Days {rsEvidence.rs_days_21d_pct.toFixed(1)}%</span> : null}
+              {rsEvidence?.up_on_down_days_21d != null ? <span className="chart-pill chart-pill-setup">Up/Down {rsEvidence.up_on_down_days_21d}</span> : null}
+              {chartPayload?.data_source ? <span className="chart-pill chart-pill-setup">Source {chartPayload.data_source}</span> : null}
+              {latestMarketExtension ? (
+                <span className={`chart-pill ${marketExtensionChartPillClass(latestMarketExtension.state)}`}>
+                  {marketExtensionLabel} {formatPercent(latestMarketExtension.extension_pct)}
+                </span>
+              ) : null}
+              {latestMarketExtension?.distance != null ? (
+                <span className="chart-pill chart-pill-setup">Dist {formatPrice(latestMarketExtension.distance)}</span>
+              ) : null}
+              {markDailyExtendMarkers.length > 0 ? <span className="chart-pill chart-pill-event">{markDailyExtendMarkers.length} Mark extend</span> : null}
+              {vcs ? <span className={`chart-pill ${vcsChartPillClass(vcs.stage)}`}>VCS {formatScore(vcs.score)} {vcs.stage_label}</span> : null}
+              {atr14 != null ? <span className="chart-pill chart-pill-setup">ATR14 {formatPrice(atr14)}</span> : null}
+              {atrMultipleFrom50Ma != null ? <span className="chart-pill chart-pill-setup">50MA {formatAtrMultiple(atrMultipleFrom50Ma)}</span> : null}
+              {hasTrimWarning ? <span className="chart-pill chart-pill-event">Trim warning: 3x ATR above 50MA</span> : null}
+              {atrExtensionMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{atrExtensionMarkers.length} ATR extension dot(s)</span> : null}
+              {wyckoffClimaxCount > 0 ? <span className="chart-pill chart-pill-event">{wyckoffClimaxCount} Wyckoff BC</span> : null}
+              {wyckoffBuyCount > 0 ? <span className="chart-pill chart-pill-setup">{wyckoffBuyCount} Wyckoff BUY</span> : null}
+              {wyckoffSellCount > 0 ? <span className="chart-pill chart-pill-event">{wyckoffSellCount} Wyckoff SELL</span> : null}
+              {wyckoffHoldCount > 0 ? <span className="chart-pill chart-pill-setup">{wyckoffHoldCount} Wyckoff HOLD</span> : null}
+              {sellIntoStrengthMarkers.length > 0 ? <span className="chart-pill chart-pill-event">{sellIntoStrengthMarkers.length} sell signal(s)</span> : null}
+            </div>
+            <div className="rs-rating-grid">
+              <RsRatingMiniChart
+                title="RS Rating Daily"
+                series={dailyRsRatingSeries}
+                emptyLabel="Daily RS rating needs more history."
+                hoveredTime={syncedHoverTime}
+                onHoverTimeChange={setSyncedHoverTime}
+              />
+            </div>
+            <div className="chart-controls">
+              <div className="chart-presets" aria-label="Chart presets">
+                <span className="eyebrow">Preset</span>
+                {CHART_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    className={activeChartPreset === preset.id ? "primary-button" : "ghost-button"}
+                    type="button"
+                    aria-pressed={activeChartPreset === preset.id}
+                    onClick={() => setChartVisibility(preset.visibility)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+                {activeChartPreset === "custom" ? <span className="panel-copy">Custom</span> : null}
+                <button className="ghost-button" type="button" onClick={() => setChartVisibility(DEFAULT_CHART_VISIBILITY)}>
+                  Reset
+                </button>
+              </div>
+              <div className="chart-toolbar">
+                {COMMON_CHART_TOGGLES.map((toggle) => (
+                  <label key={toggle.key} className="chart-toggle">
+                    <input
+                      type="checkbox"
+                      checked={chartVisibility[toggle.key]}
+                      onChange={() =>
+                        setChartVisibility((current) => ({
+                          ...current,
+                          [toggle.key]: !current[toggle.key],
+                        }))
+                      }
+                    />
+                    <span>{toggle.label}</span>
+                  </label>
+                ))}
+              </div>
+              <details className="chart-advanced-overlays">
+                <summary>Advanced overlays</summary>
+                <div className="chart-overlay-groups">
+                  {ADVANCED_CHART_TOGGLE_GROUPS.map((group) => (
+                    <fieldset key={group.label}>
+                      <legend>{group.label}</legend>
+                      <div className="chart-toolbar">
+                        {group.toggles.map((toggle) => (
+                          <label key={toggle.key} className="chart-toggle">
+                            <input
+                              type="checkbox"
+                              checked={chartVisibility[toggle.key]}
+                              onChange={() =>
+                                setChartVisibility((current) => ({
+                                  ...current,
+                                  [toggle.key]: !current[toggle.key],
+                                }))
+                              }
+                            />
+                            <span>{toggle.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  ))}
+                </div>
+              </details>
+            </div>
+          </>
+        ) : null}
+      </Panel>
+
+      <details className="charts-research-section charts-analysis-details">
+        <summary>Full analysis</summary>
+        <div className="charts-research-content hero-stats">
+          {heroStatGroups.map(renderHeroStatGroup)}
+        </div>
+      </details>
+
+      <details className="charts-research-section charts-research-options">
+        <summary>Options and data repair</summary>
+        <div className="charts-research-content">
       <Panel title="Options GEX" aside={<span className="eyebrow">CBOE delayed all-expiry profile</span>}>
         {!requestedTicker ? <p className="panel-copy">Load ticker to inspect latest GEX profile.</p> : null}
         {requestedTicker && isGexLoading ? <LoadingBlock label="Loading options GEX…" compact /> : null}
         {requestedTicker && !isGexLoading && !gexPayload ? <p className="panel-copy">No GEX response returned for this ticker.</p> : null}
-        {requestedTicker && gexNotice ? <p className="panel-copy">{gexNotice}</p> : null}
+        {requestedTicker && gexNotice ? <p className="panel-copy" role="status">{gexNotice}</p> : null}
         {gexPayload?.available ? (
           <>
-            <p className="panel-copy">
-              {gexPayload.gex_label ?? "Unavailable"}
-              {" · "}
-              Spot {formatPrice(gexPayload.spot ?? null)}
-              {" · "}
-              Net GEX {formatCompactCurrency(gexPayload.net_gex)}
-              {" · "}
-              Flip {formatPrice(gexPayload.gamma_flip ?? null)}
-              {" · "}
-              {formatFlipDistance(gexPayload.distance_to_flip_pct)}
-            </p>
-            <p className="panel-copy">
-              Call wall {formatPrice(gexPayload.call_wall ?? null)}
-              {" · "}
-              Put wall {formatPrice(gexPayload.put_wall ?? null)}
-              {" · "}
-              ATM pin {formatPrice(gexPayload.atm_pin_strike ?? null)}
-              {" · "}
-              Put/Call OI {formatRatio(gexPayload.put_call_oi_ratio)}
-            </p>
-            <p className="panel-copy">
+            <div className="gex-decision-grid" aria-label="Options GEX key levels">
+              <div className="gex-decision-card">
+                <span className="eyebrow">Regime</span>
+                <strong className={gexPayload.gex_regime === "negative" ? "is-negative" : "is-positive"}>{gexPayload.gex_label ?? "Unavailable"}</strong>
+              </div>
+              <div className="gex-decision-card">
+                <span className="eyebrow">Spot</span>
+                <strong>{formatPrice(gexPayload.spot ?? null)}</strong>
+              </div>
+              <div className="gex-decision-card">
+                <span className="eyebrow">Net GEX</span>
+                <strong>{formatCompactCurrency(gexPayload.net_gex)}</strong>
+              </div>
+              <div className="gex-decision-card">
+                <span className="eyebrow">Gamma flip</span>
+                <strong>{formatPrice(gexPayload.gamma_flip ?? null)}</strong>
+                <span>{formatFlipDistance(gexPayload.distance_to_flip_pct)}</span>
+              </div>
+              <div className="gex-decision-card">
+                <span className="eyebrow">Call / put wall</span>
+                <strong>{formatPrice(gexPayload.call_wall ?? null)} / {formatPrice(gexPayload.put_wall ?? null)}</strong>
+              </div>
+              <div className="gex-decision-card">
+                <span className="eyebrow">ATM pin · Put/call OI</span>
+                <strong>{formatPrice(gexPayload.atm_pin_strike ?? null)} · {formatRatio(gexPayload.put_call_oi_ratio)}</strong>
+              </div>
+            </div>
+            <p className="gex-metadata">
               Next expiry {gexPayload.next_expiry || "--"}
               {" · "}
               Next monthly {gexPayload.next_monthly_expiry || "--"}
@@ -1041,17 +1272,20 @@ export function ChartsPage() {
             {gexPayload.methodology ? <p className="panel-copy">{gexPayload.methodology}</p> : null}
             {gexPayload.plots?.v2 ? (
               <div className="gex-v2-section">
-                <div className="chart-rs-header">GEX Plot Chart V2</div>
-                <p className="panel-copy">Explainer-style net GEX by strike with gamma flip, call wall, and put wall.</p>
+                <div className="chart-rs-header">Net GEX by strike</div>
+                <p className="panel-copy">Gamma flip, call wall, and put wall are marked directly on the profile.</p>
                 <div className="gex-v2-card" dangerouslySetInnerHTML={{ __html: gexPayload.plots.v2 }} />
               </div>
             ) : null}
             {gexPayload.plots ? (
-              <div className="list-grid">
-                <div className="chart-card" dangerouslySetInnerHTML={{ __html: gexPayload.plots.absolute }} />
-                <div className="chart-card" dangerouslySetInnerHTML={{ __html: gexPayload.plots.by_option_type }} />
-                <div className="chart-card" style={{ gridColumn: "1 / -1" }} dangerouslySetInnerHTML={{ __html: gexPayload.plots.profile }} />
-              </div>
+              <details className="gex-legacy-plots" open={!gexPayload.plots.v2}>
+                <summary>Legacy strike diagnostics</summary>
+                <div className="list-grid">
+                  <div className="chart-card" dangerouslySetInnerHTML={{ __html: gexPayload.plots.absolute }} />
+                  <div className="chart-card" dangerouslySetInnerHTML={{ __html: gexPayload.plots.by_option_type }} />
+                  <div className="chart-card" style={{ gridColumn: "1 / -1" }} dangerouslySetInnerHTML={{ __html: gexPayload.plots.profile }} />
+                </div>
+              </details>
             ) : null}
           </>
         ) : null}
@@ -1073,10 +1307,16 @@ export function ChartsPage() {
               {isLaunchingBackfill ? "Launching Backfill..." : `Backfill ${requestedTicker}`}
             </button>
           </div>
-          {backfillNotice ? <p className="panel-copy">{backfillNotice}</p> : null}
+          {backfillNotice ? <p className="panel-copy" role="status">{backfillNotice}</p> : null}
         </Panel>
       ) : null}
 
+        </div>
+      </details>
+
+      <details className="charts-research-section charts-research-fundamentals">
+        <summary>Fundamentals and ratings</summary>
+        <div className="charts-research-content">
       <Panel title="Ticker Rating" aside={<span className="eyebrow">Latest DB-backed rating snapshot</span>}>
         {!requestedTicker ? <p className="panel-copy">Load ticker to inspect latest rating snapshot and diagnostics.</p> : null}
         {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading ticker rating…" compact /> : null}
@@ -1307,6 +1547,12 @@ export function ChartsPage() {
         ) : null}
       </Panel>
 
+        </div>
+      </details>
+
+      <details className="charts-research-section charts-research-ownership">
+        <summary>Earnings and ownership</summary>
+        <div className="charts-research-content">
       <Panel title="EPS History" aside={<span className="eyebrow">Yahoo internet scrape for estimate, reported, surprise</span>}>
         {!requestedTicker ? <p className="panel-copy">Load ticker to inspect recent earnings EPS rows.</p> : null}
         {requestedTicker && isFundamentalsLoading ? <LoadingBlock label="Loading chart fundamentals…" compact /> : null}
@@ -1329,7 +1575,7 @@ export function ChartsPage() {
             {fundamentalsPayload?.implied_move?.strike != null ? ` at strike ${fundamentalsPayload.implied_move.strike.toFixed(2)}` : ""}
           </p>
         ) : null}
-        {fundamentalsNotice ? <p className="panel-copy">{fundamentalsNotice}</p> : null}
+        {fundamentalsNotice ? <p className="panel-copy" role="status">{fundamentalsNotice}</p> : null}
         {requestedTicker && !isFundamentalsLoading && earningsRows.length === 0 ? (
           <p className="panel-copy">No EPS rows returned from Yahoo scrape for this ticker.</p>
         ) : null}
@@ -1384,8 +1630,8 @@ export function ChartsPage() {
         {requestedTicker && insiderPayload?.generated_at ? (
           <p className="panel-copy">Cache generated: {formatDateTime(insiderPayload.generated_at)}</p>
         ) : null}
-        {insiderPayload?.notice ? <p className="panel-copy">{insiderPayload.notice}</p> : null}
-        {insiderNotice ? <p className="panel-copy">{insiderNotice}</p> : null}
+        {insiderPayload?.notice ? <p className="panel-copy" role="status">{insiderPayload.notice}</p> : null}
+        {insiderNotice ? <p className="panel-copy" role="status">{insiderNotice}</p> : null}
         {requestedTicker && !isInsiderLoading && (insiderPayload?.entries.length ?? 0) === 0 ? (
           <p className="panel-copy">No cached insider buys or sells in this window.</p>
         ) : null}
@@ -1433,110 +1679,12 @@ export function ChartsPage() {
         ) : null}
       </Panel>
 
-      <Panel
-        title="Candles"
-        aside={
-          <div className="watchlist-panel-aside">
-            <div className="legend-row legend-row-compact">
-              <span className="legend-marker legend-marker-gap" aria-hidden="true" />
-              <span>Gap</span>
-              <span className="legend-marker legend-marker-rs" aria-hidden="true" />
-              <span>RS NH</span>
-              <span className="legend-marker legend-marker-rs-before" aria-hidden="true" />
-              <span>RS NH before price</span>
-              <span className="legend-marker legend-marker-support" aria-hidden="true" />
-              <span>RS reclaim/loss</span>
-            </div>
-            <Link className="ghost-button" to="/guide">
-              Open Guide
-            </Link>
-          </div>
-        }
-      >
-        <div className="chart-toolbar">
-          {chartToggles.map((toggle) => (
-            <label key={toggle.key} className="chart-toggle">
-              <input
-                type="checkbox"
-                checked={chartVisibility[toggle.key]}
-                onChange={() =>
-                  setChartVisibility((current) => ({
-                    ...current,
-                    [toggle.key]: !current[toggle.key],
-                  }))
-                }
-              />
-              <span>{toggle.label}</span>
-            </label>
-          ))}
         </div>
-        {isLoading ? <LoadingBlock label={`Loading chart for ${requestedTicker}…`} /> : null}
-        {!isLoading && !requestedTicker ? <p className="panel-copy">Enter ticker, pick date if needed, load chart.</p> : null}
-        {!isLoading && requestedTicker && chartData.length === 0 ? <p className="panel-copy">No chart data returned for this request.</p> : null}
-        {chartData.length > 0 ? (
-          <>
-            <PriceChart
-              ticker={requestedTicker}
-              candles={chartData}
-              overlays={chartPayload ?? undefined}
-              extraMarkers={priceChartExtraMarkers}
-              visibility={chartVisibility}
-              forceFearzonePanel
-              hoveredTime={syncedHoverTime}
-              onHoverTimeChange={setSyncedHoverTime}
-            />
-            <div className="chart-annotation-strip">
-              {chartPayload?.resolved_as_of_date ? <span className="chart-pill chart-pill-event">As Of {chartPayload.resolved_as_of_date}</span> : null}
-              {chartPayload?.benchmark_ticker ? <span className="chart-pill chart-pill-rs">RS vs {chartPayload.benchmark_ticker}</span> : null}
-              {latestRsMarker ? (
-                <span className="chart-pill chart-pill-rs">
-                  {latestRsMarker.kind === "daily_new_high_before_price" ? "RS new high before price" : "RS new high"}
-                </span>
-              ) : null}
-              {rsPhase ? (
-                <span className={`chart-pill ${rsPhase.active ? "chart-pill-rs" : "chart-pill-event"} ${rsPhase.state ? `is-rs-phase-${rsPhase.state}` : ""}`}>
-                  {rsPhase.badge_label ?? (rsPhase.active ? `RS Phase ${rsPhase.active_days}D` : rsPhase.loss_confirmed ? "RS Lost" : "RS Inactive")}
-                </span>
-              ) : null}
-              {rsPhase?.recent_reclaim_days_ago === 0 ? <span className="chart-pill chart-pill-rs">RS reclaim today</span> : null}
-              {rsPhase?.recent_loss_days_ago === 0 ? <span className="chart-pill chart-pill-event">RS phase lost today</span> : null}
-              {rsEvidence ? <span className="chart-pill chart-pill-rs">RS Evidence {rsEvidence.score}/{rsEvidence.max_score}</span> : null}
-              {rsEvidence?.rs_days_21d_pct != null ? <span className="chart-pill chart-pill-setup">RS Days {rsEvidence.rs_days_21d_pct.toFixed(1)}%</span> : null}
-              {rsEvidence?.up_on_down_days_21d != null ? <span className="chart-pill chart-pill-setup">Up/Down {rsEvidence.up_on_down_days_21d}</span> : null}
-              {chartPayload?.data_source ? <span className="chart-pill chart-pill-setup">Source {chartPayload.data_source}</span> : null}
-              {latestMarketExtension ? (
-                <span className={`chart-pill ${marketExtensionChartPillClass(latestMarketExtension.state)}`}>
-                  {marketExtensionLabel} {formatPercent(latestMarketExtension.extension_pct)}
-                </span>
-              ) : null}
-              {latestMarketExtension?.distance != null ? (
-                <span className="chart-pill chart-pill-setup">Dist {formatPrice(latestMarketExtension.distance)}</span>
-              ) : null}
-              {markDailyExtendMarkers.length > 0 ? <span className="chart-pill chart-pill-event">{markDailyExtendMarkers.length} Mark extend</span> : null}
-              {vcs ? <span className={`chart-pill ${vcsChartPillClass(vcs.stage)}`}>VCS {formatScore(vcs.score)} {vcs.stage_label}</span> : null}
-              {atr14 != null ? <span className="chart-pill chart-pill-setup">ATR14 {formatPrice(atr14)}</span> : null}
-              {atrMultipleFrom50Ma != null ? <span className="chart-pill chart-pill-setup">50MA {formatAtrMultiple(atrMultipleFrom50Ma)}</span> : null}
-              {hasTrimWarning ? <span className="chart-pill chart-pill-event">Trim warning: 3x ATR above 50MA</span> : null}
-              {atrExtensionMarkers.length > 0 ? <span className="chart-pill chart-pill-setup">{atrExtensionMarkers.length} ATR extension dot(s)</span> : null}
-              {wyckoffClimaxCount > 0 ? <span className="chart-pill chart-pill-event">{wyckoffClimaxCount} Wyckoff BC</span> : null}
-              {wyckoffBuyCount > 0 ? <span className="chart-pill chart-pill-setup">{wyckoffBuyCount} Wyckoff BUY</span> : null}
-              {wyckoffSellCount > 0 ? <span className="chart-pill chart-pill-event">{wyckoffSellCount} Wyckoff SELL</span> : null}
-              {wyckoffHoldCount > 0 ? <span className="chart-pill chart-pill-setup">{wyckoffHoldCount} Wyckoff HOLD</span> : null}
-              {sellIntoStrengthMarkers.length > 0 ? <span className="chart-pill chart-pill-event">{sellIntoStrengthMarkers.length} sell signal(s)</span> : null}
-            </div>
-            <div className="rs-rating-grid">
-              <RsRatingMiniChart
-                title="RS Rating Daily"
-                series={dailyRsRatingSeries}
-                emptyLabel="Daily RS rating needs more history."
-                hoveredTime={syncedHoverTime}
-                onHoverTimeChange={setSyncedHoverTime}
-              />
-            </div>
-          </>
-        ) : null}
-      </Panel>
+      </details>
 
+      <details className="charts-research-section charts-research-diagnostics">
+        <summary>Risk signals and diagnostics</summary>
+        <div className="charts-research-content">
       <Panel title="Danger Signals" aside={<span className="eyebrow">Latest bar snapshot, Mindwheel-inspired</span>}>
         {!requestedTicker ? <p className="panel-copy">Load ticker to inspect active danger signals on latest bar.</p> : null}
         {requestedTicker && isLoading ? <LoadingBlock label="Refreshing danger signals..." compact /> : null}
@@ -1596,6 +1744,9 @@ export function ChartsPage() {
           </div>
         </Panel>
       ) : null}
+
+        </div>
+      </details>
 
       <ExclusionDialog
         isOpen={isListDialogOpen}
