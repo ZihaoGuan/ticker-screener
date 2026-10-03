@@ -14,6 +14,7 @@ type ScannerMiniChartProps = {
   ema60?: Array<{ time: string; value: number }>;
   ema200?: Array<{ time: string; value: number }>;
   sma50?: Array<{ time: string; value: number }>;
+  rsMarkers?: Array<{ time: string; kind: "daily_new_high" | "daily_new_high_before_price" }>;
 };
 
 export function ScannerMiniChart({
@@ -28,6 +29,7 @@ export function ScannerMiniChart({
   ema60 = [],
   ema200 = [],
   sma50 = [],
+  rsMarkers = [],
 }: ScannerMiniChartProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -75,6 +77,7 @@ export function ScannerMiniChart({
         lastValueVisible: false,
       });
       priceSeries.setData(candles.map((item) => ({ time: item.time, value: item.close })));
+      priceSeries.setMarkers(buildRsPriceMarkers(candles, rsMarkers));
     } else if (chartType === "bars") {
       const priceSeries = chart.addBarSeries({
         upColor: "#30d158",
@@ -83,6 +86,7 @@ export function ScannerMiniChart({
         lastValueVisible: false,
       });
       priceSeries.setData(candles.map((item) => ({ time: item.time, open: item.open, high: item.high, low: item.low, close: item.close })));
+      priceSeries.setMarkers(buildRsPriceMarkers(candles, rsMarkers));
     } else {
       const priceSeries = chart.addCandlestickSeries({
         upColor: "#30d158",
@@ -94,6 +98,7 @@ export function ScannerMiniChart({
         lastValueVisible: false,
       });
       priceSeries.setData(candles.map((item) => ({ time: item.time, open: item.open, high: item.high, low: item.low, close: item.close })));
+      priceSeries.setMarkers(buildRsPriceMarkers(candles, rsMarkers));
     }
     const volumeSeries = showVolume ? chart.addHistogramSeries({
       priceScaleId: "",
@@ -170,7 +175,40 @@ export function ScannerMiniChart({
       resizeObserver.disconnect();
       chart.remove();
     };
-  }, [candles, chartType, ema8, ema9, ema21, ema60, ema200, height, showVolume, sma50, ticker]);
+  }, [candles, chartType, ema8, ema9, ema21, ema60, ema200, height, rsMarkers, showVolume, sma50, ticker]);
 
   return <div ref={rootRef} className="scanner-mini-chart" aria-label={`${ticker} candlestick chart`} />;
+}
+
+function buildRsPriceMarkers(
+  candles: CandlePoint[],
+  rsMarkers: Array<{ time: string; kind: "daily_new_high" | "daily_new_high_before_price" }>,
+) {
+  const chartTimes = candles.map((candle) => candle.time);
+  const chartTimeSet = new Set(chartTimes);
+  const resolved = new Map<string, "daily_new_high" | "daily_new_high_before_price">();
+  for (const marker of rsMarkers) {
+    let chartTime = marker.time;
+    if (!chartTimeSet.has(chartTime)) {
+      chartTime = chartTimes.find((time) => time >= marker.time && daysBetween(marker.time, time) <= 6) ?? "";
+    }
+    if (!chartTime || (resolved.get(chartTime) === "daily_new_high_before_price" && marker.kind === "daily_new_high")) {
+      continue;
+    }
+    resolved.set(chartTime, marker.kind);
+  }
+  return [...resolved.entries()].map(([time, kind]) => {
+    const leadsPrice = kind === "daily_new_high_before_price";
+    return {
+      time,
+      position: leadsPrice ? "belowBar" as const : "aboveBar" as const,
+      color: leadsPrice ? "#22c55e" : "#38bdf8",
+      shape: leadsPrice ? "circle" as const : "square" as const,
+      text: leadsPrice ? "RS NH first" : "RS NH",
+    };
+  });
+}
+
+function daysBetween(start: string, end: string): number {
+  return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000);
 }
