@@ -957,7 +957,7 @@ export function ScannerTopHitsPage() {
         </div>
       </section>
 
-      <section className="scanner-result-table-shell panel">
+      <section className={`scanner-result-table-shell panel${isColumnView ? " is-column-workspace" : ""}`}>
         {isLoading && !payload ? <LoadingBlock label="Loading scanner top hits…" /> : null}
         {notice ? <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></p> : null}
         {!notice && myPicksNotice ? <p className="panel-copy earnings-console-note">{myPicksNotice}</p> : null}

@@ -4944,6 +4944,10 @@ dialog.modal-backdrop:not([open]) {
   overflow: hidden;
 }
 
+.scanner-result-table-shell.is-column-workspace {
+  overflow: visible;
+}
+
 .scanner-result-chart-grid {
   display: grid;
   gap: 22px;
