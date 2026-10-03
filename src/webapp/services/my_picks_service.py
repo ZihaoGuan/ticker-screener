@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from src.market_data_access import load_many_ticker_windows_for_range
+from src.artifact_paths import strategy_id_from_legacy_stem
 from src.relative_trend_strength import build_leadership_health
 from src.bollinger_band_screen import compute_latest_bollinger_snapshot
 from src.ratings.repository import RatingsRepository
@@ -101,6 +102,7 @@ class MyPicksService:
         self._attach_trend_template_context(picks, price_frames)
         self._attach_latest_position_actions(picks)
         self._attach_relative_trend_strength(picks)
+        self._attach_pullback_quality(picks)
         return {
             "database_configured": self.repository.is_configured(),
             "total_count": len(picks),
@@ -144,6 +146,7 @@ class MyPicksService:
         self._attach_trend_template_context([row], price_frames)
         self._attach_latest_position_actions([row])
         self._attach_relative_trend_strength([row])
+        self._attach_pullback_quality([row])
         return row
 
     def delete_pick(self, pick_id: int) -> None:
@@ -174,6 +177,7 @@ class MyPicksService:
         self._attach_trend_template_context([row], price_frames)
         self._attach_latest_position_actions([row])
         self._attach_relative_trend_strength([row])
+        self._attach_pullback_quality([row])
         return row
 
     def _attach_latest_position_actions(self, rows: list[dict[str, Any]]) -> None:
@@ -204,6 +208,34 @@ class MyPicksService:
                 snapshot_map.get(ticker),
                 leadership_health=build_leadership_health(history_map.get(ticker, [])),
             )
+
+    def _attach_pullback_quality(self, rows: list[dict[str, Any]]) -> None:
+        """Attach the latest MA-pullback quality evidence without recalculating charts on request."""
+        tickers = {str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()}
+        if not tickers:
+            return
+        metadata = next(
+            (
+                item
+                for item in self.watchlist_repository.list_recent_watchlists(limit=400, include_deprecated=False)
+                if strategy_id_from_legacy_stem(str(item.get("stem") or "")) == "ma_pullback_retest"
+            ),
+            None,
+        )
+        if not isinstance(metadata, dict):
+            return
+        stem = str(metadata.get("stem") or "").strip()
+        if not stem:
+            return
+        quality_by_ticker: dict[str, dict[str, Any]] = {}
+        for entry in self.watchlist_repository.load_watchlist(stem):
+            ticker = str(entry.get("ticker") or "").upper()
+            quality = entry.get("pullback_quality")
+            if ticker in tickers and isinstance(quality, dict):
+                quality_by_ticker[ticker] = dict(quality)
+        for row in rows:
+            quality = quality_by_ticker.get(str(row.get("ticker") or "").upper())
+            row["pullback_quality"] = quality or None
 
     def _attach_rating_context(self, rows: list[dict[str, Any]]) -> None:
         tickers = sorted({str(row.get("ticker") or "").upper() for row in rows if str(row.get("ticker") or "").strip()})
@@ -402,6 +434,7 @@ class MyPicksService:
             "trend_template_criteria_total": None,
             "trend_template_label": None,
             "position_action": None,
+            "pullback_quality": None,
             "position_bucket": "no_data",
             "atr_to_sma50": None,
         }
