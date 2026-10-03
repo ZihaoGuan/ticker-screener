@@ -3444,6 +3444,10 @@ a {
   width: 100%;
 }
 
+dialog.modal-backdrop:not([open]) {
+  display: none;
+}
+
 .modal-backdrop::backdrop {
   background: rgba(9, 9, 11, 0.72);
 }
