@@ -908,6 +908,50 @@ class HistoryRepository:
                 cursor.execute(sql, (normalized_ids, target_date))
                 return self._rows_to_dicts(cursor, cursor.fetchall())
 
+    def list_recent_screen_run_counts_by_strategy(
+        self,
+        *,
+        strategy_ids: list[str],
+        target_date: dt.date,
+        per_strategy_limit: int = 8,
+    ) -> dict[str, list[dict[str, Any]]] | None:
+        """Return bounded persisted run counts for every scanner in one query."""
+        normalized_ids = sorted({str(value or "").strip() for value in strategy_ids if str(value or "").strip()})
+        if not normalized_ids:
+            return {}
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            WITH ranked AS (
+              SELECT strategy_id, run_date, hit_count,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY strategy_id
+                       ORDER BY run_date DESC, id DESC
+                     ) AS row_number
+              FROM screen_runs
+              WHERE deleted_at IS NULL
+                AND strategy_id = ANY(%s)
+                AND run_date <= %s
+            )
+            SELECT strategy_id, run_date, hit_count
+            FROM ranked
+            WHERE row_number <= %s
+            ORDER BY strategy_id, run_date ASC
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized_ids, target_date, max(2, int(per_strategy_limit))))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+        result: dict[str, list[dict[str, Any]]] = {strategy_id: [] for strategy_id in normalized_ids}
+        for row in rows:
+            strategy_id = str(row.get("strategy_id") or "")
+            if strategy_id:
+                result.setdefault(strategy_id, []).append(
+                    {"run_date": str(row.get("run_date") or ""), "hit_count": int(row.get("hit_count") or 0)}
+                )
+        return result
+
     def list_screen_run_preview_tickers(
         self,
         *,
