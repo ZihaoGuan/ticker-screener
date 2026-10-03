@@ -59,7 +59,7 @@ export function ScannerBoardPage() {
 
   const updateFilter = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
-    if (!value || value === "all" || (key === "family" && value === "recommended") || (key === "freshness" && value === "current") || (key === "sort" && value === "recommended")) next.delete(key);
+    if (!value || (key !== "family" && value === "all") || (key === "family" && value === "recommended") || (key === "freshness" && value === "current") || (key === "sort" && value === "recommended")) next.delete(key);
     else next.set(key, value);
     setSearchParams(next, { replace: true });
   };
