@@ -760,16 +760,18 @@ function MyPicksBoardChartWorkspace({
             </select>
             <label className="scanner-chart-toggle"><input type="checkbox" checked={showVolume} onChange={(event) => onShowVolumeChange(event.target.checked)} /><span>Volume</span></label>
           </div>
-          <div className="board-chart-ma-legend" aria-label="Moving average legend">
+          <div className="board-chart-ma-legend" aria-label="Chart legend">
             <span className="is-ema9">EMA 9</span>
             <span className="is-ema21">EMA 21</span>
             <span className="is-ema200">EMA 200</span>
+            <span className="is-rs-new-high">RS NH</span>
+            <span className="is-rs-new-high-first">RS NH first</span>
           </div>
           <div className="board-chart-panel-chart">
             {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart...`} /> : null}
             {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
             {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
-            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={row.ticker} candles={chartCandles} chartType={chartType} height={330} showVolume={showVolume} ema9={ema9} ema21={ema21} ema200={ema200} /> : null}
+            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={row.ticker} candles={chartCandles} chartType={chartType} height={330} showVolume={showVolume} ema9={ema9} ema21={ema21} ema200={ema200} rsMarkers={chartPayload?.rs_markers ?? []} /> : null}
           </div>
           <div className="board-chart-panel-context">
             <span>{positionBucketLabel(row.position_bucket)}</span>

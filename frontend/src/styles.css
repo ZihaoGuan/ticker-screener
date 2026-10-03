@@ -6224,6 +6224,10 @@ dialog.modal-backdrop:not([open]) {
 .board-chart-ma-legend .is-ema9 { color: #2dd4bf; }
 .board-chart-ma-legend .is-ema21 { color: #f59e0b; }
 .board-chart-ma-legend .is-ema200 { color: #ef4444; }
+.board-chart-ma-legend .is-rs-new-high { color: #38bdf8; }
+.board-chart-ma-legend .is-rs-new-high-first { color: #22c55e; }
+.board-chart-ma-legend .is-rs-new-high::before { width: 8px; height: 8px; border-radius: 1px; }
+.board-chart-ma-legend .is-rs-new-high-first::before { width: 8px; height: 8px; border-radius: 50%; }
 .board-chart-panel-chart { min-height: 250px; }
 .board-chart-panel-context { display: grid; gap: 4px; color: #a1a1aa; font-size: 12px; }
 .board-chart-panel-link { justify-self: start; }

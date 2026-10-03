@@ -1379,16 +1379,18 @@ function BoardChartWorkspace({
             {(["daily", "weekly"] as ChartTimeframe[]).map((timeframe) => <button key={timeframe} type="button" title={timeframe === "daily" ? "Daily" : "Weekly"} aria-pressed={workspace.timeframe === timeframe} className={`scanner-result-view-chip${workspace.timeframe === timeframe ? " is-active" : ""}`} onClick={() => onWorkspaceChange({ timeframe })}>{timeframe === "daily" ? "D" : "W"}</button>)}
             {(["3m", "6m", "1y"] as ChartRange[]).map((range) => <button key={range} type="button" className={`scanner-result-view-chip${workspace.range === range ? " is-active" : ""}`} onClick={() => onWorkspaceChange({ range })}>{range.toUpperCase()}</button>)}
           </div>
-          <div className="board-chart-ma-legend" aria-label="Moving average legend">
+          <div className="board-chart-ma-legend" aria-label="Chart legend">
             <span className="is-ema8">EMA 8</span>
             <span className="is-ema21">EMA 21</span>
             <span className="is-ema200">EMA 200</span>
+            <span className="is-rs-new-high">RS NH</span>
+            <span className="is-rs-new-high-first">RS NH first</span>
           </div>
           <div className="board-chart-panel-chart">
             {isChartLoading ? <LoadingBlock label={`Loading ${selection.ticker} chart...`} /> : null}
             {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
             {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
-            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={selection.ticker} candles={chartCandles} chartType={workspace.chartType} height={330} showVolume={workspace.showVolume} ema8={workspace.showEma8 ? ema8 : []} ema21={workspace.showEma21 ? ema21 : []} ema200={ema200} /> : null}
+            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={selection.ticker} candles={chartCandles} chartType={workspace.chartType} height={330} showVolume={workspace.showVolume} ema8={workspace.showEma8 ? ema8 : []} ema21={workspace.showEma21 ? ema21 : []} ema200={ema200} rsMarkers={chartPayload?.rs_markers ?? []} /> : null}
           </div>
           <div className="board-chart-panel-context">
             <span>{selection.sector || "Sector unavailable"}</span>
