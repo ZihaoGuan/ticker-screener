@@ -12,6 +12,7 @@ class _FakeCursor:
         self.scripted_results = list(scripted_results)
         self.current_result: dict[str, object] | None = None
         self.executed_sql: list[str] = []
+        self.executed_params: list[object] = []
 
     def __enter__(self) -> _FakeCursor:
         return self
@@ -20,10 +21,10 @@ class _FakeCursor:
         return False
 
     def execute(self, sql: str, params: object = None) -> None:
-        del params
         if not self.scripted_results:
             raise AssertionError("No scripted result left for execute call.")
         self.executed_sql.append(sql)
+        self.executed_params.append(params)
         self.current_result = self.scripted_results.pop(0)
 
     def fetchone(self):
@@ -355,12 +356,14 @@ class RatingsRepositoryRankChangeTests(unittest.TestCase):
             as_of_date=dt.date(2026, 6, 13),
             limit=25,
             rating_status="ok",
-            sector="Technology",
+            sector="Technology, Financial Services, technology",
         )
 
         self.assertEqual([row["ticker"] for row in payload["rows"]], ["NVDA", "MSFT"])
         self.assertEqual(payload["status_counts"], {"ok": 2})
         self.assertEqual(payload["sector_options"], ["Technology"])
+        self.assertIn("= ANY(%s)", cursor.executed_sql[3])
+        self.assertEqual(cursor.executed_params[3], (dt.date(2026, 6, 13), 2, ["financial services", "technology"]))
 
     def test_list_top_rating_snapshots_qualifies_previous_rank_columns(self) -> None:
         cursor = _FakeCursor(

@@ -77,13 +77,17 @@ function formatDataQualityLabel(value: string): string {
   return formatStatusLabel(value);
 }
 
-function buildRequestPath(mode: RatingsMode, limit: number, sector: string) {
+function buildRequestPath(mode: RatingsMode, limit: number, sectors: string[]) {
   const query = new URLSearchParams();
   query.set("limit", String(limit));
-  if (sector.trim()) {
-    query.set("sector", sector.trim());
+  if (sectors.length) {
+    query.set("sector", sectors.join(","));
   }
   return `${REQUEST_PATHS[mode]}?${query.toString()}`;
+}
+
+function parseSectors(value: string | null): string[] {
+  return [...new Set((value ?? "").split(",").map((sector) => sector.trim().toLowerCase()).filter(Boolean))];
 }
 
 function isSectorOption(value: string): boolean {
@@ -125,8 +129,9 @@ export function RatingsPage() {
   const requestedMode = searchParams.get("mode");
   const requestedLimitParam = searchParams.get("limit");
   const requestedSort = searchParams.get("sort");
+  const requestedSectorParam = searchParams.get("sector");
   const mode = normalizeMode(requestedMode);
-  const requestedSector = (searchParams.get("sector") ?? "").trim();
+  const requestedSectors = useMemo(() => parseSectors(requestedSectorParam), [requestedSectorParam]);
   const requestedLimit = normalizeLimit(requestedLimitParam);
   const tickerQuery = (searchParams.get("q") ?? "").trim();
   const sortBy = requestedSort === "overall" ? "overall" : "rank";
@@ -158,10 +163,10 @@ export function RatingsPage() {
     setNotice("");
     const primaryRequest =
       mode === "technical"
-        ? fetchJson<TopTechnicalRatingsResponse>(buildRequestPath(mode, requestedLimit, requestedSector))
+        ? fetchJson<TopTechnicalRatingsResponse>(buildRequestPath(mode, requestedLimit, requestedSectors))
         : mode === "technical-indicator"
-          ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildRequestPath(mode, requestedLimit, requestedSector))
-          : fetchJson<TopRatingsResponse>(buildRequestPath(mode, requestedLimit, requestedSector));
+          ? fetchJson<TopTechnicalIndicatorRatingsResponse>(buildRequestPath(mode, requestedLimit, requestedSectors))
+          : fetchJson<TopRatingsResponse>(buildRequestPath(mode, requestedLimit, requestedSectors));
     void primaryRequest
       .then((response) => {
         if (ignore) {
@@ -190,7 +195,7 @@ export function RatingsPage() {
     return () => {
       ignore = true;
     };
-  }, [mode, requestedLimit, requestedSector, retryKey]);
+  }, [mode, requestedLimit, requestedSectors, retryKey]);
 
   const payload = mode === "technical" ? technicalPayload : mode === "technical-indicator" ? technicalIndicatorPayload : fundamentalPayload;
   const rows = mode === "technical" ? (technicalPayload?.rows ?? []) : mode === "technical-indicator" ? (technicalIndicatorPayload?.rows ?? []) : (fundamentalPayload?.rows ?? []);
@@ -226,7 +231,7 @@ export function RatingsPage() {
         ? "TradingView-style composite ratings across daily, weekly, and monthly timeframes. Review labels and raw scores side by side."
       : "Fast review board for the latest ticker ratings snapshots. Open charts from here, inspect grade balance, and sanity-check which names rise to the top.";
   const isRefreshing = isLoading && rows.length > 0;
-  const activeFilterCount = Number(Boolean(requestedSector)) + Number(Boolean(tickerQuery)) + Number(sortBy !== "rank") + Number(mode !== "fundamental") + Number(requestedLimit !== 100);
+  const activeFilterCount = Number(requestedSectors.length > 0) + Number(Boolean(tickerQuery)) + Number(sortBy !== "rank") + Number(mode !== "fundamental") + Number(requestedLimit !== 100);
 
   function updateParam(key: string, value: string | null) {
     const next = new URLSearchParams(searchParams);
@@ -240,6 +245,13 @@ export function RatingsPage() {
 
   function resetFilters() {
     setSearchParams(new URLSearchParams(), { replace: true });
+  }
+
+  function toggleSector(sector: string) {
+    const normalizedSector = sector.toLowerCase();
+    const next = new Set(requestedSectors);
+    next.has(normalizedSector) ? next.delete(normalizedSector) : next.add(normalizedSector);
+    updateParam("sector", [...next].sort().join(",") || null);
   }
 
   return (
@@ -281,17 +293,20 @@ export function RatingsPage() {
               ))}
             </select>
           </label>
-          <label className="field">
+          <div className="field ratings-sector-filter">
             <span>Sector</span>
-            <select value={requestedSector} onChange={(event) => updateParam("sector", event.target.value || null)}>
-              <option value="">All sectors</option>
-              {visibleSectors.map((sector) => (
-                <option key={sector} value={sector}>
-                  {sector}
-                </option>
-              ))}
-            </select>
-          </label>
+            <details>
+              <summary>{requestedSectors.length ? `${requestedSectors.length} sector${requestedSectors.length === 1 ? "" : "s"} selected` : "All sectors"}</summary>
+              <div className="ratings-sector-options">
+                {visibleSectors.map((sector) => (
+                  <label key={sector} className="ratings-sector-option">
+                    <input type="checkbox" checked={requestedSectors.includes(sector.toLowerCase())} onChange={() => toggleSector(sector)} />
+                    {sector}
+                  </label>
+                ))}
+              </div>
+            </details>
+          </div>
           <label className="field">
             <span>Find ticker</span>
             <input
