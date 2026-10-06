@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
@@ -100,18 +100,24 @@ function filterEntries(
 ) {
   const excludedSectorKeys = new Set(excludedSectors.map((value) => normalizeFilterValue(value)).filter(Boolean));
   const excludedIndustryKeys = new Set(excludedIndustries.map((value) => normalizeFilterValue(value)).filter(Boolean));
-  return entries.filter((entry) => {
-    if (excludedSectorKeys.has(normalizeFilterValue(entry.sector))) {
-      return false;
-    }
-    if (excludedIndustryKeys.has(normalizeFilterValue(entry.industry))) {
-      return false;
-    }
-    if (onlyCriteria && !entry.criteria?.passed) {
-      return false;
-    }
-    return true;
-  });
+  return entries
+    .filter((entry) => {
+      if (excludedSectorKeys.has(normalizeFilterValue(entry.sector))) {
+        return false;
+      }
+      if (excludedIndustryKeys.has(normalizeFilterValue(entry.industry))) {
+        return false;
+      }
+      if (onlyCriteria && !entry.criteria?.passed) {
+        return false;
+      }
+      return true;
+    })
+    .sort((left, right) => {
+      const leftMatches = left.criteria?.matched_criteria.length ?? 0;
+      const rightMatches = right.criteria?.matched_criteria.length ?? 0;
+      return Number(Boolean(right.criteria?.passed)) - Number(Boolean(left.criteria?.passed)) || rightMatches - leftMatches;
+    });
 }
 
 function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
@@ -120,7 +126,21 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
   }
   return (
     <div className="earnings-entry-list">
-      {entries.map((entry) => (
+      {entries.map((entry) => {
+        const technicalRatings = orderedTechnicalIndicatorRatings(entry.technical_indicator_ratings);
+        const hasSecondaryDetails = Boolean(
+          entry.fundamental_rating ||
+            entry.technical_rating ||
+            technicalRatings.length > 0 ||
+            entry.summary ||
+            entry.implied_move_signal ||
+            entry.earnings_trade_analysis ||
+            entry.pead_analysis ||
+            entry.post_earnings_tracking ||
+            entry.criteria,
+        );
+
+        return (
         <article key={`${entry.date}-${entry.ticker}-${entry.session ?? "unknown"}`} className="earnings-entry-card">
           <div className="earnings-entry-head">
             <Link className="earnings-entry-link" to={`/charts?ticker=${encodeURIComponent(entry.ticker)}`}>
@@ -129,7 +149,19 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
             <span className="earnings-exchange-badge">{entry.exchange ?? "-"}</span>
           </div>
           <p className="earnings-entry-meta">{[entry.sector, entry.industry].filter(Boolean).join(" / ") || "No sector or industry"}</p>
-          {entry.fundamental_rating || entry.technical_rating || orderedTechnicalIndicatorRatings(entry.technical_indicator_ratings).length > 0 ? (
+          {entry.criteria ? (
+            <div className="earnings-criteria-summary earnings-criteria-summary-primary">
+              <span className={`earnings-pass-indicator${entry.criteria.passed ? " is-pass" : " is-fail"}`}>
+                {entry.criteria.passed ? "Pass" : "No pass"} · {entry.criteria.matched_criteria.length}/{CRITERIA_LABELS.length} criteria
+              </span>
+              {entry.criteria.pass_mode ? <span className="earnings-pass-mode">{entry.criteria.pass_mode}</span> : null}
+            </div>
+          ) : null}
+          {hasSecondaryDetails ? (
+            <details className="earnings-entry-details">
+              <summary>Signals and analysis</summary>
+              <div className="earnings-entry-details-body">
+          {entry.fundamental_rating || entry.technical_rating || technicalRatings.length > 0 ? (
             <div className="earnings-criteria-pill-row">
               {entry.fundamental_rating ? (
                 <span
@@ -147,7 +179,7 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
                   {`T ${formatRatingValue(entry.technical_rating.overall_rating)}${entry.technical_rating.rating_band ? ` ${entry.technical_rating.rating_band}` : ""}`}
                 </span>
               ) : null}
-              {orderedTechnicalIndicatorRatings(entry.technical_indicator_ratings).map((rating) => (
+              {technicalRatings.map((rating) => (
                 <span
                   key={`${entry.ticker}-${rating.timeframe}`}
                   className={`earnings-criteria-pill${rating.technical_status === "ok" ? " is-match" : " is-miss"}`}
@@ -241,12 +273,6 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
           ) : null}
           {entry.criteria ? (
             <div className="earnings-criteria-block">
-              <div className="earnings-criteria-summary">
-                <span className={`earnings-pass-indicator${entry.criteria.passed ? " is-pass" : " is-fail"}`}>
-                  {entry.criteria.passed ? "PASS" : "FAIL"} {entry.criteria.matched_criteria.length}/{CRITERIA_LABELS.length}
-                </span>
-                {entry.criteria.pass_mode ? <span className="earnings-pass-mode">{entry.criteria.pass_mode}</span> : null}
-              </div>
               <div className="earnings-criteria-pill-row">
                 {CRITERIA_LABELS.map((item) => {
                   const matched = entry.criteria?.criteria?.[item.key];
@@ -263,8 +289,12 @@ function EntryList({ entries }: { entries: EarningsCalendarEntry[] }) {
               </div>
             </div>
           ) : null}
+              </div>
+            </details>
+          ) : null}
         </article>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -277,53 +307,90 @@ export function EarningsPage() {
   const [excludedSectors, setExcludedSectors] = useState<string[]>([]);
   const [excludedIndustries, setExcludedIndustries] = useState<string[]>([]);
   const [onlyCriteria, setOnlyCriteria] = useState(false);
-  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [loadedWeekOffset, setLoadedWeekOffset] = useState<number | null>(null);
+  const [refreshRequest, setRefreshRequest] = useState<{ id: number; weekOffset: number } | null>(null);
+  const consumedRefreshRequest = useRef<number | null>(null);
+
+  const currentPayload = loadedWeekOffset === weekOffset ? payload : null;
+  const refreshCalendar = () => {
+    sessionStorage.removeItem(buildEarningsCalendarCacheKey(weekOffset));
+    setRefreshRequest({ id: Date.now(), weekOffset });
+  };
 
   useEffect(() => {
+    const controller = new AbortController();
+    let isCurrentRequest = true;
+    const forceRefresh = refreshRequest?.weekOffset === weekOffset && refreshRequest.id !== consumedRefreshRequest.current;
+    const cacheKey = buildEarningsCalendarCacheKey(weekOffset);
+
+    if (forceRefresh) consumedRefreshRequest.current = refreshRequest?.id ?? null;
+
     setIsLoading(true);
     setNotice("");
-    const cacheKey = buildEarningsCalendarCacheKey(weekOffset);
-    if (refreshNonce === 0) {
+    if (!forceRefresh) {
       try {
         const cached = sessionStorage.getItem(cacheKey);
         if (cached) {
           const parsed = JSON.parse(cached) as EarningsCalendarResponse;
           setPayload(parsed);
+          setLoadedWeekOffset(weekOffset);
           setIsLoading(false);
-          return;
+          return () => {
+            isCurrentRequest = false;
+            controller.abort();
+          };
         }
       } catch {
         sessionStorage.removeItem(cacheKey);
       }
     }
-    void fetchJson<EarningsCalendarResponse>(`/api/earnings-calendar?weekOffset=${weekOffset}`)
+    void fetchJson<EarningsCalendarResponse>(`/api/earnings-calendar?weekOffset=${weekOffset}`, { signal: controller.signal })
       .then((response) => {
+        if (!isCurrentRequest) return;
         setPayload(response);
-        sessionStorage.setItem(cacheKey, JSON.stringify(response));
+        setLoadedWeekOffset(weekOffset);
+        try {
+          sessionStorage.setItem(cacheKey, JSON.stringify(response));
+        } catch {
+          // Calendar data remains usable when browser storage is unavailable.
+        }
       })
       .catch((error) => {
-        setPayload(null);
+        if (!isCurrentRequest || (error instanceof DOMException && error.name === "AbortError")) return;
+        if (loadedWeekOffset !== weekOffset) {
+          setPayload(null);
+          setLoadedWeekOffset(weekOffset);
+        }
         setNotice(error instanceof Error ? error.message : "Failed to load earnings calendar.");
       })
-      .finally(() => setIsLoading(false));
-  }, [refreshNonce, weekOffset]);
+      .finally(() => {
+        if (!isCurrentRequest) return;
+        setIsLoading(false);
+      });
+
+    return () => {
+      isCurrentRequest = false;
+      controller.abort();
+    };
+  }, [refreshRequest, weekOffset]);
 
   const days = useMemo(() => {
-    if (!payload) {
+    if (!currentPayload) {
       return [];
     }
-    return payload.days
+    return currentPayload.days
       .map((day) => ({
         ...day,
         before_market: filterEntries(day.before_market, { excludedSectors, excludedIndustries, onlyCriteria }),
         after_market: filterEntries(day.after_market, { excludedSectors, excludedIndustries, onlyCriteria }),
         during_market: filterEntries(day.during_market, { excludedSectors, excludedIndustries, onlyCriteria }),
         unknown: filterEntries(day.unknown, { excludedSectors, excludedIndustries, onlyCriteria }),
-      }))
-      .filter((day) => hasAnyEntries(day));
-  }, [excludedIndustries, excludedSectors, onlyCriteria, payload]);
+      }));
+  }, [currentPayload, excludedIndustries, excludedSectors, onlyCriteria]);
   const totalEntries = days.reduce((total, day) => total + countDayEntries(day), 0);
+  const activeDayCount = days.filter(hasAnyEntries).length;
   const filteredExclusionCount = excludedSectors.length + excludedIndustries.length;
+  const isRefreshing = isLoading && currentPayload != null;
   const matchedCount = days.reduce(
     (total, day) => total + countMatchedEntries(BUCKET_KEYS.flatMap((key) => bucketEntries(day, key))),
     0,
@@ -333,21 +400,20 @@ export function EarningsPage() {
     <div className="page-grid earnings-board">
       <section className="earnings-board-hero">
         <div className="earnings-board-hero-copy">
-          <span className="earnings-board-kicker">Operational Mode</span>
           <h1>Earnings Calendar</h1>
-          <p className="panel-copy">Command-board view for this week, next week, or the week after, grouped by trading session and tuned for fast weekly scanning.</p>
+          <p className="panel-copy">Plan the week by trading session, surface the strongest criteria matches first, then open a chart when a name deserves a closer look.</p>
         </div>
         <div className="earnings-board-metrics">
           <div className="earnings-metric">
             <span className="eyebrow">Active Week</span>
-            <strong>{formatRange(payload?.week_start, payload?.week_end)}</strong>
+            <strong>{formatRange(currentPayload?.week_start, currentPayload?.week_end)}</strong>
           </div>
           <div className="earnings-metric">
-            <span className="eyebrow">Day Count</span>
-            <strong>{String(days.length).padStart(2, "0")}</strong>
+            <span className="eyebrow">Visible Days</span>
+            <strong>{String(activeDayCount).padStart(2, "0")}</strong>
           </div>
           <div className="earnings-metric">
-            <span className="eyebrow">Event Count</span>
+            <span className="eyebrow">Visible Events</span>
             <strong>{String(totalEntries).padStart(2, "0")}</strong>
           </div>
           <div className="earnings-metric">
@@ -355,8 +421,8 @@ export function EarningsPage() {
             <strong>{String(filteredExclusionCount).padStart(2, "0")}</strong>
           </div>
           <div className="earnings-metric earnings-metric-highlight">
-            <span className="eyebrow">Criteria Match</span>
-            <strong>{payload ? matchedCount : "-"}</strong>
+            <span className="eyebrow">Criteria Passes</span>
+            <strong>{currentPayload ? matchedCount : "-"}</strong>
           </div>
         </div>
       </section>
@@ -376,80 +442,82 @@ export function EarningsPage() {
               </select>
             </label>
             <label className="earnings-toggle">
-              <input type="checkbox" checked={onlyCriteria} onChange={() => setOnlyCriteria((current) => !current)} />
+              <input className="visually-hidden" type="checkbox" checked={onlyCriteria} onChange={() => setOnlyCriteria((current) => !current)} />
               <span className="earnings-toggle-track" aria-hidden="true">
                 <span className="earnings-toggle-thumb" />
               </span>
               <span className="earnings-toggle-label">Only Criteria Matches</span>
             </label>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => {
-                sessionStorage.removeItem(buildEarningsCalendarCacheKey(weekOffset));
-                setRefreshNonce((current) => current + 1);
-              }}
-            >
-              Refresh
-            </button>
-          </div>
-          <div className="earnings-inline-filters">
-            <div className="earnings-inline-filter-group">
-              <span className="eyebrow">Sector Exclusions</span>
-              <div className="earnings-inline-chip-row">
-                {excludedSectors.length > 0 ? excludedSectors.map((value) => <span key={value} className="earnings-inline-chip">{value}</span>) : <span className="earnings-inline-empty">None</span>}
-              </div>
-            </div>
-            <div className="earnings-inline-filter-group">
-              <span className="eyebrow">Industry Exclusions</span>
-              <div className="earnings-inline-chip-row">
-                {excludedIndustries.length > 0 ? excludedIndustries.map((value) => <span key={value} className="earnings-inline-chip">{value}</span>) : <span className="earnings-inline-empty">None</span>}
-              </div>
-            </div>
+            <button type="button" className="ghost-button" disabled={isLoading} onClick={refreshCalendar}>Refresh calendar</button>
           </div>
         </div>
-        {isLoading ? <LoadingBlock label="Loading earnings filters…" compact /> : null}
-        <div className="earnings-filter-grid">
+        <details className="earnings-exclusion-disclosure">
+          <summary>
+            <span>Exclude sectors or industries</span>
+            <span>{filteredExclusionCount === 0 ? "None selected" : `${filteredExclusionCount} selected`}</span>
+          </summary>
+          <div className="earnings-filter-grid">
           <div className="field earnings-filter-field">
-            <span>Sector Universe</span>
+            <span>Sectors to exclude</span>
             <div className="earnings-chip-grid">
-              {(payload?.available_sectors ?? []).map((value) => (
+              {(currentPayload?.available_sectors ?? []).map((value) => {
+                const isExcluded = excludedSectors.includes(value);
+                return (
                 <button
                   key={value}
                   type="button"
-                  className={`earnings-filter-chip${excludedSectors.includes(value) ? " is-active" : ""}`}
+                  aria-pressed={isExcluded}
+                  aria-label={`${isExcluded ? "Include" : "Exclude"} ${value}`}
+                  className={`earnings-filter-chip${isExcluded ? " is-excluded" : ""}`}
                   onClick={() => setExcludedSectors((current) => toggleSelection(current, value))}
                 >
                   {value}
                 </button>
-              ))}
+                );
+              })}
             </div>
           </div>
           <div className="field earnings-filter-field">
-            <span>Industry Universe</span>
+            <span>Industries to exclude</span>
             <div className="earnings-chip-grid">
-              {(payload?.available_industries ?? []).map((value) => (
+              {(currentPayload?.available_industries ?? []).map((value) => {
+                const isExcluded = excludedIndustries.includes(value);
+                return (
                 <button
                   key={value}
                   type="button"
-                  className={`earnings-filter-chip${excludedIndustries.includes(value) ? " is-active" : ""}`}
+                  aria-pressed={isExcluded}
+                  aria-label={`${isExcluded ? "Include" : "Exclude"} ${value}`}
+                  className={`earnings-filter-chip${isExcluded ? " is-excluded" : ""}`}
                   onClick={() => setExcludedIndustries((current) => toggleSelection(current, value))}
                 >
                   {value}
                 </button>
-              ))}
+                );
+              })}
             </div>
           </div>
-        </div>
+          </div>
+          {filteredExclusionCount > 0 ? (
+            <button type="button" className="earnings-clear-filters" onClick={() => { setExcludedSectors([]); setExcludedIndustries([]); }}>
+              Clear exclusions
+            </button>
+          ) : null}
+        </details>
         {onlyCriteria ? (
           <p className="panel-copy earnings-console-note">
-            {payload?.criteria_filter.available
-              ? `Using latest persisted criteria run ${payload.criteria_filter.run_date || ""}, including persisted IV > 7% near-earnings check. ${matchedCount} current matches.`
+            {currentPayload?.criteria_filter.available
+              ? `Showing ${matchedCount} criteria passes from the latest persisted run${currentPayload.criteria_filter.run_date ? ` on ${currentPayload.criteria_filter.run_date}` : ""}.`
               : "Criteria filter is on, but no persisted criteria run is available yet."}
           </p>
         ) : null}
-        {payload ? <p className="panel-copy earnings-console-note">Filter toggles use session-cached calendar data on this device per selected week. Refresh to pull newest server data.</p> : null}
-        {notice ? <p className="panel-copy earnings-console-note">{notice}</p> : null}
+        {currentPayload ? <p className="panel-copy earnings-console-note">This week is cached for this browser session. Refresh calendar to request the newest server data.</p> : null}
+        {notice ? (
+          <div className="earnings-error" role="alert">
+            <span>Could not load the earnings calendar. {notice}</span>
+            <button type="button" className="ghost-button" onClick={refreshCalendar}>Try again</button>
+          </div>
+        ) : null}
       </section>
 
       <section className="panel earnings-calendar-panel">
@@ -457,20 +525,21 @@ export function EarningsPage() {
           <h2>Calendar</h2>
           <span className="eyebrow">Grouped by earnings session</span>
         </div>
-        {isLoading ? <LoadingBlock label="Loading earnings calendar…" /> : null}
-        {!isLoading && days.length === 0 ? <p className="panel-copy">No earnings events returned for selected week.</p> : null}
-        {!isLoading && days.length > 0 ? (
+        {isLoading && !currentPayload ? <LoadingBlock label="Loading earnings calendar…" /> : null}
+        {isRefreshing ? <p className="earnings-refreshing" role="status">Refreshing calendar…</p> : null}
+        {!isLoading && !notice && days.length === 0 ? <p className="panel-copy">No earnings events returned for selected week.</p> : null}
+        {days.length > 0 ? (
           <div className="earnings-calendar-grid earnings-command-grid">
             {days.map((day) => (
               <section key={day.date} className="earnings-day-card">
                 <div className="earnings-day-head">
-                  <strong>{formatDayHeading(day)}</strong>
+                  <h3>{formatDayHeading(day)}</h3>
                   <span className={`earnings-day-badge${countMatchedEntries(BUCKET_KEYS.flatMap((key) => bucketEntries(day, key))) > 0 ? " is-active" : ""}`}>
-                    {countDayEntries(day)} matches
+                    {countDayEntries(day)} events{countMatchedEntries(BUCKET_KEYS.flatMap((key) => bucketEntries(day, key))) > 0 ? ` · ${countMatchedEntries(BUCKET_KEYS.flatMap((key) => bucketEntries(day, key)))} pass` : ""}
                   </span>
                 </div>
                 {hasAnyEntries(day) ? (
-                  BUCKET_KEYS.filter((bucketKey) => bucketKey !== "during_market" || bucketEntries(day, bucketKey).length > 0).map((bucketKey) => (
+                  BUCKET_KEYS.filter((bucketKey) => bucketEntries(day, bucketKey).length > 0).map((bucketKey) => (
                     <div key={bucketKey} className="earnings-bucket">
                       <div className="earnings-bucket-head">
                         <span>{bucketLabel(bucketKey)}</span>
