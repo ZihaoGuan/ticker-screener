@@ -29,7 +29,7 @@ export type ChartVisibility = {
   channelLines: boolean;
 };
 
-type PriceChartProps = {
+export type PriceChartProps = {
   ticker: string;
   candles: CandlePoint[];
   overlays?: Pick<

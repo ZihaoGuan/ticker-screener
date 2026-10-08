@@ -710,6 +710,45 @@ a {
   min-height: 458px;
 }
 
+.vela-chart-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.vela-chart-root {
+  min-height: 520px;
+  overflow: hidden;
+  position: relative;
+}
+
+.vela-chart-toolbar,
+.chart-engine-selector {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vela-pine-status {
+  color: #a1a1aa;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.vela-pine-status.is-ready {
+  color: #4ade80;
+}
+
+.vela-pine-status.is-error,
+.vela-pine-error {
+  color: #fda4af;
+}
+
+.vela-pine-error,
+.vela-preview-note {
+  margin: 0;
+}
+
 .chart-card-rs {
   min-height: 152px;
 }

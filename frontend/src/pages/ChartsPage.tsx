@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ExclusionDialog } from "../components/ExclusionDialog";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { Panel } from "../components/Panel";
-import { PriceChart, type ChartVisibility } from "../components/PriceChart";
+import { AnalyticalChart, type ChartEngine } from "../components/AnalyticalChart";
+import { type ChartVisibility } from "../components/PriceChart";
 import { fetchJson } from "../lib/api";
 import { formatLocalDate } from "../lib/format";
 import type { AdminTickerListStatusResponse, CandlePoint, ChartFundamentalsResponse, ChartGexResponse, ChartInsiderResponse, ChartOverlaysResponse, MissingSectorAdminResponse, WatchlistChartResponse } from "../lib/types";
@@ -92,6 +93,8 @@ const CHART_PRESETS: Array<{ id: string; label: string; visibility: ChartVisibil
   { id: "signals", label: "Signals", visibility: DEFAULT_CHART_VISIBILITY },
 ];
 const CHART_CACHE_PREFIX = "chart-screen-cache-v6";
+const CHART_ENGINE_STORAGE_KEY = "ticker-screener.chart-engine.v1";
+const VELA_PREVIEW_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_VELA_PREVIEW === "true";
 const EXCLUSION_REASON_OPTIONS = [
   "Bad data quality",
   "Not tradable / structured product",
@@ -104,13 +107,37 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+function resolveChartEngine(requestedEngine: string | null): ChartEngine {
+  if (!VELA_PREVIEW_ENABLED) {
+    return "current";
+  }
+  if (requestedEngine === "vela") {
+    return "vela";
+  }
+  try {
+    return localStorage.getItem(CHART_ENGINE_STORAGE_KEY) === "vela" ? "vela" : "current";
+  } catch {
+    return "current";
+  }
+}
+
+function persistChartEngine(engine: ChartEngine) {
+  try {
+    localStorage.setItem(CHART_ENGINE_STORAGE_KEY, engine);
+  } catch {
+    // Storage is optional; the URL remains the source of truth for a shared preview link.
+  }
+}
+
 export function ChartsPage() {
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTicker = (searchParams.get("ticker") ?? "").trim().toUpperCase();
   const requestedDate = (searchParams.get("date") ?? "").trim();
+  const requestedChartEngine = searchParams.get("engine");
   const [tickerInput, setTickerInput] = useState(requestedTicker);
   const [dateInput, setDateInput] = useState(requestedDate);
+  const [chartEngine, setChartEngine] = useState<ChartEngine>(() => resolveChartEngine(requestedChartEngine));
   const [payload, setPayload] = useState<WatchlistChartResponse | null>(null);
   const [overlayPayload, setOverlayPayload] = useState<ChartOverlaysResponse | null>(null);
   const [gexPayload, setGexPayload] = useState<ChartGexResponse | null>(null);
@@ -151,6 +178,10 @@ export function ChartsPage() {
     setTickerInput(requestedTicker);
     setDateInput(requestedDate);
   }, [requestedDate, requestedTicker]);
+
+  useEffect(() => {
+    setChartEngine(resolveChartEngine(requestedChartEngine));
+  }, [requestedChartEngine]);
 
   useEffect(() => {
     setSyncedHoverTime(null);
@@ -786,6 +817,9 @@ export function ChartsPage() {
     if (dateInput.trim()) {
       nextParams.set("date", dateInput.trim());
     }
+    if (chartEngine === "vela") {
+      nextParams.set("engine", "vela");
+    }
     setSearchParams(nextParams, { replace: true });
   };
 
@@ -795,8 +829,34 @@ export function ChartsPage() {
     if (!nextTicker) {
       return;
     }
-    setSearchParams(new URLSearchParams({ ticker: nextTicker }), { replace: true });
+    const nextParams = new URLSearchParams({ ticker: nextTicker });
+    if (chartEngine === "vela") {
+      nextParams.set("engine", "vela");
+    }
+    setSearchParams(nextParams, { replace: true });
   };
+
+  const handleChartEngineChange = useCallback((nextEngine: ChartEngine) => {
+    if (nextEngine === "vela" && !VELA_PREVIEW_ENABLED) {
+      return;
+    }
+    setChartEngine(nextEngine);
+    persistChartEngine(nextEngine);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (nextEngine === "vela") {
+        next.set("engine", "vela");
+      } else {
+        next.delete("engine");
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const handleVelaUnavailable = useCallback((message: string) => {
+    setNotice(`Vela preview returned to Current: ${message}`);
+    handleChartEngineChange("current");
+  }, [handleChartEngineChange]);
 
   const handleRefresh = () => {
     setRefreshNonce((current) => current + 1);
@@ -1078,6 +1138,17 @@ export function ChartsPage() {
               <span className="legend-marker legend-marker-support" aria-hidden="true" />
               <span>RS reclaim/loss</span>
             </div>
+            {VELA_PREVIEW_ENABLED ? (
+              <div className="chart-engine-selector" aria-label="Chart engine">
+                <span className="eyebrow">Engine</span>
+                <button className={chartEngine === "current" ? "primary-button" : "ghost-button"} type="button" aria-pressed={chartEngine === "current"} onClick={() => handleChartEngineChange("current")}>
+                  Current
+                </button>
+                <button className={chartEngine === "vela" ? "primary-button" : "ghost-button"} type="button" aria-pressed={chartEngine === "vela"} onClick={() => handleChartEngineChange("vela")}>
+                  Vela Preview
+                </button>
+              </div>
+            ) : null}
             <Link className="ghost-button" to="/guide">
               Open Guide
             </Link>
@@ -1089,7 +1160,8 @@ export function ChartsPage() {
         {!isLoading && requestedTicker && chartData.length === 0 ? <p className="panel-copy">No chart data returned for this request.</p> : null}
         {chartData.length > 0 ? (
           <>
-            <PriceChart
+            <AnalyticalChart
+              engine={chartEngine}
               ticker={requestedTicker}
               candles={chartData}
               overlays={chartPayload ?? undefined}
@@ -1098,6 +1170,7 @@ export function ChartsPage() {
               forceFearzonePanel
               hoveredTime={syncedHoverTime}
               onHoverTimeChange={setSyncedHoverTime}
+              onVelaUnavailable={handleVelaUnavailable}
             />
             <div className="chart-annotation-strip">
               {chartPayload?.resolved_as_of_date ? <span className="chart-pill chart-pill-event">As Of {chartPayload.resolved_as_of_date}</span> : null}
@@ -1147,7 +1220,7 @@ export function ChartsPage() {
                 onHoverTimeChange={setSyncedHoverTime}
               />
             </div>
-            <div className="chart-controls">
+            {chartEngine === "current" ? <div className="chart-controls">
               <div className="chart-presets" aria-label="Chart presets">
                 <span className="eyebrow">Preset</span>
                 {CHART_PRESETS.map((preset) => (
@@ -1210,7 +1283,7 @@ export function ChartsPage() {
                   ))}
                 </div>
               </details>
-            </div>
+            </div> : <p className="panel-copy">Vela Preview currently provides candles, volume, and the bundled Pine indicator. Switch to Current for ticker-screener overlays and signals.</p>}
           </>
         ) : null}
       </Panel>
