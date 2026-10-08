@@ -30,6 +30,7 @@ type ChartWorkspace = {
   showSma50: boolean;
 };
 type GuruSortKey = "default" | "stage" | "rs" | "rts" | "rsPhase" | "strike";
+type RsPhaseFilter = "all" | "new" | "quick_reclaim" | "established" | "mature" | "unavailable";
 type BoardChartSelection = {
   ticker: string;
   company: string;
@@ -170,7 +171,8 @@ export function ScannerTopHitsPage() {
   const [upOnDownDaysMin, setUpOnDownDaysMin] = useState(initialFilters.upOnDownDaysMin);
   const [scannerGroups, setScannerGroups] = useState<string[][]>(() => initialFilters.scannerGroups.map((group) => [...group]));
   const [activeScannerGroupIndex, setActiveScannerGroupIndex] = useState(0);
-  const [guruScannerGroupsOnly, setGuruScannerGroupsOnly] = useState(false);
+  const [guruScannerGroupsOnly, setGuruScannerGroupsOnly] = useState(true);
+  const [columnRsPhaseFilter, setColumnRsPhaseFilter] = useState<RsPhaseFilter>("all");
   const [sortBy, setSortBy] = useState<SortKey>(initialFilters.sortBy);
   const [sortDirection, setSortDirection] = useState<SortDirection>(initialFilters.sortDirection);
   const [viewMode, setViewMode] = useState<ViewMode>(initialFilters.viewMode);
@@ -344,6 +346,10 @@ export function ScannerTopHitsPage() {
     () => new Map(rows.map((row) => [row.ticker, row.scanners.map((scanner) => normalizeScannerId(scanner.id))])),
     [rows],
   );
+  const rowsByTicker = useMemo(
+    () => new Map([...rows, ...(guruBoard?.rows ?? [])].map((row) => [row.ticker, row])),
+    [guruBoard?.rows, rows],
+  );
   const normalizedLeaderRsRange = useMemo(() => normalizeRsRatingRange(leaderRsMin, leaderRsMax), [leaderRsMin, leaderRsMax]);
   const normalizedRsEvidenceMin = useMemo(() => normalizeBoundedInteger(rsEvidenceMin, 0, 9, 5), [rsEvidenceMin]);
   const normalizedRsDaysMinPct = useMemo(() => normalizeBoundedInteger(rsDaysMinPct, 0, 100, 60), [rsDaysMinPct]);
@@ -355,9 +361,10 @@ export function ScannerTopHitsPage() {
       if (sectorFilter !== "all" && row.sector !== sectorFilter) return false;
       if (query && ![row.ticker, row.company, row.sector, row.industry, row.scanners.map((scanner) => scanner.label).join(" ")].join(" ").toLowerCase().includes(query)) return false;
       if (leaderRsOnly && !hasDailyRsRatingInRange(row, normalizedLeaderRsRange.min, normalizedLeaderRsRange.max)) return false;
+      if (!matchesRsPhaseFilter(row, columnRsPhaseFilter)) return false;
       return true;
     });
-  }, [guruBoard?.rows, leaderRsOnly, normalizedLeaderRsRange, search, sectorFilter, sizePriceFloorOnly]);
+  }, [columnRsPhaseFilter, guruBoard?.rows, leaderRsOnly, normalizedLeaderRsRange, search, sectorFilter, sizePriceFloorOnly]);
   const visibleGuruRows = useMemo(() => {
     if (!guruScannerGroupsOnly || nonEmptyScannerGroupCount === 0) return guruRows;
     return guruRows.filter((row) => hasScannerGroupSignals(row, scannerGroups, scannerIdsByTicker.get(row.ticker)));
@@ -953,6 +960,17 @@ export function ScannerTopHitsPage() {
               ETF Portfolios
             </button>
           </div>
+          {isColumnView ? <label className="field">
+            <span>RS Phase</span>
+            <select value={columnRsPhaseFilter} onChange={(event) => setColumnRsPhaseFilter(event.target.value as RsPhaseFilter)}>
+              <option value="all">All phases</option>
+              <option value="new">New</option>
+              <option value="quick_reclaim">Quick reclaim</option>
+              <option value="established">Established</option>
+              <option value="mature">Mature</option>
+              <option value="unavailable">No phase data</option>
+            </select>
+          </label> : null}
           <span className="panel-copy">Guru Board keeps scanner overlap visible; unavailable strategies stay clearly marked.</span>
         </div>
       </section>
@@ -974,6 +992,8 @@ export function ScannerTopHitsPage() {
               sizePriceFloorOnly={sizePriceFloorOnly}
               scannerGroups={scannerGroups}
               scannerGroupsOnly={guruScannerGroupsOnly}
+              rsPhaseFilter={columnRsPhaseFilter}
+              rowsByTicker={rowsByTicker}
               selectedScannerGroupCount={nonEmptyScannerGroupCount}
               scannerIdsByTicker={scannerIdsByTicker}
               myPickTickers={myPickTickers}
@@ -1835,6 +1855,12 @@ function guruRsPhaseRank(row: ScannerTopHitRow): number | null {
   return resolveRsPhaseActiveDays(row) == null ? null : 4;
 }
 
+function matchesRsPhaseFilter(row: ScannerTopHitRow | undefined, filter: RsPhaseFilter): boolean {
+  if (filter === "all") return true;
+  const state = String(row?.rs_phase_state ?? row?.relative_strength_evidence?.rs_phase_state ?? "").toLowerCase();
+  return filter === "unavailable" ? !state : state === filter;
+}
+
 const POSITION_BUCKETS = [
   ["extended", "Extended"],
   ["above_ema10", "Above EMA10"],
@@ -1855,6 +1881,8 @@ function MomentumEtfPortfolioBoard({
   sizePriceFloorOnly,
   scannerGroups,
   scannerGroupsOnly,
+  rsPhaseFilter,
+  rowsByTicker,
   selectedScannerGroupCount,
   scannerIdsByTicker,
   myPickTickers,
@@ -1875,6 +1903,8 @@ function MomentumEtfPortfolioBoard({
   sizePriceFloorOnly: boolean;
   scannerGroups: string[][];
   scannerGroupsOnly: boolean;
+  rsPhaseFilter: RsPhaseFilter;
+  rowsByTicker: Map<string, ScannerTopHitRow>;
   selectedScannerGroupCount: number;
   scannerIdsByTicker: Map<string, string[]>;
   myPickTickers: Set<string>;
@@ -1895,8 +1925,9 @@ function MomentumEtfPortfolioBoard({
       [...(row.scanner_ids ?? []), ...(scannerIdsByTicker.get(row.ticker) ?? [])],
       scannerGroups,
     )) return false;
+    if (!matchesRsPhaseFilter(rowsByTicker.get(row.ticker), rsPhaseFilter)) return false;
     return row.etf_count >= minOverlap;
-  }), [minOverlap, payload?.rows, scannerGroups, scannerGroupsOnly, scannerIdsByTicker, selectedEtf, selectedScannerGroupCount, sizePriceFloorOnly, topHitsOnly]);
+  }), [minOverlap, payload?.rows, rowsByTicker, rsPhaseFilter, scannerGroups, scannerGroupsOnly, scannerIdsByTicker, selectedEtf, selectedScannerGroupCount, sizePriceFloorOnly, topHitsOnly]);
   const funds = selectedEtf === "all" ? (payload?.funds ?? []) : (payload?.funds ?? []).filter((fund) => fund.ticker === selectedEtf);
   useEffect(() => {
     if (rows.length > 0 && !rows.some((row) => row.ticker === selectedTicker)) {
