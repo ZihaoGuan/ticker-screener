@@ -1,0 +1,12 @@
+//@version=6
+indicator("Ticker Screener Price Overlays", shorttitle="TS Overlays", overlay=true)
+
+showEma8 = input.bool(true, "EMA 8")
+showEma21 = input.bool(true, "EMA 21")
+showSma50 = input.bool(true, "SMA 50")
+showSma200 = input.bool(true, "SMA 200")
+
+plot(showEma8 ? ta.ema(close, 8) : na, "EMA 8", color=color.rgb(56, 189, 248), linewidth=2)
+plot(showEma21 ? ta.ema(close, 21) : na, "EMA 21", color=color.rgb(245, 158, 11), linewidth=2)
+plot(showSma50 ? ta.sma(close, 50) : na, "SMA 50", color=color.rgb(167, 139, 250), linewidth=2)
+plot(showSma200 ? ta.sma(close, 200) : na, "SMA 200", color=color.rgb(244, 114, 182), linewidth=2)

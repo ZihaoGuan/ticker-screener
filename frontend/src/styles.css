@@ -722,8 +722,15 @@ a {
 }
 
 .vela-chart-toolbar,
-.chart-engine-selector {
+.chart-engine-selector,
+.vela-pine-statuses {
   align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vela-pine-statuses {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

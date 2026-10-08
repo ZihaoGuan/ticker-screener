@@ -1283,7 +1283,7 @@ export function ChartsPage() {
                   ))}
                 </div>
               </details>
-            </div> : <p className="panel-copy">Vela Preview currently provides candles, volume, and the bundled Pine indicator. Switch to Current for ticker-screener overlays and signals.</p>}
+            </div> : <p className="panel-copy">Vela Preview includes Pine EMA/SMA overlays and RS versus the configured benchmark. Switch to Current for annotations, signals, and the remaining advanced overlays.</p>}
           </>
         ) : null}
       </Panel>

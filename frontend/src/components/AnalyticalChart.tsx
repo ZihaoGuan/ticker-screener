@@ -38,7 +38,7 @@ export function AnalyticalChart({ engine, onVelaUnavailable, ...priceChartProps 
   return (
     <VelaPreviewBoundary key={priceChartProps.ticker} fallback={<PriceChart {...priceChartProps} />} onUnavailable={onVelaUnavailable}>
       <Suspense fallback={<LoadingBlock label="Loading Vela preview…" />}>
-        <VelaPriceChart ticker={priceChartProps.ticker} candles={priceChartProps.candles} onUnavailable={onVelaUnavailable} />
+        <VelaPriceChart ticker={priceChartProps.ticker} candles={priceChartProps.candles} overlays={priceChartProps.overlays} onUnavailable={onVelaUnavailable} />
       </Suspense>
     </VelaPreviewBoundary>
   );

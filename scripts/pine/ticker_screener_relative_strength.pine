@@ -1,0 +1,9 @@
+//@version=6
+indicator("Ticker Screener Relative Strength", shorttitle="TS RS", overlay=false)
+
+benchmark = input.string("SPY", "Benchmark")
+benchmarkClose = request.security(benchmark, "D", close)
+rsLine = benchmarkClose > 0 ? close / benchmarkClose : na
+
+plot(rsLine, "RS line", color=color.rgb(56, 189, 248), linewidth=2)
+plot(ta.ema(rsLine, 21), "RS 21 EMA", color=color.rgb(245, 158, 11), linewidth=2)
