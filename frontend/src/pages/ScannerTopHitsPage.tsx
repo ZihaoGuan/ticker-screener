@@ -116,6 +116,7 @@ const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
 };
 const BUILT_IN_LEADERSHIP_PRESET_ID = "built-in:leadership-trend";
 const BUILT_IN_ENTRY_CONFLUENCE_PRESET_ID = "built-in:entry-confluence";
+const BUILT_IN_RS_NEW_HIGH_CONFLUENCE_PRESET_ID = "built-in:rs-new-high-confluence";
 const ENTRY_CONFLUENCE_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   ...DEFAULT_TOP_HITS_FILTERS,
   scannerGroups: [
@@ -129,9 +130,15 @@ const ENTRY_CONFLUENCE_TOP_HITS_FILTERS: TopHitsFilterPreset = {
     ["rti", "rmv_tightness", "vcs_critical_tightness"],
   ],
 };
+const RS_NEW_HIGH_CONFLUENCE_TOP_HITS_FILTERS: TopHitsFilterPreset = {
+  ...EMPTY_TOP_HITS_FILTERS,
+  sizePriceFloorOnly: true,
+  scannerGroups: [["daily_rs_new_high"], ["rs"]],
+};
 const BUILT_IN_TOP_HITS_PRESETS: Record<string, { label: string; filters: TopHitsFilterPreset }> = {
   [BUILT_IN_LEADERSHIP_PRESET_ID]: { label: "Leadership + Trend", filters: DEFAULT_TOP_HITS_FILTERS },
   [BUILT_IN_ENTRY_CONFLUENCE_PRESET_ID]: { label: "Momentum + Entry Confluence", filters: ENTRY_CONFLUENCE_TOP_HITS_FILTERS },
+  [BUILT_IN_RS_NEW_HIGH_CONFLUENCE_PRESET_ID]: { label: "RS New High Confluence", filters: RS_NEW_HIGH_CONFLUENCE_TOP_HITS_FILTERS },
 };
 
 export function ScannerTopHitsPage() {
