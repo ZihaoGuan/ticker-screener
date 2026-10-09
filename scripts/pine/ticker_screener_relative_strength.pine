@@ -1,7 +1,10 @@
 //@version=6
 indicator("Ticker Screener Relative Strength", shorttitle="TS RS", overlay=false)
 
-benchmark = input.string("SPY", "Benchmark")
+// The host replaces this default with its configured benchmark before compilation.
+// PineTS 0.2.15 records string input overrides but does not apply them while
+// evaluating input.string(), so the chart also indexes this bare symbol in Vela.
+benchmark = input.string("__TICKER_SCREENER_BENCHMARK__", "Benchmark")
 benchmarkClose = request.security(benchmark, "D", close)
 rsLine = benchmarkClose > 0 ? close / benchmarkClose : na
 

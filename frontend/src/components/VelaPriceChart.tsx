@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import marketOverextendedSource from "../../../scripts/pine/market_overextended_indicator.pine?raw";
 import priceOverlaysSource from "../../../scripts/pine/ticker_screener_price_overlays.pine?raw";
 import relativeStrengthSource from "../../../scripts/pine/ticker_screener_relative_strength.pine?raw";
-import { TickerScreenerVelaProvider, TICKER_SCREENER_VELA_PROVIDER, toVelaProviderSymbol } from "../lib/velaMarketData";
+import { TickerScreenerVelaProvider, TICKER_SCREENER_VELA_PROVIDER, toVelaProviderSymbol, toVelaTicker } from "../lib/velaMarketData";
 import type { PriceChartProps } from "./PriceChart";
 
 type VelaPriceChartProps = Pick<PriceChartProps, "ticker" | "candles" | "overlays"> & {
@@ -17,6 +17,18 @@ type IndicatorKey = "extension" | "priceOverlays" | "relativeStrength";
 const MARKET_OVEREXTENDED_ID = "ticker-screener-market-overextended";
 const PRICE_OVERLAYS_ID = "ticker-screener-price-overlays";
 const RELATIVE_STRENGTH_ID = "ticker-screener-relative-strength";
+const RELATIVE_STRENGTH_BENCHMARK_PLACEHOLDER = "__TICKER_SCREENER_BENCHMARK__";
+
+function buildRelativeStrengthSource(benchmarkTicker: string): string {
+  const occurrences = relativeStrengthSource.split(RELATIVE_STRENGTH_BENCHMARK_PLACEHOLDER).length - 1;
+  if (occurrences !== 1) {
+    throw new Error("The relative-strength Pine script is missing its benchmark placeholder.");
+  }
+  return relativeStrengthSource.replace(
+    RELATIVE_STRENGTH_BENCHMARK_PLACEHOLDER,
+    toVelaTicker(benchmarkTicker),
+  );
+}
 
 export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: VelaPriceChartProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -31,6 +43,10 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
   });
   const [indicatorErrors, setIndicatorErrors] = useState<Partial<Record<IndicatorKey, string>>>({});
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
+  const configuredRelativeStrengthSource = useMemo(
+    () => buildRelativeStrengthSource(benchmarkTicker),
+    [benchmarkTicker],
+  );
   const latestCandleTime = useMemo(() => {
     const lastCandle = candles[candles.length - 1];
     const time = lastCandle ? Date.parse(`${lastCandle.time}T00:00:00.000Z`) : Number.NaN;
@@ -55,13 +71,16 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
         animations: { intro: false },
       });
       chartRef.current = chart;
-      chart.data.registerProvider(TICKER_SCREENER_VELA_PROVIDER, new TickerScreenerVelaProvider(latestCandleTime));
+      chart.data.registerProvider(
+        TICKER_SCREENER_VELA_PROVIDER,
+        new TickerScreenerVelaProvider(latestCandleTime, [ticker, benchmarkTicker]),
+      );
       chart.registerEngine("pine", new PineWorkerEngine());
 
-      const enabledIndicators: Array<{ key: IndicatorKey; id: string; source: string; title: string; inputs?: Record<string, string> }> = [
+      const enabledIndicators: Array<{ key: IndicatorKey; id: string; source: string; title: string }> = [
         ...(isPineEnabled ? [{ key: "extension" as const, id: MARKET_OVEREXTENDED_ID, source: marketOverextendedSource, title: "Market Overextended Monitor" }] : []),
         ...(arePriceOverlaysEnabled ? [{ key: "priceOverlays" as const, id: PRICE_OVERLAYS_ID, source: priceOverlaysSource, title: "Ticker Screener Price Overlays" }] : []),
-        ...(isRelativeStrengthEnabled ? [{ key: "relativeStrength" as const, id: RELATIVE_STRENGTH_ID, source: relativeStrengthSource, title: `Relative Strength vs ${benchmarkTicker}`, inputs: { Benchmark: toVelaProviderSymbol(benchmarkTicker) } }] : []),
+        ...(isRelativeStrengthEnabled ? [{ key: "relativeStrength" as const, id: RELATIVE_STRENGTH_ID, source: configuredRelativeStrengthSource, title: `Relative Strength vs ${benchmarkTicker}` }] : []),
       ];
       const disabledStatuses: Partial<Record<IndicatorKey, PineStatus>> = {};
       if (!isPineEnabled) disabledStatuses.extension = "disabled";
@@ -70,12 +89,11 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
       setIndicatorStatuses({ extension: "starting", priceOverlays: "starting", relativeStrength: "starting", ...disabledStatuses });
       setIndicatorErrors({});
 
-      void chart.ready().then(async () => {
+      void Promise.all([chart.ready(), chart.data.ready()]).then(async () => {
         for (const indicator of enabledIndicators) {
           const outcome = await chart!.runIndicator(indicator.source, {
             id: indicator.id,
             title: indicator.title,
-            inputs: indicator.inputs,
           });
           if (disposed) {
             return;
@@ -110,7 +128,7 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
         chartRef.current = null;
       }
     };
-  }, [arePriceOverlaysEnabled, benchmarkTicker, isPineEnabled, isRelativeStrengthEnabled, latestCandleTime, onUnavailable, ticker]);
+  }, [arePriceOverlaysEnabled, benchmarkTicker, configuredRelativeStrengthSource, isPineEnabled, isRelativeStrengthEnabled, latestCandleTime, onUnavailable, ticker]);
 
   return (
     <div className="vela-chart-stack">

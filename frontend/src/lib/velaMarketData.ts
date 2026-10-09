@@ -1,4 +1,4 @@
-import type { BarRange, DataProvider, OHLCV, ProviderInfo } from "@luxalgo/vela";
+import type { BarRange, DataProvider, OHLCV, ProviderInfo, SymbolDescriptor } from "@luxalgo/vela";
 import { fetchJson } from "./api";
 
 // Vela provider prefixes accept letters, numbers, underscores, and dots only.
@@ -108,16 +108,27 @@ function aggregateBars(bars: OHLCV[], timeframe: SupportedTimeframe): OHLCV[] {
  */
 export class TickerScreenerVelaProvider implements DataProvider {
   private readonly inFlight = new Map<string, Promise<OHLCV[]>>();
+  private readonly indexedSymbols: SymbolDescriptor[];
 
-  constructor(private readonly latestTime?: number) {}
+  constructor(private readonly latestTime?: number, indexedTickers: readonly string[] = []) {
+    this.indexedSymbols = [...new Set(indexedTickers.map(normalizeTicker))].map((ticker) => ({
+      ticker,
+      description: ticker,
+      type: "stock",
+    }));
+  }
 
   info(): ProviderInfo {
     return {
       name: PROVIDER_NAME,
       displayName: "Ticker Screener",
       supportedTimeframes: ["1D", "1W", "1M"],
-      capabilities: { enumerate: false, stream: false, symbolInfo: false },
+      capabilities: { enumerate: true, stream: false, symbolInfo: false },
     };
+  }
+
+  listSymbols(): Promise<SymbolDescriptor[]> {
+    return Promise.resolve(this.indexedSymbols);
   }
 
   getBars(ticker: string, timeframe: string, range: BarRange): Promise<OHLCV[]> {
@@ -143,11 +154,14 @@ export class TickerScreenerVelaProvider implements DataProvider {
 
 export const TICKER_SCREENER_VELA_PROVIDER = PROVIDER_NAME;
 
+export function toVelaTicker(ticker: string): string {
+  return normalizeTicker(ticker);
+}
+
 /**
- * Vela only routes a bare secondary symbol through a provider that has a
- * complete symbol index. Ticker Screener intentionally does not enumerate the
- * whole market, so host-owned Pine inputs must pin this provider explicitly.
+ * Primary chart symbols use an explicit provider prefix. Pine secondary-series
+ * requests are bare symbols and resolve through this chart's small eager index.
  */
 export function toVelaProviderSymbol(ticker: string): string {
-  return `${PROVIDER_NAME}:${normalizeTicker(ticker)}`;
+  return `${PROVIDER_NAME}:${toVelaTicker(ticker)}`;
 }
