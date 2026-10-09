@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import marketOverextendedSource from "../../../scripts/pine/market_overextended_indicator.pine?raw";
 import priceOverlaysSource from "../../../scripts/pine/ticker_screener_price_overlays.pine?raw";
 import relativeStrengthSource from "../../../scripts/pine/ticker_screener_relative_strength.pine?raw";
-import { TickerScreenerVelaProvider, TICKER_SCREENER_VELA_PROVIDER } from "../lib/velaMarketData";
+import { TickerScreenerVelaProvider, TICKER_SCREENER_VELA_PROVIDER, toVelaProviderSymbol } from "../lib/velaMarketData";
 import type { PriceChartProps } from "./PriceChart";
 
 type VelaPriceChartProps = Pick<PriceChartProps, "ticker" | "candles" | "overlays"> & {
@@ -46,7 +46,7 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
     let chart: Vela | null = null;
     try {
       chart = new Vela(rootRef.current, {
-        symbol: `${TICKER_SCREENER_VELA_PROVIDER}:${ticker}`,
+        symbol: toVelaProviderSymbol(ticker),
         timeframe: "1D",
         theme: "dark",
         height: 520,
@@ -61,7 +61,7 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
       const enabledIndicators: Array<{ key: IndicatorKey; id: string; source: string; title: string; inputs?: Record<string, string> }> = [
         ...(isPineEnabled ? [{ key: "extension" as const, id: MARKET_OVEREXTENDED_ID, source: marketOverextendedSource, title: "Market Overextended Monitor" }] : []),
         ...(arePriceOverlaysEnabled ? [{ key: "priceOverlays" as const, id: PRICE_OVERLAYS_ID, source: priceOverlaysSource, title: "Ticker Screener Price Overlays" }] : []),
-        ...(isRelativeStrengthEnabled ? [{ key: "relativeStrength" as const, id: RELATIVE_STRENGTH_ID, source: relativeStrengthSource, title: `Relative Strength vs ${benchmarkTicker}`, inputs: { Benchmark: benchmarkTicker } }] : []),
+        ...(isRelativeStrengthEnabled ? [{ key: "relativeStrength" as const, id: RELATIVE_STRENGTH_ID, source: relativeStrengthSource, title: `Relative Strength vs ${benchmarkTicker}`, inputs: { Benchmark: toVelaProviderSymbol(benchmarkTicker) } }] : []),
       ];
       const disabledStatuses: Partial<Record<IndicatorKey, PineStatus>> = {};
       if (!isPineEnabled) disabledStatuses.extension = "disabled";

@@ -142,3 +142,12 @@ export class TickerScreenerVelaProvider implements DataProvider {
 }
 
 export const TICKER_SCREENER_VELA_PROVIDER = PROVIDER_NAME;
+
+/**
+ * Vela only routes a bare secondary symbol through a provider that has a
+ * complete symbol index. Ticker Screener intentionally does not enumerate the
+ * whole market, so host-owned Pine inputs must pin this provider explicitly.
+ */
+export function toVelaProviderSymbol(ticker: string): string {
+  return `${PROVIDER_NAME}:${normalizeTicker(ticker)}`;
+}
