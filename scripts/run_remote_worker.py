@@ -171,6 +171,34 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
     last_heartbeat = time.monotonic()
     cancel_requested = False
 
+    def record_output_line(line: str, log_handle: Any, *, publish: bool) -> None:
+        nonlocal log_lines
+        log_handle.write(line)
+        log_handle.flush()
+        normalized_line = line.rstrip()
+        log_lines.append(normalized_line)
+        log_lines = log_lines[-80:]
+        progress = run_service._extract_progress(log_lines)
+        temp_job = dict(artifact_state)
+        run_service._update_artifacts(temp_job, normalized_line)
+        artifact_state.update(temp_job)
+        state.update(
+            {
+                "log_tail": "\n".join(log_lines),
+                "progress_current": progress["current"],
+                "progress_total": progress["total"],
+                "progress_percent": progress["percent"],
+                "progress_label": progress["label"] or state.get("progress_label"),
+                "success_count": int(progress["success_count"] or state.get("success_count") or 0),
+                "summary_file": str(artifact_state.get("summary_file") or ""),
+                "watchlist_file": str(artifact_state.get("watchlist_file") or ""),
+                "raw_results_file": str(artifact_state.get("raw_results_file") or ""),
+                "backtest_run_id": artifact_state.get("backtest_run_id"),
+            }
+        )
+        if publish:
+            _publish_state(run_service, job_run_id=job_run_id, state=state)
+
     try:
         with log_path.open("a", encoding="utf-8") as log_handle:
             while True:
@@ -184,30 +212,7 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
                 if events:
                     line = process.stdout.readline()
                     if line:
-                        log_handle.write(line)
-                        log_handle.flush()
-                        normalized_line = line.rstrip()
-                        log_lines.append(normalized_line)
-                        log_lines = log_lines[-80:]
-                        progress = run_service._extract_progress(log_lines)
-                        temp_job = dict(artifact_state)
-                        run_service._update_artifacts(temp_job, normalized_line)
-                        artifact_state.update(temp_job)
-                        state.update(
-                            {
-                                "log_tail": "\n".join(log_lines),
-                                "progress_current": progress["current"],
-                                "progress_total": progress["total"],
-                                "progress_percent": progress["percent"],
-                                "progress_label": progress["label"] or state.get("progress_label"),
-                                "success_count": int(progress["success_count"] or state.get("success_count") or 0),
-                                "summary_file": str(artifact_state.get("summary_file") or ""),
-                                "watchlist_file": str(artifact_state.get("watchlist_file") or ""),
-                                "raw_results_file": str(artifact_state.get("raw_results_file") or ""),
-                                "backtest_run_id": artifact_state.get("backtest_run_id"),
-                            }
-                        )
-                        _publish_state(run_service, job_run_id=job_run_id, state=state)
+                        record_output_line(line, log_handle, publish=True)
 
                 return_code = process.poll()
                 now = time.monotonic()
@@ -222,10 +227,13 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
                     )
                     last_heartbeat = now
                 if return_code is not None:
+                    for remaining_line in process.stdout:
+                        record_output_line(remaining_line, log_handle, publish=False)
                     break
     finally:
         selector.unregister(process.stdout)
         selector.close()
+        process.stdout.close()
 
     finished_at = _now_iso()
     final_status = "cancelled" if cancel_requested else ("success" if process.returncode == 0 else "failed")

@@ -16,6 +16,16 @@ FINVIZ_TARGET_PRICE_SCANNER_FILTERS: tuple[str, ...] = ("ind_stocksonly", "targe
 FINVIZ_TARGET_PRICE_SCANNER_STRATEGY_ID = "finviz_target_price_50"
 TARGET_PRICE_UPSIDE_RATIO = 1.5
 _CUSTOM_TABLE_COLUMNS: tuple[str, ...] = ("1", "2", "65", "69")
+_EXCHANGE_FILTERS: tuple[str, ...] = ("exch_amex", "exch_nasd", "exch_nyse")
+_EXACT_MARKET_CAP_FILTERS: tuple[str, ...] = (
+    "cap_nano",
+    "cap_micro",
+    "cap_small",
+    "cap_mid",
+    "cap_large",
+    "cap_mega",
+)
+_FINVIZ_MAX_PAGEABLE_ROWS = 1_000
 _MULTIPLIERS = {"K": 1_000.0, "M": 1_000_000.0, "B": 1_000_000_000.0, "T": 1_000_000_000_000.0}
 _RATE_LIMIT_RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0, 6.0)
 
@@ -97,20 +107,25 @@ def _is_rate_limit_error(error: Exception) -> bool:
 
 
 def _build_screener_rows(screener_cls: type[Any]) -> tuple[list[dict[str, Any]], str]:
-    filters = list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS)
+    base_filters = list(FINVIZ_TARGET_PRICE_SCANNER_FILTERS)
 
-    def _fetch_rows(*, table: str, request_method: str, custom: list[str] | None = None) -> list[dict[str, Any]]:
+    def _fetch_screener(
+        *,
+        filters: list[str],
+        request_method: str,
+        rows: int | None = None,
+    ) -> Any:
         last_error: Exception | None = None
         for attempt_index in range(len(_RATE_LIMIT_RETRY_DELAYS) + 1):
             try:
-                screener = screener_cls(
+                return screener_cls(
                     filters=filters,
-                    table=table,
-                    custom=custom,
+                    rows=rows,
+                    table="Custom",
+                    custom=list(_CUSTOM_TABLE_COLUMNS),
                     order="ticker",
                     request_method=request_method,
                 )
-                return [dict(row) for row in screener]
             except Exception as exc:
                 last_error = exc
                 if not _is_rate_limit_error(exc) or attempt_index >= len(_RATE_LIMIT_RETRY_DELAYS):
@@ -118,23 +133,54 @@ def _build_screener_rows(screener_cls: type[Any]) -> tuple[list[dict[str, Any]],
                 time.sleep(_RATE_LIMIT_RETRY_DELAYS[attempt_index])
         if last_error is not None:
             raise last_error
-        return []
+        raise RuntimeError("Finviz target-price fetch failed before building screener.")
+
+    def _fetch_partition(filters: list[str], *, request_method: str) -> tuple[list[dict[str, Any]], int]:
+        probe = _fetch_screener(filters=filters, request_method=request_method, rows=1)
+        total_rows = int(getattr(probe, "total_rows", len(probe)) or 0)
+        if total_rows <= len(probe):
+            return [dict(row) for row in probe], total_rows
+        screener = _fetch_screener(filters=filters, request_method=request_method)
+        return [dict(row) for row in screener], total_rows
 
     last_error: Exception | None = None
     for request_method in ("async", "sync"):
         try:
-            overview_rows = _fetch_rows(table="Overview", request_method=request_method)
+            collected_rows: list[dict[str, Any]] = []
+            for exchange_filter in _EXCHANGE_FILTERS:
+                exchange_filters = [*base_filters, exchange_filter]
+                exchange_probe = _fetch_screener(
+                    filters=exchange_filters,
+                    request_method=request_method,
+                    rows=1,
+                )
+                exchange_total = int(getattr(exchange_probe, "total_rows", len(exchange_probe)) or 0)
+                if exchange_total > _FINVIZ_MAX_PAGEABLE_ROWS:
+                    for cap_filter in _EXACT_MARKET_CAP_FILTERS:
+                        partition_rows, _ = _fetch_partition(
+                            [*exchange_filters, cap_filter],
+                            request_method=request_method,
+                        )
+                        collected_rows.extend(partition_rows)
+                    continue
+                if exchange_total <= len(exchange_probe):
+                    collected_rows.extend(dict(row) for row in exchange_probe)
+                else:
+                    exchange_rows, _ = _fetch_partition(
+                        exchange_filters,
+                        request_method=request_method,
+                    )
+                    collected_rows.extend(exchange_rows)
         except Exception as exc:
             last_error = exc
             continue
-        if overview_rows and "Target Price" in overview_rows[0]:
-            return overview_rows, f"overview:{request_method}"
-        try:
-            custom_rows = _fetch_rows(table="Custom", request_method=request_method, custom=list(_CUSTOM_TABLE_COLUMNS))
-        except Exception as exc:
-            last_error = exc
-            continue
-        return custom_rows, f"custom:{request_method}"
+
+        deduplicated: dict[str, dict[str, Any]] = {}
+        for row in collected_rows:
+            ticker = normalize_finviz_ticker(row)
+            if ticker:
+                deduplicated[ticker] = row
+        return list(deduplicated.values()), f"custom:partitioned:{request_method}"
 
     if last_error is not None:
         raise last_error

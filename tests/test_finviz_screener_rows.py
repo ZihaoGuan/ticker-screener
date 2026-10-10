@@ -5,6 +5,7 @@ import unittest
 from lxml import html
 
 from src.finviz_screener_rows import (
+    SafeFinvizScreener,
     _extract_rows,
     _filter_leveraged_fund_rows,
     normalize_finviz_ticker,
@@ -14,6 +15,28 @@ from src.finviz_screener_rows import (
 
 
 class FinvizScreenerRowsTests(unittest.TestCase):
+    def test_screener_exposes_total_rows_when_fetch_is_limited(self) -> None:
+        class _Screener(SafeFinvizScreener):
+            def _fetch_page(self, start: int, *, base_url: str | None = None):
+                del start, base_url
+                return (
+                    html.fromstring(
+                        """
+                        <div>#1 / 1,428 Total</div>
+                        <table>
+                          <tr valign="middle"><th>Ticker</th><th>Company</th></tr>
+                          <tr valign="top"><td>NVDA</td><td>NVIDIA</td></tr>
+                        </table>
+                        """
+                    ),
+                    "https://finviz.com/screener.ashx?v=111",
+                )
+
+        screener = _Screener(rows=1)
+
+        self.assertEqual(screener.total_rows, 1_428)
+        self.assertEqual(len(screener), 1)
+
     def test_sanitize_company_name_keeps_real_company_names(self) -> None:
         row = {"Ticker": "PLTR", "Company": "Palantir"}
 

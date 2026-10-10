@@ -54,6 +54,7 @@ class SafeFinvizScreener:
         self._user_agent = user_agent
         self._request_method = request_method
         self.headers: list[str] = []
+        self.total_rows = 0
         self.data = self._search_screener()
         self.analysis: list[dict[str, Any]] = []
 
@@ -73,6 +74,7 @@ class SafeFinvizScreener:
         first_tree, first_url = self._fetch_page(1)
         self.headers = _extract_headers(first_tree)
         total_rows = _extract_total_rows(first_tree) or len(_extract_rows(first_tree, self.headers))
+        self.total_rows = total_rows
         row_limit = total_rows if self._rows_requested is None else min(self._rows_requested, total_rows)
         if row_limit <= 0:
             return []
