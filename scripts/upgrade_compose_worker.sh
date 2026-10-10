@@ -37,4 +37,11 @@ if [ "${active_jobs:-0}" != "0" ]; then
 fi
 
 echo "Worker drain complete; replacing only the worker with ticker-screener:${image_tag}."
-TICKER_SCREENER_IMAGE_TAG="$image_tag" compose up -d --force-recreate --no-deps worker
+worker_container_id="$(compose ps -q worker || true)"
+if [ -n "$worker_container_id" ]; then
+  # docker-compose v1 can fail during --force-recreate when the image metadata
+  # omits ContainerConfig. Removing the already-drained worker first avoids
+  # that compatibility path while leaving every other service untouched.
+  docker rm -f "$worker_container_id"
+fi
+TICKER_SCREENER_IMAGE_TAG="$image_tag" compose up -d --no-deps worker
