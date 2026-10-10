@@ -276,6 +276,11 @@ function buildPipelineGroups(pipelineStatus: OverlapPipelineStatus[]) {
           match: (item) => (item.bias_group ?? "other") === "bullish" && (item.bullish_subgroup ?? "leaders") === "leaders",
         },
         {
+          key: "entries",
+          label: "Entry Signals",
+          match: (item) => (item.bias_group ?? "other") === "bullish" && (item.bullish_subgroup ?? "") === "entries",
+        },
+        {
           key: "bottoming",
           label: "Bottoming",
           match: (item) => (item.bias_group ?? "other") === "bullish" && (item.bullish_subgroup ?? "") === "bottoming",
@@ -329,6 +334,12 @@ function buildGroupedOverlapCandidates(candidates: OverlapEntry[], pipelineStatu
       label: "Leaders",
       match: (pipeline: OverlapPipelineStatus | undefined) =>
         (pipeline?.bias_group ?? "other") === "bullish" && (pipeline?.bullish_subgroup ?? "leaders") === "leaders",
+    },
+    {
+      key: "entries",
+      label: "Entry Signals",
+      match: (pipeline: OverlapPipelineStatus | undefined) =>
+        (pipeline?.bias_group ?? "other") === "bullish" && (pipeline?.bullish_subgroup ?? "") === "entries",
     },
     {
       key: "bottoming",

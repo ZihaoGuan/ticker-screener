@@ -603,7 +603,7 @@ export type OverlapPipelineStatus = {
   count: number;
   file_present: boolean;
   bias_group?: "bullish" | "bearish" | "data" | "other";
-  bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
+  bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "entries" | "";
 };
 
 export type DashboardResponse = {
@@ -875,7 +875,7 @@ export type RunAction = {
   id: string;
   label: string;
   bias_group?: "bullish" | "bearish" | "data" | "other";
-  bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
+  bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "entries" | "";
   command: string;
   supports_limit: boolean;
   fields: Array<{
@@ -1871,7 +1871,7 @@ export type ScheduledJobConfigResponse = {
     id: string;
     label: string;
     bias_group?: "bullish" | "bearish" | "data" | "other";
-    bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "";
+    bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "entries" | "";
     estimated_duration_seconds: number | null;
     estimate_sample_count: number;
     fields: Array<{
