@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
@@ -95,6 +95,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [isSavingScheduleSettings, setIsSavingScheduleSettings] = useState(false);
   const [scheduleNotice, setScheduleNotice] = useState("");
   const [isScheduleEditorOpen, setIsScheduleEditorOpen] = useState(false);
+  const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   const [isSchedulerSettingsOpen, setIsSchedulerSettingsOpen] = useState(false);
   const [warmStrategyIds, setWarmStrategyIds] = useState("");
   const [warmFrom, setWarmFrom] = useState(isoDateDaysAgo(20));
@@ -203,6 +204,17 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     loadScheduledJobs();
     loadScheduleConfig();
   }, [canManageSchedules]);
+
+  useEffect(() => {
+    if (!isScheduleEditorOpen && !isSchedulerSettingsOpen) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setIsScheduleEditorOpen(false);
+      setIsSchedulerSettingsOpen(false);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [isScheduleEditorOpen, isSchedulerSettingsOpen]);
 
   const visibleActions = useMemo(() => {
     const actions = payload?.actions ?? [];
@@ -624,6 +636,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   };
 
   const resetScheduleForm = () => {
+    setIsEditingSchedule(false);
     const nextActionId = sortedScheduledActions[0]?.id ?? "weekly_rs";
     const nextAction = sortedScheduledActions.find((item) => item.id === nextActionId) ?? null;
     const nextIdentity = buildDefaultScheduleIdentity(nextAction);
@@ -682,6 +695,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   };
 
   const handleEditSchedule = (job: ScheduledJobConfig) => {
+    setIsEditingSchedule(true);
     const parsedCron = parseSimpleScheduleCron(job.cron_expr);
     scheduleCronDraftRef.current = {
       cadence: parsedCron.cadence,
@@ -710,11 +724,16 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 
   const handleOpenNewSchedule = () => {
     resetScheduleForm();
+    setIsEditingSchedule(false);
     setScheduleNotice("");
     setIsScheduleEditorOpen(true);
   };
 
   const handleDeleteSchedule = async (jobId: string) => {
+    const target = scheduledConfigs.find((job) => job.job_id === jobId);
+    if (!window.confirm(`Remove ${target?.job_label || jobId} from the scheduler? This does not delete its past runs or artifacts.`)) {
+      return;
+    }
     setIsSavingSchedule(true);
     setScheduleNotice("");
     try {
@@ -1469,16 +1488,20 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 
         {canManageSchedules && schedulesMode ? (
           <>
-            <Panel
-              title="Screener Automation"
-              aside={<span className="screeners-operator-badge">Automation</span>}
-              className="screeners-automation-hero-panel"
-            >
-              <p className="panel-copy">
-                Manage recurring scanner runs here. Track last scheduled execution, DB persistence, cron settings, and scheduler capacity without mixing it into live run operations.
+            <ScheduleTimeline
+              configs={scheduledConfigs}
+              summaries={scheduledJobs}
+              isLoading={isLoadingScheduleConfig || isLoadingScheduledJobs}
+              maxParallelJobs={Number(maxParallelJobs) || 0}
+              onEdit={handleEditSchedule}
+              onNew={handleOpenNewSchedule}
+              onOpenSettings={() => setIsSchedulerSettingsOpen(true)}
+            />
+
+            <Panel title="Recent Execution Details" aside={<span className="eyebrow">{scheduledJobs.length} tracked</span>} className="screeners-scheduled-panel screeners-secondary-panel">
+              <p className="panel-copy screeners-section-intro">
+                Latest scheduler status, persistence confirmation, logs, and result artifacts. Timeline state is derived from these records.
               </p>
-            </Panel>
-            <Panel title="Scheduled Screeners" aside={<span className="eyebrow">{scheduledJobs.length} tracked</span>} className="screeners-scheduled-panel">
               {isLoadingScheduledJobs ? <LoadingBlock label="Loading scheduled job status…" compact /> : null}
               <div className="data-table-responsive">
                 <table className="data-table">
@@ -1552,12 +1575,12 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
               </div>
             </Panel>
 
-            <Panel title="Scheduler Config" aside={<span className="eyebrow">{scheduledConfigs.length} schedules</span>} className="screeners-scheduler-config-panel">
+            <Panel title="Schedule Definitions" aside={<span className="eyebrow">{scheduledConfigs.length} schedules</span>} className="screeners-scheduler-config-panel screeners-secondary-panel">
               <div className="run-toolbar">
                 <div className="screeners-scheduler-toolbar">
                   <div>
-                    <p className="panel-copy">Manage recurring screener tasks from focused dialogs instead of the full inline admin form.</p>
-                    <p className="file-meta">Host cron command: {schedulerCommand || "-"}</p>
+                    <p className="panel-copy">Edit timing, screener choice, payload overrides, and enabled state.</p>
+                    <p className="file-meta">Runner polls every 5 minutes · capacity {maxParallelJobs} parallel jobs</p>
                   </div>
                   <div className="button-row">
                     <button className="primary-button" type="button" onClick={handleOpenNewSchedule} disabled={isSavingSchedule || isLoadingScheduleConfig}>
@@ -1568,7 +1591,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     </button>
                   </div>
                 </div>
-                {scheduleNotice ? <p className="panel-copy">{scheduleNotice}</p> : null}
+                {scheduleNotice ? <p className="panel-copy" role="status" aria-live="polite">{scheduleNotice}</p> : null}
                 {isLoadingScheduleConfig ? <LoadingBlock label="Loading scheduler config…" compact /> : null}
                 <div className="data-table-responsive">
                   <table className="data-table">
@@ -1654,14 +1677,14 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 
       {isScheduleEditorOpen ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setIsScheduleEditorOpen(false)}>
-          <div className="modal-shell screeners-schedule-modal-shell" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-shell screeners-schedule-modal-shell" role="dialog" aria-modal="true" aria-labelledby="schedule-editor-title" onClick={(event) => event.stopPropagation()}>
             <form className="modal-content screeners-schedule-modal" onSubmit={(event) => void handleSaveSchedule(event)}>
               <div className="modal-header">
                 <div>
-                  <div className="eyebrow">{scheduleJobId ? "Edit schedule" : "New schedule"}</div>
-                  <h2>{scheduleJobLabel || "Configure Scheduled Screener"}</h2>
+                  <div className="eyebrow">{isEditingSchedule ? "Edit schedule" : "New schedule"}</div>
+                  <h2 id="schedule-editor-title">{scheduleJobLabel || "Configure Scheduled Screener"}</h2>
                 </div>
-                <button className="ghost-button" type="button" onClick={() => setIsScheduleEditorOpen(false)}>
+                <button className="ghost-button" type="button" aria-label="Close schedule editor" onClick={() => setIsScheduleEditorOpen(false)}>
                   Close
                 </button>
               </div>
@@ -1687,7 +1710,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                       className="schedule-action-chooser"
                       value={scheduleActionId}
                       onChange={(event) => setScheduleActionId(event.target.value)}
-                      size={Math.min(Math.max(filteredScheduledActions.length, 6), 12)}
+                      size={Math.min(Math.max(filteredScheduledActions.length, 4), 6)}
                     >
                       {groupedScheduledActions.length === 0 ? <option value={scheduleActionId}>No matching screeners</option> : null}
                       {groupedScheduledActions.map((group) => (
@@ -1754,7 +1777,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                       <option value="false">disabled</option>
                     </select>
                   </label>
-                  <label className="field" style={{ gridColumn: "1 / -1" }}>
+                  <label className="field schedule-options-field">
                     <span>Action Options JSON</span>
                     <textarea
                       value={scheduleOptionsJson}
@@ -1808,14 +1831,14 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 
       {isSchedulerSettingsOpen ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setIsSchedulerSettingsOpen(false)}>
-          <div className="modal-shell" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="scheduler-settings-title" onClick={(event) => event.stopPropagation()}>
             <div className="modal-content screeners-settings-modal">
               <div className="modal-header">
                 <div>
                   <div className="eyebrow">Scheduler settings</div>
-                  <h2>Runner Throughput</h2>
+                  <h2 id="scheduler-settings-title">Runner Throughput</h2>
                 </div>
-                <button className="ghost-button" type="button" onClick={() => setIsSchedulerSettingsOpen(false)}>
+                <button className="ghost-button" type="button" aria-label="Close scheduler settings" onClick={() => setIsSchedulerSettingsOpen(false)}>
                   Close
                 </button>
               </div>
@@ -1854,13 +1877,190 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   );
 }
 
+type TimelineRowState = "active" | "finished" | "upcoming" | "waiting" | "disabled";
+
+type ScheduleTimelineRow = {
+  config: ScheduledJobConfig;
+  summary: ScheduledJobSummary | null;
+  minute: number;
+  durationMinutes: number;
+  state: TimelineRowState;
+};
+
+function ScheduleTimeline({
+  configs,
+  summaries,
+  isLoading,
+  maxParallelJobs,
+  onEdit,
+  onNew,
+  onOpenSettings,
+}: {
+  configs: ScheduledJobConfig[];
+  summaries: ScheduledJobSummary[];
+  isLoading: boolean;
+  maxParallelJobs: number;
+  onEdit: (job: ScheduledJobConfig) => void;
+  onNew: () => void;
+  onOpenSettings: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [enabledOnly, setEnabledOnly] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+  const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+  const hasAutoFocusedNowRef = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const primaryTimezone = useMemo(() => findPrimaryScheduleTimezone(configs), [configs]);
+  const timeline = useMemo(
+    () => buildScheduleTimeline(configs, summaries, now, primaryTimezone),
+    [configs, summaries, now, primaryTimezone],
+  );
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleRows = timeline.rows.filter((row) => {
+    if (enabledOnly && !row.config.enabled) return false;
+    if (!normalizedQuery) return true;
+    return `${row.config.job_label} ${row.config.job_id} ${row.config.action_id}`.toLowerCase().includes(normalizedQuery);
+  });
+  const counts = timeline.rows.reduce(
+    (result, row) => {
+      result[row.state] += 1;
+      return result;
+    },
+    { active: 0, finished: 0, upcoming: 0, waiting: 0, disabled: 0 } as Record<TimelineRowState, number>,
+  );
+  const nowPosition = `${(timeline.nowMinute / 1440) * 100}%`;
+  const nowLabel = formatMinuteOfDay(timeline.nowMinute);
+  const scrollToNow = () => {
+    const viewport = timelineScrollRef.current;
+    if (!viewport) return;
+    const labelColumnWidth = viewport.clientWidth <= 768 ? 236 : 300;
+    const target = labelColumnWidth + (timeline.nowMinute / 1440) * 1536 - viewport.clientWidth / 2;
+    viewport.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    if (isLoading || visibleRows.length === 0 || hasAutoFocusedNowRef.current) return;
+    hasAutoFocusedNowRef.current = true;
+    window.requestAnimationFrame(() => {
+      const viewport = timelineScrollRef.current;
+      if (!viewport) return;
+      const labelColumnWidth = viewport.clientWidth <= 768 ? 236 : 300;
+      const target = labelColumnWidth + (timeline.nowMinute / 1440) * 1536 - viewport.clientWidth / 2;
+      viewport.scrollLeft = Math.max(0, target);
+    });
+  }, [isLoading, visibleRows.length]);
+
+  return (
+    <section className="schedule-timeline-panel" aria-labelledby="schedule-timeline-title">
+      <header className="schedule-timeline-header">
+        <div>
+          <h2 id="schedule-timeline-title">Today’s Automation Timeline</h2>
+          <p>
+            {formatTimelineDate(now, primaryTimezone)} · {primaryTimezone} · quarter-hour grid
+          </p>
+        </div>
+        <div className="button-row">
+          <button className="ghost-button" type="button" onClick={onOpenSettings}>Runner Settings</button>
+          <button className="primary-button" type="button" onClick={onNew}>New Schedule</button>
+        </div>
+      </header>
+
+      <div className="schedule-timeline-controls">
+        <div className="schedule-timeline-stats" aria-label="Schedule status summary">
+          <span className="timeline-stat timeline-stat-finished"><span aria-hidden="true" />{counts.finished} finished</span>
+          <span className="timeline-stat timeline-stat-active"><span aria-hidden="true" />{counts.active} active</span>
+          <span className="timeline-stat timeline-stat-upcoming"><span aria-hidden="true" />{counts.upcoming} upcoming</span>
+          {counts.waiting ? <span className="timeline-stat timeline-stat-waiting"><span aria-hidden="true" />{counts.waiting} awaiting run</span> : null}
+          {counts.disabled ? <span className="timeline-stat"><span aria-hidden="true" />{counts.disabled} paused</span> : null}
+        </div>
+        <div className="schedule-timeline-filters">
+          <button className="ghost-button schedule-now-button" type="button" onClick={scrollToNow}>Jump to now</button>
+          <label className="schedule-search-field">
+            <span className="visually-hidden">Filter scheduled tasks</span>
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter task or screener" />
+          </label>
+          <label className="schedule-enabled-filter">
+            <input type="checkbox" checked={enabledOnly} onChange={(event) => setEnabledOnly(event.target.checked)} />
+            Enabled only
+          </label>
+        </div>
+      </div>
+
+      {isLoading ? <LoadingBlock label="Building today’s timeline…" compact /> : null}
+      {!isLoading && timeline.rows.length === 0 ? (
+        <div className="schedule-timeline-empty">
+          <strong>No clock-based schedules run today.</strong>
+          <span>Custom cron rules remain available in Schedule Definitions below.</span>
+        </div>
+      ) : (
+        <div ref={timelineScrollRef} className="schedule-timeline-scroll" tabIndex={0} aria-label="Scrollable 24-hour schedule timeline">
+          <div className="schedule-timeline-canvas">
+            <div className="schedule-timeline-corner">
+              <span>Scheduled automation</span>
+              <span>{visibleRows.length} shown</span>
+            </div>
+            <div className="schedule-timeline-hours" aria-hidden="true">
+              {Array.from({ length: 24 }, (_, hour) => (
+                <span key={hour}>{String(hour).padStart(2, "0")}:00</span>
+              ))}
+              <span className="schedule-now-marker schedule-now-marker-header" style={{ left: nowPosition }}>
+                <span>{nowLabel} now</span>
+              </span>
+            </div>
+
+            {visibleRows.map((row) => {
+              const widthMinutes = Math.min(Math.max(row.durationMinutes, 8), 1440 - row.minute);
+              const barStyle = {
+                "--timeline-start": `${(row.minute / 1440) * 100}%`,
+                "--timeline-width": `${(widthMinutes / 1440) * 100}%`,
+              } as CSSProperties;
+              return (
+                <div className="schedule-timeline-row" key={row.config.job_id}>
+                  <button className="schedule-timeline-task" type="button" onClick={() => onEdit(row.config)}>
+                    <span className="schedule-task-title">{row.config.job_label}</span>
+                    <span className="schedule-task-meta">{row.config.action_id} · {formatMinuteOfDay(row.minute)}</span>
+                  </button>
+                  <div className="schedule-timeline-track">
+                    <span className="schedule-now-marker" style={{ left: nowPosition }} aria-hidden="true" />
+                    <button
+                      className={`schedule-timeline-bar schedule-timeline-bar-${row.state}`}
+                      style={barStyle}
+                      type="button"
+                      onClick={() => onEdit(row.config)}
+                      aria-label={`Edit ${row.config.job_label}, ${timelineStateLabel(row.state)} at ${formatMinuteOfDay(row.minute)}`}
+                    >
+                      <span>{formatMinuteOfDay(row.minute)}</span>
+                      <span>{timelineBarDetail(row)}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <footer className="schedule-timeline-footer">
+        <span><strong>{maxParallelJobs || "—"}</strong> max parallel jobs</span>
+        <span>{timeline.customCount} custom or non-today rules shown below</span>
+        <span>Status uses the latest scheduler record; duration uses recent-run median.</span>
+      </footer>
+    </section>
+  );
+}
+
 function ScreenersSubnav({ activeMode }: { activeMode: RunsPageMode }) {
   const isSchedules = activeMode === "schedules";
 
   return (
     <section className="panel screeners-subnav-panel">
       <div className="screeners-subnav-copy">
-        <span className="eyebrow">Screeners Workspace</span>
+        {!isSchedules ? <span className="eyebrow">Screeners Workspace</span> : null}
         <h1>{isSchedules ? "Automation" : "Run Center"}</h1>
         <p className="panel-copy">
           {isSchedules
@@ -2150,6 +2350,144 @@ function describeScheduleCadence(cronExpr: string): string {
     return "Intraday cadence";
   }
   return "Custom cadence";
+}
+
+function findPrimaryScheduleTimezone(configs: ScheduledJobConfig[]): string {
+  const counts = new Map<string, number>();
+  configs.forEach((config) => counts.set(config.cron_tz, (counts.get(config.cron_tz) ?? 0) + 1));
+  return Array.from(counts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] || "America/New_York";
+}
+
+function buildScheduleTimeline(
+  configs: ScheduledJobConfig[],
+  summaries: ScheduledJobSummary[],
+  now: Date,
+  primaryTimezone: string,
+): { rows: ScheduleTimelineRow[]; customCount: number; nowMinute: number } {
+  const summaryByJobId = new Map(summaries.map((summary) => [summary.job_id, summary]));
+  const primaryParts = getZonedDateParts(now, primaryTimezone);
+  const nowMinute = primaryParts.hour * 60 + primaryParts.minute;
+  const rows: ScheduleTimelineRow[] = [];
+  let customCount = 0;
+
+  configs.forEach((config) => {
+    const clock = parseTimelineCron(config.cron_expr, now, config.cron_tz);
+    if (!clock) {
+      customCount += 1;
+      return;
+    }
+    const sourceOffset = getTimezoneOffsetMinutes(now, config.cron_tz);
+    const primaryOffset = getTimezoneOffsetMinutes(now, primaryTimezone);
+    const minute = normalizeMinuteOfDay(clock.hour * 60 + clock.minute - sourceOffset + primaryOffset);
+    const summary = summaryByJobId.get(config.job_id) ?? null;
+    const status = summary?.status ?? "unknown";
+    const ranToday = Boolean(summary?.last_started_at && isSameZonedDate(new Date(summary.last_started_at), now, config.cron_tz));
+    let state: TimelineRowState;
+    if (!config.enabled) {
+      state = "disabled";
+    } else if (status === "running" || status === "queued") {
+      state = "active";
+    } else if (ranToday && (status === "success" || status === "failed")) {
+      state = "finished";
+    } else if (minute > nowMinute) {
+      state = "upcoming";
+    } else {
+      state = "waiting";
+    }
+    rows.push({
+      config,
+      summary,
+      minute,
+      durationMinutes: Math.max((config.estimated_duration_seconds ?? 0) / 60, 8),
+      state,
+    });
+  });
+
+  rows.sort((left, right) => left.minute - right.minute || left.config.job_label.localeCompare(right.config.job_label));
+  return { rows, customCount, nowMinute };
+}
+
+function parseTimelineCron(cronExpr: string, now: Date, timezone: string): { hour: number; minute: number } | null {
+  const [minutePart, hourPart, dayOfMonth, month, dayOfWeek, ...extra] = cronExpr.trim().split(/\s+/);
+  if (extra.length || !/^\d{1,2}$/.test(minutePart) || !/^\d{1,2}$/.test(hourPart) || dayOfMonth !== "*" || month !== "*") {
+    return null;
+  }
+  const minute = Number(minutePart);
+  const hour = Number(hourPart);
+  if (minute > 59 || hour > 23 || !cronRunsOnZonedWeekday(dayOfWeek, now, timezone)) {
+    return null;
+  }
+  return { hour, minute };
+}
+
+function cronRunsOnZonedWeekday(dayOfWeek: string, now: Date, timezone: string): boolean {
+  if (dayOfWeek === "*") return true;
+  const weekdayName = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" }).format(now);
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekdayName);
+  if (dayOfWeek === "1-5") return weekday >= 1 && weekday <= 5;
+  return dayOfWeek.split(",").some((value) => Number(value) % 7 === weekday);
+}
+
+function getZonedDateParts(date: Date, timezone: string): { year: number; month: number; day: number; hour: number; minute: number; second: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return { year: value("year"), month: value("month"), day: value("day"), hour: value("hour"), minute: value("minute"), second: value("second") };
+}
+
+function getTimezoneOffsetMinutes(date: Date, timezone: string): number {
+  const parts = getZonedDateParts(date, timezone);
+  const zonedTimestamp = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return Math.round((zonedTimestamp - date.getTime()) / 60_000);
+}
+
+function isSameZonedDate(left: Date, right: Date, timezone: string): boolean {
+  const leftParts = getZonedDateParts(left, timezone);
+  const rightParts = getZonedDateParts(right, timezone);
+  return leftParts.year === rightParts.year && leftParts.month === rightParts.month && leftParts.day === rightParts.day;
+}
+
+function normalizeMinuteOfDay(value: number): number {
+  return ((value % 1440) + 1440) % 1440;
+}
+
+function formatMinuteOfDay(value: number): string {
+  const normalized = normalizeMinuteOfDay(Math.round(value));
+  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
+}
+
+function formatTimelineDate(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" }).format(date);
+}
+
+function timelineStateLabel(state: TimelineRowState): string {
+  if (state === "active") return "active";
+  if (state === "finished") return "finished";
+  if (state === "upcoming") return "upcoming";
+  if (state === "waiting") return "awaiting scheduler status";
+  return "paused";
+}
+
+function timelineBarDetail(row: ScheduleTimelineRow): string {
+  if (row.state === "active") return row.summary?.status === "queued" ? "Queued" : "Running";
+  if (row.state === "finished") {
+    if (row.summary?.status === "failed") return "Failed";
+    const startedAt = row.summary?.last_started_at ? new Date(row.summary.last_started_at).getTime() : 0;
+    const finishedAt = row.summary?.last_finished_at ? new Date(row.summary.last_finished_at).getTime() : 0;
+    const actualSeconds = startedAt && finishedAt ? Math.max(0, Math.round((finishedAt - startedAt) / 1000)) : 0;
+    return actualSeconds ? formatEstimatedDuration(actualSeconds).replace("~", "") : "Finished";
+  }
+  if (row.state === "upcoming") return formatEstimatedDuration(row.config.estimated_duration_seconds);
+  if (row.state === "waiting") return "Awaiting status";
+  return "Paused";
 }
 
 function formatEstimatedDuration(seconds: number | null | undefined): string {
