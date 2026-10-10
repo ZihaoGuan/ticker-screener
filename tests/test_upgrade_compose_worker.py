@@ -34,7 +34,7 @@ def _run_script(tmp_path: Path, *, active_jobs: int) -> subprocess.CompletedProc
         "#!/bin/sh\n"
         "echo \"$*|$TICKER_SCREENER_IMAGE_TAG\" >> \"$CALL_LOG\"\n"
         "if [ \"$1\" = \"exec\" ]; then printf '%s\\n' \"$ACTIVE_JOBS\"; exit 0; fi\n"
-        "if [ \"$1 $2 $3\" = \"ps -q worker\" ]; then printf '%s\\n' worker-container-id; exit 0; fi\n"
+        "if [ \"$1 $2 $3 $4\" = \"ps -q worker worker_parallel\" ]; then printf '%s\\n' worker-container-id parallel-worker-container-id; exit 0; fi\n"
         "if [ \"$1\" = \"up\" ]; then exit 0; fi\n"
         "exit 99\n",
     )
@@ -58,13 +58,14 @@ class UpgradeComposeWorkerTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             calls = (tmp_path / "calls.log").read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(calls), 6)
+            self.assertEqual(len(calls), 7)
             self.assertEqual(calls[0], "compose version|")
             self.assertEqual(calls[1], "image inspect ticker-screener:80663d4|")
             self.assertIn("exec -T db", calls[2])
-            self.assertEqual(calls[3], "ps -q worker|")
+            self.assertEqual(calls[3], "ps -q worker worker_parallel|")
             self.assertEqual(calls[4], "rm -f worker-container-id|")
-            self.assertEqual(calls[5], "up -d --no-deps worker|80663d4")
+            self.assertEqual(calls[5], "rm -f parallel-worker-container-id|")
+            self.assertEqual(calls[6], "up -d --no-deps worker worker_parallel|80663d4")
 
     def test_refuses_worker_upgrade_until_drain_is_complete(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

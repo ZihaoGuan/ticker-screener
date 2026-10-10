@@ -65,15 +65,19 @@ class DeployComposeServicesTest(unittest.TestCase):
         compose = (PROJECT_ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
 
         self.assertIn("\n  worker:\n", compose)
+        self.assertIn("\n  worker_parallel:\n", compose)
         self.assertIn('"scripts/run_remote_worker.py"', compose)
+        self.assertIn('"primary-worker"', compose)
+        self.assertIn('"parallel-worker"', compose)
         self.assertIn("image: ticker-screener:${TICKER_SCREENER_IMAGE_TAG:-dev}", compose)
         self.assertNotIn("- ..:/app", compose)
-        self.assertEqual(compose.count("- ../config:/app/config"), 2)
+        self.assertEqual(compose.count("- ../config:/app/config"), 3)
 
     def test_web_deploy_starts_but_does_not_recreate_worker(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
         self.assertIn("docker-compose up -d --no-recreate worker", workflow)
+        self.assertIn("worker worker_parallel", workflow)
         self.assertIn("docker build --build-arg CODE_VERSION", workflow)
         self.assertIn("TICKER_SCREENER_IMAGE_TAG=\"${IMAGE_TAG}\"", workflow)
         self.assertIn("MIGRATE_WORKER_IMAGE=false", workflow)

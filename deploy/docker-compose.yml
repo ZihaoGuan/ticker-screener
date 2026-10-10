@@ -60,6 +60,25 @@ services:
       db:
         condition: service_healthy
 
+  worker_parallel:
+    image: ticker-screener:${TICKER_SCREENER_IMAGE_TAG:-dev}
+    restart: unless-stopped
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      TICKER_SCREENER_DATABASE_URL: ${TICKER_SCREENER_DATABASE_URL}
+      TICKER_SCREENER_ARTIFACTS_DIR: /artifacts
+      TICKER_SCREENER_OUTPUT_DIR: /artifacts/output
+      PLAYWRIGHT_EXECUTABLE_PATH: /usr/bin/chromium
+    command: ["python", "scripts/run_remote_worker.py", "--worker-name", "parallel-worker"]
+    volumes:
+      - ../config:/app/config
+      - ../artifacts:/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+
   caddy:
     image: caddy:2
     restart: unless-stopped
