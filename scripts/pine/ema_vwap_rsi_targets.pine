@@ -1,0 +1,138 @@
+//@version=5
+indicator("9/20 Crossover + VWAP + Golden + RSI", shorttitle="9/20 Targets", overlay=true, max_lines_count=4, max_labels_count=500)
+
+targetLookback = input.int(500, "Target Lookback", minval=1, maxval=500)
+showTargetLabels = input.bool(true, "Show Target Price Labels")
+rsiLength = input.int(14, "RSI Length", minval=1, maxval=200, group="RSI")
+overbought = input.float(73.5, "Overbought", minval=50, maxval=100, step=0.5, group="RSI")
+oversold = input.float(23, "Oversold", minval=0, maxval=50, step=0.5, group="RSI")
+highLowLookback = input.int(230, "Candle Lookback", minval=1, maxval=230, group="High/Low Labels")
+showHighLowLabels = input.bool(true, "Show Labels", group="High/Low Labels")
+useSmallFont = input.bool(false, "Use Small Font for High/Low Labels", group="High/Low Labels")
+useShadedColor = input.bool(true, "Use Red/Green Label Background", group="High/Low Labels")
+
+ema9 = ta.ema(close, 9)
+ema20 = ta.ema(close, 20)
+ema150 = ta.ema(close, 150)
+ema500 = ta.ema(close, 500)
+vwapValue = ta.vwap(hlc3)
+crossUp = ta.crossover(ema9, ema20)
+crossDown = ta.crossover(ema20, ema9)
+aboveEma = close > ema9 and close > ema20
+belowEma = close < ema9 and close < ema20
+
+var array<float> bullValues = array.new_float(0)
+var array<float> bearValues = array.new_float(0)
+var array<float> bullCrossOpens = array.new_float(0)
+var array<float> bearCrossOpens = array.new_float(0)
+
+if bar_index >= targetLookback
+    array.clear(bullValues)
+    array.clear(bearValues)
+    array.clear(bullCrossOpens)
+    array.clear(bearCrossOpens)
+    for i = 0 to targetLookback
+        if aboveEma[i]
+            array.push(bullValues, close[i])
+        if belowEma[i]
+            array.push(bearValues, close[i])
+        if crossUp[i]
+            array.push(bullValues, close[i])
+            array.push(bullCrossOpens, open[i])
+        if crossDown[i]
+            array.push(bearValues, close[i])
+            array.push(bearCrossOpens, open[i])
+
+bullMax = array.size(bullValues) > 0 ? array.max(bullValues) : na
+bullAverage = array.size(bullValues) > 0 ? array.avg(bullValues) : na
+bearMin = array.size(bearValues) > 0 ? array.min(bearValues) : na
+bearAverage = array.size(bearValues) > 0 ? array.avg(bearValues) : na
+
+float bullTargetOne = na
+float bullTargetTwo = na
+float bearTargetOne = na
+float bearTargetTwo = na
+
+if crossUp and array.size(bullCrossOpens) > 0 and not na(bullMax) and not na(bullAverage)
+    bullEntry = array.get(bullCrossOpens, 0)
+    bullTargetOne := bullEntry + (bullMax - bullAverage) / 2
+    bullTargetTwo := bullEntry + (bullMax - bullAverage)
+if crossDown and array.size(bearCrossOpens) > 0 and not na(bearMin) and not na(bearAverage)
+    bearEntry = array.get(bearCrossOpens, 0)
+    bearTargetOne := bearEntry - (bearAverage - bearMin) / 2
+    bearTargetTwo := bearEntry - (bearAverage - bearMin)
+
+var line bullLineOne = na
+var line bullLineTwo = na
+var line bearLineOne = na
+var line bearLineTwo = na
+var label bullLabelOne = na
+var label bullLabelTwo = na
+var label bearLabelOne = na
+var label bearLabelTwo = na
+
+if crossUp and not na(bullTargetOne) and not na(bullTargetTwo)
+    line.delete(bullLineOne)
+    line.delete(bullLineTwo)
+    label.delete(bullLabelOne)
+    label.delete(bullLabelTwo)
+    bullLineOne := line.new(bar_index, bullTargetOne, bar_index + targetLookback, bullTargetOne, color=color.green, width=1)
+    bullLineTwo := line.new(bar_index, bullTargetTwo, bar_index + targetLookback, bullTargetTwo, color=color.green, width=1)
+    if showTargetLabels
+        bullLabelOne := label.new(bar_index + targetLookback, bullTargetOne, "Target 1: " + str.tostring(bullTargetOne, format.mintick), color=color.green, textcolor=color.white, style=label.style_label_left)
+        bullLabelTwo := label.new(bar_index + targetLookback, bullTargetTwo, "Target 2: " + str.tostring(bullTargetTwo, format.mintick), color=color.green, textcolor=color.white, style=label.style_label_left)
+if crossDown and not na(bearTargetOne) and not na(bearTargetTwo)
+    line.delete(bearLineOne)
+    line.delete(bearLineTwo)
+    label.delete(bearLabelOne)
+    label.delete(bearLabelTwo)
+    bearLineOne := line.new(bar_index, bearTargetOne, bar_index + targetLookback, bearTargetOne, color=color.red, width=1)
+    bearLineTwo := line.new(bar_index, bearTargetTwo, bar_index + targetLookback, bearTargetTwo, color=color.red, width=1)
+    if showTargetLabels
+        bearLabelOne := label.new(bar_index + targetLookback, bearTargetOne, "Target 1: " + str.tostring(bearTargetOne, format.mintick), color=color.red, textcolor=color.white, style=label.style_label_left)
+        bearLabelTwo := label.new(bar_index + targetLookback, bearTargetTwo, "Target 2: " + str.tostring(bearTargetTwo, format.mintick), color=color.red, textcolor=color.white, style=label.style_label_left)
+
+plot(ema9, "EMA 9", color=color.lime, linewidth=2)
+plot(ema20, "EMA 20", color=color.red, linewidth=2)
+plot(ema150, "EMA 150", color=color.blue, linewidth=2)
+plot(ema500, "EMA 500", color=color.orange, linewidth=2)
+plot(vwapValue, "VWAP", color=color.yellow, linewidth=2)
+plotshape(crossUp, "Bullish crossover", shape.triangleup, location.belowbar, color=color.lime, size=size.small)
+plotshape(crossDown, "Bearish crossover", shape.triangledown, location.abovebar, color=color.red, size=size.small)
+
+goldenCross = ta.crossover(ema150, ema500)
+deathCross = ta.crossover(ema500, ema150)
+plotshape(goldenCross, "Golden cross", shape.labelup, location.belowbar, color=color.yellow, text="Golden")
+plotshape(deathCross, "Death cross", shape.labeldown, location.abovebar, color=color.orange, text="Death")
+ema9Plot = plot(ema9, "EMA 9 fill", color=color.new(color.lime, 100))
+ema20Plot = plot(ema20, "EMA 20 fill", color=color.new(color.red, 100))
+fill(ema9Plot, ema20Plot, color=ema9 > ema20 ? color.new(color.green, 90) : color.new(color.red, 90))
+
+var array<label> highLowLabels = array.new<label>(0)
+if barstate.islast
+    for storedLabel in highLowLabels
+        label.delete(storedLabel)
+    array.clear(highLowLabels)
+    if showHighLowLabels
+        labelSize = useSmallFont ? size.small : size.normal
+        highColor = useShadedColor ? color.new(color.red, 80) : color.white
+        lowColor = useShadedColor ? color.new(color.green, 80) : color.white
+        for i = 0 to highLowLookback - 1
+            if not na(high[i]) and not na(low[i])
+                highLabel = label.new(bar_index - i, high[i], str.format("{0,number,#.##}", high[i]), style=label.style_label_down, color=highColor, textcolor=color.red, size=labelSize)
+                lowLabel = label.new(bar_index - i, low[i], str.format("{0,number,#.##}", low[i]), style=label.style_label_up, color=lowColor, textcolor=color.green, size=labelSize)
+                array.push(highLowLabels, highLabel)
+                array.push(highLowLabels, lowLabel)
+
+priceChange = close - close[1]
+upChange = math.max(priceChange, 0)
+downChange = math.max(-priceChange, 0)
+var float upSum = 0
+var float downSum = 0
+upSum := nz(upSum[1]) - nz(upChange[rsiLength]) + upChange
+downSum := nz(downSum[1]) - nz(downChange[rsiLength]) + downChange
+rsi = downSum == 0 ? 100 : upSum == 0 ? 0 : 100 - 100 / (1 + upSum / downSum)
+barcolor(rsi > overbought ? color.red : rsi < oversold ? color.green : na)
+
+alertcondition(crossUp, "Bullish Crossover", "EMA 9 crossed above EMA 20")
+alertcondition(crossDown, "Bearish Crossover", "EMA 9 crossed below EMA 20")

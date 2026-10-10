@@ -1,6 +1,7 @@
 import { Vela } from "@luxalgo/vela";
 import { PineWorkerEngine } from "@luxalgo/vela-pinets";
 import { useEffect, useMemo, useRef, useState } from "react";
+import emaVwapRsiTargetsSource from "../../../scripts/pine/ema_vwap_rsi_targets.pine?raw";
 import marketOverextendedSource from "../../../scripts/pine/market_overextended_indicator.pine?raw";
 import priceOverlaysSource from "../../../scripts/pine/ticker_screener_price_overlays.pine?raw";
 import relativeStrengthSource from "../../../scripts/pine/ticker_screener_relative_strength.pine?raw";
@@ -12,11 +13,12 @@ type VelaPriceChartProps = Pick<PriceChartProps, "ticker" | "candles" | "overlay
 };
 
 type PineStatus = "starting" | "ready" | "error" | "disabled";
-type IndicatorKey = "extension" | "priceOverlays" | "relativeStrength";
+type IndicatorKey = "extension" | "priceOverlays" | "relativeStrength" | "emaVwapRsi";
 
 const MARKET_OVEREXTENDED_ID = "ticker-screener-market-overextended";
 const PRICE_OVERLAYS_ID = "ticker-screener-price-overlays";
 const RELATIVE_STRENGTH_ID = "ticker-screener-relative-strength";
+const EMA_VWAP_RSI_TARGETS_ID = "ticker-screener-ema-vwap-rsi-targets";
 const RELATIVE_STRENGTH_BENCHMARK_PLACEHOLDER = "__TICKER_SCREENER_BENCHMARK__";
 
 function buildRelativeStrengthSource(benchmarkTicker: string): string {
@@ -36,10 +38,12 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
   const [isPineEnabled, setIsPineEnabled] = useState(true);
   const [arePriceOverlaysEnabled, setArePriceOverlaysEnabled] = useState(true);
   const [isRelativeStrengthEnabled, setIsRelativeStrengthEnabled] = useState(true);
+  const [isEmaVwapRsiEnabled, setIsEmaVwapRsiEnabled] = useState(false);
   const [indicatorStatuses, setIndicatorStatuses] = useState<Record<IndicatorKey, PineStatus>>({
     extension: "starting",
     priceOverlays: "starting",
     relativeStrength: "starting",
+    emaVwapRsi: "disabled",
   });
   const [indicatorErrors, setIndicatorErrors] = useState<Partial<Record<IndicatorKey, string>>>({});
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
@@ -81,12 +85,14 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
         ...(isPineEnabled ? [{ key: "extension" as const, id: MARKET_OVEREXTENDED_ID, source: marketOverextendedSource, title: "Market Overextended Monitor" }] : []),
         ...(arePriceOverlaysEnabled ? [{ key: "priceOverlays" as const, id: PRICE_OVERLAYS_ID, source: priceOverlaysSource, title: "Ticker Screener Price Overlays" }] : []),
         ...(isRelativeStrengthEnabled ? [{ key: "relativeStrength" as const, id: RELATIVE_STRENGTH_ID, source: configuredRelativeStrengthSource, title: `Relative Strength vs ${benchmarkTicker}` }] : []),
+        ...(isEmaVwapRsiEnabled ? [{ key: "emaVwapRsi" as const, id: EMA_VWAP_RSI_TARGETS_ID, source: emaVwapRsiTargetsSource, title: "9/20 + VWAP + RSI targets" }] : []),
       ];
       const disabledStatuses: Partial<Record<IndicatorKey, PineStatus>> = {};
       if (!isPineEnabled) disabledStatuses.extension = "disabled";
       if (!arePriceOverlaysEnabled) disabledStatuses.priceOverlays = "disabled";
       if (!isRelativeStrengthEnabled) disabledStatuses.relativeStrength = "disabled";
-      setIndicatorStatuses({ extension: "starting", priceOverlays: "starting", relativeStrength: "starting", ...disabledStatuses });
+      if (!isEmaVwapRsiEnabled) disabledStatuses.emaVwapRsi = "disabled";
+      setIndicatorStatuses({ extension: "starting", priceOverlays: "starting", relativeStrength: "starting", emaVwapRsi: "starting", ...disabledStatuses });
       setIndicatorErrors({});
 
       void Promise.all([chart.ready(), chart.data.ready()]).then(async () => {
@@ -128,7 +134,7 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
         chartRef.current = null;
       }
     };
-  }, [arePriceOverlaysEnabled, benchmarkTicker, configuredRelativeStrengthSource, isPineEnabled, isRelativeStrengthEnabled, latestCandleTime, onUnavailable, ticker]);
+  }, [arePriceOverlaysEnabled, benchmarkTicker, configuredRelativeStrengthSource, isEmaVwapRsiEnabled, isPineEnabled, isRelativeStrengthEnabled, latestCandleTime, onUnavailable, ticker]);
 
   return (
     <div className="vela-chart-stack">
@@ -150,17 +156,21 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
           <input type="checkbox" checked={isRelativeStrengthEnabled} onChange={(event) => setIsRelativeStrengthEnabled(event.target.checked)} />
           <span>RS vs {benchmarkTicker}</span>
         </label>
+        <label className="chart-toggle">
+          <input type="checkbox" checked={isEmaVwapRsiEnabled} onChange={(event) => setIsEmaVwapRsiEnabled(event.target.checked)} />
+          <span>9/20 + VWAP + RSI targets</span>
+        </label>
       </div>
       <div className="vela-pine-statuses" aria-live="polite">
-        {(["extension", "priceOverlays", "relativeStrength"] as IndicatorKey[]).map((key) => (
+        {(["extension", "priceOverlays", "relativeStrength", "emaVwapRsi"] as IndicatorKey[]).map((key) => (
           <span key={key} className={`vela-pine-status is-${indicatorStatuses[key]}`}>
-            {key === "extension" ? "Extension" : key === "priceOverlays" ? "Price overlays" : "RS"}: {indicatorStatuses[key] === "starting" ? "loading" : indicatorStatuses[key]}
+            {key === "extension" ? "Extension" : key === "priceOverlays" ? "Price overlays" : key === "relativeStrength" ? "RS" : "9/20 targets"}: {indicatorStatuses[key] === "starting" ? "loading" : indicatorStatuses[key]}
           </span>
         ))}
       </div>
       {Object.entries(indicatorErrors).map(([key, message]) => <p className="vela-pine-error" key={key}>{message}</p>)}
       <div ref={rootRef} className="vela-chart-root" aria-label={`${ticker} Vela chart`} />
-      <p className="panel-copy vela-preview-note">Vela uses ticker-screener daily OHLCV for candles and Pine secondary-series requests. This preview now includes EMA 8/21, SMA 50/200, and RS versus {benchmarkTicker}; advanced annotations remain in Current.</p>
+      <p className="panel-copy vela-preview-note">Vela uses ticker-screener daily OHLCV for candles and Pine secondary-series requests. This preview now includes EMA 8/21, SMA 50/200, RS versus {benchmarkTicker}, and optional 9/20 + VWAP + RSI targets; advanced annotations remain in Current.</p>
     </div>
   );
 }

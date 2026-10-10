@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "validate:pine-indicator": "node scripts/validate_ema_vwap_rsi_targets.mjs",
     "probe:yahoo": "node scripts/probe_yahoo_playwright.mjs",
     "probe:yahoo-options": "node scripts/probe_yahoo_options_playwright.mjs"
   },
