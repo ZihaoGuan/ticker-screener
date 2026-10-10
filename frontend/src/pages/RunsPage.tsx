@@ -1879,6 +1879,12 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 
 type TimelineRowState = "active" | "finished" | "upcoming" | "waiting" | "disabled";
 
+const MARKET_OPEN_MINUTE_ET = 9 * 60 + 30;
+const MARKET_CLOSE_MINUTE_ET = 16 * 60;
+const VISIBLE_TIMELINE_MINUTES = 24 * 60 - (MARKET_CLOSE_MINUTE_ET - MARKET_OPEN_MINUTE_ET);
+const TIMELINE_TRACK_WIDTH = 1400;
+const TIMELINE_HOUR_MARKS = [...Array.from({ length: 10 }, (_, hour) => hour), ...Array.from({ length: 8 }, (_, index) => index + 16)];
+
 type ScheduleTimelineRow = {
   config: ScheduledJobConfig;
   summary: ScheduledJobSummary | null;
@@ -1933,13 +1939,15 @@ function ScheduleTimeline({
     },
     { active: 0, finished: 0, upcoming: 0, waiting: 0, disabled: 0 } as Record<TimelineRowState, number>,
   );
-  const nowPosition = `${(timeline.nowMinute / 1440) * 100}%`;
+  const visibleNowMinute = toVisibleTimelineMinute(timeline.nowMinute);
+  const scrollAnchorMinute = visibleNowMinute ?? MARKET_OPEN_MINUTE_ET;
+  const nowPosition = visibleNowMinute == null ? null : `${(visibleNowMinute / VISIBLE_TIMELINE_MINUTES) * 100}%`;
   const nowLabel = formatMinuteOfDay(timeline.nowMinute);
   const scrollToNow = () => {
     const viewport = timelineScrollRef.current;
     if (!viewport) return;
     const labelColumnWidth = viewport.clientWidth <= 768 ? 236 : 300;
-    const target = labelColumnWidth + (timeline.nowMinute / 1440) * 1536 - viewport.clientWidth / 2;
+    const target = labelColumnWidth + (scrollAnchorMinute / VISIBLE_TIMELINE_MINUTES) * TIMELINE_TRACK_WIDTH - viewport.clientWidth / 2;
     viewport.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
   };
 
@@ -1950,7 +1958,7 @@ function ScheduleTimeline({
       const viewport = timelineScrollRef.current;
       if (!viewport) return;
       const labelColumnWidth = viewport.clientWidth <= 768 ? 236 : 300;
-      const target = labelColumnWidth + (timeline.nowMinute / 1440) * 1536 - viewport.clientWidth / 2;
+      const target = labelColumnWidth + (scrollAnchorMinute / VISIBLE_TIMELINE_MINUTES) * TIMELINE_TRACK_WIDTH - viewport.clientWidth / 2;
       viewport.scrollLeft = Math.max(0, target);
     });
   }, [isLoading, visibleRows.length]);
@@ -1961,7 +1969,7 @@ function ScheduleTimeline({
         <div>
           <h2 id="schedule-timeline-title">Today’s Automation Timeline</h2>
           <p>
-            {formatTimelineDate(now, primaryTimezone)} · {primaryTimezone} · quarter-hour grid
+            {formatTimelineDate(now, primaryTimezone)} · {primaryTimezone} · 09:30–16:00 market session hidden
           </p>
         </div>
         <div className="button-row">
@@ -1979,7 +1987,9 @@ function ScheduleTimeline({
           {counts.disabled ? <span className="timeline-stat"><span aria-hidden="true" />{counts.disabled} paused</span> : null}
         </div>
         <div className="schedule-timeline-filters">
-          <button className="ghost-button schedule-now-button" type="button" onClick={scrollToNow}>Jump to now</button>
+          <button className="ghost-button schedule-now-button" type="button" onClick={scrollToNow}>
+            {visibleNowMinute == null ? "Jump to 16:00" : "Jump to now"}
+          </button>
           <label className="schedule-search-field">
             <span className="visually-hidden">Filter scheduled tasks</span>
             <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter task or screener" />
@@ -1998,26 +2008,34 @@ function ScheduleTimeline({
           <span>Custom cron rules remain available in Schedule Definitions below.</span>
         </div>
       ) : (
-        <div ref={timelineScrollRef} className="schedule-timeline-scroll" tabIndex={0} aria-label="Scrollable 24-hour schedule timeline">
+        <div ref={timelineScrollRef} className="schedule-timeline-scroll" tabIndex={0} aria-label="Scrollable schedule timeline with regular US market hours hidden">
           <div className="schedule-timeline-canvas">
             <div className="schedule-timeline-corner">
               <span>Scheduled automation</span>
               <span>{visibleRows.length} shown</span>
             </div>
             <div className="schedule-timeline-hours" aria-hidden="true">
-              {Array.from({ length: 24 }, (_, hour) => (
-                <span key={hour}>{String(hour).padStart(2, "0")}:00</span>
+              {TIMELINE_HOUR_MARKS.map((hour) => (
+                <span className="schedule-timeline-hour" style={{ left: `${(toVisibleTimelineMinute(hour * 60)! / VISIBLE_TIMELINE_MINUTES) * 100}%` }} key={hour}>
+                  {String(hour).padStart(2, "0")}:00
+                </span>
               ))}
-              <span className="schedule-now-marker schedule-now-marker-header" style={{ left: nowPosition }}>
-                <span>{nowLabel} now</span>
+              <span className="schedule-market-hours-break" style={{ left: `${(MARKET_OPEN_MINUTE_ET / VISIBLE_TIMELINE_MINUTES) * 100}%` }}>
+                <span>09:30–16:00 hidden</span>
               </span>
+              {nowPosition ? (
+                <span className="schedule-now-marker schedule-now-marker-header" style={{ left: nowPosition }}>
+                  <span>{nowLabel} now</span>
+                </span>
+              ) : null}
             </div>
 
             {visibleRows.map((row) => {
-              const widthMinutes = Math.min(Math.max(row.durationMinutes, 8), 1440 - row.minute);
+              const visibleMinute = toVisibleTimelineMinute(row.minute)!;
+              const widthMinutes = getVisibleTimelineDuration(row.minute, row.durationMinutes);
               const barStyle = {
-                "--timeline-start": `${(row.minute / 1440) * 100}%`,
-                "--timeline-width": `${(widthMinutes / 1440) * 100}%`,
+                "--timeline-start": `${(visibleMinute / VISIBLE_TIMELINE_MINUTES) * 100}%`,
+                "--timeline-width": `${(widthMinutes / VISIBLE_TIMELINE_MINUTES) * 100}%`,
               } as CSSProperties;
               return (
                 <div className="schedule-timeline-row" key={row.config.job_id}>
@@ -2026,7 +2044,7 @@ function ScheduleTimeline({
                     <span className="schedule-task-meta">{row.config.action_id} · {formatMinuteOfDay(row.minute)}</span>
                   </button>
                   <div className="schedule-timeline-track">
-                    <span className="schedule-now-marker" style={{ left: nowPosition }} aria-hidden="true" />
+                    {nowPosition ? <span className="schedule-now-marker" style={{ left: nowPosition }} aria-hidden="true" /> : null}
                     <button
                       className={`schedule-timeline-bar schedule-timeline-bar-${row.state}`}
                       style={barStyle}
@@ -2048,6 +2066,7 @@ function ScheduleTimeline({
       <footer className="schedule-timeline-footer">
         <span><strong>{maxParallelJobs || "—"}</strong> max parallel jobs</span>
         <span>{timeline.customCount} custom or non-today rules shown below</span>
+        {timeline.marketHoursHiddenCount ? <span>{timeline.marketHoursHiddenCount} market-hour schedules hidden</span> : null}
         <span>Status uses the latest scheduler record; duration uses recent-run median.</span>
       </footer>
     </section>
@@ -2363,12 +2382,13 @@ function buildScheduleTimeline(
   summaries: ScheduledJobSummary[],
   now: Date,
   primaryTimezone: string,
-): { rows: ScheduleTimelineRow[]; customCount: number; nowMinute: number } {
+): { rows: ScheduleTimelineRow[]; customCount: number; marketHoursHiddenCount: number; nowMinute: number } {
   const summaryByJobId = new Map(summaries.map((summary) => [summary.job_id, summary]));
   const primaryParts = getZonedDateParts(now, primaryTimezone);
   const nowMinute = primaryParts.hour * 60 + primaryParts.minute;
   const rows: ScheduleTimelineRow[] = [];
   let customCount = 0;
+  let marketHoursHiddenCount = 0;
 
   configs.forEach((config) => {
     const clock = parseTimelineCron(config.cron_expr, now, config.cron_tz);
@@ -2379,6 +2399,10 @@ function buildScheduleTimeline(
     const sourceOffset = getTimezoneOffsetMinutes(now, config.cron_tz);
     const primaryOffset = getTimezoneOffsetMinutes(now, primaryTimezone);
     const minute = normalizeMinuteOfDay(clock.hour * 60 + clock.minute - sourceOffset + primaryOffset);
+    if (isRegularMarketMinute(minute)) {
+      marketHoursHiddenCount += 1;
+      return;
+    }
     const summary = summaryByJobId.get(config.job_id) ?? null;
     const status = summary?.status ?? "unknown";
     const ranToday = Boolean(summary?.last_started_at && isSameZonedDate(new Date(summary.last_started_at), now, config.cron_tz));
@@ -2404,7 +2428,24 @@ function buildScheduleTimeline(
   });
 
   rows.sort((left, right) => left.minute - right.minute || left.config.job_label.localeCompare(right.config.job_label));
-  return { rows, customCount, nowMinute };
+  return { rows, customCount, marketHoursHiddenCount, nowMinute };
+}
+
+function isRegularMarketMinute(minute: number): boolean {
+  return minute >= MARKET_OPEN_MINUTE_ET && minute < MARKET_CLOSE_MINUTE_ET;
+}
+
+function toVisibleTimelineMinute(minute: number): number | null {
+  if (isRegularMarketMinute(minute)) return null;
+  if (minute >= MARKET_CLOSE_MINUTE_ET) {
+    return minute - (MARKET_CLOSE_MINUTE_ET - MARKET_OPEN_MINUTE_ET);
+  }
+  return minute;
+}
+
+function getVisibleTimelineDuration(startMinute: number, durationMinutes: number): number {
+  const visibleWindowEnd = startMinute < MARKET_OPEN_MINUTE_ET ? MARKET_OPEN_MINUTE_ET : 24 * 60;
+  return Math.max(1, Math.min(Math.max(durationMinutes, 8), visibleWindowEnd - startMinute));
 }
 
 function parseTimelineCron(cronExpr: string, now: Date, timezone: string): { hour: number; minute: number } | null {

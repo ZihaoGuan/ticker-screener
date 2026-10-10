@@ -621,8 +621,8 @@
 
 .schedule-timeline-canvas {
   display: grid;
-  grid-template-columns: 300px minmax(1536px, 1fr);
-  min-width: 1836px;
+  grid-template-columns: 300px minmax(1400px, 1fr);
+  min-width: 1700px;
 }
 
 .schedule-timeline-corner,
@@ -658,24 +658,27 @@
 }
 
 .schedule-timeline-hours {
-  display: grid;
-  grid-template-columns: repeat(24, minmax(64px, 1fr));
   overflow: hidden;
+  position: relative;
   position: sticky;
 }
 
-.schedule-timeline-hours > span:not(.schedule-now-marker) {
+.schedule-timeline-hour {
   border-left: 1px solid var(--color-line);
   color: var(--color-text-muted);
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
+  height: 100%;
   padding: 11px 6px 0;
+  position: absolute;
+  top: 0;
+  width: 80px;
 }
 
 .schedule-timeline-row {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: 300px minmax(1536px, 1fr);
+  grid-template-columns: 300px minmax(1400px, 1fr);
   min-height: 58px;
 }
 
@@ -727,9 +730,39 @@
   background-image:
     linear-gradient(to right, var(--color-line) 1px, transparent 1px),
     linear-gradient(to right, rgba(63, 63, 70, 0.38) 1px, transparent 1px);
-  background-size: 64px 100%, 16px 100%;
+  background-size: 80px 100%, 20px 100%;
   border-bottom: 1px solid var(--color-line);
   position: relative;
+}
+
+.schedule-timeline-track::after,
+.schedule-market-hours-break {
+  border-left: 2px solid var(--color-text-dim);
+  border-right: 2px solid var(--color-text-dim);
+  content: "";
+  height: 100%;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transform: translateX(-2px);
+  width: 5px;
+  z-index: 2;
+}
+
+.schedule-timeline-track::after {
+  left: 54.2857%;
+}
+
+.schedule-market-hours-break span {
+  background: var(--color-surface-muted);
+  color: var(--color-text-dim);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  left: 8px;
+  padding: 2px 5px;
+  position: absolute;
+  top: 34px;
+  white-space: nowrap;
 }
 
 .schedule-now-marker {
@@ -1053,11 +1086,11 @@
 
   .schedule-timeline-canvas,
   .schedule-timeline-row {
-    grid-template-columns: 236px minmax(1536px, 1fr);
+    grid-template-columns: 236px minmax(1400px, 1fr);
   }
 
   .schedule-timeline-canvas {
-    min-width: 1772px;
+    min-width: 1636px;
   }
 
   .schedule-task-title,
