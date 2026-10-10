@@ -120,4 +120,8 @@ jobs:
               ../scripts/upgrade_compose_worker.sh "${IMAGE_TAG}"
             fi
             TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" ../scripts/deploy_compose_services.sh ${COMPOSE_COMMAND}
+            mkdir -p ../artifacts/status
+            nohup ../scripts/upgrade_compose_worker_when_drained.sh "${IMAGE_TAG}" \
+              >> "../artifacts/status/worker-upgrade-${IMAGE_TAG}.log" 2>&1 < /dev/null &
+            echo "Scheduled automatic worker release for ${IMAGE_TAG} after drain."
             docker-compose ps

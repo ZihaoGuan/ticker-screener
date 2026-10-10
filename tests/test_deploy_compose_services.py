@@ -87,6 +87,8 @@ class DeployComposeServicesTest(unittest.TestCase):
         self.assertIn("MIGRATE_WORKER_IMAGE=false", workflow)
         self.assertIn("sh scripts/check_active_remote_jobs.sh", workflow)
         self.assertIn("scripts/upgrade_compose_worker.sh", workflow)
+        self.assertIn("scripts/upgrade_compose_worker_when_drained.sh", workflow)
+        self.assertIn("Scheduled automatic worker release", workflow)
 
     def test_legacy_compose_recovers_from_container_config_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
