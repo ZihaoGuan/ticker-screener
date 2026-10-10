@@ -379,6 +379,12 @@ class _FakeAdminService:
     def remove_missing_finviz_ticker(self, *, ticker: str):
         return {"ticker": ticker.upper(), "removed_entry": {"ticker": ticker.upper()}}
 
+    def get_scheduled_job_log(self, *, job_id: str, cursor: int | None = None):
+        if job_id != "daily_rs":
+            raise ValueError("Scheduled job was not found.")
+        _ = cursor
+        return {"available": True, "text": "running\n", "next_cursor": 8, "truncated": False, "reset": False, "status": "running"}
+
 
 class _FakeUserAdminService:
     def list_users(self):
@@ -1637,6 +1643,18 @@ class ApiAdHocScreenTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["transaction"]["side"], "sell")
         self.assertEqual(payload["transaction"]["position_id"], 1)
+
+    def test_admin_can_read_scheduled_job_log(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.get("/api/admin/scheduled-jobs/daily_rs/log")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["text"], "running\n")
 
     def test_admin_can_access_my_picks(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(

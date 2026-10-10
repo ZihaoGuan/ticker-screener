@@ -1412,6 +1412,19 @@ def scheduled_jobs_data(
     return JSONResponse({"jobs": service.list_scheduled_jobs()})
 
 
+@router.get("/admin/scheduled-jobs/{job_id}/log", response_class=JSONResponse)
+def scheduled_job_log_data(
+    job_id: str,
+    cursor: int | None = Query(default=None, ge=0),
+    service: AdminService = Depends(get_admin_service),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    try:
+        return JSONResponse(service.get_scheduled_job_log(job_id=job_id, cursor=cursor))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/admin/schedules", response_class=JSONResponse)
 def schedule_config_data(
     service: ScheduledJobService = Depends(get_scheduled_job_service),

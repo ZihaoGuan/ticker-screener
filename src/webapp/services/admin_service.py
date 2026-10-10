@@ -28,6 +28,8 @@ from src.webapp.repositories.history_repository import HistoryRepository
 
 
 class AdminService:
+    _SCHEDULED_LOG_CHUNK_BYTES = 16_384
+
     def __init__(self, database_url: str = "", *, artifacts_dir: Path | None = None) -> None:
         self.database_url = resolve_database_url(database_url)
         self.artifacts_dir = artifacts_dir or (Path(__file__).resolve().parents[3] / "artifacts")
@@ -293,6 +295,54 @@ class AdminService:
             )
         jobs.sort(key=lambda item: (str(item.get("job_label") or item.get("job_id") or "")))
         return jobs
+
+    def get_scheduled_job_log(self, *, job_id: str, cursor: int | None = None) -> dict[str, Any]:
+        job = next((item for item in self.list_scheduled_jobs() if item["job_id"] == job_id), None)
+        if job is None:
+            raise ValueError("Scheduled job was not found.")
+        log_path = self._resolve_scheduled_log_path(str(job.get("log_file") or ""))
+        if log_path is None:
+            return {"available": False, "text": "", "next_cursor": 0, "truncated": False, "reset": False, "status": job["status"]}
+
+        try:
+            size = log_path.stat().st_size
+        except OSError:
+            return {"available": False, "text": "", "next_cursor": 0, "truncated": False, "reset": False, "status": job["status"]}
+        reset = cursor is not None and cursor > size
+        start = max(0, size - self._SCHEDULED_LOG_CHUNK_BYTES) if cursor is None or reset else max(0, cursor)
+        try:
+            with log_path.open("rb") as handle:
+                handle.seek(start)
+                chunk = handle.read(self._SCHEDULED_LOG_CHUNK_BYTES)
+                next_cursor = int(handle.tell())
+        except OSError:
+            return {"available": False, "text": "", "next_cursor": 0, "truncated": False, "reset": False, "status": job["status"]}
+        return {
+            "available": True,
+            "text": chunk.decode("utf-8", errors="replace"),
+            "next_cursor": next_cursor,
+            "truncated": start > 0,
+            "reset": reset,
+            "status": job["status"],
+        }
+
+    def _resolve_scheduled_log_path(self, raw_path: str) -> Path | None:
+        if not raw_path.strip():
+            return None
+        log_dir = (self.artifacts_dir / "status" / "logs").resolve()
+        artifacts_dir = self.artifacts_dir.resolve()
+        source = Path(raw_path)
+        candidates = [source.resolve()] if source.is_absolute() else [(artifacts_dir / source).resolve(), (log_dir / source).resolve()]
+        if source.is_absolute() and artifacts_dir.name in source.parts:
+            artifact_index = max(index for index, part in enumerate(source.parts) if part == artifacts_dir.name)
+            candidates.append((artifacts_dir / Path(*source.parts[artifact_index + 1 :])).resolve())
+        for candidate in candidates:
+            try:
+                if candidate.is_relative_to(log_dir) and candidate.is_file():
+                    return candidate
+            except OSError:
+                continue
+        return None
 
     def get_gamma_exposure_plot_context(self, *, symbol: str = "SPX") -> dict[str, Any]:
         report = build_gamma_exposure_report(symbol=symbol)

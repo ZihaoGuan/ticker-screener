@@ -273,6 +273,46 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(payload[0]["screen_run_id"], 812)
         self.assertEqual(payload[0]["persistence_message"], "Persisted screen run id=812.")
 
+    def test_scheduled_job_log_tails_only_the_status_linked_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir)
+            status_dir = artifacts_dir / "status"
+            log_dir = status_dir / "logs"
+            log_dir.mkdir(parents=True)
+            log_path = log_dir / "daily_rs-20261010T220000Z.log"
+            log_path.write_text("first line\nsecond line\n", encoding="utf-8")
+            (status_dir / "daily_rs.json").write_text(
+                json.dumps({"job_id": "daily_rs", "status": "running", "log_file": str(log_path)}),
+                encoding="utf-8",
+            )
+            service = AdminService(database_url="postgres://example", artifacts_dir=artifacts_dir)
+
+            payload = service.get_scheduled_job_log(job_id="daily_rs")
+            next_payload = service.get_scheduled_job_log(job_id="daily_rs", cursor=payload["next_cursor"])
+
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["text"], "first line\nsecond line\n")
+        self.assertEqual(next_payload["text"], "")
+        self.assertFalse(next_payload["reset"])
+
+    def test_scheduled_job_log_rejects_paths_outside_scheduler_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir) / "artifacts"
+            status_dir = artifacts_dir / "status"
+            status_dir.mkdir(parents=True)
+            outside_log = Path(temp_dir) / "outside-scheduler.log"
+            outside_log.write_text("do not expose\n", encoding="utf-8")
+            (status_dir / "daily_rs.json").write_text(
+                json.dumps({"job_id": "daily_rs", "status": "failed", "log_file": str(outside_log)}),
+                encoding="utf-8",
+            )
+            service = AdminService(database_url="postgres://example", artifacts_dir=artifacts_dir)
+
+            payload = service.get_scheduled_job_log(job_id="daily_rs")
+
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["text"], "")
+
     def test_build_missing_ranges_combines_edge_windows_and_internal_gaps(self) -> None:
         payload = _build_missing_ranges(
             coverage_start=dt.date(2020, 1, 1),
