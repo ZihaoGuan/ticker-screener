@@ -45,7 +45,7 @@ type ScheduledActionOption = {
   }>;
 };
 
-type ScheduleCadence = "weekdays" | "weekly_saturday";
+type ScheduleCadence = "weekdays" | "weekly_saturday" | "weekly_sunday";
 type ScheduleCronDraft = {
   cadence: ScheduleCadence;
   time: string;
@@ -746,7 +746,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const handleMoveSchedule = async (job: ScheduledJobConfig, minute: number) => {
     const cronExpr = moveSimpleScheduleCron(job.cron_expr, minute);
     if (!cronExpr) {
-      setScheduleNotice("Only weekday and Saturday schedules can be moved from the timeline.");
+      setScheduleNotice("Only weekday, Saturday, and Sunday schedules can be moved from the timeline.");
       return;
     }
     setIsSavingSchedule(true);
@@ -1794,6 +1794,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     >
                       <option value="weekdays">Weekdays (Mon-Fri)</option>
                       <option value="weekly_saturday">Weekly (Saturday)</option>
+                      <option value="weekly_sunday">Weekly (Sunday)</option>
                     </select>
                   </label>
                   <label className="field">
@@ -1931,7 +1932,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 }
 
 type TimelineRowState = "active" | "finished" | "upcoming" | "waiting" | "disabled";
-type ScheduleTimelineView = "today" | "week";
+type ScheduleTimelineView = "today" | "schedule";
 
 const MARKET_OPEN_MINUTE_ET = 9 * 60 + 30;
 const MARKET_CLOSE_MINUTE_ET = 16 * 60;
@@ -1945,10 +1946,11 @@ type ScheduleTimelineRow = {
   minute: number;
   durationMinutes: number;
   state: TimelineRowState;
+  nextOccurrenceAt?: Date;
 };
 
-type ScheduleWeekDay = {
-  key: string;
+type ScheduleMapGroup = {
+  key: ScheduleCadence;
   label: string;
   rows: ScheduleTimelineRow[];
 };
@@ -1994,9 +1996,9 @@ function ScheduleTimeline({
     () => buildScheduleTimeline(configs, summaries, now, primaryTimezone),
     [configs, summaries, now, primaryTimezone],
   );
-  const scheduleView: ScheduleTimelineView = searchParams.get("view") === "week" ? "week" : "today";
-  const weekDays = useMemo(
-    () => buildScheduleWeekPlan(configs, summaries, now, primaryTimezone),
+  const scheduleView: ScheduleTimelineView = searchParams.get("view") === "schedule" || searchParams.get("view") === "week" ? "schedule" : "today";
+  const scheduleMap = useMemo(
+    () => buildScheduleMap(configs, summaries, now, primaryTimezone),
     [configs, summaries, now, primaryTimezone],
   );
   const normalizedQuery = query.trim().toLowerCase();
@@ -2005,6 +2007,14 @@ function ScheduleTimeline({
     if (!normalizedQuery) return true;
     return `${row.config.job_label} ${row.config.job_id} ${row.config.action_id}`.toLowerCase().includes(normalizedQuery);
   });
+  const visibleScheduleMap = scheduleMap.map((group) => ({
+    ...group,
+    rows: group.rows.filter((row) => {
+      if (enabledOnly && !row.config.enabled) return false;
+      if (!normalizedQuery) return true;
+      return `${row.config.job_label} ${row.config.job_id} ${row.config.action_id}`.toLowerCase().includes(normalizedQuery);
+    }),
+  }));
   const counts = timeline.rows.reduce(
     (result, row) => {
       result[row.state] += 1;
@@ -2013,8 +2023,8 @@ function ScheduleTimeline({
     { active: 0, finished: 0, upcoming: 0, waiting: 0, disabled: 0 } as Record<TimelineRowState, number>,
   );
   const selectedRow = selectedOccurrence
-    ? (scheduleView === "week"
-      ? weekDays.find((day) => day.key === selectedOccurrence.dayKey)?.rows.find((row) => row.config.job_id === selectedOccurrence.jobId)
+    ? (scheduleView === "schedule"
+      ? scheduleMap.flatMap((group) => group.rows).find((row) => row.config.job_id === selectedOccurrence.jobId)
       : timeline.rows.find((row) => row.config.job_id === selectedOccurrence.jobId)) ?? null
     : null;
   const visibleNowMinute = toVisibleTimelineMinute(timeline.nowMinute);
@@ -2030,7 +2040,7 @@ function ScheduleTimeline({
   };
   const selectView = (view: ScheduleTimelineView) => {
     const next = new URLSearchParams(searchParams);
-    if (view === "week") next.set("view", "week");
+    if (view === "schedule") next.set("view", "schedule");
     else next.delete("view");
     setSearchParams(next, { replace: true });
     setSelectedOccurrence(null);
@@ -2045,7 +2055,7 @@ function ScheduleTimeline({
   const requestMove = (row: ScheduleTimelineRow, minute: number) => {
     const targetMinute = snapTimelineMinute(minute);
     if (targetMinute === row.minute) return;
-    if (window.confirm(`Move ${row.config.job_label} from ${formatMinuteOfDay(row.minute)} to ${formatMinuteOfDay(targetMinute)} ${primaryTimezone}?`)) {
+    if (window.confirm(`Move ${row.config.job_label}'s ${describeScheduleCadence(row.config.cron_expr).toLowerCase()} run from ${formatMinuteOfDay(row.minute)} to ${formatMinuteOfDay(targetMinute)} ${primaryTimezone}?`)) {
       onMove(row.config, targetMinute);
     }
   };
@@ -2112,9 +2122,11 @@ function ScheduleTimeline({
     <section className="schedule-timeline-panel" aria-labelledby="schedule-timeline-title">
       <header className="schedule-timeline-header">
         <div>
-          <h2 id="schedule-timeline-title">{scheduleView === "week" ? "Weekly Automation Plan" : "Today’s Automation Timeline"}</h2>
+          <h2 id="schedule-timeline-title">{scheduleView === "schedule" ? "Schedule Map" : "Today’s Automation Timeline"}</h2>
           <p>
-            {formatTimelineDate(now, primaryTimezone)} · {primaryTimezone} · 09:30–16:00 market session hidden
+            {scheduleView === "schedule"
+              ? `Primary: ${primaryTimezone} · Reference: Pacific/Auckland · 09:30–16:00 ET hidden`
+              : `${formatTimelineDate(now, primaryTimezone)} · ${primaryTimezone} · 09:30–16:00 market session hidden`}
           </p>
         </div>
         <div className="button-row">
@@ -2134,7 +2146,7 @@ function ScheduleTimeline({
         <div className="schedule-timeline-filters">
           <div className="schedule-view-toggle" role="group" aria-label="Schedule view">
             <button className={scheduleView === "today" ? "schedule-view-button schedule-view-button-active" : "schedule-view-button"} type="button" onClick={() => selectView("today")}>Today</button>
-            <button className={scheduleView === "week" ? "schedule-view-button schedule-view-button-active" : "schedule-view-button"} type="button" onClick={() => selectView("week")}>Week plan</button>
+            <button className={scheduleView === "schedule" ? "schedule-view-button schedule-view-button-active" : "schedule-view-button"} type="button" onClick={() => selectView("schedule")}>Schedule map</button>
           </div>
           {scheduleView === "today" ? (
             <button className="ghost-button schedule-now-button" type="button" onClick={scrollToNow}>
@@ -2152,7 +2164,7 @@ function ScheduleTimeline({
         </div>
       </div>
 
-      {isLoading ? <LoadingBlock label="Building today’s timeline…" compact /> : null}
+      {isLoading ? <LoadingBlock label={scheduleView === "schedule" ? "Building schedule map…" : "Building today’s timeline…"} compact /> : null}
       {!isLoading && scheduleView === "today" && timeline.rows.length === 0 ? (
         <div className="schedule-timeline-empty">
           <strong>No clock-based schedules run today.</strong>
@@ -2238,7 +2250,20 @@ function ScheduleTimeline({
             })}
           </div>
         </div>
-      ) : !isLoading ? <ScheduleWeekPlan days={weekDays} onInspect={(jobId, dayKey) => setSelectedOccurrence({ jobId, dayKey })} /> : null}
+      ) : !isLoading ? (
+        <ScheduleMap
+          groups={visibleScheduleMap}
+          primaryTimezone={primaryTimezone}
+          onInspect={(jobId) => setSelectedOccurrence({ jobId, dayKey: "schedule" })}
+          canMoveRow={canMoveRow}
+          dragPreview={dragPreview}
+          onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+          onMoveKeyDown={handleMoveKeyDown}
+        />
+      ) : null}
 
       {selectedRow ? (
         <ScheduleTaskInspector
@@ -2255,46 +2280,123 @@ function ScheduleTimeline({
 
       <footer className="schedule-timeline-footer">
         <span><strong>{maxParallelJobs || "—"}</strong> max parallel jobs</span>
-        <span>{scheduleView === "week" ? "Next seven days · simple recurring rules only" : `${timeline.customCount} custom or non-today rules shown below`}</span>
-        {scheduleView === "week" ? <span>Regular market hours stay hidden</span> : timeline.marketHoursHiddenCount ? <span>{timeline.marketHoursHiddenCount} market-hour schedules hidden</span> : null}
+        <span>{scheduleView === "schedule" ? "Weekday, Saturday, and Sunday recurring rules" : `${timeline.customCount} custom or non-today rules shown below`}</span>
+        {scheduleView === "schedule" ? <span>NZ time reflects each task’s next occurrence</span> : timeline.marketHoursHiddenCount ? <span>{timeline.marketHoursHiddenCount} market-hour schedules hidden</span> : null}
         <span>Status uses the latest scheduler record; duration uses recent-run median.</span>
       </footer>
     </section>
   );
 }
 
-function ScheduleWeekPlan({ days, onInspect }: { days: ScheduleWeekDay[]; onInspect: (jobId: string, dayKey: string) => void }) {
-  const scheduledCount = days.reduce((count, day) => count + day.rows.length, 0);
+function ScheduleMap({
+  groups,
+  primaryTimezone,
+  onInspect,
+  canMoveRow,
+  dragPreview,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  onDragCancel,
+  onMoveKeyDown,
+}: {
+  groups: ScheduleMapGroup[];
+  primaryTimezone: string;
+  onInspect: (jobId: string) => void;
+  canMoveRow: (row: ScheduleTimelineRow) => boolean;
+  dragPreview: { jobId: string; minute: number } | null;
+  onDragStart: (event: ReactPointerEvent<HTMLButtonElement>, row: ScheduleTimelineRow) => void;
+  onDragMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onDragEnd: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onDragCancel: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onMoveKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>, row: ScheduleTimelineRow) => void;
+}) {
+  const scheduledCount = groups.reduce((count, group) => count + group.rows.length, 0);
   if (!scheduledCount) {
     return (
       <div className="schedule-timeline-empty">
-        <strong>No simple recurring schedules are available for this week.</strong>
+        <strong>No simple weekday, Saturday, or Sunday schedules match this filter.</strong>
         <span>Custom cron rules remain available in Schedule Definitions below.</span>
       </div>
     );
   }
   return (
-    <div className="schedule-week-plan" aria-label="Seven-day automation plan">
-      {days.map((day) => (
-        <section className="schedule-week-day" key={day.key}>
+    <div className="schedule-map" aria-label="Recurring schedule map">
+      {groups.map((group) => (
+        <section className="schedule-map-group" key={group.key}>
           <header>
-            <span>{day.label}</span>
-            <span>{day.rows.length} task{day.rows.length === 1 ? "" : "s"}</span>
-          </header>
-          {day.rows.length ? (
-            <div className="schedule-week-cards">
-              {day.rows.map((row) => {
-                const tone = row.state === "finished" && row.summary?.status === "failed" ? "failed" : row.state;
-                return (
-                  <button className={`schedule-week-card schedule-week-card-${tone}`} type="button" key={row.config.job_id} onClick={() => onInspect(row.config.job_id, day.key)}>
-                    <span>{formatMinuteOfDay(row.minute)}</span>
-                    <strong>{row.config.job_label}</strong>
-                    <small>{row.state === "upcoming" ? timelineExpectedFinish(row) ?? "ETA unavailable" : timelineBarDetail(row)}</small>
-                  </button>
-                );
-              })}
+            <div>
+              <h3>{group.label}</h3>
+              <p>{group.key === "weekdays" ? "Runs Monday through Friday" : `Runs every ${group.label}`}</p>
             </div>
-          ) : <p>No scheduled tasks</p>}
+            <span>{group.rows.length} task{group.rows.length === 1 ? "" : "s"}</span>
+          </header>
+          {group.rows.length ? (
+            <div className="schedule-map-scroll">
+              <div className="schedule-map-canvas">
+                <div className="schedule-map-corner">Task · ET / NZ time</div>
+                <div className="schedule-timeline-hours" aria-hidden="true">
+                  {TIMELINE_HOUR_MARKS.map((hour) => (
+                    <span className="schedule-timeline-hour" style={{ left: `${(toVisibleTimelineMinute(hour * 60)! / VISIBLE_TIMELINE_MINUTES) * 100}%` }} key={hour}>
+                      {String(hour).padStart(2, "0")}:00
+                    </span>
+                  ))}
+                  <span className="schedule-market-hours-break" style={{ left: `${(MARKET_OPEN_MINUTE_ET / VISIBLE_TIMELINE_MINUTES) * 100}%` }}>
+                    <span>09:30–16:00 hidden</span>
+                  </span>
+                </div>
+                {group.rows.map((row) => {
+                  const visibleMinute = toVisibleTimelineMinute(row.minute)!;
+                  const widthMinutes = getVisibleTimelineDuration(row.minute, row.durationMinutes);
+                  const barTone = row.state === "finished" && row.summary?.status === "failed" ? "failed" : row.state;
+                  const barStyle = {
+                    "--timeline-start": `${(visibleMinute / VISIBLE_TIMELINE_MINUTES) * 100}%`,
+                    "--timeline-width": `${(widthMinutes / VISIBLE_TIMELINE_MINUTES) * 100}%`,
+                  } as CSSProperties;
+                  return (
+                    <div className="schedule-timeline-row" key={row.config.job_id}>
+                      <button className="schedule-timeline-task" type="button" onClick={() => onInspect(row.config.job_id)}>
+                        <span className="schedule-task-title">{row.config.job_label}</span>
+                        <span className="schedule-task-meta">{row.config.action_id} · {formatScheduleMapTime(row, primaryTimezone)}</span>
+                      </button>
+                      <div className="schedule-timeline-track">
+                        {dragPreview?.jobId === row.config.job_id ? (
+                          <span
+                            className="schedule-timeline-drag-preview"
+                            style={{ "--timeline-start": `${(toVisibleTimelineMinute(dragPreview.minute)! / VISIBLE_TIMELINE_MINUTES) * 100}%` } as CSSProperties}
+                            aria-hidden="true"
+                          >
+                            {formatMinuteOfDay(dragPreview.minute)}
+                          </span>
+                        ) : null}
+                        <div className={`schedule-timeline-bar schedule-timeline-bar-${barTone}`} style={barStyle}>
+                          <button className="schedule-timeline-bar-content" type="button" onClick={() => onInspect(row.config.job_id)} aria-label={`Inspect ${row.config.job_label} at ${formatScheduleMapTime(row, primaryTimezone)}`}>
+                            <span>{formatMinuteOfDay(row.minute)} ET</span>
+                            <span>{timelineExpectedFinish(row) ?? "Scheduled"}</span>
+                          </button>
+                          {canMoveRow(row) ? (
+                            <button
+                              className="schedule-timeline-drag-handle"
+                              type="button"
+                              aria-label={`Move ${row.config.job_label}; drag or use left and right arrow keys in 15-minute steps`}
+                              title="Move task in 15-minute steps"
+                              onPointerDown={(event) => onDragStart(event, row)}
+                              onPointerMove={onDragMove}
+                              onPointerUp={onDragEnd}
+                              onPointerCancel={onDragCancel}
+                              onKeyDown={(event) => onMoveKeyDown(event, row)}
+                            >
+                              ↔
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : <p className="schedule-map-empty">No matching tasks</p>}
         </section>
       ))}
     </div>
@@ -2762,42 +2864,64 @@ function buildScheduleTimeline(
   return { rows, customCount, marketHoursHiddenCount, nowMinute };
 }
 
-function buildScheduleWeekPlan(
+function buildScheduleMap(
   configs: ScheduledJobConfig[],
   summaries: ScheduledJobSummary[],
   now: Date,
   primaryTimezone: string,
-): ScheduleWeekDay[] {
+): ScheduleMapGroup[] {
   const summaryByJobId = new Map(summaries.map((summary) => [summary.job_id, summary]));
-  const nowParts = getZonedDateParts(now, primaryTimezone);
-  const nowMinute = nowParts.hour * 60 + nowParts.minute;
-  return Array.from({ length: 7 }, (_, index) => {
-    const day = new Date(now.getTime() + index * 24 * 60 * 60 * 1_000);
-    const dayParts = getZonedDateParts(day, primaryTimezone);
-    const dayKey = `${dayParts.year}-${String(dayParts.month).padStart(2, "0")}-${String(dayParts.day).padStart(2, "0")}`;
-    const rows = configs.flatMap((config) => {
-      const clock = parseTimelineCronExpression(config.cron_expr);
-      if (!clock || !cronRunsOnZonedWeekday(clock.dayOfWeek, day, config.cron_tz)) return [];
-      const sourceOffset = getTimezoneOffsetMinutes(day, config.cron_tz);
-      const primaryOffset = getTimezoneOffsetMinutes(day, primaryTimezone);
-      const minute = normalizeMinuteOfDay(clock.hour * 60 + clock.minute - sourceOffset + primaryOffset);
-      if (isRegularMarketMinute(minute)) return [];
-      const summary = summaryByJobId.get(config.job_id) ?? null;
-      return [{
-        config,
-        summary,
-        minute,
-        durationMinutes: Math.max((config.estimated_duration_seconds ?? 0) / 60, 8),
-        state: index === 0 ? getTimelineRowState(config, summary, minute, nowMinute, now) : config.enabled ? "upcoming" as const : "disabled" as const,
-      }];
+  const groups: ScheduleMapGroup[] = [
+    { key: "weekdays", label: "Weekdays", rows: [] },
+    { key: "weekly_saturday", label: "Saturday", rows: [] },
+    { key: "weekly_sunday", label: "Sunday", rows: [] },
+  ];
+  const groupByCadence = new Map(groups.map((group) => [group.key, group]));
+
+  configs.forEach((config) => {
+    const cadence = parseSimpleScheduleCron(config.cron_expr);
+    if (!cadence.supported) return;
+    const occurrence = findNextScheduleOccurrence(config.cron_expr, config.cron_tz, now);
+    if (!occurrence) return;
+    const primaryParts = getZonedDateParts(occurrence, primaryTimezone);
+    const minute = primaryParts.hour * 60 + primaryParts.minute;
+    if (isRegularMarketMinute(minute)) return;
+    const summary = summaryByJobId.get(config.job_id) ?? null;
+    const state: TimelineRowState = !config.enabled ? "disabled" : summary?.status === "running" || summary?.status === "queued" ? "active" : "upcoming";
+    groupByCadence.get(cadence.cadence)?.rows.push({
+      config,
+      summary,
+      minute,
+      durationMinutes: Math.max((config.estimated_duration_seconds ?? 0) / 60, 8),
+      state,
+      nextOccurrenceAt: occurrence,
     });
-    rows.sort((left, right) => left.minute - right.minute || left.config.job_label.localeCompare(right.config.job_label));
-    return {
-      key: dayKey,
-      label: new Intl.DateTimeFormat("en-US", { timeZone: primaryTimezone, weekday: "short", month: "short", day: "numeric" }).format(day),
-      rows,
-    };
   });
+
+  groups.forEach((group) => group.rows.sort((left, right) => left.minute - right.minute || left.config.job_label.localeCompare(right.config.job_label)));
+  return groups;
+}
+
+function findNextScheduleOccurrence(cronExpr: string, timezone: string, now: Date): Date | null {
+  const expression = parseTimelineCronExpression(cronExpr);
+  if (!expression) return null;
+  for (let dayOffset = 0; dayOffset <= 7; dayOffset += 1) {
+    const day = new Date(now.getTime() + dayOffset * 24 * 60 * 60 * 1_000);
+    if (!cronRunsOnZonedWeekday(expression.dayOfWeek, day, timezone)) continue;
+    const localDay = getZonedDateParts(day, timezone);
+    const scheduledAt = zonedDateTimeToDate(localDay, expression.hour, expression.minute, timezone);
+    if (scheduledAt.getTime() >= now.getTime()) return scheduledAt;
+  }
+  return null;
+}
+
+function zonedDateTimeToDate(day: ReturnType<typeof getZonedDateParts>, hour: number, minute: number, timezone: string): Date {
+  const expectedUtc = Date.UTC(day.year, day.month - 1, day.day, hour, minute);
+  let candidate = new Date(expectedUtc);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    candidate = new Date(expectedUtc - getTimezoneOffsetMinutes(candidate, timezone) * 60_000);
+  }
+  return candidate;
 }
 
 function getTimelineRowState(config: ScheduledJobConfig, summary: ScheduledJobSummary | null, minute: number, nowMinute: number, now: Date): TimelineRowState {
@@ -2900,6 +3024,28 @@ function normalizeMinuteOfDay(value: number): number {
 function formatMinuteOfDay(value: number): string {
   const normalized = normalizeMinuteOfDay(Math.round(value));
   return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
+}
+
+function formatScheduleMapTime(row: ScheduleTimelineRow, primaryTimezone: string): string {
+  const occurrence = row.nextOccurrenceAt;
+  if (!occurrence) return `${formatMinuteOfDay(row.minute)} ${primaryTimezone}`;
+  const primary = new Intl.DateTimeFormat("en-US", {
+    timeZone: primaryTimezone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZoneName: "short",
+  }).format(occurrence);
+  const newZealand = new Intl.DateTimeFormat("en-NZ", {
+    timeZone: "Pacific/Auckland",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZoneName: "short",
+  }).format(occurrence);
+  return `${primary} · NZ ${newZealand}`;
 }
 
 function formatTimelineDate(date: Date, timezone: string): string {
@@ -3117,7 +3263,7 @@ function buildDefaultScheduleIdentity(action: ScheduledActionOption | null): { j
 function buildScheduleCronExpr(cadence: ScheduleCadence, timeValue: string): string {
   const normalizedTime = /^\d{2}:\d{2}$/.test(timeValue) ? timeValue : "16:30";
   const [hours, minutes] = normalizedTime.split(":");
-  const weekday = cadence === "weekly_saturday" ? "6" : "1-5";
+  const weekday = cadence === "weekly_saturday" ? "6" : cadence === "weekly_sunday" ? "0" : "1-5";
   return `${Number(minutes)} ${Number(hours)} * * ${weekday}`;
 }
 
@@ -3137,7 +3283,7 @@ function parseSimpleScheduleCron(cronExpr: string): { supported: boolean; cadenc
   if (!/^\d{1,2}$/.test(minutePart) || !/^\d{1,2}$/.test(hourPart) || dayPart !== "*" || monthPart !== "*") {
     return { supported: false, cadence: "weekdays", time: "16:30" };
   }
-  if (weekdayPart !== "1-5" && weekdayPart !== "6") {
+  if (weekdayPart !== "1-5" && weekdayPart !== "6" && weekdayPart !== "0" && weekdayPart !== "7") {
     return { supported: false, cadence: "weekdays", time: "16:30" };
   }
   const hours = Number(hourPart);
@@ -3147,7 +3293,7 @@ function parseSimpleScheduleCron(cronExpr: string): { supported: boolean; cadenc
   }
   return {
     supported: true,
-    cadence: weekdayPart === "6" ? "weekly_saturday" : "weekdays",
+    cadence: weekdayPart === "6" ? "weekly_saturday" : weekdayPart === "0" || weekdayPart === "7" ? "weekly_sunday" : "weekdays",
     time: `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`,
   };
 }
