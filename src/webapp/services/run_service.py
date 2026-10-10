@@ -55,17 +55,6 @@ class RunField:
 
 class RunService:
     REMOTE_WORKER_STALE_SECONDS = 90
-    _remote_execution_action_ids = {
-        "sync_finviz_fundamentals",
-        "sync_finviz_ipo_dates",
-        "sync_chart_fundamentals_cache",
-        "build_sector_rating_baselines",
-        "build_ticker_ratings",
-        "build_technical_ratings",
-        "build_technical_indicator_ratings",
-        "run_finviz_ratings_pipeline",
-        "sync_tiger_positions",
-    }
     _progress_pattern = re.compile(r"\[(\d{1,6})/(\d{1,6})\]")
     _passed_pattern = re.compile(r"passed=(\d{1,6})")
     _stage_pattern = re.compile(r"^Stage (\d{1,2})/(\d{1,2}): (.+)$")
@@ -2636,15 +2625,12 @@ class RunService:
             raise ValueError(f"Unknown run action: {action_id}")
 
         normalized = self._normalize_options(action, options or {})
-        execution_mode = str(normalized.get("execution_mode") or "local").strip().lower() or "local"
+        default_execution_mode = "remote" if self.database_url else "local"
+        execution_mode = str(normalized.get("execution_mode") or default_execution_mode).strip().lower() or default_execution_mode
         if execution_mode not in {"local", "remote"}:
             raise ValueError("Execution mode must be local or remote.")
-        if execution_mode == "remote" and action_id not in self._remote_execution_action_ids:
-            raise ValueError("Remote worker execution is currently supported only for Finviz rating sync actions.")
-        if execution_mode == "remote" and not self.has_healthy_remote_workers():
-            execution_mode = "local"
-            normalized["execution_mode"] = "local"
-            normalized["_remote_fallback_reason"] = "No healthy remote workers detected at launch time."
+        if execution_mode == "remote" and not self.database_url:
+            raise ValueError("Remote worker execution requires a configured database connection.")
         request_payload = {
             "action_id": action_id,
             "execution_mode": execution_mode,
@@ -2696,15 +2682,10 @@ class RunService:
         recovered = self.history_repository.requeue_stale_remote_job_runs(
             stale_after_seconds=self.REMOTE_WORKER_STALE_SECONDS
         )
-        fallback_started = 0
-        if not self.has_healthy_remote_workers():
-            while fallback_started < max(1, int(max_local_fallbacks)):
-                row = self.history_repository.claim_remote_job_run_for_local_fallback()
-                if row is None:
-                    break
-                self.resume_remote_job_locally(row)
-                fallback_started += 1
-        return {"requeued": len(recovered), "local_fallback_started": fallback_started}
+        # Production work must stay isolated from the web process. A stale job
+        # remains queued until a worker claims it instead of falling back here.
+        _ = max_local_fallbacks
+        return {"requeued": len(recovered), "local_fallback_started": 0}
 
     def resume_remote_job_locally(self, row: dict[str, Any]) -> str:
         request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
@@ -2982,6 +2963,9 @@ class RunService:
             "resume_from",
             "execution_mode",
             "target_worker",
+            "scheduled_job_id",
+            "scheduled_job_label",
+            "scheduled_artifact_file",
         ):
             value = options.get(key)
             if isinstance(value, str) and value.strip():
@@ -3544,9 +3528,13 @@ class RunService:
 
     def _persist_completed_job(self, job_id: str) -> None:
         with self._jobs_lock:
-            job = dict(self._jobs_by_id.get(job_id) or {})
+            job = self._jobs_by_id.get(job_id)
         if not job:
             return
+        self.finalize_completed_job(job)
+
+    def finalize_completed_job(self, job: dict[str, Any]) -> None:
+        """Persist one completed local or worker-owned job and send its notification."""
         result_payload = {
             "job_id": job.get("job_id"),
             "status": job.get("status"),
@@ -3605,10 +3593,6 @@ class RunService:
             job_run_id=job.get("job_run_id"),
         )
         if screen_run_id is not None:
-            with self._jobs_lock:
-                live = self._jobs_by_id.get(job_id)
-                if live is not None:
-                    live["screen_run_id"] = screen_run_id
             self.history_repository.patch_job_run_result(
                 job.get("job_run_id"),
                 result_payload_patch={"screen_run_id": screen_run_id},

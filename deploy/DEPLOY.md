@@ -276,10 +276,11 @@ for preserve_path in ${PRESERVE_PATHS}; do
 done
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
 cd deploy
+docker compose up -d --no-recreate worker
 docker compose up -d --no-deps web caddy || { docker rm -f deploy_web_1 deploy_caddy_1 || true; docker ps -a --format '{{.Names}}' | grep -E '_deploy_(web|caddy)_1$' | xargs -r docker rm -f || true; docker compose up -d --no-deps web caddy; }
 ```
 
-That default deploy path intentionally avoids restarting Postgres.
+That default deploy path intentionally avoids restarting Postgres or the job worker. The first command creates the worker when it is absent; later web deploys leave queued and running work alone.
 
 You can still override the compose command from the workflow UI when needed. For example, if you intentionally need a broader restart, you can pass:
 

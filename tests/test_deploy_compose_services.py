@@ -61,6 +61,18 @@ def _run_script(tmp_path: Path, *, compose_failure: str) -> subprocess.Completed
 
 
 class DeployComposeServicesTest(unittest.TestCase):
+    def test_compose_defines_independent_worker_service(self) -> None:
+        compose = (PROJECT_ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn("\n  worker:\n", compose)
+        self.assertIn('"scripts/run_remote_worker.py"', compose)
+
+    def test_web_deploy_starts_but_does_not_recreate_worker(self) -> None:
+        workflow = (PROJECT_ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
+
+        self.assertIn("docker-compose up -d --no-recreate worker", workflow)
+        self.assertNotIn("sh scripts/check_active_remote_jobs.sh", workflow)
+
     def test_legacy_compose_recovers_from_container_config_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

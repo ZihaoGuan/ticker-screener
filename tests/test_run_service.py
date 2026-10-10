@@ -1030,11 +1030,11 @@ class RunServiceTests(unittest.TestCase):
             captured_patch["job_run_id"] = job_run_id
             captured_patch["kwargs"] = kwargs
 
-        self.service.history_repository.create_job_run = lambda **kwargs: 901  # type: ignore[method-assign]
-        self.service.history_repository.patch_job_run_result = fake_patch_job_run_result  # type: ignore[method-assign]
-        self.service.history_repository.healthy_remote_worker_count = lambda stale_after_seconds=None: 1  # type: ignore[method-assign]
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
+        service.history_repository.create_job_run = lambda **kwargs: 901  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = fake_patch_job_run_result  # type: ignore[method-assign]
 
-        job_id = self.service.launch(
+        job_id = service.launch(
             "run_finviz_ratings_pipeline",
             options={
                 "as_of_date": "2026-06-13",
@@ -1050,35 +1050,31 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(kwargs["result_payload_patch"]["target_worker"], "worker-a")
         self.assertEqual(kwargs["result_payload_patch"]["execution_mode"], "remote")
 
-    def test_launch_remote_falls_back_to_local_when_no_healthy_workers(self) -> None:
-        captured: dict[str, object] = {}
+    def test_launch_remote_stays_queued_when_no_worker_is_healthy(self) -> None:
+        captured_patch: dict[str, object] = {}
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
+        service.history_repository.create_job_run = lambda **kwargs: 777  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = lambda job_run_id, **kwargs: captured_patch.update(  # type: ignore[method-assign]
+            {"job_run_id": job_run_id, "kwargs": kwargs}
+        )
 
-        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
-            captured["job_id"] = job_id
-            captured["command"] = command
-            captured["env"] = env
-
-        self.service._run_job = fake_run_job  # type: ignore[method-assign]
-        self.service.history_repository.create_job_run = lambda **kwargs: 777  # type: ignore[method-assign]
-        self.service.history_repository.healthy_remote_worker_count = lambda stale_after_seconds=None: 0  # type: ignore[method-assign]
-
-        job_id = self.service.launch(
-            "run_finviz_ratings_pipeline",
+        job_id = service.launch(
+            "rs",
             options={
-                "as_of_date": "2026-06-13",
                 "execution_mode": "remote",
             },
         )
 
-        self.assertEqual(job_id, captured["job_id"])
-        job = self.service.get_job(job_id)
-        self.assertEqual(job["job_run_id"], 777)
-        self.assertEqual(job["execution_mode"], "local")
-        self.assertIn("No healthy remote workers detected", job["log_tail"])
+        self.assertEqual(job_id, "remote-777")
+        self.assertEqual(captured_patch["job_run_id"], 777)
+        self.assertEqual(captured_patch["kwargs"]["status"], "queued")
 
-    def test_launch_remote_rejects_unsupported_action(self) -> None:
-        with self.assertRaisesRegex(ValueError, "Remote worker execution"):
-            self.service.launch("rs", options={"execution_mode": "remote"})
+    def test_launch_defaults_every_registered_action_to_remote_with_database(self) -> None:
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
+        service.history_repository.create_job_run = lambda **kwargs: 778  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = lambda *args, **kwargs: None  # type: ignore[method-assign]
+
+        self.assertEqual(service.launch("rs", options={}), "remote-778")
 
     def test_cancel_remote_job_uses_repository_cancel(self) -> None:
         remote_row = {
@@ -1172,45 +1168,17 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(payload[0]["status"], "running")
         self.assertEqual(payload[0]["execution_mode"], "local")
 
-    def test_recover_remote_jobs_starts_local_fallback_when_workers_are_down(self) -> None:
-        captured: dict[str, object] = {}
-
-        def fake_run_job(job_id: str, command: list[str], env: dict[str, str]) -> None:
-            captured["job_id"] = job_id
-            captured["command"] = command
-
-        self.service._run_job = fake_run_job  # type: ignore[method-assign]
+    def test_recover_remote_jobs_leaves_work_queued_when_workers_are_down(self) -> None:
         self.service.history_repository.requeue_stale_remote_job_runs = lambda stale_after_seconds=None: [  # type: ignore[method-assign]
             {"id": 901}
         ]
-        self.service.history_repository.healthy_remote_worker_count = lambda stale_after_seconds=None: 0  # type: ignore[method-assign]
-        fallback_row = {
-            "id": 915,
-            "parent_job_run_id": None,
-            "job_type": "admin_sync",
-            "job_name": "Run Finviz Ratings Pipeline",
-            "status": "running",
-            "trigger_source": "scheduler",
-            "request_payload": {
-                "action_id": "run_finviz_ratings_pipeline",
-                "options": {"as_of_date": "2026-06-13", "execution_mode": "remote"},
-            },
-            "result_payload": {
-                "message": "No healthy remote workers detected. Falling back to local execution.",
-            },
-            "artifact_path": "",
-            "started_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
-            "finished_at": None,
-            "created_at": dt.datetime(2026, 6, 13, 0, 0, tzinfo=dt.timezone.utc),
-        }
-        claims = [fallback_row, None]
-        self.service.history_repository.claim_remote_job_run_for_local_fallback = lambda: claims.pop(0)  # type: ignore[method-assign]
+        self.service.history_repository.claim_remote_job_run_for_local_fallback = MagicMock()  # type: ignore[method-assign]
 
         result = self.service.recover_remote_jobs()
 
         self.assertEqual(result["requeued"], 1)
-        self.assertEqual(result["local_fallback_started"], 1)
-        self.assertEqual(captured["job_id"], "remote-915")
+        self.assertEqual(result["local_fallback_started"], 0)
+        self.service.history_repository.claim_remote_job_run_for_local_fallback.assert_not_called()
 
     def test_launch_earnings_weekly_criteria_includes_reference_date(self) -> None:
         captured: dict[str, object] = {}

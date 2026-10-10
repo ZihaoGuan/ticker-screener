@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 from pathlib import Path
 import selectors
@@ -60,6 +61,58 @@ def _publish_state(
     )
 
 
+def _worker_log_path(run_service: RunService, *, job_run_id: int, options: dict[str, Any]) -> Path:
+    scheduled_job_id = str(options.get("scheduled_job_id") or "").strip()
+    stem = scheduled_job_id or f"remote-{job_run_id}"
+    log_dir = run_service.artifacts_dir / "status" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / f"{stem}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.log"
+
+
+def _write_scheduled_status(
+    run_service: RunService,
+    *,
+    options: dict[str, Any],
+    state: dict[str, Any],
+    status: str,
+    finished_at: str | None = None,
+) -> None:
+    scheduled_job_id = str(options.get("scheduled_job_id") or "").strip()
+    if not scheduled_job_id:
+        return
+    status_dir = run_service.artifacts_dir / "status"
+    status_dir.mkdir(parents=True, exist_ok=True)
+    screen_run_id = state.get("screen_run_id")
+    payload = {
+        "job_id": scheduled_job_id,
+        "job_label": str(options.get("scheduled_job_label") or scheduled_job_id),
+        "status": status,
+        "last_started_at": str(state.get("started_at") or "") or None,
+        "last_finished_at": finished_at,
+        "exit_code": state.get("return_code"),
+        "log_file": str(state.get("log_file") or ""),
+        "artifact_file": str(
+            state.get("summary_file")
+            or state.get("watchlist_file")
+            or options.get("scheduled_artifact_file")
+            or ""
+        )
+        or None,
+        "message": str(state.get("message") or ""),
+        "persisted_to_db": True if screen_run_id is not None else (False if status == "failed" else None),
+        "screen_run_id": screen_run_id,
+        "persistence_message": (
+            f"Persisted screen run id={screen_run_id}."
+            if screen_run_id is not None
+            else ("Job failed before DB persistence completed." if status == "failed" else None)
+        ),
+    }
+    status_path = status_dir / f"{scheduled_job_id}.json"
+    tmp_path = status_path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(status_path)
+
+
 def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_name: str, heartbeat_seconds: float) -> int:
     request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
     options = request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {}
@@ -73,6 +126,7 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
         )
         return 1
 
+    job_run_id = int(row["id"])
     command = run_service.build_command(action_id, options, normalized=True)
     process = subprocess.Popen(
         command,
@@ -84,7 +138,7 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
         bufsize=1,
         start_new_session=True,
     )
-    job_run_id = int(row["id"])
+    log_path = _worker_log_path(run_service, job_run_id=job_run_id, options=options)
     state: dict[str, Any] = {
         "worker_name": worker_name,
         "execution_mode": "remote",
@@ -97,8 +151,11 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
         "success_count": 0,
         "cancel_requested": False,
         "message": f"Running on worker {worker_name}.",
+        "started_at": _now_iso(),
+        "log_file": str(log_path),
     }
     _publish_state(run_service, job_run_id=job_run_id, state=state, status="running")
+    _write_scheduled_status(run_service, options=options, state=state, status="running")
     run_service.history_repository.heartbeat_remote_worker(
         worker_name=worker_name,
         status="running",
@@ -115,54 +172,57 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
     cancel_requested = False
 
     try:
-        while True:
-            if run_service.history_repository.is_remote_job_cancel_requested(job_run_id):
-                cancel_requested = True
-                state["cancel_requested"] = True
-                state["message"] = f"Cancellation requested on worker {worker_name}."
-                run_service._terminate_process(process)
+        with log_path.open("a", encoding="utf-8") as log_handle:
+            while True:
+                if run_service.history_repository.is_remote_job_cancel_requested(job_run_id):
+                    cancel_requested = True
+                    state["cancel_requested"] = True
+                    state["message"] = f"Cancellation requested on worker {worker_name}."
+                    run_service._terminate_process(process)
 
-            events = selector.select(timeout=1.0)
-            if events:
-                line = process.stdout.readline()
-                if line:
-                    normalized_line = line.rstrip()
-                    log_lines.append(normalized_line)
-                    log_lines = log_lines[-80:]
-                    progress = run_service._extract_progress(log_lines)
-                    temp_job = dict(artifact_state)
-                    run_service._update_artifacts(temp_job, normalized_line)
-                    artifact_state.update(temp_job)
-                    state.update(
-                        {
-                            "log_tail": "\n".join(log_lines),
-                            "progress_current": progress["current"],
-                            "progress_total": progress["total"],
-                            "progress_percent": progress["percent"],
-                            "progress_label": progress["label"] or state.get("progress_label"),
-                            "success_count": int(progress["success_count"] or state.get("success_count") or 0),
-                            "summary_file": str(artifact_state.get("summary_file") or ""),
-                            "watchlist_file": str(artifact_state.get("watchlist_file") or ""),
-                            "raw_results_file": str(artifact_state.get("raw_results_file") or ""),
-                            "backtest_run_id": artifact_state.get("backtest_run_id"),
-                        }
-                    )
+                events = selector.select(timeout=1.0)
+                if events:
+                    line = process.stdout.readline()
+                    if line:
+                        log_handle.write(line)
+                        log_handle.flush()
+                        normalized_line = line.rstrip()
+                        log_lines.append(normalized_line)
+                        log_lines = log_lines[-80:]
+                        progress = run_service._extract_progress(log_lines)
+                        temp_job = dict(artifact_state)
+                        run_service._update_artifacts(temp_job, normalized_line)
+                        artifact_state.update(temp_job)
+                        state.update(
+                            {
+                                "log_tail": "\n".join(log_lines),
+                                "progress_current": progress["current"],
+                                "progress_total": progress["total"],
+                                "progress_percent": progress["percent"],
+                                "progress_label": progress["label"] or state.get("progress_label"),
+                                "success_count": int(progress["success_count"] or state.get("success_count") or 0),
+                                "summary_file": str(artifact_state.get("summary_file") or ""),
+                                "watchlist_file": str(artifact_state.get("watchlist_file") or ""),
+                                "raw_results_file": str(artifact_state.get("raw_results_file") or ""),
+                                "backtest_run_id": artifact_state.get("backtest_run_id"),
+                            }
+                        )
+                        _publish_state(run_service, job_run_id=job_run_id, state=state)
+
+                return_code = process.poll()
+                now = time.monotonic()
+                if now - last_heartbeat >= heartbeat_seconds:
+                    state["worker_heartbeat_at"] = _now_iso()
                     _publish_state(run_service, job_run_id=job_run_id, state=state)
-
-            return_code = process.poll()
-            now = time.monotonic()
-            if now - last_heartbeat >= heartbeat_seconds:
-                state["worker_heartbeat_at"] = _now_iso()
-                _publish_state(run_service, job_run_id=job_run_id, state=state)
-                run_service.history_repository.heartbeat_remote_worker(
-                    worker_name=worker_name,
-                    status="running",
-                    current_job_run_id=job_run_id,
-                    metadata={"action_id": action_id},
-                )
-                last_heartbeat = now
-            if return_code is not None:
-                break
+                    run_service.history_repository.heartbeat_remote_worker(
+                        worker_name=worker_name,
+                        status="running",
+                        current_job_run_id=job_run_id,
+                        metadata={"action_id": action_id},
+                    )
+                    last_heartbeat = now
+                if return_code is not None:
+                    break
     finally:
         selector.unregister(process.stdout)
         selector.close()
@@ -178,7 +238,33 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
     else:
         state["message"] = f"Failed on worker {worker_name}."
     state["return_code"] = process.returncode
+    run_service._load_summary_metadata(state)
+    completed_job = {
+        **state,
+        "job_id": f"remote-{job_run_id}",
+        "job_run_id": job_run_id,
+        "action_id": action_id,
+        "label": str(row.get("job_name") or action_id),
+        "status": final_status,
+        "finished_at": finished_at,
+        "options": options,
+        "trigger_source": str(row.get("trigger_source") or "manual"),
+    }
+    run_service.finalize_completed_job(completed_job)
+    state.update(
+        {
+            key: completed_job.get(key)
+            for key in (
+                "success_count",
+                "summary_file",
+                "watchlist_file",
+                "raw_results_file",
+                "screen_run_id",
+            )
+        }
+    )
     _publish_state(run_service, job_run_id=job_run_id, state=state, status=final_status, finished_at=finished_at)
+    _write_scheduled_status(run_service, options=options, state=state, status=final_status, finished_at=finished_at)
     run_service.history_repository.heartbeat_remote_worker(
         worker_name=worker_name,
         status="idle",

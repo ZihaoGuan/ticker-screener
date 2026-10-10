@@ -85,7 +85,6 @@ jobs:
                 cp "${BACKUP_DIR}/${preserve_path}" "${preserve_path}"
               fi
             done
-            sh scripts/check_active_remote_jobs.sh
             cd "${APP_DIR}"
             VELA_PREVIEW=false
             if [ -f deploy/.env ] && grep -qx 'VITE_ENABLE_VELA_PREVIEW=true' deploy/.env; then
@@ -101,5 +100,8 @@ jobs:
               sleep 2
             done
             docker-compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < ../sql/postgres_app_schema.sql
+            # Create the durable job worker if it is absent, but never restart it
+            # as part of a web deploy.  It owns queued and running work.
+            docker-compose up -d --no-recreate worker
             ../scripts/deploy_compose_services.sh ${COMPOSE_COMMAND}
             docker-compose ps

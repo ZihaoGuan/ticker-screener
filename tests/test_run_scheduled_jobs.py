@@ -4,11 +4,63 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import scripts.run_scheduled_jobs as module
 
 
 class RunScheduledJobsTests(unittest.TestCase):
+    def test_main_queues_due_job_without_running_web_container_command(self) -> None:
+        queued: list[tuple[str, dict[str, object], str]] = []
+        saved_states: list[dict[str, str]] = []
+
+        class _RunService:
+            _actions = {"rs": SimpleNamespace(action_id="rs")}
+
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def recover_remote_jobs(self) -> dict[str, int]:
+                return {"requeued": 0, "local_fallback_started": 0}
+
+            def launch(self, action_id: str, *, options: dict[str, object], trigger_source: str) -> str:
+                queued.append((action_id, options, trigger_source))
+                return "remote-123"
+
+        class _ScheduleService:
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def list_jobs(self) -> list[dict[str, object]]:
+                return [
+                    {
+                        "job_id": "daily_rs",
+                        "job_label": "Daily RS",
+                        "action_id": "rs",
+                        "cron_expr": "* * * * *",
+                        "cron_tz": "America/New_York",
+                        "enabled": True,
+                        "options": {"limit": 25},
+                    }
+                ]
+
+        with (
+            patch.object(module, "load_webapp_config", return_value=SimpleNamespace(database_url="postgresql://queue-test")),
+            patch.object(module, "RunService", _RunService),
+            patch.object(module, "ScheduledJobService", _ScheduleService),
+            patch.object(module, "_load_state", return_value={}),
+            patch.object(module, "_save_state", side_effect=lambda state: saved_states.append(dict(state))),
+            patch.object(module, "_write_scheduler_status"),
+        ):
+            self.assertEqual(module.main(), 0)
+
+        self.assertEqual(queued[0][0], "rs")
+        self.assertEqual(queued[0][2], "scheduler")
+        self.assertEqual(queued[0][1]["execution_mode"], "remote")
+        self.assertEqual(queued[0][1]["scheduled_job_id"], "daily_rs")
+        self.assertEqual(len(saved_states), 1)
+
     def test_sync_scheduler_persistence_marks_snapshot_waiting_without_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             original_status_dir = module.STATUS_DIR

@@ -3,12 +3,9 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 from pathlib import Path
 import re
-import subprocess
 import sys
-import time
 from zoneinfo import ZoneInfo
 
 
@@ -16,7 +13,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.scheduled_job_service import ScheduledJobService
 from src.webapp.config import load_webapp_config
@@ -25,8 +21,6 @@ from src.webapp.config import load_webapp_config
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 STATUS_DIR = ARTIFACTS_DIR / "status"
 STATE_FILE = STATUS_DIR / "scheduler-state.json"
-DEPLOY_DIR = PROJECT_ROOT / "deploy"
-WRAPPER_SCRIPT = PROJECT_ROOT / "scripts" / "run_with_status.sh"
 _PERSISTED_SCREEN_RUN_PATTERN = re.compile(r"Persisted screen run id=(\d+)")
 _SNAPSHOT_WAITING_PATTERN = re.compile(r"^SNAPSHOT_WAITING:\s*(.+)$", re.MULTILINE)
 _SNAPSHOT_CURRENT_PATTERN = re.compile(r"^SNAPSHOT_CURRENT:\s*(.+)$", re.MULTILINE)
@@ -101,17 +95,6 @@ def _update_scheduler_persistence_status(
     tmp_path = status_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     tmp_path.replace(status_path)
-
-
-def _load_scheduler_status(job_id: str) -> dict[str, object] | None:
-    status_path = STATUS_DIR / f"{job_id}.json"
-    if not status_path.exists():
-        return None
-    try:
-        payload = json.loads(status_path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    return payload if isinstance(payload, dict) else None
 
 
 def _sync_scheduler_persistence_from_status(job_id: str) -> None:
@@ -212,27 +195,6 @@ def _sync_scheduler_persistence_from_status(job_id: str) -> None:
     )
 
 
-def _notify_scheduler_completion(
-    *,
-    discord_service: DiscordNotificationService,
-    job: dict[str, object],
-) -> None:
-    payload = _load_scheduler_status(str(job.get("job_id") or ""))
-    if not payload:
-        return
-    try:
-        discord_service.notify_job_completion(
-            action_id=str(job.get("action_id") or ""),
-            job_label=str(job.get("job_label") or job.get("job_id") or ""),
-            status=str(payload.get("status") or ""),
-            success_count=None,
-            trigger_source="scheduler",
-            watchlist_file=str(payload.get("artifact_file") or ""),
-        )
-    except Exception:
-        return
-
-
 def _matches_field(field: str, value: int, *, minimum: int, maximum: int) -> bool:
     if field == "*":
         return True
@@ -311,22 +273,16 @@ def main() -> int:
     web_config = load_webapp_config()
     run_service = RunService(project_root=PROJECT_ROOT, database_url=web_config.database_url)
     schedule_service = ScheduledJobService(project_root=PROJECT_ROOT, run_service=run_service)
-    discord_service = DiscordNotificationService(project_root=PROJECT_ROOT, app_base_url=web_config.app_base_url)
-    max_parallel_jobs = schedule_service.get_max_parallel_jobs()
-    recovery = run_service.recover_remote_jobs(max_local_fallbacks=max_parallel_jobs)
-    if recovery["requeued"] or recovery["local_fallback_started"]:
-        print(
-            f"remote recovery: requeued={recovery['requeued']} "
-            f"local_fallback_started={recovery['local_fallback_started']}"
-        )
+    recovery = run_service.recover_remote_jobs()
+    if recovery["requeued"]:
+        print(f"remote recovery: requeued={recovery['requeued']}")
     actions = {
         action.action_id: action
         for action in run_service._actions.values()
     }
     state = _load_state()
-    any_run = False
+    state_changed = False
     time_snapshots: dict[str, dt.datetime] = {}
-    due_runs: list[tuple[dict[str, object], str, dt.datetime, dict[str, str], list[str], Path]] = []
 
     for job in schedule_service.list_jobs():
         if not job.get("enabled"):
@@ -346,96 +302,34 @@ def main() -> int:
         if state.get(str(job["job_id"])) == slot_key:
             continue
 
-        env = dict(os.environ)
         artifact_path = _artifact_path_for_job(job, local_now=local_now)
-        if artifact_path:
-            env["TICKER_SCREENER_STATUS_ARTIFACT"] = artifact_path
         resolved_options = _resolve_template_value(job.get("options") or {}, local_now=local_now)
-        if isinstance(resolved_options, dict) and str(resolved_options.get("execution_mode") or "local").strip().lower() == "remote":
-            job_id = run_service.launch(action_id, options=resolved_options, trigger_source="scheduler")
-            _write_scheduler_status(
-                job_id=str(job["job_id"]),
-                job_label=str(job["job_label"]),
-                status="queued",
-                message=f"Queued remote job {job_id} for worker execution.",
-                artifact_file=str(env.get("TICKER_SCREENER_STATUS_ARTIFACT") or ""),
-                persisted_to_db=None,
-                screen_run_id=None,
-                persistence_message="Waiting for remote worker completion.",
-            )
-            print(f"queued scheduled remote job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")
-            continue
-        command_tail = run_service.build_command(action_id, resolved_options if isinstance(resolved_options, dict) else {})
-        if os.path.exists("/.dockerenv"):
-            command = [
-                str(WRAPPER_SCRIPT),
-                str(job["job_id"]),
-                str(job["job_label"]),
-                "--",
-                *command_tail,
-            ]
-            run_cwd = PROJECT_ROOT
-        else:
-            command = [
-                str(WRAPPER_SCRIPT),
-                str(job["job_id"]),
-                str(job["job_label"]),
-                "--",
-                "docker-compose",
-                "exec",
-                "-T",
-                "web",
-                "python",
-                *command_tail[1:],
-            ]
-            run_cwd = DEPLOY_DIR
-        due_runs.append((job, slot_key, local_now, env, command, run_cwd))
+        queue_options = dict(resolved_options) if isinstance(resolved_options, dict) else {}
+        queue_options.update(
+            {
+                "execution_mode": "remote",
+                "scheduled_job_id": str(job["job_id"]),
+                "scheduled_job_label": str(job["job_label"]),
+                "scheduled_artifact_file": artifact_path,
+            }
+        )
+        remote_job_id = run_service.launch(action_id, options=queue_options, trigger_source="scheduler")
+        _write_scheduler_status(
+            job_id=str(job["job_id"]),
+            job_label=str(job["job_label"]),
+            status="queued",
+            message=f"Queued worker job {remote_job_id}.",
+            artifact_file=artifact_path,
+            persisted_to_db=None,
+            screen_run_id=None,
+            persistence_message="Waiting for worker completion.",
+        )
         state[str(job["job_id"])] = slot_key
-        any_run = True
+        state_changed = True
+        print(f"queued scheduled job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")
 
-    if any_run:
+    if state_changed:
         _save_state(state)
-        pending_runs = list(due_runs)
-        running_processes: list[tuple[dict[str, object], subprocess.Popen[bytes]]] = []
-        exit_code = 0
-
-        for index, (job, _, _, env, _, _) in enumerate(pending_runs):
-            if index >= max_parallel_jobs:
-                _write_scheduler_status(
-                    job_id=str(job["job_id"]),
-                    job_label=str(job["job_label"]),
-                    status="queued",
-                    message="Queued behind other scheduled jobs for this time slot.",
-                    artifact_file=str(env.get("TICKER_SCREENER_STATUS_ARTIFACT") or ""),
-                    persisted_to_db=None,
-                    screen_run_id=None,
-                    persistence_message="Waiting for local execution slot.",
-                )
-
-        while pending_runs or running_processes:
-            while pending_runs and len(running_processes) < max_parallel_jobs:
-                job, _, local_now, env, command, run_cwd = pending_runs.pop(0)
-                action_id = str(job.get("action_id") or "")
-                cron_tz = str(job.get("cron_tz") or "America/New_York")
-                print(f"running scheduled job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")
-                process = subprocess.Popen(command, cwd=run_cwd, env=env)
-                running_processes.append((job, process))
-
-            next_running: list[tuple[dict[str, object], subprocess.Popen[bytes]]] = []
-            for job, process in running_processes:
-                return_code = process.poll()
-                if return_code is None:
-                    next_running.append((job, process))
-                    continue
-                if return_code != 0:
-                    print(f"scheduled job {job['job_id']} exited with {return_code}")
-                    exit_code = return_code if exit_code == 0 else exit_code
-                _sync_scheduler_persistence_from_status(str(job["job_id"]))
-                _notify_scheduler_completion(discord_service=discord_service, job=job)
-            running_processes = next_running
-            if running_processes:
-                time.sleep(1)
-        return exit_code
     return 0
 
 
