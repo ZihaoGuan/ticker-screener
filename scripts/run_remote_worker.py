@@ -127,18 +127,49 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
         return 1
 
     job_run_id = int(row["id"])
-    command = run_service.build_command(action_id, options, normalized=True)
-    process = subprocess.Popen(
-        command,
-        cwd=str(PROJECT_ROOT),
-        env=_build_worker_env(run_service, options),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        start_new_session=True,
-    )
-    log_path = _worker_log_path(run_service, job_run_id=job_run_id, options=options)
+    try:
+        command = run_service.build_command(action_id, options, normalized=True)
+        log_path = _worker_log_path(run_service, job_run_id=job_run_id, options=options)
+        process = subprocess.Popen(
+            command,
+            cwd=str(PROJECT_ROOT),
+            env=_build_worker_env(run_service, options),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        finished_at = _now_iso()
+        message = f"Worker could not start action {action_id}: {exc}"
+        state = {
+            "worker_name": worker_name,
+            "worker_code_version": run_service.code_version,
+            "code_version": str(request_payload.get("code_version") or ""),
+            "execution_mode": "remote",
+            "action_id": action_id,
+            "progress_label": "Failed to start",
+            "return_code": 1,
+            "message": message,
+            "log_tail": message,
+            "started_at": str(row.get("started_at") or "") or None,
+            "finished_at": finished_at,
+        }
+        _publish_state(run_service, job_run_id=job_run_id, state=state, status="failed", finished_at=finished_at)
+        _write_scheduled_status(run_service, options=options, state=state, status="failed", finished_at=finished_at)
+        run_service.history_repository.heartbeat_remote_worker(
+            worker_name=worker_name,
+            status="idle",
+            current_job_run_id=None,
+            metadata={
+                "last_completed_job_run_id": job_run_id,
+                "last_status": "failed",
+                "code_version": run_service.code_version,
+            },
+        )
+        return 1
+
     state: dict[str, Any] = {
         "worker_name": worker_name,
         "worker_code_version": run_service.code_version,

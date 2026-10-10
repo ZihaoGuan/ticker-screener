@@ -18,6 +18,7 @@ class _RunService:
 class _HistoryRepository:
     def __init__(self) -> None:
         self.patches: list[dict[str, object]] = []
+        self.heartbeats: list[dict[str, object]] = []
 
     def patch_job_run_result(self, _job_run_id: int, **kwargs: object) -> None:
         self.patches.append(dict(kwargs))
@@ -25,8 +26,8 @@ class _HistoryRepository:
     def is_remote_job_cancel_requested(self, _job_run_id: int) -> bool:
         return False
 
-    def heartbeat_remote_worker(self, **_kwargs: object) -> None:
-        return None
+    def heartbeat_remote_worker(self, **kwargs: object) -> None:
+        self.heartbeats.append(dict(kwargs))
 
 
 class _FailingJobRunService(_RunService):
@@ -58,7 +59,36 @@ class _FailingJobRunService(_RunService):
         self.completed_job = dict(job)
 
 
+class _UnknownActionRunService(_FailingJobRunService):
+    def build_command(self, action_id: str, _options: dict[str, object], *, normalized: bool) -> list[str]:
+        assert normalized
+        raise ValueError(f"Unknown run action: {action_id}")
+
+
 class RunRemoteWorkerTests(unittest.TestCase):
+    def test_unknown_action_marks_claimed_job_failed_without_crashing_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = _UnknownActionRunService(Path(temp_dir))
+
+            exit_code = module._run_claimed_job(
+                service,  # type: ignore[arg-type]
+                {
+                    "id": 860,
+                    "job_name": "Run EMA 9/20 Buy Targets",
+                    "trigger_source": "manual",
+                    "request_payload": {"action_id": "ema9_20_crossover_targets", "options": {}},
+                },
+                worker_name="test-worker",
+                heartbeat_seconds=5.0,
+            )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(service.history_repository.patches[-1]["status"], "failed")
+        self.assertIsNotNone(service.history_repository.patches[-1]["finished_at"])
+        payload = service.history_repository.patches[-1]["result_payload_patch"]
+        self.assertIn("Unknown run action", str(payload))
+        self.assertEqual(service.history_repository.heartbeats[-1]["status"], "idle")
+
     def test_run_claimed_job_drains_output_after_short_process_exits(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = _FailingJobRunService(Path(temp_dir))
