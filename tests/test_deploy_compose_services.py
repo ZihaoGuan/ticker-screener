@@ -68,6 +68,7 @@ class DeployComposeServicesTest(unittest.TestCase):
         self.assertIn('"scripts/run_remote_worker.py"', compose)
         self.assertIn("image: ticker-screener:${TICKER_SCREENER_IMAGE_TAG:-dev}", compose)
         self.assertNotIn("- ..:/app", compose)
+        self.assertEqual(compose.count("- ../config:/app/config"), 2)
 
     def test_web_deploy_starts_but_does_not_recreate_worker(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")

@@ -135,7 +135,7 @@ The application image contains its Python dependencies and then launches:
 uvicorn web.app:app --host 0.0.0.0 --port 8000
 ```
 
-The production deploy builds `ticker-screener:<git-sha>` and recreates the web container from that immutable image. The worker is intentionally left on its current image until its separate release is drained and upgraded. `docker-compose exec -T web python ...` therefore runs against the web image currently deployed.
+The production deploy builds `ticker-screener:<git-sha>` and recreates the web container from that immutable image. The worker is intentionally left on its current image until its separate release is drained and upgraded. `docker-compose exec -T web python ...` therefore runs against the web image currently deployed. The production-local `config/` directory is mounted separately as durable configuration data, so scheduler and exclusion changes made through the UI survive image replacement without making application source live.
 
 ## 9. Smoke checks
 

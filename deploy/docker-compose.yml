@@ -33,6 +33,9 @@ services:
       PLAYWRIGHT_EXECUTABLE_PATH: /usr/bin/chromium
     command: ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
+      # Production-local scheduler and universe settings are durable data, not
+      # application source.  Keep them outside the immutable image lifecycle.
+      - ../config:/app/config
       - ../artifacts:/artifacts
     depends_on:
       db:
@@ -51,6 +54,7 @@ services:
       PLAYWRIGHT_EXECUTABLE_PATH: /usr/bin/chromium
     command: ["python", "scripts/run_remote_worker.py", "--worker-name", "primary-worker"]
     volumes:
+      - ../config:/app/config
       - ../artifacts:/artifacts
     depends_on:
       db:
