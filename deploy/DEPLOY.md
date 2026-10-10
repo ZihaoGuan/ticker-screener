@@ -303,7 +303,7 @@ up -d --force-recreate db web caddy
 
 Each queued remote job records the Git-SHA `code_version` of the web image that created it. A worker claims only jobs for its own image version (with a compatibility exception for legacy jobs that predate the field). This means a web deployment can move to a newer image while an in-flight worker process continues using the old image and source tree.
 
-The main deployment builds the new image and updates only `web` and `caddy`; it does not recreate existing workers. Two worker services (`primary-worker` and `parallel-worker`) can claim different queued jobs concurrently. To upgrade the Compose workers later, run the **Release Compose Worker** workflow with the image's Git-SHA tag. It checks that no running jobs or queued jobs for a previous image remain, then recreates only the workers from `ticker-screener:<git-sha>`.
+The main deployment builds the new image and updates only `web` and `caddy`; it does not recreate existing workers. Four worker services (`primary-worker` plus three parallel workers) can claim different queued jobs concurrently, matching the production scheduler's `max_parallel_jobs` setting. To upgrade the Compose workers later, run the **Release Compose Worker** workflow with the image's Git-SHA tag. It checks that no running jobs or queued jobs for a previous image remain, then recreates only the workers from `ticker-screener:<git-sha>`.
 
 For a manual production release from `deploy/`:
 

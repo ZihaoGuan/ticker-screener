@@ -37,7 +37,7 @@ if [ "${active_jobs:-0}" != "0" ]; then
 fi
 
 echo "Worker drain complete; replacing only the worker with ticker-screener:${image_tag}."
-worker_container_ids="$(compose ps -q worker worker_parallel || true)"
+worker_container_ids="$(compose ps -q worker worker_parallel worker_parallel_2 worker_parallel_3 || true)"
 if [ -n "$worker_container_ids" ]; then
   # docker-compose v1 can fail during --force-recreate when the image metadata
   # omits ContainerConfig. Removing the already-drained workers first avoids
@@ -48,4 +48,5 @@ if [ -n "$worker_container_ids" ]; then
 $worker_container_ids
 EOF
 fi
-TICKER_SCREENER_IMAGE_TAG="$image_tag" compose up -d --no-deps worker worker_parallel
+TICKER_SCREENER_IMAGE_TAG="$image_tag" compose up -d --no-deps \
+  worker worker_parallel worker_parallel_2 worker_parallel_3

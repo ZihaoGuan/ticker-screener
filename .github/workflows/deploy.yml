@@ -56,7 +56,7 @@ jobs:
             set -euo pipefail
             cd "${APP_DIR}"
             MIGRATE_WORKER_IMAGE=false
-            for WORKER_SERVICE in worker worker_parallel; do
+            for WORKER_SERVICE in worker worker_parallel worker_parallel_2 worker_parallel_3; do
               WORKER_CONTAINER_ID="$(docker ps -q --filter "label=com.docker.compose.service=${WORKER_SERVICE}" | head -1)"
               if [ -n "${WORKER_CONTAINER_ID}" ] && ! docker inspect -f '{{.Config.Image}}' "${WORKER_CONTAINER_ID}" | grep -q '^ticker-screener:'; then
                 # A Phase 1 worker has a live source mount. Drain it before this
@@ -115,7 +115,7 @@ jobs:
             docker-compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < ../sql/postgres_app_schema.sql
             # Create durable job workers when absent, but never restart existing
             # workers as part of a web deploy. They own queued and running work.
-            TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" docker-compose up -d --no-recreate worker worker_parallel
+            TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" docker-compose up -d --no-recreate worker worker_parallel worker_parallel_2 worker_parallel_3
             if [ "${MIGRATE_WORKER_IMAGE}" = "true" ]; then
               ../scripts/upgrade_compose_worker.sh "${IMAGE_TAG}"
             fi
