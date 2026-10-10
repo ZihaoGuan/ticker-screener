@@ -301,11 +301,12 @@ class ScreenerHistoryService:
                 ticker = self._extract_ticker(item)
                 if not ticker:
                     continue
+                item_signal_date = self._resolve_payload_signal_date(item, default=signal_date)
                 reasons = item.get("reasons")
                 rows.append(
                     {
                         "strategy_id": strategy_id,
-                        "signal_date": signal_date,
+                        "signal_date": item_signal_date,
                         "ticker": ticker,
                         "passed": True,
                         "rank": index,
@@ -337,6 +338,15 @@ class ScreenerHistoryService:
                 )
         return rows
 
+    def _resolve_payload_signal_date(self, payload: dict[str, Any], *, default: dt.date) -> dt.date:
+        value = payload.get("signal_date")
+        if isinstance(value, str) and value.strip():
+            try:
+                return dt.date.fromisoformat(value.strip())
+            except ValueError:
+                pass
+        return default
+
     def _extract_ticker(self, payload: dict[str, Any]) -> str:
         for key in ("ticker", "symbol"):
             value = payload.get(key)
@@ -346,7 +356,19 @@ class ScreenerHistoryService:
 
     def _extract_metrics(self, payload: dict[str, Any]) -> dict[str, Any]:
         preferred = {}
-        for key in ("score", "lastPrice", "triggerPrice", "entryPrice", "breakout_date", "signal_date"):
+        for key in (
+            "score",
+            "lastPrice",
+            "triggerPrice",
+            "entryPrice",
+            "breakout_date",
+            "signal_date",
+            "bull_target_1",
+            "bull_target_2",
+            "bear_target_1",
+            "bear_target_2",
+            "target_status",
+        ):
             if key in payload:
                 preferred[key] = payload[key]
         return preferred

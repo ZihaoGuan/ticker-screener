@@ -381,6 +381,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("weekly_candidate_pool_{date_label}.json",),
         "legacy_summary_templates": ("weekly_candidate_pool_run_summary_{date_label}.json",),
     },
+    "ema9_20_crossover_targets": {
+        "stem_template": "ema9_20_crossover_targets_{date_label}",
+        "legacy_watchlist_templates": ("ema9_20_crossover_targets_{date_label}.json",),
+        "legacy_raw_templates": ("ema9_20_crossover_targets_{date_label}.json",),
+        "legacy_summary_templates": ("ema9_20_crossover_targets_run_summary_{date_label}.json",),
+    },
     "best_winners": {
         "stem_template": "best_winners_{date_label}",
         "legacy_watchlist_templates": ("best_winners_{date_label}.json",),
@@ -614,6 +620,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("trend_template", "trend_template"),
     ("minervini_vcp_detector", "minervini_vcp_detector"),
     ("weekly_candidate_pool", "weekly_candidate_pool"),
+    ("ema9_20_crossover_targets", "ema9_20_crossover_targets"),
     ("best_winners", "best_winners"),
     ("kai_s1", "kai_s1"),
     ("kai_s2", "kai_s2"),

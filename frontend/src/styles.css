@@ -5599,6 +5599,20 @@ dialog.modal-backdrop:not([open]) {
   flex-wrap: wrap;
 }
 
+.scanner-chart-card-targets {
+  display: flex;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+  padding: 10px 0 2px;
+  color: #c7d2fe;
+  font-size: 12px;
+}
+
+.scanner-chart-card-targets strong {
+  color: #a7f3d0;
+  text-transform: capitalize;
+}
+
 .scanner-chart-card-volume {
   color: #a1a1aa;
   font-size: 12px;

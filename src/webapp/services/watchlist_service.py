@@ -136,6 +136,7 @@ _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "daily_rs_new_high", "label": "RS New High", "accent": "cyan", "available": True},
     {"id": "rs", "label": "RS NH Before Price", "accent": "cyan", "available": True},
     {"id": "weekly_candidate_pool", "label": "Weekly Candidate Pool", "accent": "indigo", "available": True},
+    {"id": "ema9_20_crossover_targets", "label": "EMA 9/20 Buy Targets", "accent": "emerald", "available": True},
     {"id": "best_winners", "label": "Best Winners", "accent": "lime", "available": True},
     {"id": "one_year_winners", "label": "Wey How", "accent": "lime", "available": True},
     {"id": "kai_s1", "label": "Kai S1", "accent": "cyan", "available": True},
@@ -684,6 +685,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "description": "Weekly candidate pool: price above $10 and 50 EMA, ADR20 above 4%, Daily RS above 90, 10 EMA above 20 EMA, and at least 70% above the 52-week low. Review structure and wait for a setup before acting.",
         "timeframe": "Daily",
         "accent": "violet",
+        "bias_group": "bullish",
+    },
+    {
+        "id": "ema9_20_crossover_targets",
+        "strategy_id": "ema9_20_crossover_targets",
+        "label": "EMA 9/20 Buy Targets",
+        "description": "Confirmed EMA 9 crossing above EMA 20, with fixed bull and bear target references and post-signal target-hit tracking for the most recent 60 trading days.",
+        "timeframe": "Daily",
+        "accent": "emerald",
         "bias_group": "bullish",
     },
     {

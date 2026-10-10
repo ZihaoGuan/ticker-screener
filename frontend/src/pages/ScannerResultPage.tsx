@@ -52,6 +52,19 @@ type ScannerRow = {
   technicalIndicator1d: string;
   technicalIndicator1w: string;
   isNew: boolean;
+  targetDetails: TargetDetails | null;
+};
+
+type TargetDetails = {
+  status: string;
+  bullTarget1: number | null;
+  bullTarget2: number | null;
+  bearTarget1: number | null;
+  bearTarget2: number | null;
+  bullTarget1HitDate: string;
+  bullTarget2HitDate: string;
+  bearTarget1HitDate: string;
+  bearTarget2HitDate: string;
 };
 
 const MAX_RATINGS_ROWS = 500;
@@ -493,6 +506,7 @@ export function ScannerResultPage() {
                         {row.rsPhaseBadgeLabel ? <span className={`scanner-score-pill ${rsPhaseBadgeClass(row.rsPhaseState)}`}>{row.rsPhaseBadgeLabel}</span> : null}
                         <span className="scanner-chart-card-volume">Vol {formatVolume(row.dayVolume)}</span>
                       </div>
+                      {row.targetDetails ? <TargetDetailsPanel target={row.targetDetails} /> : null}
                       <div className="scanner-chart-card-body">
                         {isChartLoading ? <LoadingBlock label={`Loading ${row.ticker} chart…`} /> : null}
                         {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
@@ -667,7 +681,40 @@ function buildScannerRow(
     technicalIndicator1d: dailyIndicator?.rating_label ?? "",
     technicalIndicator1w: weeklyIndicator?.rating_label ?? "",
     isNew: Boolean(entry.is_new),
+    targetDetails: buildTargetDetails(entry),
   };
+}
+
+function buildTargetDetails(entry: Record<string, unknown>): TargetDetails | null {
+  const bullTarget1 = coerceOptionalNumber(entry.bull_target_1);
+  const bullTarget2 = coerceOptionalNumber(entry.bull_target_2);
+  if (bullTarget1 == null || bullTarget2 == null) {
+    return null;
+  }
+  return {
+    status: String(entry.target_status ?? "active").replace(/_/g, " "),
+    bullTarget1,
+    bullTarget2,
+    bearTarget1: coerceOptionalNumber(entry.bear_target_1),
+    bearTarget2: coerceOptionalNumber(entry.bear_target_2),
+    bullTarget1HitDate: String(entry.bull_target_1_hit_date ?? ""),
+    bullTarget2HitDate: String(entry.bull_target_2_hit_date ?? ""),
+    bearTarget1HitDate: String(entry.bear_target_1_hit_date ?? ""),
+    bearTarget2HitDate: String(entry.bear_target_2_hit_date ?? ""),
+  };
+}
+
+function TargetDetailsPanel({ target }: { target: TargetDetails }) {
+  const label = (name: string, value: number | null, hitDate: string) => value == null ? null : <span>{name} {value.toFixed(2)}{hitDate ? ` · hit ${formatLocalDate(hitDate)}` : " · pending"}</span>;
+  return (
+    <div className="scanner-chart-card-targets" aria-label={`Target status: ${target.status}`}>
+      <strong>{target.status}</strong>
+      {label("Bull T1", target.bullTarget1, target.bullTarget1HitDate)}
+      {label("Bull T2", target.bullTarget2, target.bullTarget2HitDate)}
+      {label("Bear T1", target.bearTarget1, target.bearTarget1HitDate)}
+      {label("Bear T2", target.bearTarget2, target.bearTarget2HitDate)}
+    </div>
+  );
 }
 
 function normalizeDirectTechnicalIndicatorRatings(value: unknown) {

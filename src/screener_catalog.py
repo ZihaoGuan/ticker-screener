@@ -15,6 +15,7 @@ from .double_bottom_detection_screen import find_active_double_bottom_detection_
 from .earnings_gap_screen import run_earnings_gap_screen
 from .elite_rs_screen import run_elite_rs_screen
 from .ema21_pullback_buy_screen import find_recent_ema21_pullback_buy_hit
+from .ema9_20_crossover_targets_screen import PRICE_HISTORY_DAYS as EMA9_20_TARGETS_HISTORY_DAYS, find_recent_ema9_20_crossover_target_hit
 from .cup_handle_screen import run_cup_handle_screen
 from .fearzone_zeiierman_screen import find_recent_fearzone_zeiierman_hit
 from .fearzone_screen import find_recent_fearzone_hit
@@ -584,6 +585,30 @@ def _run_weekly_candidate_pool(bundle: ScreenerInputBundle) -> ScreenerEvaluatio
             "ticker": bundle.ticker,
             "daily_rs_rating": payload["daily_rs_rating"],
             "adr_pct_20": payload["adr_pct_20"],
+        },
+        reasons=tuple(str(item) for item in payload["reasons"]),
+        hit=payload,
+    )
+
+
+def _run_ema9_20_crossover_targets(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = find_recent_ema9_20_crossover_target_hit(
+        bundle.bars,
+        ticker=_ticker_from_bundle(bundle),
+        as_of_date=bundle.as_of_date,
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    payload = hit.to_dict()
+    return ScreenerEvaluationResult(
+        passed=True,
+        metrics={
+            "ticker": bundle.ticker,
+            "signal_date": payload["signal_date"],
+            "is_fresh_signal": payload["is_fresh_signal"],
+            "bull_target_1": payload["bull_target_1"],
+            "bull_target_2": payload["bull_target_2"],
+            "target_status": payload["target_status"],
         },
         reasons=tuple(str(item) for item in payload["reasons"]),
         hit=payload,
@@ -1919,6 +1944,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=WEEKLY_CANDIDATE_POOL_HISTORY_DAYS,
             warmup_trading_days=20,
             evaluator=_run_weekly_candidate_pool,
+        ),
+        "ema9_20_crossover_targets": ScreenerSpec(
+            id="ema9_20_crossover_targets",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=EMA9_20_TARGETS_HISTORY_DAYS,
+            warmup_trading_days=20,
+            evaluator=_run_ema9_20_crossover_targets,
         ),
         "best_winners": ScreenerSpec(
             id="best_winners",
