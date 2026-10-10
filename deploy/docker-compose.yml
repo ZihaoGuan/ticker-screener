@@ -19,7 +19,7 @@ services:
       retries: 10
 
   web:
-    image: python:3.12-slim
+    image: ticker-screener:${TICKER_SCREENER_IMAGE_TAG:-dev}
     restart: unless-stopped
     working_dir: /app
     env_file:
@@ -31,17 +31,15 @@ services:
       TICKER_SCREENER_ARTIFACTS_DIR: /artifacts
       TICKER_SCREENER_OUTPUT_DIR: /artifacts/output
       PLAYWRIGHT_EXECUTABLE_PATH: /usr/bin/chromium
-    entrypoint: ["sh", "/app/deploy/web-entrypoint.sh"]
     command: ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
-      - ..:/app
       - ../artifacts:/artifacts
     depends_on:
       db:
         condition: service_healthy
 
   worker:
-    image: python:3.12-slim
+    image: ticker-screener:${TICKER_SCREENER_IMAGE_TAG:-dev}
     restart: unless-stopped
     working_dir: /app
     env_file:
@@ -51,10 +49,8 @@ services:
       TICKER_SCREENER_ARTIFACTS_DIR: /artifacts
       TICKER_SCREENER_OUTPUT_DIR: /artifacts/output
       PLAYWRIGHT_EXECUTABLE_PATH: /usr/bin/chromium
-    entrypoint: ["sh", "/app/deploy/web-entrypoint.sh"]
     command: ["python", "scripts/run_remote_worker.py", "--worker-name", "primary-worker"]
     volumes:
-      - ..:/app
       - ../artifacts:/artifacts
     depends_on:
       db:

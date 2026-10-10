@@ -12,6 +12,7 @@ import scripts.run_remote_worker as module
 class _RunService:
     def __init__(self, artifacts_dir: Path) -> None:
         self.artifacts_dir = artifacts_dir
+        self.code_version = "test-image"
 
 
 class _HistoryRepository:

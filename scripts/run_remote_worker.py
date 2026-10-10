@@ -141,6 +141,8 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
     log_path = _worker_log_path(run_service, job_run_id=job_run_id, options=options)
     state: dict[str, Any] = {
         "worker_name": worker_name,
+        "worker_code_version": run_service.code_version,
+        "code_version": str(request_payload.get("code_version") or ""),
         "execution_mode": "remote",
         "command": " ".join(command),
         "log_tail": "Starting...\n",
@@ -160,7 +162,7 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
         worker_name=worker_name,
         status="running",
         current_job_run_id=job_run_id,
-        metadata={"action_id": action_id},
+        metadata={"action_id": action_id, "code_version": run_service.code_version},
     )
 
     assert process.stdout is not None
@@ -223,7 +225,7 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
                         worker_name=worker_name,
                         status="running",
                         current_job_run_id=job_run_id,
-                        metadata={"action_id": action_id},
+                        metadata={"action_id": action_id, "code_version": run_service.code_version},
                     )
                     last_heartbeat = now
                 if return_code is not None:
@@ -277,7 +279,11 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
         worker_name=worker_name,
         status="idle",
         current_job_run_id=None,
-        metadata={"last_completed_job_run_id": job_run_id, "last_status": final_status},
+        metadata={
+            "last_completed_job_run_id": job_run_id,
+            "last_status": final_status,
+            "code_version": run_service.code_version,
+        },
     )
     return int(process.returncode or 0)
 
@@ -295,8 +301,12 @@ def main() -> int:
             worker_name=str(args.worker_name).strip() or socket.gethostname(),
             status="idle",
             current_job_run_id=None,
+            metadata={"code_version": run_service.code_version},
         )
-        claimed = run_service.history_repository.claim_remote_job_run(worker_name=str(args.worker_name).strip() or socket.gethostname())
+        claimed = run_service.history_repository.claim_remote_job_run(
+            worker_name=str(args.worker_name).strip() or socket.gethostname(),
+            code_version=run_service.code_version,
+        )
         if claimed is None:
             if args.once:
                 return exit_code

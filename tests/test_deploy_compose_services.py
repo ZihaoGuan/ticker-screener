@@ -66,12 +66,18 @@ class DeployComposeServicesTest(unittest.TestCase):
 
         self.assertIn("\n  worker:\n", compose)
         self.assertIn('"scripts/run_remote_worker.py"', compose)
+        self.assertIn("image: ticker-screener:${TICKER_SCREENER_IMAGE_TAG:-dev}", compose)
+        self.assertNotIn("- ..:/app", compose)
 
     def test_web_deploy_starts_but_does_not_recreate_worker(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
         self.assertIn("docker-compose up -d --no-recreate worker", workflow)
-        self.assertNotIn("sh scripts/check_active_remote_jobs.sh", workflow)
+        self.assertIn("docker build --build-arg CODE_VERSION", workflow)
+        self.assertIn("TICKER_SCREENER_IMAGE_TAG=\"${IMAGE_TAG}\"", workflow)
+        self.assertIn("MIGRATE_WORKER_IMAGE=false", workflow)
+        self.assertIn("sh scripts/check_active_remote_jobs.sh", workflow)
+        self.assertIn("scripts/upgrade_compose_worker.sh", workflow)
 
     def test_legacy_compose_recovers_from_container_config_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

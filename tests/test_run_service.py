@@ -1030,8 +1030,18 @@ class RunServiceTests(unittest.TestCase):
             captured_patch["job_run_id"] = job_run_id
             captured_patch["kwargs"] = kwargs
 
-        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
-        service.history_repository.create_job_run = lambda **kwargs: 901  # type: ignore[method-assign]
+        captured_create: dict[str, object] = {}
+
+        def fake_create_job_run(**kwargs: object) -> int:
+            captured_create.update(kwargs)
+            return 901
+
+        service = RunService(
+            project_root=self.project_root,
+            database_url="postgresql://queue-test",
+            code_version="80663d4",
+        )
+        service.history_repository.create_job_run = fake_create_job_run  # type: ignore[method-assign]
         service.history_repository.patch_job_run_result = fake_patch_job_run_result  # type: ignore[method-assign]
 
         job_id = service.launch(
@@ -1049,6 +1059,8 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(kwargs["status"], "queued")
         self.assertEqual(kwargs["result_payload_patch"]["target_worker"], "worker-a")
         self.assertEqual(kwargs["result_payload_patch"]["execution_mode"], "remote")
+        self.assertEqual(kwargs["result_payload_patch"]["code_version"], "80663d4")
+        self.assertEqual(captured_create["request_payload"]["code_version"], "80663d4")
 
     def test_launch_remote_stays_queued_when_no_worker_is_healthy(self) -> None:
         captured_patch: dict[str, object] = {}

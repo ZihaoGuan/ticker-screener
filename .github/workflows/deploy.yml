@@ -55,6 +55,14 @@ jobs:
           script: |
             set -euo pipefail
             cd "${APP_DIR}"
+            MIGRATE_WORKER_IMAGE=false
+            WORKER_CONTAINER_ID="$(docker-compose ps -q worker || true)"
+            if [ -n "${WORKER_CONTAINER_ID}" ] && ! docker inspect -f '{{.Config.Image}}' "${WORKER_CONTAINER_ID}" | grep -q '^ticker-screener:'; then
+              # The Phase 1 worker has a live source mount. Drain it before this
+              # first immutable-image deploy can change files in that mount.
+              ALLOW_ACTIVE_REMOTE_JOBS="${ALLOW_ACTIVE_REMOTE_JOBS}" sh scripts/check_active_remote_jobs.sh
+              MIGRATE_WORKER_IMAGE=true
+            fi
             BACKUP_DIR="$(mktemp -d)"
             PRESERVE_PATHS="config/smallcap_exclude_tickers.txt config/manual_exclude_tickers.txt config/manual_include_tickers.txt"
             for preserve_path in ${PRESERVE_PATHS}; do
@@ -91,6 +99,8 @@ jobs:
               VELA_PREVIEW=true
             fi
             docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -e VITE_ENABLE_VELA_PREVIEW="${VELA_PREVIEW}" -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
+            IMAGE_TAG="$(git rev-parse --short=12 HEAD)"
+            docker build --build-arg CODE_VERSION="${IMAGE_TAG}" -t "ticker-screener:${IMAGE_TAG}" "${APP_DIR}"
             cd deploy
             docker-compose up -d --no-recreate db || docker-compose start db
             for _ in $(seq 1 30); do
@@ -102,6 +112,9 @@ jobs:
             docker-compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < ../sql/postgres_app_schema.sql
             # Create the durable job worker if it is absent, but never restart it
             # as part of a web deploy.  It owns queued and running work.
-            docker-compose up -d --no-recreate worker
-            ../scripts/deploy_compose_services.sh ${COMPOSE_COMMAND}
+            TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" docker-compose up -d --no-recreate worker
+            if [ "${MIGRATE_WORKER_IMAGE}" = "true" ]; then
+              ../scripts/upgrade_compose_worker.sh "${IMAGE_TAG}"
+            fi
+            TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" ../scripts/deploy_compose_services.sh ${COMPOSE_COMMAND}
             docker-compose ps

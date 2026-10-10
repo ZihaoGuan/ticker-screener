@@ -2435,9 +2435,11 @@ class RunService:
         database_url: str = "",
         artifacts_dir: Path | None = None,
         discord_notification_service: DiscordNotificationService | None = None,
+        code_version: str | None = None,
     ) -> None:
         self.project_root = project_root
         self.database_url = database_url
+        self.code_version = str(code_version or os.getenv("TICKER_SCREENER_CODE_VERSION") or "development").strip()
         self.artifacts_dir = artifacts_dir or (project_root / "artifacts")
         self.history_repository = HistoryRepository(database_url=database_url, artifacts_dir=self.artifacts_dir)
         self.screener_history_service = ScreenerHistoryService(
@@ -2635,6 +2637,7 @@ class RunService:
             "action_id": action_id,
             "execution_mode": execution_mode,
             "target_worker": str(normalized.get("target_worker") or ""),
+            "code_version": self.code_version,
             "options": normalized,
         }
         initial_status = "queued" if execution_mode == "remote" else "running"
@@ -2658,6 +2661,7 @@ class RunService:
                     "job_id": self._remote_job_id(job_run_id),
                     "execution_mode": "remote",
                     "target_worker": str(normalized.get("target_worker") or ""),
+                    "code_version": self.code_version,
                     "command": " ".join(command),
                     "progress_label": "Queued for remote worker",
                     "message": "Queued for remote worker claim.",

@@ -401,7 +401,7 @@ class HistoryRepository:
                 row = cursor.fetchone()
         return int(row[0] or 0) if row else 0
 
-    def claim_remote_job_run(self, *, worker_name: str) -> dict[str, Any] | None:
+    def claim_remote_job_run(self, *, worker_name: str, code_version: str) -> dict[str, Any] | None:
         connection = self._connect()
         if connection is None:
             return None
@@ -414,6 +414,10 @@ class HistoryRepository:
                   AND (
                     COALESCE(request_payload->>'target_worker', '') = ''
                     OR request_payload->>'target_worker' = %s
+                  )
+                  AND (
+                    COALESCE(request_payload->>'code_version', '') = ''
+                    OR request_payload->>'code_version' = %s
                   )
                 ORDER BY created_at ASC, id ASC
                 FOR UPDATE SKIP LOCKED
@@ -433,9 +437,11 @@ class HistoryRepository:
                     sql,
                     (
                         worker_name,
+                        code_version,
                         _json_dumps(
                             {
                                 "worker_name": worker_name,
+                                "worker_code_version": code_version,
                                 "message": f"Claimed by worker {worker_name}.",
                             }
                         ),

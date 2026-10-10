@@ -1,0 +1,36 @@
+name: Release Compose Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Immutable Git-SHA image tag already built by a web deployment
+        required: true
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  release-worker:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: oracle-compose-worker-release
+      cancel-in-progress: false
+    steps:
+      - name: Drain and release worker over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          APP_DIR: ${{ secrets.ORACLE_APP_DIR }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_PORT }}
+          envs: APP_DIR,IMAGE_TAG
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "${APP_DIR}/deploy"
+            ../scripts/upgrade_compose_worker.sh "${IMAGE_TAG}"

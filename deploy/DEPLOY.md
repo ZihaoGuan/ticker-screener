@@ -129,13 +129,13 @@ docker-compose ps
 docker-compose logs -f web
 ```
 
-The web service installs Python dependencies at container start and then launches:
+The application image contains its Python dependencies and then launches:
 
 ```bash
 uvicorn web.app:app --host 0.0.0.0 --port 8000
 ```
 
-Because the `web` container entrypoint runs `pip install -r requirements.txt -r requirements-web.txt` on every container start, `docker-compose exec -T web python ...` jobs reuse an environment that already has the repo Python requirements installed. If requirements change, restart or recreate the `web` container before running scheduled jobs.
+The production deploy builds `ticker-screener:<git-sha>` and recreates the web container from that immutable image. The worker is intentionally left on its current image until its separate release is drained and upgraded. `docker-compose exec -T web python ...` therefore runs against the web image currently deployed.
 
 ## 9. Smoke checks
 
@@ -226,6 +226,7 @@ This repo now includes:
 
 - [.github/workflows/ci.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/ci.yml)
 - [.github/workflows/deploy.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/deploy.yml)
+- [.github/workflows/release-compose-worker.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/release-compose-worker.yml)
 - [.github/workflows/deploy-worker.yml](/Users/Zihao.Guan/Personal/ticker-screener/.github/workflows/deploy-worker.yml)
 
 The deploy workflow supports both:
@@ -275,12 +276,16 @@ for preserve_path in ${PRESERVE_PATHS}; do
   fi
 done
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
+IMAGE_TAG="$(git rev-parse --short=12 HEAD)"
+docker build --build-arg CODE_VERSION="${IMAGE_TAG}" -t "ticker-screener:${IMAGE_TAG}" "${APP_DIR}"
 cd deploy
-docker compose up -d --no-recreate worker
-docker compose up -d --no-deps web caddy || { docker rm -f deploy_web_1 deploy_caddy_1 || true; docker ps -a --format '{{.Names}}' | grep -E '_deploy_(web|caddy)_1$' | xargs -r docker rm -f || true; docker compose up -d --no-deps web caddy; }
+TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" docker compose up -d --no-recreate worker
+TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" docker compose up -d --no-deps web caddy || { docker rm -f deploy_web_1 deploy_caddy_1 || true; docker ps -a --format '{{.Names}}' | grep -E '_deploy_(web|caddy)_1$' | xargs -r docker rm -f || true; TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" docker compose up -d --no-deps web caddy; }
 ```
 
 That default deploy path intentionally avoids restarting Postgres or the job worker. The first command creates the worker when it is absent; later web deploys leave queued and running work alone.
+
+On the one-time migration from the Phase 1 source-mounted worker, the deploy first requires the worker to be drained, then replaces that idle worker with the new image before it replaces the web service. This prevents the initial `git pull` from changing files beneath a running legacy worker.
 
 You can still override the compose command from the workflow UI when needed. For example, if you intentionally need a broader restart, you can pass:
 
@@ -293,6 +298,20 @@ or force a full service recreate:
 ```bash
 up -d --force-recreate db web caddy
 ```
+
+### Immutable Compose worker release
+
+Each queued remote job records the Git-SHA `code_version` of the web image that created it. A worker claims only jobs for its own image version (with a compatibility exception for legacy jobs that predate the field). This means a web deployment can move to a newer image while an in-flight worker process continues using the old image and source tree.
+
+The main deployment builds the new image and updates only `web` and `caddy`; it does not recreate `worker`. To upgrade the Compose worker later, run the **Release Compose Worker** workflow with the image's Git-SHA tag. It checks that no running jobs or queued jobs for a previous image remain, then recreates only `worker` from `ticker-screener:<git-sha>`.
+
+For a manual production release from `deploy/`:
+
+```bash
+../scripts/upgrade_compose_worker.sh <git-sha>
+```
+
+If the drain check reports outstanding work, wait for it to finish or resolve it through the Runs UI; do not force-recreate the worker.
 
 ### Remote worker deploy
 
