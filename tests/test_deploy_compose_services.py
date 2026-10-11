@@ -9,6 +9,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = PROJECT_ROOT / "scripts" / "deploy_compose_services.sh"
+WEB_RELEASE_SCRIPT = PROJECT_ROOT / "scripts" / "recreate_web_release.sh"
 
 
 def _write_executable(path: Path, contents: str) -> None:
@@ -89,6 +90,15 @@ class DeployComposeServicesTest(unittest.TestCase):
         self.assertIn("scripts/upgrade_compose_worker.sh", workflow)
         self.assertIn("scripts/upgrade_compose_worker_when_drained.sh", workflow)
         self.assertIn("Scheduled automatic worker release", workflow)
+
+    def test_manual_web_release_derives_an_immutable_image_tag_without_editing_env(self) -> None:
+        script = WEB_RELEASE_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn('git -C "$project_root" rev-parse --short=12 HEAD', script)
+        self.assertIn('docker image inspect "ticker-screener:${image_tag}"', script)
+        self.assertIn('TICKER_SCREENER_IMAGE_TAG="$image_tag" compose up -d --no-deps web', script)
+        self.assertIn('compose ps -q web', script)
+        self.assertNotIn('deploy/.env', script)
 
     def test_legacy_compose_recovers_from_container_config_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
