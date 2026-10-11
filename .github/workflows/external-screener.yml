@@ -44,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.code_version }}
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-python@v5
         with:
