@@ -7,6 +7,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.config import load_app_config
+from src.screener_catalog import build_screener_catalog
+
 from .run_service import RunService
 
 
@@ -19,6 +22,7 @@ _COMMON_TIMEZONES = (
 _DEFAULT_MAX_PARALLEL_JOBS = 5
 _DEFAULT_QUEUE_PRIORITY = 50
 _DEFAULT_WORKER_POOL = "any"
+_POLICY_UNSET = object()
 
 
 class ScheduledJobService:
@@ -106,6 +110,9 @@ class ScheduledJobService:
         cron_tz: str,
         enabled: bool,
         options: dict[str, Any] | None = None,
+        priority: object = _POLICY_UNSET,
+        depends_on_job_ids: object = _POLICY_UNSET,
+        worker_pool: object = _POLICY_UNSET,
     ) -> dict[str, Any]:
         clean_job_id = _normalize_job_id(job_id)
         clean_job_label = str(job_label or "").strip()
@@ -136,6 +143,21 @@ class ScheduledJobService:
             (item for item in jobs if str(item.get("job_id") or "").strip() == clean_job_id),
             None,
         )
+        clean_priority = (
+            _normalize_queue_priority((existing_job or {}).get("priority"))
+            if priority is _POLICY_UNSET
+            else _validate_queue_priority(priority)
+        )
+        clean_dependencies = (
+            _normalize_dependency_job_ids((existing_job or {}).get("depends_on_job_ids"))
+            if depends_on_job_ids is _POLICY_UNSET
+            else _validate_dependency_job_ids(depends_on_job_ids)
+        )
+        clean_worker_pool = (
+            _normalize_worker_pool((existing_job or {}).get("worker_pool"))
+            if worker_pool is _POLICY_UNSET
+            else _validate_worker_pool(worker_pool)
+        )
         next_job = {
             "job_id": clean_job_id,
             "job_label": clean_job_label,
@@ -144,11 +166,11 @@ class ScheduledJobService:
             "cron_tz": clean_cron_tz,
             "enabled": bool(enabled),
             "options": clean_options,
-            # The schedule editor does not manage queue policy until Phase 4.
-            # Preserve production-local policy when an existing schedule is edited.
-            "priority": _normalize_queue_priority((existing_job or {}).get("priority")),
-            "depends_on_job_ids": _normalize_dependency_job_ids((existing_job or {}).get("depends_on_job_ids")),
-            "worker_pool": _normalize_worker_pool((existing_job or {}).get("worker_pool")),
+            # Older editors do not submit queue policy. Preserve it in that case;
+            # callers that do submit it receive strict validation below.
+            "priority": clean_priority,
+            "depends_on_job_ids": clean_dependencies,
+            "worker_pool": clean_worker_pool,
         }
         replaced = False
         next_jobs: list[dict[str, Any]] = []
@@ -160,6 +182,7 @@ class ScheduledJobService:
                 next_jobs.append(item)
         if not replaced:
             next_jobs.append(next_job)
+        _validate_schedule_dependencies(next_jobs)
         payload["jobs"] = sorted(next_jobs, key=lambda item: str(item.get("job_label") or item.get("job_id") or ""))
         self._write_jobs(payload)
         return next_job
@@ -194,6 +217,10 @@ class ScheduledJobService:
 
     def _available_actions(self, jobs: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         filter_catalog = self.run_service._get_filter_catalog()
+        screener_catalog = build_screener_catalog(load_app_config())
+        required_inputs_by_action = {
+            action_id: spec.required_inputs for action_id, spec in screener_catalog.items()
+        }
         actions = self.run_service.list_actions() + [
             {
                 "id": action.action_id,
@@ -234,6 +261,7 @@ class ScheduledJobService:
                 "bias_group": item.get("bias_group") or "other",
                 "bullish_subgroup": item.get("bullish_subgroup") or "",
                 "fields": item.get("fields", []),
+                "requires_daily_bars": "daily_bars" in required_inputs_by_action.get(str(item["id"]), ()),
                 **_summarize_durations(
                     estimates_by_action.get(str(item["id"]), []),
                     sample_count=sample_counts_by_action.get(str(item["id"]), 0),
@@ -402,6 +430,60 @@ def _normalize_dependency_job_ids(value: object) -> list[str]:
 def _normalize_worker_pool(value: object) -> str:
     pool = str(value or "").strip().lower()
     return pool if re.fullmatch(r"[a-z0-9_-]+", pool or "") else _DEFAULT_WORKER_POOL
+
+
+def _validate_queue_priority(value: object) -> int:
+    try:
+        priority = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("priority must be between 0 and 100.") from exc
+    if not 0 <= priority <= 100:
+        raise ValueError("priority must be between 0 and 100.")
+    return priority
+
+
+def _validate_dependency_job_ids(value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("depends_on_job_ids must be a list.")
+    return _normalize_dependency_job_ids(value)
+
+
+def _validate_worker_pool(value: object) -> str:
+    pool = str(value or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9_-]+", pool or ""):
+        raise ValueError("worker_pool must be non-empty and use only lowercase letters, numbers, underscores, or hyphens.")
+    return pool
+
+
+def _validate_schedule_dependencies(jobs: list[dict[str, Any]]) -> None:
+    by_id = {str(item.get("job_id") or "").strip(): item for item in jobs}
+    for job_id, job in by_id.items():
+        dependencies = _normalize_dependency_job_ids(job.get("depends_on_job_ids"))
+        if job_id in dependencies:
+            raise ValueError(f"Schedule {job_id} cannot depend on itself.")
+        for dependency_id in dependencies:
+            provider = by_id.get(dependency_id)
+            if provider is None:
+                raise ValueError(f"Schedule {job_id} depends on unknown schedule: {dependency_id}.")
+            if bool(job.get("enabled", True)) and not bool(provider.get("enabled", True)):
+                raise ValueError(f"Enabled schedule {job_id} cannot depend on disabled schedule: {dependency_id}.")
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(job_id: str) -> None:
+        if job_id in visiting:
+            raise ValueError("Schedule dependencies cannot contain a cycle.")
+        if job_id in visited:
+            return
+        visiting.add(job_id)
+        for dependency_id in _normalize_dependency_job_ids(by_id[job_id].get("depends_on_job_ids")):
+            visit(dependency_id)
+        visiting.remove(job_id)
+        visited.add(job_id)
+
+    for job_id in by_id:
+        visit(job_id)
 
 
 def _validate_cron_expr(value: str) -> None:

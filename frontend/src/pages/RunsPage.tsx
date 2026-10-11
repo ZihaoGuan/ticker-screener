@@ -35,6 +35,7 @@ type ScheduledActionOption = {
   bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "entries" | "";
   estimated_duration_seconds: number | null;
   estimate_sample_count: number;
+  requires_daily_bars: boolean;
   fields: Array<{
     id: string;
     label: string;
@@ -97,6 +98,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [scheduleCadenceTouched, setScheduleCadenceTouched] = useState(false);
   const [scheduleCronTz, setScheduleCronTz] = useState("America/New_York");
   const [scheduleEnabled, setScheduleEnabled] = useState(true);
+  const [schedulePriority, setSchedulePriority] = useState("50");
+  const [scheduleDependsOnJobIds, setScheduleDependsOnJobIds] = useState<string[]>([]);
+  const [scheduleWorkerPool, setScheduleWorkerPool] = useState("any");
   const [scheduleOptionsJson, setScheduleOptionsJson] = useState("{}");
   const [lastSuggestedOptionsJson, setLastSuggestedOptionsJson] = useState("{}");
   const [scheduleActionSearch, setScheduleActionSearch] = useState("");
@@ -403,6 +407,26 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     }
     return buildScheduleCronExpr(scheduleCadence, scheduleTime);
   }, [scheduleCadence, scheduleCadenceTouched, scheduleCronExpr, scheduleHasUnsupportedCron, scheduleTime]);
+  const scheduleWaitOptions = useMemo(
+    () => scheduledConfigs.filter((job) => job.enabled && job.job_id !== scheduleJobId),
+    [scheduleJobId, scheduledConfigs],
+  );
+  const priceReloadSchedule = useMemo(
+    () => scheduledConfigs.find((job) => job.enabled && job.action_id === "reload_postgres_market_data_date") ?? null,
+    [scheduledConfigs],
+  );
+  const executionPolicySummary = useMemo(
+    () => describeExecutionPolicy({
+      cadence: scheduleCadence,
+      time: scheduleTime,
+      timezone: scheduleCronTz,
+      priority: Number(schedulePriority),
+      dependencyIds: scheduleDependsOnJobIds,
+      workerPool: scheduleWorkerPool,
+      configs: scheduledConfigs,
+    }),
+    [scheduleCadence, scheduleCronTz, scheduleDependsOnJobIds, schedulePriority, scheduleTime, scheduleWorkerPool, scheduledConfigs],
+  );
 
   useEffect(() => {
     const element = consoleRef.current;
@@ -608,6 +632,24 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     await handleRunAction({}, actionId);
   };
 
+  const handleRunScheduledPrerequisite = async (job: ScheduledJobConfig) => {
+    setIsSavingSchedule(true);
+    setScheduleNotice("");
+    try {
+      await fetchJson<{ ok: boolean; job_id: string }>(`/api/runs/${encodeURIComponent(job.action_id)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...job.options, execution_mode: job.options.execution_mode ?? "remote" }),
+      });
+      setScheduleNotice(`${job.job_label} queued now.`);
+      loadScheduledJobs();
+    } catch (error) {
+      setScheduleNotice(error instanceof Error ? error.message : `Failed to queue ${job.job_label}.`);
+    } finally {
+      setIsSavingSchedule(false);
+    }
+  };
+
   const handleBatchRun = async (
     sectionLabel: string,
     actions: Array<{
@@ -678,6 +720,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setScheduleCadenceTouched(false);
     setScheduleCronTz("America/New_York");
     setScheduleEnabled(true);
+    setSchedulePriority("50");
+    setScheduleDependsOnJobIds([]);
+    setScheduleWorkerPool("any");
     setScheduleActionSearch("");
     const nextSuggested = buildScheduleOptionsTemplate(nextAction);
     setScheduleOptionsJson(nextSuggested);
@@ -702,6 +747,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
           cron_tz: scheduleCronTz,
           enabled: scheduleEnabled,
           options: parsedOptions,
+          priority: Number(schedulePriority),
+          depends_on_job_ids: scheduleDependsOnJobIds,
+          worker_pool: scheduleWorkerPool,
         }),
       });
       setScheduleNotice("Scheduled job saved.");
@@ -735,6 +783,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setScheduleCadenceTouched(false);
     setScheduleCronTz(job.cron_tz);
     setScheduleEnabled(job.enabled);
+    setSchedulePriority(String(job.priority));
+    setScheduleDependsOnJobIds(job.depends_on_job_ids);
+    setScheduleWorkerPool(job.worker_pool);
     setScheduleActionSearch("");
     const serialized = JSON.stringify(job.options ?? {}, null, 2);
     setScheduleOptionsJson(serialized);
@@ -1552,6 +1603,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
               onMove={handleMoveSchedule}
               onNew={handleOpenNewSchedule}
               onOpenSettings={() => setIsSchedulerSettingsOpen(true)}
+              onRunPrerequisite={handleRunScheduledPrerequisite}
             />
 
             <Panel title="Recent Execution Details" aside={<span className="eyebrow">{scheduledJobs.length} tracked</span>} className="screeners-scheduled-panel screeners-secondary-panel">
@@ -1635,7 +1687,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
               <div className="run-toolbar">
                 <div className="screeners-scheduler-toolbar">
                   <div>
-                    <p className="panel-copy">Edit timing, screener choice, payload overrides, and enabled state.</p>
+                    <p className="panel-copy">Edit timing, execution policy, screener choice, and enabled state.</p>
                     <p className="file-meta">Runner polls every 5 minutes · capacity {maxParallelJobs} parallel jobs</p>
                   </div>
                   <div className="button-row">
@@ -1657,7 +1709,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                         <th>Screener</th>
                         <th>Cron</th>
                         <th>TZ</th>
-                        <th>Options</th>
+                        <th>Execution policy</th>
                         <th>Est. time</th>
                         <th>Enabled</th>
                         <th>Actions</th>
@@ -1692,10 +1744,10 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                             <td data-label="TZ">
                               <span className="schedule-chip schedule-chip-soft">{job.cron_tz}</span>
                             </td>
-                            <td data-label="Options">
+                            <td data-label="Execution policy">
                               <div className="schedule-cell-stack">
-                                <code className="schedule-options-code">{formatScheduleOptionsPreview(job.options)}</code>
-                                <span className="file-meta">{summarizeScheduleOptions(job.options)}</span>
+                                <strong>{formatPriorityLabel(job.priority)} · {formatWorkerPoolLabel(job.worker_pool)}</strong>
+                                <span className="file-meta">{formatScheduleDependencies(job, scheduledConfigs)}</span>
                               </div>
                             </td>
                             <td data-label="Est. time">
@@ -1834,6 +1886,52 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                       <option value="false">disabled</option>
                     </select>
                   </label>
+                </div>
+                <section className="schedule-policy-section" aria-labelledby="schedule-policy-title">
+                  <div>
+                    <div className="eyebrow">Execution policy</div>
+                    <h3 id="schedule-policy-title">Queue and prerequisites</h3>
+                  </div>
+                  <div className="run-params-grid">
+                    <label className="field">
+                      <span>Priority</span>
+                      <select value={schedulePriority} onChange={(event) => setSchedulePriority(event.target.value)}>
+                        <option value="100">Critical</option>
+                        <option value="75">High</option>
+                        <option value="50">Normal</option>
+                        <option value="25">Low</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Worker pool</span>
+                      <select value={scheduleWorkerPool} onChange={(event) => setScheduleWorkerPool(event.target.value)}>
+                        <option value="any">Any</option>
+                        <option value="general">General</option>
+                        <option value="finviz">Finviz/light</option>
+                        <option value="market-data">Market data</option>
+                      </select>
+                    </label>
+                    <label className="field schedule-wait-field">
+                      <span>Wait for</span>
+                      <select
+                        multiple
+                        value={scheduleDependsOnJobIds}
+                        onChange={(event) => setScheduleDependsOnJobIds(Array.from(event.currentTarget.selectedOptions, (option) => option.value))}
+                      >
+                        {scheduleWaitOptions.map((job) => <option key={job.job_id} value={job.job_id}>{job.job_label}</option>)}
+                      </select>
+                      <small className="file-meta">Select one or more enabled schedules. Leave empty for an independent run.</small>
+                    </label>
+                  </div>
+                  {selectedScheduledAction?.requires_daily_bars && priceReloadSchedule && !scheduleDependsOnJobIds.includes(priceReloadSchedule.job_id) ? (
+                    <p className="schedule-policy-recommendation">
+                      This screener requires daily prices. <button type="button" className="inline-button" onClick={() => setScheduleDependsOnJobIds((current) => [...current, priceReloadSchedule.job_id])}>Wait for {priceReloadSchedule.job_label}</button>
+                    </p>
+                  ) : null}
+                  <p className="schedule-policy-summary"><strong>Before saving:</strong> {executionPolicySummary}</p>
+                </section>
+                <details className="schedule-advanced-options">
+                  <summary>Advanced options</summary>
                   <label className="field schedule-options-field">
                     <span>Action Options JSON</span>
                     <textarea
@@ -1843,7 +1941,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                       placeholder='{"reference_date":"{{local_date}}"}'
                     />
                   </label>
-                </div>
+                </details>
                 <div className="detail-card">
                   <div className="eyebrow">Templates</div>
                   <p className="panel-copy">
@@ -1935,6 +2033,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 }
 
 type TimelineRowState = "active" | "finished" | "upcoming" | "waiting" | "disabled";
+type ScheduleQueueState = "ready" | "waiting" | "blocked" | "running" | "no-worker" | "independent";
 type ScheduleTimelineView = "today" | "schedule";
 
 const MARKET_OPEN_MINUTE_ET = 9 * 60 + 30;
@@ -1949,6 +2048,8 @@ type ScheduleTimelineRow = {
   minute: number;
   durationMinutes: number;
   state: TimelineRowState;
+  queueState: ScheduleQueueState;
+  dependency: ScheduledJobConfig | null;
   nextOccurrenceAt?: Date;
 };
 
@@ -1968,6 +2069,7 @@ function ScheduleTimeline({
   onMove,
   onNew,
   onOpenSettings,
+  onRunPrerequisite,
 }: {
   configs: ScheduledJobConfig[];
   summaries: ScheduledJobSummary[];
@@ -1978,6 +2080,7 @@ function ScheduleTimeline({
   onMove: (job: ScheduledJobConfig, minute: number) => void;
   onNew: () => void;
   onOpenSettings: () => void;
+  onRunPrerequisite: (job: ScheduledJobConfig) => void;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
@@ -2208,7 +2311,7 @@ function ScheduleTimeline({
                 <div className="schedule-timeline-row" key={row.config.job_id}>
                   <button className="schedule-timeline-task" type="button" onClick={() => setSelectedOccurrence({ jobId: row.config.job_id, dayKey: "today" })}>
                     <span className="schedule-task-title">{row.config.job_label}</span>
-                    <span className="schedule-task-meta">{row.config.action_id} · {formatMinuteOfDay(row.minute)}</span>
+                    <span className="schedule-task-meta">{row.config.action_id} · {formatMinuteOfDay(row.minute)} · {queueStateLabel(row)}</span>
                   </button>
                   <div className="schedule-timeline-track">
                     {nowPosition ? <span className="schedule-now-marker" style={{ left: nowPosition }} aria-hidden="true" /> : null}
@@ -2229,7 +2332,7 @@ function ScheduleTimeline({
                         aria-label={`Inspect ${row.config.job_label}, ${timelineStateLabel(row.state)} at ${formatMinuteOfDay(row.minute)}`}
                       >
                         <span>{formatMinuteOfDay(row.minute)}</span>
-                        <span>{timelineBarDetail(row)}</span>
+                        <span>{queueStateLabel(row)}</span>
                       </button>
                       {canMoveRow(row) ? (
                         <button
@@ -2278,6 +2381,8 @@ function ScheduleTimeline({
             setSelectedOccurrence(null);
             onEdit(selectedRow.config);
           }}
+          onOpenDependency={(jobId) => setSelectedOccurrence({ jobId, dayKey: scheduleView })}
+          onRunPrerequisite={onRunPrerequisite}
         />
       ) : null}
 
@@ -2360,7 +2465,7 @@ function ScheduleMap({
                     <div className="schedule-timeline-row" key={row.config.job_id}>
                       <button className="schedule-timeline-task" type="button" onClick={() => onInspect(row.config.job_id)}>
                         <span className="schedule-task-title">{row.config.job_label}</span>
-                        <span className="schedule-task-meta">{row.config.action_id} · {formatScheduleMapTime(row, primaryTimezone)}</span>
+                        <span className="schedule-task-meta">{row.config.action_id} · {formatScheduleMapTime(row, primaryTimezone)} · {queueStateLabel(row)}</span>
                       </button>
                       <div className="schedule-timeline-track">
                         {dragPreview?.jobId === row.config.job_id ? (
@@ -2375,7 +2480,7 @@ function ScheduleMap({
                         <div className={`schedule-timeline-bar schedule-timeline-bar-${barTone}`} style={barStyle}>
                           <button className="schedule-timeline-bar-content" type="button" onClick={() => onInspect(row.config.job_id)} aria-label={`Inspect ${row.config.job_label} at ${formatScheduleMapTime(row, primaryTimezone)}`}>
                             <span>{formatMinuteOfDay(row.minute)} ET</span>
-                            <span>{timelineExpectedFinish(row) ?? "Scheduled"}</span>
+                            <span>{queueStateLabel(row)}</span>
                           </button>
                           {canMoveRow(row) ? (
                             <button
@@ -2412,12 +2517,16 @@ function ScheduleTaskInspector({
   now,
   onClose,
   onEdit,
+  onOpenDependency,
+  onRunPrerequisite,
 }: {
   row: ScheduleTimelineRow;
   timezone: string;
   now: Date;
   onClose: () => void;
   onEdit: () => void;
+  onOpenDependency: (jobId: string) => void;
+  onRunPrerequisite: (job: ScheduledJobConfig) => void;
 }) {
   const summary = row.summary;
   const isFailed = row.state === "finished" && summary?.status === "failed";
@@ -2488,7 +2597,7 @@ function ScheduleTaskInspector({
       <div className="schedule-task-inspector-details">
         <div>
           <span>Status</span>
-          <strong className={`schedule-task-status schedule-task-status-${isFailed ? "failed" : row.state}`}>{timelineStateLabel(row.state)}</strong>
+          <strong className={`schedule-task-status schedule-task-status-${isFailed ? "failed" : row.queueState}`}>{isFailed ? "failed" : queueStateLabel(row)}</strong>
         </div>
         <div>
           <span>{isSuccessful ? "Finished" : row.state === "active" ? "Expected finish" : "Typical duration"}</span>
@@ -2501,6 +2610,13 @@ function ScheduleTaskInspector({
       </div>
 
       {isFailed ? <p className="schedule-task-inspector-message schedule-task-inspector-message-failed">{failureReason}</p> : null}
+      {row.dependency ? (
+        <section className={`schedule-dependency-chain schedule-dependency-chain-${row.queueState}`}>
+          <span>Prerequisite</span>
+          <strong>{row.dependency.job_label}</strong>
+          <p>{queueStateLabel(row)}.</p>
+        </section>
+      ) : null}
       {row.state === "active" ? <p className="schedule-task-inspector-message">Schedule status refreshes every 15 seconds. Log output refreshes every 2 seconds.</p> : null}
       {isSuccessful && !resultHref ? <p className="schedule-task-inspector-message">The task finished, but no persisted scanner result is available yet.</p> : null}
 
@@ -2517,6 +2633,8 @@ function ScheduleTaskInspector({
 
       <div className="button-row schedule-task-inspector-actions">
         {resultHref ? <Link className="primary-button" to={resultHref}>Open latest scanner result</Link> : null}
+        {row.queueState === "blocked" && row.dependency ? <button className="ghost-button" type="button" onClick={() => onOpenDependency(row.dependency!.job_id)}>Open failed run</button> : null}
+        {row.dependency ? <button className="primary-button" type="button" onClick={() => onRunPrerequisite(row.dependency!)}>Run prerequisite now</button> : null}
         <button className="ghost-button" type="button" onClick={onEdit}>Edit schedule</button>
       </div>
     </aside>
@@ -2823,6 +2941,57 @@ function describeScheduleCadence(cronExpr: string): string {
   return "Custom cadence";
 }
 
+function formatPriorityLabel(priority: number): string {
+  if (priority >= 100) return "Critical";
+  if (priority >= 75) return "High";
+  if (priority <= 25) return "Low";
+  return "Normal";
+}
+
+function formatWorkerPoolLabel(workerPool: string): string {
+  if (workerPool === "finviz") return "Finviz/light";
+  if (workerPool === "market-data") return "Market data";
+  if (workerPool === "general") return "General";
+  return "Any";
+}
+
+function formatScheduleDependencies(job: ScheduledJobConfig, configs: ScheduledJobConfig[]): string {
+  if (!job.depends_on_job_ids.length) return "Independent";
+  const labels = new Map(configs.map((config) => [config.job_id, config.job_label]));
+  return `Waits for: ${job.depends_on_job_ids.map((jobId) => labels.get(jobId) ?? jobId).join(", ")}`;
+}
+
+function describeExecutionPolicy({
+  cadence,
+  time,
+  timezone,
+  priority,
+  dependencyIds,
+  workerPool,
+  configs,
+}: {
+  cadence: ScheduleCadence;
+  time: string;
+  timezone: string;
+  priority: number;
+  dependencyIds: string[];
+  workerPool: string;
+  configs: ScheduledJobConfig[];
+}): string {
+  const timezoneLabel = timezone === "America/New_York" ? "New York" : timezone;
+  const [hourText, minuteText] = time.split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const displayTime = Number.isFinite(hour) && Number.isFinite(minute)
+    ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(2026, 0, 1, hour, minute))
+    : time;
+  const cadenceLabel = cadence === "weekdays" ? "Weekdays" : cadence === "weekly_saturday" ? "Saturday" : "Sunday";
+  const dependencyText = dependencyIds.length
+    ? `waits for ${dependencyIds.map((jobId) => configs.find((job) => job.job_id === jobId)?.job_label ?? jobId).join(", ")}`
+    : "independent";
+  return `${cadenceLabel} ${displayTime} ${timezoneLabel} · ${formatPriorityLabel(priority)} priority · ${dependencyText} · ${formatWorkerPoolLabel(workerPool)} workers`;
+}
+
 function findPrimaryScheduleTimezone(configs: ScheduledJobConfig[]): string {
   const counts = new Map<string, number>();
   configs.forEach((config) => counts.set(config.cron_tz, (counts.get(config.cron_tz) ?? 0) + 1));
@@ -2836,6 +3005,7 @@ function buildScheduleTimeline(
   primaryTimezone: string,
 ): { rows: ScheduleTimelineRow[]; customCount: number; marketHoursHiddenCount: number; nowMinute: number } {
   const summaryByJobId = new Map(summaries.map((summary) => [summary.job_id, summary]));
+  const configByJobId = new Map(configs.map((config) => [config.job_id, config]));
   const primaryParts = getZonedDateParts(now, primaryTimezone);
   const nowMinute = primaryParts.hour * 60 + primaryParts.minute;
   const rows: ScheduleTimelineRow[] = [];
@@ -2856,12 +3026,15 @@ function buildScheduleTimeline(
       return;
     }
     const summary = summaryByJobId.get(config.job_id) ?? null;
+    const queue = resolveScheduleQueueState(config, summary, configByJobId, summaryByJobId, now);
     rows.push({
       config,
       summary,
       minute,
       durationMinutes: Math.max((config.estimated_duration_seconds ?? 0) / 60, 8),
       state: getTimelineRowState(config, summary, minute, nowMinute, now),
+      queueState: queue.state,
+      dependency: queue.dependency,
     });
   });
 
@@ -2876,6 +3049,7 @@ function buildScheduleMap(
   primaryTimezone: string,
 ): ScheduleMapGroup[] {
   const summaryByJobId = new Map(summaries.map((summary) => [summary.job_id, summary]));
+  const configByJobId = new Map(configs.map((config) => [config.job_id, config]));
   const groups: ScheduleMapGroup[] = [
     { key: "weekdays", label: "Weekdays", rows: [] },
     { key: "weekly_saturday", label: "Saturday", rows: [] },
@@ -2892,6 +3066,7 @@ function buildScheduleMap(
     const minute = primaryParts.hour * 60 + primaryParts.minute;
     if (isRegularMarketMinute(minute)) return;
     const summary = summaryByJobId.get(config.job_id) ?? null;
+    const queue = resolveScheduleQueueState(config, summary, configByJobId, summaryByJobId, now);
     const state: TimelineRowState = !config.enabled ? "disabled" : summary?.status === "running" || summary?.status === "queued" ? "active" : "upcoming";
     groupByCadence.get(cadence.cadence)?.rows.push({
       config,
@@ -2899,6 +3074,8 @@ function buildScheduleMap(
       minute,
       durationMinutes: Math.max((config.estimated_duration_seconds ?? 0) / 60, 8),
       state,
+      queueState: queue.state,
+      dependency: queue.dependency,
       nextOccurrenceAt: occurrence,
     });
   });
@@ -2918,6 +3095,37 @@ function findNextScheduleOccurrence(cronExpr: string, timezone: string, now: Dat
     if (scheduledAt.getTime() >= now.getTime()) return scheduledAt;
   }
   return null;
+}
+
+function resolveScheduleQueueState(
+  config: ScheduledJobConfig,
+  summary: ScheduledJobSummary | null,
+  configByJobId: Map<string, ScheduledJobConfig>,
+  summaryByJobId: Map<string, ScheduledJobSummary>,
+  now: Date,
+): { state: ScheduleQueueState; dependency: ScheduledJobConfig | null } {
+  if (/no compatible worker/i.test(summary?.message ?? "")) {
+    return { state: "no-worker", dependency: null };
+  }
+  if (summary?.status === "running") {
+    return { state: "running", dependency: null };
+  }
+  for (const dependencyId of config.depends_on_job_ids) {
+    const dependency = configByJobId.get(dependencyId);
+    if (!dependency) continue;
+    const provider = summaryByJobId.get(dependencyId);
+    const providerTimestamp = provider?.last_finished_at ?? provider?.last_started_at;
+    const providerStatus = providerTimestamp && isSameZonedDate(new Date(providerTimestamp), now, config.cron_tz)
+      ? provider?.status
+      : null;
+    if (providerStatus === "failed") {
+      return { state: "blocked", dependency };
+    }
+    if (providerStatus !== "success") {
+      return { state: "waiting", dependency };
+    }
+  }
+  return { state: config.depends_on_job_ids.length ? "ready" : "independent", dependency: null };
 }
 
 function zonedDateTimeToDate(day: ReturnType<typeof getZonedDateParts>, hour: number, minute: number, timezone: string): Date {
@@ -3057,29 +3265,21 @@ function formatTimelineDate(date: Date, timezone: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" }).format(date);
 }
 
+function queueStateLabel(row: ScheduleTimelineRow): string {
+  if (row.queueState === "running") return "Running";
+  if (row.queueState === "no-worker") return "No compatible worker";
+  if (row.queueState === "blocked") return `Blocked: ${row.dependency?.job_label ?? "prerequisite failed"}`;
+  if (row.queueState === "waiting") return `Waiting for ${row.dependency?.job_label ?? "prerequisite"}`;
+  if (row.queueState === "ready") return "Ready";
+  return "Independent";
+}
+
 function timelineStateLabel(state: TimelineRowState): string {
   if (state === "active") return "active";
   if (state === "finished") return "finished";
   if (state === "upcoming") return "upcoming";
   if (state === "waiting") return "awaiting scheduler status";
   return "paused";
-}
-
-function timelineBarDetail(row: ScheduleTimelineRow): string {
-  if (row.state === "active") {
-    if (row.summary?.status === "queued") return "Queued";
-    return timelineExpectedFinish(row) ?? "Running · ETA unavailable";
-  }
-  if (row.state === "finished") {
-    if (row.summary?.status === "failed") return "Failed";
-    const startedAt = row.summary?.last_started_at ? new Date(row.summary.last_started_at).getTime() : 0;
-    const finishedAt = row.summary?.last_finished_at ? new Date(row.summary.last_finished_at).getTime() : 0;
-    const actualSeconds = startedAt && finishedAt ? Math.max(0, Math.round((finishedAt - startedAt) / 1000)) : 0;
-    return actualSeconds ? formatEstimatedDuration(actualSeconds).replace("~", "") : "Finished";
-  }
-  if (row.state === "upcoming") return timelineExpectedFinish(row) ?? "ETA unavailable";
-  if (row.state === "waiting") return "Awaiting status";
-  return "Paused";
 }
 
 function timelineExpectedFinish(row: ScheduleTimelineRow, timezone?: string): string | null {
@@ -3162,19 +3362,6 @@ function describeActivityStatus(status: ScreenerActivityEntry["status"]): string
   if (status === "failed") return "Failed";
   if (status === "cancelled") return "Cancelled";
   return "Interrupted";
-}
-
-function formatScheduleOptionsPreview(options: ScheduledJobConfig["options"]): string {
-  const serialized = JSON.stringify(options ?? {});
-  return serialized.length > 84 ? `${serialized.slice(0, 81)}...` : serialized;
-}
-
-function summarizeScheduleOptions(options: ScheduledJobConfig["options"]): string {
-  const entries = Object.entries(options ?? {});
-  if (entries.length === 0) {
-    return "Default payload";
-  }
-  return `${entries.length} override${entries.length === 1 ? "" : "s"}`;
 }
 
 function formatFilePathPreview(value: string | null | undefined): string {

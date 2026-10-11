@@ -25,6 +25,7 @@ if TestClient is not None:
         get_portfolio_service,
         get_rrg_service,
         get_run_service,
+        get_scheduled_job_service,
         get_screener_history_service,
         get_tiger_positions_service,
         get_user_admin_service,
@@ -176,6 +177,18 @@ class _FakeScreenerHistoryService:
 
     def soft_delete(self, *_: object, **__: object):
         return True
+
+
+class _FakeScheduledJobService:
+    def __init__(self) -> None:
+        self.upsert_calls: list[dict[str, object]] = []
+
+    def get_context(self):
+        return {"jobs": [], "available_actions": [], "common_timezones": [], "scheduler_command": "", "max_parallel_jobs": 5}
+
+    def upsert_job(self, **kwargs: object):
+        self.upsert_calls.append(kwargs)
+        return {"job_id": str(kwargs["job_id"]), "job_label": str(kwargs["job_label"]), **kwargs}
 
 
 class _FakeAuthService:
@@ -1183,9 +1196,11 @@ class _FakeRrgService:
 @unittest.skipIf(TestClient is None, "fastapi test dependencies are not installed")
 class ApiAdHocScreenTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.scheduled_job_service = _FakeScheduledJobService()
         app.dependency_overrides[get_ad_hoc_screen_service] = lambda: _FakeAdHocService()
         app.dependency_overrides[get_admin_service] = lambda: _FakeAdminService()
         app.dependency_overrides[get_run_service] = lambda: _FakeRunService()
+        app.dependency_overrides[get_scheduled_job_service] = lambda: self.scheduled_job_service
         app.dependency_overrides[get_screener_history_service] = lambda: _FakeScreenerHistoryService()
         app.dependency_overrides[get_auth_service] = lambda: _FakeAuthService()
         app.dependency_overrides[get_audit_service] = lambda: _FakeAuditService()
@@ -1655,6 +1670,34 @@ class ApiAdHocScreenTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["text"], "running\n")
+
+    def test_admin_schedule_save_passes_explicit_queue_policy(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=1,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        response = self.client.post(
+            "/api/admin/schedules",
+            json={
+                "job_id": "daily_rs",
+                "job_label": "Daily RS",
+                "action_id": "rs",
+                "cron_expr": "0 18 * * 1-5",
+                "cron_tz": "America/New_York",
+                "enabled": True,
+                "priority": 90,
+                "depends_on_job_ids": ["reload_prices"],
+                "worker_pool": "market-data",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        saved = self.scheduled_job_service.upsert_calls[-1]
+        self.assertEqual(saved["priority"], 90)
+        self.assertEqual(saved["depends_on_job_ids"], ["reload_prices"])
+        self.assertEqual(saved["worker_pool"], "market-data")
 
     def test_admin_can_access_my_picks(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(

@@ -1214,7 +1214,10 @@
   text-transform: capitalize;
 }
 
-.schedule-task-status-active {
+.schedule-task-status-active,
+.schedule-task-status-running,
+.schedule-task-status-ready,
+.schedule-task-status-independent {
   color: #bfdbfe !important;
 }
 
@@ -1222,7 +1225,9 @@
   color: var(--color-accent-muted) !important;
 }
 
-.schedule-task-status-failed {
+.schedule-task-status-failed,
+.schedule-task-status-blocked,
+.schedule-task-status-no-worker {
   color: #fecaca !important;
 }
 
@@ -1427,6 +1432,81 @@
 
 .schedule-options-field {
   grid-column: 1 / -1;
+}
+
+.schedule-policy-section,
+.schedule-advanced-options,
+.schedule-dependency-chain {
+  background: #111114;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  margin-top: 16px;
+  padding: 14px 16px;
+}
+
+.schedule-policy-section h3 {
+  font-size: 15px;
+  margin: 4px 0 14px;
+}
+
+.schedule-wait-field {
+  grid-column: 1 / -1;
+}
+
+.schedule-wait-field select {
+  min-height: 96px;
+}
+
+.schedule-policy-summary,
+.schedule-policy-recommendation {
+  margin: 14px 0 0;
+}
+
+.schedule-policy-recommendation {
+  color: #baf7d9;
+}
+
+.inline-button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.schedule-advanced-options summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.schedule-advanced-options .schedule-options-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.schedule-dependency-chain {
+  display: grid;
+  gap: 4px;
+}
+
+.schedule-dependency-chain span {
+  color: #a1a1aa;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.schedule-dependency-chain p {
+  color: #fda4af;
+  margin: 0;
+}
+
+.schedule-dependency-chain-waiting p {
+  color: #fde68a;
 }
 
 .backtest-detail-grid {

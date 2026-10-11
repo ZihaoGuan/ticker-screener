@@ -1863,6 +1863,9 @@ export type ScheduledJobConfig = {
   cron_tz: string;
   enabled: boolean;
   options: Record<string, unknown>;
+  priority: number;
+  depends_on_job_ids: string[];
+  worker_pool: string;
   estimated_duration_seconds: number | null;
   estimate_sample_count: number;
 };
@@ -1876,6 +1879,7 @@ export type ScheduledJobConfigResponse = {
     bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "entries" | "";
     estimated_duration_seconds: number | null;
     estimate_sample_count: number;
+    requires_daily_bars: boolean;
     fields: Array<{
       id: string;
       label: string;

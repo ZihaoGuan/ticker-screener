@@ -40,11 +40,11 @@ class ScheduledJobServiceTests(unittest.TestCase):
         config_path = self.project_root / "config" / "scheduled_jobs.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
-            '{"jobs":[{"job_id":"daily_rs","job_label":"Daily RS","action_id":"rs","cron_expr":"0 18 * * 1-5","cron_tz":"America/New_York","enabled":true,"options":{},"priority":75,"depends_on_job_ids":["reload_prices","reload_prices"],"worker_pool":"general"}]}\n',
+            '{"jobs":[{"job_id":"reload_prices","job_label":"Reload prices","action_id":"reload_postgres_market_data_date","cron_expr":"30 17 * * 1-5","cron_tz":"America/New_York","enabled":true,"options":{}},{"job_id":"daily_rs","job_label":"Daily RS","action_id":"rs","cron_expr":"0 18 * * 1-5","cron_tz":"America/New_York","enabled":true,"options":{},"priority":75,"depends_on_job_ids":["reload_prices","reload_prices"],"worker_pool":"general"}]}\n',
             encoding="utf-8",
         )
 
-        job = self.service.list_jobs()[0]
+        job = next(item for item in self.service.list_jobs() if item["job_id"] == "daily_rs")
         self.assertEqual(job["priority"], 75)
         self.assertEqual(job["depends_on_job_ids"], ["reload_prices"])
         self.assertEqual(job["worker_pool"], "general")
@@ -62,6 +62,107 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertEqual(saved["depends_on_job_ids"], ["reload_prices"])
         self.assertEqual(saved["worker_pool"], "general")
 
+    def test_upsert_job_validates_and_persists_queue_policy(self) -> None:
+        self.service.upsert_job(
+            job_id="daily_rs",
+            job_label="Daily RS",
+            action_id="rs",
+            cron_expr="0 18 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+
+        job = self.service.upsert_job(
+            job_id="daily_rs",
+            job_label="Daily RS",
+            action_id="rs",
+            cron_expr="0 18 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            priority=90,
+            depends_on_job_ids=["reload_prices", "reload_prices"],
+            worker_pool="market-data",
+        )
+
+        self.assertEqual(job["priority"], 90)
+        self.assertEqual(job["depends_on_job_ids"], ["reload_prices"])
+        self.assertEqual(job["worker_pool"], "market-data")
+
+    def test_upsert_job_rejects_invalid_queue_policy(self) -> None:
+        kwargs = {
+            "job_id": "daily_rs",
+            "job_label": "Daily RS",
+            "action_id": "rs",
+            "cron_expr": "0 18 * * 1-5",
+            "cron_tz": "America/New_York",
+            "enabled": True,
+        }
+
+        with self.assertRaisesRegex(ValueError, "priority"):
+            self.service.upsert_job(**kwargs, priority=101)
+        with self.assertRaisesRegex(ValueError, "worker_pool"):
+            self.service.upsert_job(**kwargs, worker_pool="")
+        with self.assertRaisesRegex(ValueError, "cannot depend on itself"):
+            self.service.upsert_job(**kwargs, depends_on_job_ids=["daily_rs"])
+        with self.assertRaisesRegex(ValueError, "unknown schedule"):
+            self.service.upsert_job(**kwargs, depends_on_job_ids=["reload_prices"])
+
+    def test_upsert_job_rejects_disabled_provider_and_dependency_cycle(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=False,
+        )
+        with self.assertRaisesRegex(ValueError, "disabled schedule"):
+            self.service.upsert_job(
+                job_id="daily_rs",
+                job_label="Daily RS",
+                action_id="rs",
+                cron_expr="0 18 * * 1-5",
+                cron_tz="America/New_York",
+                enabled=True,
+                depends_on_job_ids=["reload_prices"],
+            )
+
+        self.service.upsert_job(
+            job_id="daily_rs",
+            job_label="Daily RS",
+            action_id="rs",
+            cron_expr="0 18 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            depends_on_job_ids=["daily_rs"],
+        )
+        with self.assertRaisesRegex(ValueError, "cycle"):
+            self.service.upsert_job(
+                job_id="daily_rs",
+                job_label="Daily RS",
+                action_id="rs",
+                cron_expr="0 18 * * 1-5",
+                cron_tz="America/New_York",
+                enabled=True,
+                depends_on_job_ids=["reload_prices"],
+            )
+
     def test_available_actions_include_market_data_sync_actions(self) -> None:
         actions = {item["id"] for item in self.service.get_context()["available_actions"]}
 
@@ -78,6 +179,8 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         self.assertEqual(actions["rs"]["bias_group"], "bullish")
         self.assertEqual(actions["rs"]["bullish_subgroup"], "leaders")
+        self.assertTrue(actions["rs"]["requires_daily_bars"])
+        self.assertFalse(actions["sync_postgres_market_data"]["requires_daily_bars"])
 
     def test_completed_log_durations_are_exposed_for_jobs_and_actions(self) -> None:
         config_path = self.project_root / "config" / "scheduled_jobs.json"

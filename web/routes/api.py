@@ -1497,6 +1497,11 @@ def upsert_schedule_config(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     request_payload = payload or {}
+    queue_policy = {
+        field: request_payload[field]
+        for field in ("priority", "depends_on_job_ids", "worker_pool")
+        if field in request_payload
+    }
     try:
         job = service.upsert_job(
             job_id=str(request_payload.get("job_id") or ""),
@@ -1506,6 +1511,7 @@ def upsert_schedule_config(
             cron_tz=str(request_payload.get("cron_tz") or ""),
             enabled=bool(request_payload.get("enabled", True)),
             options=request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {},
+            **queue_policy,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
