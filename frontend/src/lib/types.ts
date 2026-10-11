@@ -878,6 +878,8 @@ export type RunAction = {
   bullish_subgroup?: "leaders" | "pullbacks" | "bottoming" | "entries" | "";
   command: string;
   supports_limit: boolean;
+  execution_modes: Array<"local" | "remote" | "github">;
+  default_execution_mode: "local" | "remote" | "github";
   fields: Array<{
     id: string;
     label: string;
@@ -939,7 +941,7 @@ export type JobsResponse = {
     screen_run_id?: number | null;
     backtest_run_id?: number | null;
     cancel_requested: boolean;
-    execution_mode?: "local" | "remote";
+    execution_mode?: "local" | "remote" | "github";
     trigger_source?: "manual" | "scheduler" | "retry" | "system";
     worker_name?: string;
     target_worker?: string;

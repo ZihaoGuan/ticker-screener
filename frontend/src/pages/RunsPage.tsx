@@ -1017,11 +1017,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                                     RUN DEFAULT
                                   </button>
                                 ) : null}
-                                {action.fields.length > 0 ? (
-                                  <button className="screener-config-button" onClick={() => handleConfigureClick(action.id)} type="button" disabled={isRunning}>
-                                    {screenersMode && !configureOnly ? "▣" : configureOnly ? "OPEN CONFIG" : "CONFIGURE"}
-                                  </button>
-                                ) : null}
+                                <button className="screener-config-button" onClick={() => handleConfigureClick(action.id)} type="button" disabled={isRunning}>
+                                  {screenersMode && !configureOnly ? "▣" : configureOnly ? "OPEN CONFIG" : "CONFIGURE"}
+                                </button>
                               </div>
                             </>
                           );

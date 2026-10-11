@@ -18,12 +18,16 @@ export function ScreenerConfigModal({
   isLoading,
 }: ScreenerConfigModalProps) {
   const [fieldValues, setFieldValues] = useState<Record<string, string | string[]>>({});
+  const [executionMode, setExecutionMode] = useState<RunAction["default_execution_mode"]>("local");
+  const [targetWorker, setTargetWorker] = useState("");
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     if (!isOpen || !action) return;
     const previousFocus = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
+    setExecutionMode(action.default_execution_mode);
+    setTargetWorker("");
     if (dialog && !dialog.open) dialog.showModal();
     return () => {
       if (dialog?.open) dialog.close();
@@ -44,7 +48,11 @@ export function ScreenerConfigModal({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await onSubmit(fieldValues);
+    await onSubmit({
+      ...fieldValues,
+      execution_mode: executionMode,
+      ...(executionMode === "remote" && targetWorker.trim() ? { target_worker: targetWorker.trim() } : {}),
+    });
     setFieldValues({});
     onClose();
   };
@@ -131,6 +139,34 @@ export function ScreenerConfigModal({
                 )}
               </label>
             ))}
+            <label className="modal-field">
+              <div className="field-header">
+                <span className="field-label">Run Mode</span>
+                <span className="field-help-text">Remote runs are resilient to web deployments. GitHub Actions is available only for supported screeners.</span>
+              </div>
+              <select value={executionMode} onChange={(event) => setExecutionMode(event.target.value as RunAction["default_execution_mode"])} className="modal-select">
+                {action.execution_modes.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode === "local" ? "Local Web Container" : mode === "remote" ? "Remote Worker Queue" : "GitHub Actions"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {executionMode === "remote" ? (
+              <label className="modal-field">
+                <div className="field-header">
+                  <span className="field-label">Target Worker</span>
+                  <span className="field-help-text">Optional. Leave blank to let any available worker claim the job.</span>
+                </div>
+                <input
+                  type="text"
+                  placeholder="worker-a"
+                  value={targetWorker}
+                  onChange={(event) => setTargetWorker(event.target.value)}
+                  className="modal-input"
+                />
+              </label>
+            ) : null}
           </div>
         </div>
 

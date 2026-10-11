@@ -42,6 +42,7 @@ class RunAction:
     visible_in_runs: bool = True
     bias_group: str = "other"
     bullish_subgroup: str = ""
+    execution_modes: tuple[str, ...] = ("local", "remote")
 
 
 @dataclass(frozen=True)
@@ -229,24 +230,6 @@ class RunService:
         "text",
         placeholder="[5, 10]",
         help_text="Trading-day hold list as JSON array.",
-    )
-    _execution_mode_field = RunField(
-        "execution_mode",
-        "Execution Mode",
-        "select",
-        help_text="Run locally, queue for an Oracle worker, or use the GitHub Actions pilot where supported.",
-        options=(
-            ("local", "Local"),
-            ("remote", "Remote Worker Queue"),
-            ("github", "GitHub Actions Pilot"),
-        ),
-    )
-    _target_worker_field = RunField(
-        "target_worker",
-        "Target Worker",
-        "text",
-        placeholder="worker-a",
-        help_text="Optional worker name. Leave blank to let any worker claim the queued job.",
     )
     _fundamental_limit_field = RunField(
         "fundamental_limit",
@@ -528,8 +511,6 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _include_sectors_field,
-                _execution_mode_field,
-                _target_worker_field,
                 _as_of_date_field,
                 _resume_from_field,
                 _delay_min_seconds_field,
@@ -549,8 +530,6 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _include_sectors_field,
-                _execution_mode_field,
-                _target_worker_field,
                 _resume_from_field,
                 _delay_min_seconds_field,
                 _delay_max_seconds_field,
@@ -568,8 +547,6 @@ class RunService:
             supports_limit=False,
             fields=(
                 _tickers_field,
-                _execution_mode_field,
-                _target_worker_field,
                 _as_of_date_field,
                 _fundamental_limit_field,
                 _technical_limit_field,
@@ -587,8 +564,6 @@ class RunService:
             fields=(
                 _as_of_date_field,
                 _include_sectors_field,
-                _execution_mode_field,
-                _target_worker_field,
             ),
         ),
         "build_ticker_ratings": RunAction(
@@ -599,8 +574,6 @@ class RunService:
             fields=(
                 _as_of_date_field,
                 _include_sectors_field,
-                _execution_mode_field,
-                _target_worker_field,
                 _min_sector_peers_field,
             ),
         ),
@@ -612,8 +585,6 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _include_sectors_field,
-                _execution_mode_field,
-                _target_worker_field,
                 _as_of_date_field,
             ),
         ),
@@ -625,8 +596,6 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _include_sectors_field,
-                _execution_mode_field,
-                _target_worker_field,
                 _as_of_date_field,
             ),
             bias_group="other",
@@ -639,8 +608,6 @@ class RunService:
                 _limit_field,
                 _tickers_field,
                 _include_sectors_field,
-                _execution_mode_field,
-                _target_worker_field,
                 _as_of_date_field,
                 _resume_from_field,
                 _delay_min_seconds_field,
@@ -2345,6 +2312,7 @@ class RunService:
             ),
             bias_group="bullish",
             bullish_subgroup="leaders",
+            execution_modes=("local", "remote", "github"),
         ),
         FINVIZ_SMALLOVER_SALES_GROWTH_TREND_STRATEGY_ID: RunAction(
             FINVIZ_SMALLOVER_SALES_GROWTH_TREND_STRATEGY_ID,
@@ -2491,6 +2459,7 @@ class RunService:
 
     def list_actions(self) -> list[dict[str, Any]]:
         filter_catalog = self._get_filter_catalog()
+        default_execution_mode = "remote" if self.database_url else "local"
         return [
             {
                 "id": action.action_id,
@@ -2499,6 +2468,8 @@ class RunService:
                 "bullish_subgroup": action.bullish_subgroup,
                 "command": " ".join([sys.executable, action.script_path, *action.extra_args]).strip(),
                 "supports_limit": action.supports_limit,
+                "execution_modes": list(action.execution_modes),
+                "default_execution_mode": default_execution_mode,
                 "fields": [
                     {
                         "id": field.field_id,
@@ -2674,8 +2645,12 @@ class RunService:
         execution_mode = str(normalized.get("execution_mode") or default_execution_mode).strip().lower() or default_execution_mode
         if execution_mode not in {"local", "remote", "github"}:
             raise ValueError("Execution mode must be local, remote, or github.")
+        if execution_mode not in action.execution_modes:
+            raise ValueError(f"{action.label} does not support {execution_mode} execution.")
         if execution_mode in {"remote", "github"} and not self.database_url:
             raise ValueError("Remote execution requires a configured database connection.")
+        if execution_mode != "remote":
+            normalized.pop("target_worker", None)
         request_payload = {
             "action_id": action_id,
             "execution_mode": execution_mode,

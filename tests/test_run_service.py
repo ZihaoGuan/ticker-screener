@@ -306,6 +306,14 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("finviz_analyst_recom_strongbuy", actions)
         self.assertEqual(actions["finviz_analyst_recom_strongbuy"]["label"], "Run Finviz Analyst Recom Strong Buy")
         self.assertIn("scripts/run_finviz_analyst_recom_scanner.py", actions["finviz_analyst_recom_strongbuy"]["command"])
+        self.assertEqual(actions["finviz_analyst_recom_strongbuy"]["execution_modes"], ["local", "remote", "github"])
+
+    def test_list_actions_exposes_local_and_remote_modes_for_every_action(self) -> None:
+        actions = self.service.list_actions()
+
+        self.assertTrue(actions)
+        self.assertTrue(all(item["execution_modes"][:2] == ["local", "remote"] for item in actions))
+        self.assertTrue(all(item["default_execution_mode"] == "local" for item in actions))
 
     def test_list_actions_includes_finviz_smallover_sales_growth_trend_scanner(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}
@@ -1101,6 +1109,16 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(executor.kwargs["job_run_id"], 903)
         self.assertEqual(executor.kwargs["code_version"], "pilot-sha")
         self.assertEqual(captured_patch["kwargs"]["result_payload_patch"]["github_run_id"], 654)
+
+    def test_launch_rejects_unsupported_execution_mode_before_creating_job(self) -> None:
+        created: list[object] = []
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
+        service.history_repository.create_job_run = lambda **kwargs: created.append(kwargs)  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(ValueError, "does not support github execution"):
+            service.launch("rs", options={"execution_mode": "github"})
+
+        self.assertEqual(created, [])
 
     def test_launch_defaults_every_registered_action_to_remote_with_database(self) -> None:
         service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
