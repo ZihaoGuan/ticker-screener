@@ -100,6 +100,22 @@ class HistoryRepositoryEnsureSchemaTests(unittest.TestCase):
         self.assertEqual(connection.unlock_calls, 0)
         self.assertEqual(connection.schema_apply_calls, 0)
 
+    def test_find_screen_run_matches_dated_artifact_stem(self) -> None:
+        connection = _FakeConnection(schema_checks=[])
+        repository = HistoryRepository(database_url="postgres://example")
+        repository._connect = lambda: connection  # type: ignore[method-assign]
+
+        with patch.object(repository, "_rows_to_dicts", return_value=[{"id": 5664}]):
+            payload = repository.find_screen_run_by_watchlist_stem(
+                "ema9_20_crossover_targets_2026-10-11"
+            )
+
+        self.assertEqual(payload, {"id": 5664})
+        sql, params = connection.executed_sql[0]
+        self.assertIn("strategy_id = %s AND run_date = %s", sql)
+        self.assertIn("ema9_20_crossover_targets", params or ())
+        self.assertIn("2026-10-11", params or ())
+
     def test_ensure_schema_unlocks_after_schema_apply_failure(self) -> None:
         connection = _FakeConnection(schema_checks=[[], []], raise_on_schema_apply=True)
         repository = HistoryRepository(database_url="postgres://example")

@@ -8,6 +8,7 @@ from time import sleep
 import threading
 from typing import Any
 
+from src.artifact_paths import date_label_from_text, strategy_id_from_legacy_stem
 from src.market_data_access import resolve_database_url
 
 
@@ -1083,24 +1084,35 @@ class HistoryRepository:
         connection = self._connect()
         if connection is None:
             return None
-        sql = """
+        strategy_id = strategy_id_from_legacy_stem(normalized_stem)
+        run_date = date_label_from_text(normalized_stem)
+        match_conditions = [
+            "watchlist_artifact_path LIKE %s",
+            "watchlist_artifact_path LIKE %s",
+        ]
+        params: list[Any] = [
+            f"%/{normalized_stem}.json",
+            f"%/{normalized_stem}/watchlist.json",
+        ]
+        if strategy_id and run_date:
+            match_conditions.append("(strategy_id = %s AND run_date = %s)")
+            params.extend([strategy_id, run_date])
+        sql = f"""
             SELECT id, strategy_id, run_date, job_run_id, config_json, config_hash, scope_json, scope_hash,
                    market_data_mode, source_kind, hit_count, failure_count, result_summary_json,
                    raw_artifact_path, watchlist_artifact_path, report_artifact_path, notes,
                    deleted_at, deleted_reason, created_at
             FROM screen_runs
             WHERE deleted_at IS NULL
-              AND watchlist_artifact_path IS NOT NULL
               AND (
-                watchlist_artifact_path LIKE %s
-                OR watchlist_artifact_path LIKE %s
+                {' OR '.join(match_conditions)}
               )
             ORDER BY run_date DESC, created_at DESC, id DESC
             LIMIT 1
         """
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (f"%/{normalized_stem}.json", f"%/{normalized_stem}/watchlist.json"))
+                cursor.execute(sql, tuple(params))
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
                 if not rows:
                     return None
