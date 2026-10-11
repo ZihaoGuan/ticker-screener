@@ -60,6 +60,12 @@ class WebAppConfig:
     smtp_use_tls: bool = _env("WEBAPP_SMTP_USE_TLS", "TICKER_SCREENER_SMTP_USE_TLS", default="true").strip().lower() in {"1", "true", "yes", "on"}
     smtp_use_ssl: bool = _env("WEBAPP_SMTP_USE_SSL", "TICKER_SCREENER_SMTP_USE_SSL", default="false").strip().lower() in {"1", "true", "yes", "on"}
     daily_report_ingest_token: str = _env("TICKER_SCREENER_DAILY_REPORT_INGEST_TOKEN", default="")
+    github_actions_token: str = _env("TICKER_SCREENER_GITHUB_ACTIONS_TOKEN", default="")
+    github_actions_repository: str = _env("TICKER_SCREENER_GITHUB_ACTIONS_REPOSITORY", default="")
+    github_actions_workflow: str = _env("TICKER_SCREENER_GITHUB_ACTIONS_WORKFLOW", default="external-screener.yml")
+    github_actions_ref: str = _env("TICKER_SCREENER_GITHUB_ACTIONS_REF", default="main")
+    external_job_callback_token: str = _env("TICKER_SCREENER_EXTERNAL_JOB_CALLBACK_TOKEN", default="")
+    external_job_artifact_base_url: str = _env("TICKER_SCREENER_EXTERNAL_JOB_ARTIFACT_BASE_URL", default="")
 
     @property
     def auth_bootstrap_admin_emails(self) -> tuple[str, ...]:

@@ -1081,6 +1081,27 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(captured_patch["job_run_id"], 777)
         self.assertEqual(captured_patch["kwargs"]["status"], "queued")
 
+    def test_launch_github_pilot_records_external_workflow_run(self) -> None:
+        captured_patch: dict[str, object] = {}
+
+        class _Executor:
+            def dispatch(self, **kwargs: object) -> dict[str, object]:
+                self.kwargs = kwargs
+                return {"workflow_run_id": 654, "html_url": "https://github.example/runs/654"}
+
+        executor = _Executor()
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test", code_version="pilot-sha")
+        service.history_repository.create_job_run = lambda **kwargs: 903  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = lambda job_run_id, **kwargs: captured_patch.update({"job_run_id": job_run_id, "kwargs": kwargs})  # type: ignore[method-assign]
+        service._github_actions_executor = lambda: executor  # type: ignore[method-assign]
+
+        job_id = service.launch("finviz_analyst_recom_strongbuy", options={"execution_mode": "github", "limit": 50})
+
+        self.assertEqual(job_id, "remote-903")
+        self.assertEqual(executor.kwargs["job_run_id"], 903)
+        self.assertEqual(executor.kwargs["code_version"], "pilot-sha")
+        self.assertEqual(captured_patch["kwargs"]["result_payload_patch"]["github_run_id"], 654)
+
     def test_launch_defaults_every_registered_action_to_remote_with_database(self) -> None:
         service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
         service.history_repository.create_job_run = lambda **kwargs: 778  # type: ignore[method-assign]

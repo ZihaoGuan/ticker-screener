@@ -451,6 +451,46 @@ class HistoryRepository:
             connection.commit()
         return rows[0] if rows else None
 
+    def list_github_job_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        sql = """
+            SELECT id, parent_job_run_id, job_type, job_name, status, trigger_source,
+                   request_payload, result_payload, artifact_path, started_at, finished_at, created_at
+            FROM job_runs
+            WHERE status IN ('queued', 'running')
+              AND COALESCE(request_payload->>'execution_mode', '') = 'github'
+            ORDER BY created_at ASC, id ASC
+            LIMIT %s
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (max(1, int(limit)),))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
+    def fallback_github_job_run(self, *, job_run_id: int, github_run_id: int, message: str) -> bool:
+        connection = self._connect()
+        if connection is None:
+            return False
+        sql = """
+            UPDATE job_runs
+            SET status = 'queued',
+                request_payload = jsonb_set(request_payload, '{execution_mode}', '"remote"'::jsonb, true),
+                result_payload = COALESCE(result_payload, '{}'::jsonb) || %s::jsonb,
+                finished_at = NULL
+            WHERE id = %s
+              AND status IN ('queued', 'running')
+              AND COALESCE(request_payload->>'execution_mode', '') = 'github'
+              AND COALESCE((result_payload->>'github_run_id')::bigint, 0) = %s
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (_json_dumps({"execution_mode": "remote", "executor": "remote_worker", "progress_label": "Falling back to Oracle", "message": message}), job_run_id, github_run_id))
+                updated = cursor.rowcount > 0
+            connection.commit()
+        return updated
+
     def requeue_stale_remote_job_runs(self, *, stale_after_seconds: int | None = None) -> list[dict[str, Any]]:
         connection = self._connect()
         if connection is None:
@@ -533,7 +573,7 @@ class HistoryRepository:
                 result_payload = COALESCE(result_payload, '{}'::jsonb) || %s::jsonb,
                 finished_at = CASE WHEN status = 'queued' THEN NOW() ELSE finished_at END
             WHERE id = %s
-              AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote'
+              AND COALESCE(request_payload->>'execution_mode', 'local') IN ('remote', 'github')
             RETURNING id, parent_job_run_id, job_type, job_name, status, trigger_source,
                       request_payload, result_payload, artifact_path, started_at, finished_at, created_at
         """

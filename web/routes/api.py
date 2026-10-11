@@ -18,6 +18,7 @@ from src.webapp.services.auth_service import AuthService, UserAdminService
 from src.webapp.services.dashboard_service import DashboardService
 from src.webapp.services.daily_report_service import DailyReportService
 from src.webapp.services.discord_notification_service import DiscordNotificationService
+from src.webapp.services.external_job_result_service import ExternalJobResultService
 from src.webapp.services.earnings_calendar_service import EarningsCalendarService
 from src.webapp.services.my_picks_service import MyPicksService
 from src.webapp.services.momentum_etf_portfolio_service import MomentumEtfPortfolioService
@@ -1125,6 +1126,60 @@ def daily_report_ingest_data(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return JSONResponse(report, status_code=201)
+
+
+@router.post("/internal/external-jobs/{job_run_id}/complete", response_class=JSONResponse)
+def complete_external_job(
+    job_run_id: int,
+    payload: dict[str, object] = Body(...),
+    callback_token: str | None = Header(default=None, alias="X-External-Job-Token"),
+    run_service: RunService = Depends(get_run_service),
+    history_service: ScreenerHistoryService = Depends(get_screener_history_service),
+) -> JSONResponse:
+    configured_token = config.external_job_callback_token
+    if (
+        not configured_token
+        or not callback_token
+        or not hmac.compare_digest(configured_token.encode("utf-8"), callback_token.encode("utf-8"))
+    ):
+        raise HTTPException(status_code=401, detail="A valid external-job callback token is required.")
+    service = ExternalJobResultService(
+        repository=run_service.history_repository,
+        history=history_service,
+        artifacts_dir=run_service.artifacts_dir,
+        artifact_base_url=config.external_job_artifact_base_url,
+    )
+    try:
+        return JSONResponse(service.complete(job_run_id=job_run_id, payload=dict(payload)))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/internal/external-jobs/{job_run_id}/heartbeat", response_class=JSONResponse)
+def heartbeat_external_job(
+    job_run_id: int,
+    payload: dict[str, object] = Body(...),
+    callback_token: str | None = Header(default=None, alias="X-External-Job-Token"),
+    run_service: RunService = Depends(get_run_service),
+    history_service: ScreenerHistoryService = Depends(get_screener_history_service),
+) -> JSONResponse:
+    configured_token = config.external_job_callback_token
+    if (
+        not configured_token
+        or not callback_token
+        or not hmac.compare_digest(configured_token.encode("utf-8"), callback_token.encode("utf-8"))
+    ):
+        raise HTTPException(status_code=401, detail="A valid external-job callback token is required.")
+    service = ExternalJobResultService(
+        repository=run_service.history_repository,
+        history=history_service,
+        artifacts_dir=run_service.artifacts_dir,
+        artifact_base_url=config.external_job_artifact_base_url,
+    )
+    try:
+        return JSONResponse(service.heartbeat(job_run_id=job_run_id, payload=dict(payload)))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/charts/{ticker}/preview", response_class=JSONResponse)

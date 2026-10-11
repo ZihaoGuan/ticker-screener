@@ -74,6 +74,29 @@ If you keep the default service names, the example database URL is already corre
 
 `TICKER_SCREENER_DAILY_REPORT_INGEST_TOKEN` protects the daily-report ingestion endpoint. Use a long random value that is different from the web session secret.
 
+### Optional GitHub Actions screener pilot
+
+The pilot can run the `finviz_analyst_recom_strongbuy` action from the app's
+queue through `.github/workflows/external-screener.yml`. It is deliberately
+limited to that one action until its runtime, Finviz rate limits, and callback
+reliability have been measured.
+
+Set these values in the production `deploy/.env` (do not commit them):
+
+- `TICKER_SCREENER_GITHUB_ACTIONS_TOKEN`: a fine-grained GitHub token that can dispatch and read Actions runs for this repository.
+- `TICKER_SCREENER_GITHUB_ACTIONS_REPOSITORY`: the `owner/repository` name.
+- `TICKER_SCREENER_GITHUB_ACTIONS_WORKFLOW=external-screener.yml`
+- `TICKER_SCREENER_GITHUB_ACTIONS_REF=main`
+- `TICKER_SCREENER_EXTERNAL_JOB_CALLBACK_TOKEN`: a new long random shared callback secret.
+- `TICKER_SCREENER_EXTERNAL_JOB_ARTIFACT_BASE_URL`: the exact public R2 URL prefix used for external-job artifacts.
+
+Add the matching GitHub repository secrets: `TICKER_SCREENER_EXTERNAL_CALLBACK_URL`,
+`TICKER_SCREENER_EXTERNAL_JOB_CALLBACK_TOKEN`, and the existing R2 upload and
+public-base secrets. To opt a single scheduled job in, add
+`"execution_mode": "github"` to that job's `options`; schedules without it
+remain on the Oracle worker queue. A queued GitHub dispatch automatically
+returns to the Oracle queue after ten minutes.
+
 For auth, also configure as needed:
 
 - `WEBAPP_GOOGLE_HOSTED_DOMAIN`

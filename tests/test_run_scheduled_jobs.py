@@ -61,6 +61,51 @@ class RunScheduledJobsTests(unittest.TestCase):
         self.assertEqual(queued[0][1]["scheduled_job_id"], "daily_rs")
         self.assertEqual(len(saved_states), 1)
 
+    def test_main_preserves_scheduled_github_execution_mode(self) -> None:
+        queued: list[dict[str, object]] = []
+
+        class _RunService:
+            _actions = {"finviz": SimpleNamespace(action_id="finviz")}
+
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def recover_remote_jobs(self) -> dict[str, int]:
+                return {"requeued": 0, "local_fallback_started": 0}
+
+            def launch(self, _: str, *, options: dict[str, object], trigger_source: str) -> str:
+                queued.append(options)
+                return "remote-456"
+
+        class _ScheduleService:
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def list_jobs(self) -> list[dict[str, object]]:
+                return [
+                    {
+                        "job_id": "finviz_external",
+                        "job_label": "Finviz external",
+                        "action_id": "finviz",
+                        "cron_expr": "* * * * *",
+                        "cron_tz": "America/New_York",
+                        "enabled": True,
+                        "options": {"execution_mode": "github"},
+                    }
+                ]
+
+        with (
+            patch.object(module, "load_webapp_config", return_value=SimpleNamespace(database_url="postgresql://queue-test")),
+            patch.object(module, "RunService", _RunService),
+            patch.object(module, "ScheduledJobService", _ScheduleService),
+            patch.object(module, "_load_state", return_value={}),
+            patch.object(module, "_save_state"),
+            patch.object(module, "_write_scheduler_status"),
+        ):
+            self.assertEqual(module.main(), 0)
+
+        self.assertEqual(queued[0]["execution_mode"], "github")
+
     def test_sync_scheduler_persistence_marks_snapshot_waiting_without_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             original_status_dir = module.STATUS_DIR

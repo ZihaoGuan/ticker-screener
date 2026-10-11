@@ -274,8 +274,12 @@ def main() -> int:
     run_service = RunService(project_root=PROJECT_ROOT, database_url=web_config.database_url)
     schedule_service = ScheduledJobService(project_root=PROJECT_ROOT, run_service=run_service)
     recovery = run_service.recover_remote_jobs()
+    reconcile_github = getattr(run_service, "reconcile_github_jobs", None)
+    github_recovery = reconcile_github() if callable(reconcile_github) else {"requeued": 0}
     if recovery["requeued"]:
         print(f"remote recovery: requeued={recovery['requeued']}")
+    if github_recovery["requeued"]:
+        print(f"github recovery: requeued={github_recovery['requeued']}")
     actions = {
         action.action_id: action
         for action in run_service._actions.values()
@@ -305,9 +309,11 @@ def main() -> int:
         artifact_path = _artifact_path_for_job(job, local_now=local_now)
         resolved_options = _resolve_template_value(job.get("options") or {}, local_now=local_now)
         queue_options = dict(resolved_options) if isinstance(resolved_options, dict) else {}
+        # A scheduled job may opt into an external executor. Keep remote workers
+        # as the default for every existing schedule.
+        queue_options.setdefault("execution_mode", "remote")
         queue_options.update(
             {
-                "execution_mode": "remote",
                 "scheduled_job_id": str(job["job_id"]),
                 "scheduled_job_label": str(job["job_label"]),
                 "scheduled_artifact_file": artifact_path,

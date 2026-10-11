@@ -1,0 +1,122 @@
+name: External Screener Pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_run_id:
+        required: true
+        type: string
+      attempt:
+        required: true
+        type: string
+      action_id:
+        required: true
+        type: string
+      code_version:
+        required: true
+        type: string
+      options_json:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  finviz-analyst-strong-buy:
+    if: ${{ inputs.action_id == 'finviz_analyst_recom_strongbuy' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      JOB_RUN_ID: ${{ inputs.job_run_id }}
+      ATTEMPT: ${{ inputs.attempt }}
+      ACTION_ID: ${{ inputs.action_id }}
+      CODE_VERSION: ${{ inputs.code_version }}
+      OPTIONS_JSON: ${{ inputs.options_json }}
+      WEBAPP_BASE_URL: ${{ secrets.TICKER_SCREENER_EXTERNAL_CALLBACK_URL }}
+      EXTERNAL_JOB_TOKEN: ${{ secrets.TICKER_SCREENER_EXTERNAL_JOB_CALLBACK_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.code_version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-finviz.txt
+
+      - name: Install screener dependencies
+        run: python -m pip install -r requirements-finviz.txt awscli
+
+      - name: Acknowledge execution
+        run: |
+          curl --fail --silent --show-error \
+            -H "X-External-Job-Token: ${EXTERNAL_JOB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"github_run_id\":${GITHUB_RUN_ID},\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+            "${WEBAPP_BASE_URL%/}/api/internal/external-jobs/${JOB_RUN_ID}/heartbeat"
+
+      - name: Run shared Finviz screener
+        id: screen
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          options = json.loads(os.environ["OPTIONS_JSON"])
+          command = ["python", "scripts/run_finviz_analyst_recom_scanner.py"]
+          if options.get("limit"):
+              command += ["--limit", str(options["limit"])]
+          if options.get("date_label"):
+              command += ["--date-label", str(options["date_label"])]
+          if options.get("tickers"):
+              command += ["--tickers", *[str(value) for value in options["tickers"]]]
+          subprocess.run(command, check=True)
+          PY
+
+      - name: Publish immutable result manifest
+        if: ${{ success() }}
+        id: publish
+        run: |
+          test -n "${R2_ACCOUNT_ID}" && test -n "${R2_BUCKET}" && test -n "${R2_PUBLIC_BASE_URL}"
+          DATE_LABEL="$(python -c 'import json, os; print(json.loads(os.environ["OPTIONS_JSON"]).get("date_label") or __import__("datetime").date.today().isoformat())')"
+          PREFIX="external-jobs/${JOB_RUN_ID}/attempt-${ATTEMPT}"
+          ARTIFACT_DIR="artifacts/screeners/${DATE_LABEL}/finviz_analyst_recom_strongbuy"
+          RAW="${ARTIFACT_DIR}/raw_results.json"
+          WATCHLIST="${ARTIFACT_DIR}/watchlist.json"
+          SUMMARY="${ARTIFACT_DIR}/run_summary.json"
+          export PREFIX RAW WATCHLIST SUMMARY
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws --endpoint-url "$ENDPOINT" s3 cp "$RAW" "s3://${R2_BUCKET}/${PREFIX}/raw.json"
+          aws --endpoint-url "$ENDPOINT" s3 cp "$WATCHLIST" "s3://${R2_BUCKET}/${PREFIX}/watchlist.json"
+          aws --endpoint-url "$ENDPOINT" s3 cp "$SUMMARY" "s3://${R2_BUCKET}/${PREFIX}/summary.json"
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          prefix = os.environ["PREFIX"]
+          base = os.environ["R2_PUBLIC_BASE_URL"].rstrip("/")
+          paths = {"raw": os.environ["RAW"], "watchlist": os.environ["WATCHLIST"], "summary": os.environ["SUMMARY"]}
+          manifest = {"job_run_id": int(os.environ["JOB_RUN_ID"]), "github_run_id": int(os.environ["GITHUB_RUN_ID"]), "action_id": os.environ["ACTION_ID"], "files": {name: {"url": f"{base}/{prefix}/{name}.json", "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()} for name, path in paths.items()}}
+          Path("manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+          PY
+          aws --endpoint-url "$ENDPOINT" s3 cp manifest.json "s3://${R2_BUCKET}/${PREFIX}/manifest.json"
+          echo "manifest_url=${R2_PUBLIC_BASE_URL%/}/${PREFIX}/manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Report completion
+        if: ${{ always() }}
+        run: |
+          if [ "${{ steps.screen.outcome }}" = "success" ] && [ -n "${{ steps.publish.outputs.manifest_url }}" ]; then
+            PAYLOAD="{\"github_run_id\":${GITHUB_RUN_ID},\"status\":\"success\",\"manifest_url\":\"${{ steps.publish.outputs.manifest_url }}\"}"
+          else
+            PAYLOAD="{\"github_run_id\":${GITHUB_RUN_ID},\"status\":\"failed\",\"message\":\"GitHub workflow failed before result publication.\"}"
+          fi
+          curl --silent --show-error --retry 3 \
+            -H "X-External-Job-Token: ${EXTERNAL_JOB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${WEBAPP_BASE_URL%/}/api/internal/external-jobs/${JOB_RUN_ID}/complete"

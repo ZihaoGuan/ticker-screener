@@ -27,6 +27,7 @@ from src.universe_filters import UniverseFilterCriteria, filter_universe_by_crit
 from src.webapp.config import load_webapp_config
 from src.webapp.services.screener_history_service import ScreenerHistoryService
 from src.webapp.services.discord_notification_service import DiscordNotificationService
+from src.webapp.services.github_actions_executor import GitHubActionsExecutor, GitHubActionsSettings
 from src.webapp.repositories.history_repository import HistoryRepository
 
 
@@ -233,8 +234,12 @@ class RunService:
         "execution_mode",
         "Execution Mode",
         "select",
-        help_text="Run locally on this server, or queue for a remote worker.",
-        options=(("local", "Local"), ("remote", "Remote Worker Queue")),
+        help_text="Run locally, queue for an Oracle worker, or use the GitHub Actions pilot where supported.",
+        options=(
+            ("local", "Local"),
+            ("remote", "Remote Worker Queue"),
+            ("github", "GitHub Actions Pilot"),
+        ),
     )
     _target_worker_field = RunField(
         "target_worker",
@@ -2473,6 +2478,17 @@ class RunService:
             app_base_url=load_webapp_config().app_base_url,
         )
 
+    def _github_actions_executor(self) -> GitHubActionsExecutor:
+        config = load_webapp_config()
+        return GitHubActionsExecutor(
+            GitHubActionsSettings(
+                token=config.github_actions_token,
+                repository=config.github_actions_repository,
+                workflow=config.github_actions_workflow,
+                ref=config.github_actions_ref,
+            )
+        )
+
     def list_actions(self) -> list[dict[str, Any]]:
         filter_catalog = self._get_filter_catalog()
         return [
@@ -2626,6 +2642,12 @@ class RunService:
         if remote_job is not None:
             if str(remote_job.get("status") or "") not in {"queued", "running"}:
                 raise ValueError(f"Job is not running: {job_id}")
+            if remote_job.get("execution_mode") == "github":
+                try:
+                    self._github_actions_executor().cancel(int(remote_job.get("github_run_id") or 0))
+                except Exception:
+                    # The persisted cancellation request remains authoritative.
+                    pass
             updated_row = self.history_repository.request_remote_job_cancel(remote_job.get("job_run_id"))
             if updated_row is None:
                 raise ValueError(f"Unknown job: {job_id}")
@@ -2650,10 +2672,10 @@ class RunService:
         normalized = self._normalize_options(action, options or {})
         default_execution_mode = "remote" if self.database_url else "local"
         execution_mode = str(normalized.get("execution_mode") or default_execution_mode).strip().lower() or default_execution_mode
-        if execution_mode not in {"local", "remote"}:
-            raise ValueError("Execution mode must be local or remote.")
-        if execution_mode == "remote" and not self.database_url:
-            raise ValueError("Remote worker execution requires a configured database connection.")
+        if execution_mode not in {"local", "remote", "github"}:
+            raise ValueError("Execution mode must be local, remote, or github.")
+        if execution_mode in {"remote", "github"} and not self.database_url:
+            raise ValueError("Remote execution requires a configured database connection.")
         request_payload = {
             "action_id": action_id,
             "execution_mode": execution_mode,
@@ -2661,7 +2683,7 @@ class RunService:
             "code_version": self.code_version,
             "options": normalized,
         }
-        initial_status = "queued" if execution_mode == "remote" else "running"
+        initial_status = "queued" if execution_mode in {"remote", "github"} else "running"
         job_run_id = self.history_repository.create_job_run(
             job_type=self._job_type_for_action(action_id),
             job_name=action.label,
@@ -2670,7 +2692,7 @@ class RunService:
             request_payload=request_payload,
             parent_job_run_id=None,
         )
-        if execution_mode == "remote" and job_run_id is None:
+        if execution_mode in {"remote", "github"} and job_run_id is None:
             raise ValueError("Remote worker queue requires a configured database connection.")
         if job_run_id is not None:
             normalized["job_run_id"] = job_run_id
@@ -2686,6 +2708,44 @@ class RunService:
                     "command": " ".join(command),
                     "progress_label": "Queued for remote worker",
                     "message": "Queued for remote worker claim.",
+                },
+                status="queued",
+            )
+            return self._remote_job_id(job_run_id)
+
+        if execution_mode == "github":
+            try:
+                dispatched = self._github_actions_executor().dispatch(
+                    job_run_id=int(job_run_id),
+                    action_id=action_id,
+                    code_version=self.code_version,
+                    options=normalized,
+                )
+            except Exception as exc:
+                self.history_repository.patch_job_run_result(
+                    job_run_id,
+                    result_payload_patch={
+                        "execution_mode": "github",
+                        "executor": "github_actions",
+                        "progress_label": "GitHub dispatch failed",
+                        "message": str(exc),
+                    },
+                    status="failed",
+                    finished_at=self._now_iso(),
+                )
+                raise ValueError(str(exc)) from exc
+            run_id = int(dispatched.get("workflow_run_id") or 0)
+            if run_id <= 0:
+                raise ValueError("GitHub Actions did not return a workflow run id.")
+            self.history_repository.patch_job_run_result(
+                job_run_id,
+                result_payload_patch={
+                    "execution_mode": "github",
+                    "executor": "github_actions",
+                    "github_run_id": run_id,
+                    "github_run_url": str(dispatched.get("html_url") or ""),
+                    "progress_label": "Queued on GitHub",
+                    "message": "Queued for GitHub Actions.",
                 },
                 status="queued",
             )
@@ -2711,6 +2771,51 @@ class RunService:
         # remains queued until a worker claims it instead of falling back here.
         _ = max_local_fallbacks
         return {"requeued": len(recovered), "local_fallback_started": 0}
+
+    def reconcile_github_jobs(self) -> dict[str, int]:
+        """Recover only GitHub infrastructure failures; script failures stay visible."""
+        recovered = 0
+        for row in self.history_repository.list_github_job_runs():
+            result = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
+            run_id = int(result.get("github_run_id") or 0)
+            if run_id <= 0:
+                continue
+            request = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
+            options = request.get("options") if isinstance(request.get("options"), dict) else {}
+            timeout_minutes = max(1, int(options.get("github_dispatch_timeout_minutes") or 10))
+            created_at = row.get("created_at")
+            if isinstance(created_at, dt.datetime):
+                created_utc = created_at.astimezone(dt.timezone.utc)
+                age = dt.datetime.now(dt.timezone.utc) - created_utc
+                if str(row.get("status") or "") == "queued" and age > dt.timedelta(minutes=timeout_minutes):
+                    try:
+                        self._github_actions_executor().cancel(run_id)
+                    except Exception:
+                        pass
+                    message = f"GitHub dispatch exceeded the {timeout_minutes}-minute queue timeout."
+                    if self.history_repository.fallback_github_job_run(
+                        job_run_id=int(row["id"]), github_run_id=run_id, message=message
+                    ):
+                        recovered += 1
+                    continue
+            try:
+                remote = self._github_actions_executor().get_status(run_id)
+            except Exception:
+                continue
+            status = str(remote.get("status") or "").lower()
+            conclusion = str(remote.get("conclusion") or "").lower()
+            if status != "completed":
+                continue
+            if conclusion in {"cancelled", "timed_out", "action_required"}:
+                try:
+                    self._github_actions_executor().cancel(run_id)
+                except Exception:
+                    pass
+                if self.history_repository.fallback_github_job_run(job_run_id=int(row["id"]), github_run_id=run_id, message=f"GitHub infrastructure conclusion: {conclusion}."):
+                    recovered += 1
+            elif conclusion and conclusion != "success":
+                self.history_repository.patch_job_run_result(int(row["id"]), result_payload_patch={"github_conclusion": conclusion, "progress_label": "GitHub failed", "message": f"GitHub workflow concluded: {conclusion}."}, status="failed", finished_at=self._now_iso())
+        return {"requeued": recovered}
 
     def resume_remote_job_locally(self, row: dict[str, Any]) -> str:
         request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
@@ -3382,7 +3487,7 @@ class RunService:
         if row is None:
             return None
         request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
-        if str(request_payload.get("execution_mode") or request_payload.get("options", {}).get("execution_mode") or "local") == "remote":
+        if str(request_payload.get("execution_mode") or request_payload.get("options", {}).get("execution_mode") or "local") in {"remote", "github"}:
             return None
         return self._serialize_persisted_local_job_run(row)
 
@@ -3394,7 +3499,7 @@ class RunService:
         if row is None:
             return None
         request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
-        if str(request_payload.get("execution_mode") or request_payload.get("options", {}).get("execution_mode") or "local") != "remote":
+        if str(request_payload.get("execution_mode") or request_payload.get("options", {}).get("execution_mode") or "local") not in {"remote", "github"}:
             return None
         return self._serialize_remote_job_run(row)
 
@@ -3440,9 +3545,11 @@ class RunService:
             "screen_run_id": result_payload.get("screen_run_id"),
             "backtest_run_id": result_payload.get("backtest_run_id"),
             "cancel_requested": bool(result_payload.get("cancel_requested")),
-            "execution_mode": "remote",
+            "execution_mode": str(request_payload.get("execution_mode") or "remote"),
             "trigger_source": str(row.get("trigger_source") or "manual"),
-            "worker_name": str(result_payload.get("worker_name") or ""),
+            "worker_name": str(result_payload.get("worker_name") or ("github-actions" if result_payload.get("executor") == "github_actions" else "")),
+            "github_run_id": result_payload.get("github_run_id"),
+            "github_run_url": str(result_payload.get("github_run_url") or ""),
             "target_worker": str(options.get("target_worker") or ""),
             "duration_seconds": self._duration_seconds_from_iso(started_at, finished_at),
             "child_jobs": [],
