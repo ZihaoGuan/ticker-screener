@@ -15,6 +15,38 @@ from src.finviz_screener_rows import (
 
 
 class FinvizScreenerRowsTests(unittest.TestCase):
+    def test_screener_stops_at_finviz_public_pagination_limit(self) -> None:
+        calls: list[int] = []
+
+        class _Screener(SafeFinvizScreener):
+            def _fetch_page(self, start: int, *, base_url: str | None = None):
+                del base_url
+                calls.append(start)
+                if start >= 1_001:
+                    raise AssertionError("Finviz rejects public screener offset 1001")
+                rows = "".join(
+                    f"<tr valign=\"top\"><td>{index}</td><td>T{index}</td><td>Company {index}</td></tr>"
+                    for index in range(start, start + 20)
+                )
+                return (
+                    html.fromstring(
+                        f"""
+                        <div>#1 / 2,127 Total</div>
+                        <table>
+                          <tr valign=\"middle\"><th>No.</th><th>Ticker</th><th>Company</th></tr>
+                          {rows}
+                        </table>
+                        """
+                    ),
+                    "https://finviz.com/screener.ashx?v=111",
+                )
+
+        screener = _Screener()
+
+        self.assertEqual(screener.total_rows, 2_127)
+        self.assertEqual(len(screener), 1_000)
+        self.assertEqual(calls[-1], 981)
+
     def test_screener_exposes_total_rows_when_fetch_is_limited(self) -> None:
         class _Screener(SafeFinvizScreener):
             def _fetch_page(self, start: int, *, base_url: str | None = None):

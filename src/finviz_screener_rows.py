@@ -25,6 +25,10 @@ TABLE_TYPES = {
     "Technical": "171",
 }
 _TICKER_LIKE_PATTERN = re.compile(r"[A-Z][A-Z0-9.-]{0,5}")
+# Finviz's public screener serves offsets through 981 (the first 1,000 rows)
+# but rejects offset 1001 with HTTP 403. Keep the upstream total separately so
+# callers that partition their query can still detect oversized result sets.
+FINVIZ_PUBLIC_MAX_PAGEABLE_ROWS = 1_000
 
 
 class SafeFinvizScreener:
@@ -75,7 +79,9 @@ class SafeFinvizScreener:
         self.headers = _extract_headers(first_tree)
         total_rows = _extract_total_rows(first_tree) or len(_extract_rows(first_tree, self.headers))
         self.total_rows = total_rows
-        row_limit = total_rows if self._rows_requested is None else min(self._rows_requested, total_rows)
+        pageable_rows = min(total_rows, FINVIZ_PUBLIC_MAX_PAGEABLE_ROWS)
+        self.is_truncated = total_rows > pageable_rows
+        row_limit = pageable_rows if self._rows_requested is None else min(self._rows_requested, pageable_rows)
         if row_limit <= 0:
             return []
 
