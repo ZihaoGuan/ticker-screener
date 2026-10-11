@@ -274,6 +274,19 @@ def main() -> int:
     run_service = RunService(project_root=PROJECT_ROOT, database_url=web_config.database_url)
     schedule_service = ScheduledJobService(project_root=PROJECT_ROOT, run_service=run_service)
     recovery = run_service.recover_remote_jobs()
+    history_repository = getattr(run_service, "history_repository", None)
+    expire_dependencies = getattr(history_repository, "expire_queued_dependency_jobs", None)
+    expired_dependencies = expire_dependencies() if callable(expire_dependencies) else []
+    for expired in expired_dependencies:
+        options = expired.get("request_payload", {}).get("options", {}) if isinstance(expired.get("request_payload"), dict) else {}
+        scheduled_job_id = str(options.get("scheduled_job_id") or "") if isinstance(options, dict) else ""
+        if scheduled_job_id:
+            _write_scheduler_status(
+                job_id=scheduled_job_id,
+                job_label=str(options.get("scheduled_job_label") or scheduled_job_id),
+                status="failed",
+                message="Prerequisites did not succeed before the daily cutoff.",
+            )
     reconcile_github = getattr(run_service, "reconcile_github_jobs", None)
     github_recovery = reconcile_github() if callable(reconcile_github) else {"requeued": 0}
     if recovery["requeued"]:
@@ -287,9 +300,6 @@ def main() -> int:
     state = _load_state()
     state_changed = False
     time_snapshots: dict[str, dt.datetime] = {}
-    get_parallel_limit = getattr(schedule_service, "get_max_parallel_jobs", None)
-    parallel_limit = int(get_parallel_limit()) if callable(get_parallel_limit) else 0
-
     for job in schedule_service.list_jobs():
         if not job.get("enabled"):
             continue
@@ -308,41 +318,7 @@ def main() -> int:
         if state.get(str(job["job_id"])) == slot_key:
             continue
 
-        artifact_path = _artifact_path_for_job(job, local_now=local_now)
-        resolved_options = _resolve_template_value(job.get("options") or {}, local_now=local_now)
-        queue_options = dict(resolved_options) if isinstance(resolved_options, dict) else {}
-        # A scheduled job may opt into an external executor. Keep remote workers
-        # as the default for every existing schedule.
-        queue_options.setdefault("execution_mode", "remote")
-        queue_options.update(
-            {
-                "scheduled_job_id": str(job["job_id"]),
-                "scheduled_job_label": str(job["job_label"]),
-                "scheduled_artifact_file": artifact_path,
-            }
-        )
-        remote_job_id = run_service.launch(
-            action_id,
-            options=queue_options,
-            trigger_source="scheduler",
-            queue_policy={
-                "queue_priority": job.get("priority", 50),
-                "dependency_job_ids": job.get("depends_on_job_ids", []),
-                "dependency_key": local_now.date().isoformat(),
-                "worker_pool": job.get("worker_pool", "any"),
-                "parallel_limit": parallel_limit,
-            },
-        )
-        _write_scheduler_status(
-            job_id=str(job["job_id"]),
-            job_label=str(job["job_label"]),
-            status="queued",
-            message=f"Queued worker job {remote_job_id}.",
-            artifact_file=artifact_path,
-            persisted_to_db=None,
-            screen_run_id=None,
-            persistence_message="Waiting for worker completion.",
-        )
+        remote_job_id = schedule_service.enqueue_job(job=job, local_now=local_now)
         state[str(job["job_id"])] = slot_key
         state_changed = True
         print(f"queued scheduled job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")

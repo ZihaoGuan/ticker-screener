@@ -1868,6 +1868,11 @@ export type ScheduledJobConfig = {
   worker_pool: string;
   estimated_duration_seconds: number | null;
   estimate_sample_count: number;
+  queue_state?: {
+    state: "ready" | "waiting" | "blocked" | "running" | "no-worker" | "independent" | "expired";
+    job_run_id: number | null;
+    blocking_job_id: string | null;
+  };
 };
 
 export type ScheduledJobConfigResponse = {

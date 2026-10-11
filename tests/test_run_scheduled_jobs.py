@@ -29,8 +29,8 @@ class RunScheduledJobsTests(unittest.TestCase):
                 return "remote-123"
 
         class _ScheduleService:
-            def __init__(self, **_: object) -> None:
-                pass
+            def __init__(self, *, run_service: _RunService, **_: object) -> None:
+                self.run_service = run_service
 
             def get_max_parallel_jobs(self) -> int:
                 return 4
@@ -50,6 +50,14 @@ class RunScheduledJobsTests(unittest.TestCase):
                         "worker_pool": "general",
                     }
                 ]
+
+            def enqueue_job(self, *, job: dict[str, object], local_now, trigger_source: str = "scheduler") -> str:
+                return self.run_service.launch(
+                    str(job["action_id"]),
+                    options={"limit": 25, "execution_mode": "remote", "scheduled_job_id": "daily_rs"},
+                    trigger_source=trigger_source,
+                    queue_policy={"queue_priority": 75, "dependency_job_ids": ["reload_prices"], "dependency_key": local_now.date().isoformat(), "dependency_expires_at": local_now.isoformat(), "worker_pool": "general", "parallel_limit": 4},
+                )
 
         with (
             patch.object(module, "load_webapp_config", return_value=SimpleNamespace(database_url="postgresql://queue-test")),
@@ -89,8 +97,8 @@ class RunScheduledJobsTests(unittest.TestCase):
                 return "remote-456"
 
         class _ScheduleService:
-            def __init__(self, **_: object) -> None:
-                pass
+            def __init__(self, *, run_service: _RunService, **_: object) -> None:
+                self.run_service = run_service
 
             def list_jobs(self) -> list[dict[str, object]]:
                 return [
@@ -104,6 +112,14 @@ class RunScheduledJobsTests(unittest.TestCase):
                         "options": {"execution_mode": "github"},
                     }
                 ]
+
+            def enqueue_job(self, *, job: dict[str, object], local_now, trigger_source: str = "scheduler") -> str:
+                return self.run_service.launch(
+                    str(job["action_id"]),
+                    options={"execution_mode": "github", "scheduled_job_id": "finviz_external"},
+                    trigger_source=trigger_source,
+                    queue_policy={"queue_priority": 50, "dependency_job_ids": [], "dependency_key": local_now.date().isoformat(), "worker_pool": "any", "parallel_limit": 5},
+                )
 
         with (
             patch.object(module, "load_webapp_config", return_value=SimpleNamespace(database_url="postgresql://queue-test")),

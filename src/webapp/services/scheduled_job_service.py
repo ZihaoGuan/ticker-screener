@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import re
 import statistics
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from src.config import load_app_config
 from src.screener_catalog import build_screener_catalog
@@ -33,6 +34,7 @@ class ScheduledJobService:
 
     def get_context(self) -> dict[str, Any]:
         jobs = self.list_jobs()
+        self._attach_queue_states(jobs)
         return {
             "jobs": jobs,
             "available_actions": self._available_actions(jobs),
@@ -40,6 +42,66 @@ class ScheduledJobService:
             "scheduler_command": f"cd {self.project_root / 'deploy'} && {self.project_root / 'scripts' / 'run_scheduled_jobs.py'}",
             "max_parallel_jobs": self.get_max_parallel_jobs(),
         }
+
+    def _attach_queue_states(self, jobs: list[dict[str, Any]]) -> None:
+        """Attach the queue's current truth, rather than inferring it from status files.
+
+        Status files are useful history, but are not authoritative while a remote
+        job is waiting for dependencies or for a compatible worker.
+        """
+        repository = getattr(self.run_service, "history_repository", None)
+        list_runs = getattr(repository, "list_remote_job_runs", None)
+        list_workers = getattr(repository, "list_remote_workers", None)
+        if not callable(list_runs):
+            return
+        try:
+            runs = list_runs(limit=max(100, len(jobs) * 12))
+            workers = list_workers() if callable(list_workers) else []
+        except Exception:
+            return
+        by_job_id = {str(job["job_id"]): job for job in jobs}
+        latest: dict[tuple[str, str], dict[str, Any]] = {}
+        for run in runs:
+            payload = run.get("request_payload") if isinstance(run.get("request_payload"), dict) else {}
+            options = payload.get("options") if isinstance(payload.get("options"), dict) else {}
+            schedule_id = str(options.get("scheduled_job_id") or "").strip()
+            key = str(payload.get("dependency_key") or "").strip()
+            if not schedule_id or not key:
+                continue
+            pair = (schedule_id, key)
+            if pair not in latest:
+                latest[pair] = run
+
+        for job in jobs:
+            local_now = datetime.now(ZoneInfo(str(job["cron_tz"])))
+            key = local_now.date().isoformat()
+            current = latest.get((str(job["job_id"]), key))
+            dependencies = [by_job_id[item] for item in job.get("depends_on_job_ids", []) if item in by_job_id]
+            dependency_runs = [latest.get((str(item["job_id"]), key)) for item in dependencies]
+            failed = next((run for run in dependency_runs if run and str(run.get("status")) in {"failed", "interrupted"}), None)
+            unfinished = next((item for item, run in zip(dependencies, dependency_runs) if not run or str(run.get("status")) != "success"), None)
+            state = "independent" if not dependencies else "ready"
+            blocking_job_id = ""
+            if current and str(current.get("status")) == "running":
+                state = "running"
+            elif current and str(current.get("status")) == "failed":
+                result = current.get("result_payload") if isinstance(current.get("result_payload"), dict) else {}
+                state = "expired" if "daily cutoff" in str(result.get("message") or "").lower() else "blocked"
+            elif failed:
+                state = "blocked"
+                blocking_job_id = str((failed.get("request_payload") or {}).get("options", {}).get("scheduled_job_id") or "")
+            elif unfinished:
+                state = "waiting"
+                blocking_job_id = str(unfinished["job_id"])
+            elif current and str(current.get("status")) == "queued" and not _has_compatible_worker(workers, str(job.get("worker_pool") or "any")):
+                state = "no-worker"
+            elif current and str(current.get("status")) == "queued":
+                state = "ready"
+            job["queue_state"] = {
+                "state": state,
+                "job_run_id": current.get("id") if current else None,
+                "blocking_job_id": blocking_job_id or None,
+            }
 
     def get_action_activity(self, *, run_jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Return card-safe activity for every configured or recently run action."""
@@ -193,9 +255,78 @@ class ScheduledJobService:
             raise ValueError("job_id is required.")
         payload = self._load_jobs()
         jobs = [item for item in payload.get("jobs", []) if isinstance(item, dict)]
+        dependents = [
+            str(item.get("job_label") or item.get("job_id") or "")
+            for item in jobs
+            if clean_job_id in _normalize_dependency_job_ids(item.get("depends_on_job_ids"))
+        ]
+        if dependents:
+            raise ValueError(f"Cannot delete {clean_job_id}; required by: {', '.join(dependents)}.")
         next_jobs = [item for item in jobs if str(item.get("job_id") or "").strip() != clean_job_id]
         payload["jobs"] = next_jobs
         self._write_jobs(payload)
+
+    def run_now(self, *, job_id: str) -> dict[str, Any]:
+        clean_job_id = _normalize_job_id(job_id)
+        job = next((item for item in self.list_jobs() if item["job_id"] == clean_job_id), None)
+        if job is None:
+            raise ValueError("Scheduled job was not found.")
+        if not job["enabled"]:
+            raise ValueError("Cannot run a disabled schedule.")
+        local_now = datetime.now(ZoneInfo(str(job["cron_tz"]))).replace(second=0, microsecond=0)
+        remote_job_id = self.enqueue_job(job=job, local_now=local_now, trigger_source="manual")
+        return {"job_id": remote_job_id, "scheduled_job_id": clean_job_id}
+
+    def enqueue_job(self, *, job: dict[str, Any], local_now: datetime, trigger_source: str = "scheduler") -> str:
+        action_id = str(job["action_id"])
+        if action_id not in self.run_service._actions:
+            raise ValueError(f"Unknown action_id: {action_id}")
+        resolved_options = _resolve_template_value(job.get("options") or {}, local_now=local_now)
+        queue_options = dict(resolved_options) if isinstance(resolved_options, dict) else {}
+        artifact_path = _artifact_path_for_job(self.project_root, job, local_now=local_now)
+        queue_options.setdefault("execution_mode", "remote")
+        queue_options.update(
+            {
+                "scheduled_job_id": str(job["job_id"]),
+                "scheduled_job_label": str(job["job_label"]),
+                "scheduled_artifact_file": artifact_path,
+            }
+        )
+        deadline = local_now.replace(hour=23, minute=59, second=59, microsecond=0)
+        remote_job_id = self.run_service.launch(
+            action_id,
+            options=queue_options,
+            trigger_source=trigger_source,
+            queue_policy={
+                "queue_priority": job.get("priority", _DEFAULT_QUEUE_PRIORITY),
+                "dependency_job_ids": job.get("depends_on_job_ids", []),
+                "dependency_key": local_now.date().isoformat(),
+                "dependency_expires_at": deadline.isoformat(),
+                "worker_pool": job.get("worker_pool", _DEFAULT_WORKER_POOL),
+                "parallel_limit": self.get_max_parallel_jobs(),
+            },
+        )
+        self._write_status(
+            job_id=str(job["job_id"]),
+            job_label=str(job["job_label"]),
+            message=f"Queued worker job {remote_job_id}.",
+            artifact_file=artifact_path,
+        )
+        return remote_job_id
+
+    def _write_status(self, *, job_id: str, job_label: str, message: str, artifact_file: str) -> None:
+        status_dir = self.project_root / "artifacts" / "status"
+        status_dir.mkdir(parents=True, exist_ok=True)
+        status_path = status_dir / f"{job_id}.json"
+        payload = {
+            "job_id": job_id, "job_label": job_label, "status": "queued", "last_started_at": None,
+            "last_finished_at": None, "exit_code": None, "log_file": "", "artifact_file": artifact_file or None,
+            "message": message, "persisted_to_db": None, "screen_run_id": None,
+            "persistence_message": "Waiting for worker completion.",
+        }
+        tmp_path = status_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        tmp_path.replace(status_path)
 
     def get_max_parallel_jobs(self) -> int:
         payload = self._load_jobs()
@@ -455,6 +586,19 @@ def _validate_worker_pool(value: object) -> str:
     return pool
 
 
+def _has_compatible_worker(workers: list[dict[str, Any]], worker_pool: str) -> bool:
+    requested = _normalize_worker_pool(worker_pool)
+    for worker in workers:
+        if not bool(worker.get("is_healthy")):
+            continue
+        metadata = worker.get("metadata_json") if isinstance(worker.get("metadata_json"), dict) else {}
+        pools = metadata.get("worker_pools") if isinstance(metadata.get("worker_pools"), list) else []
+        normalized_pools = {_normalize_worker_pool(item) for item in pools}
+        if requested == "any" or "any" in normalized_pools or requested in normalized_pools:
+            return True
+    return False
+
+
 def _validate_schedule_dependencies(jobs: list[dict[str, Any]]) -> None:
     by_id = {str(item.get("job_id") or "").strip(): item for item in jobs}
     for job_id, job in by_id.items():
@@ -467,6 +611,12 @@ def _validate_schedule_dependencies(jobs: list[dict[str, Any]]) -> None:
                 raise ValueError(f"Schedule {job_id} depends on unknown schedule: {dependency_id}.")
             if bool(job.get("enabled", True)) and not bool(provider.get("enabled", True)):
                 raise ValueError(f"Enabled schedule {job_id} cannot depend on disabled schedule: {dependency_id}.")
+            if str(job.get("cron_tz") or "America/New_York") != str(provider.get("cron_tz") or "America/New_York"):
+                raise ValueError(f"Schedule {job_id} must use the same timezone as dependency {dependency_id}.")
+            consumer_days = _simple_cron_days(str(job.get("cron_expr") or ""))
+            provider_days = _simple_cron_days(str(provider.get("cron_expr") or ""))
+            if consumer_days is not None and provider_days is not None and not consumer_days.intersection(provider_days):
+                raise ValueError(f"Schedule {job_id} never shares a run day with dependency {dependency_id}.")
 
     visiting: set[str] = set()
     visited: set[str] = set()
@@ -493,3 +643,44 @@ def _validate_cron_expr(value: str) -> None:
     for part in parts:
         if not _CRON_FIELD_PATTERN.match(part):
             raise ValueError(f"Unsupported cron field: {part}")
+
+
+def _simple_cron_days(cron_expr: str) -> set[int] | None:
+    parts = cron_expr.split()
+    if len(parts) != 5:
+        return None
+    weekday = parts[4]
+    if weekday == "*":
+        return set(range(7))
+    if weekday == "1-5":
+        return {1, 2, 3, 4, 5}
+    if weekday in {"0", "7"}:
+        return {0}
+    if weekday == "6":
+        return {6}
+    return None
+
+
+def _artifact_path_for_job(project_root: Path, job: dict[str, Any], *, local_now: datetime) -> str:
+    if str(job.get("action_id") or "") == "weekly_rs":
+        return str(project_root / "artifacts" / "watchlists" / f"weekly_rs_new_high_{local_now.date().isoformat()}.json")
+    return ""
+
+
+def _resolve_template_value(value: object, *, local_now: datetime) -> object:
+    if isinstance(value, str):
+        replacements = {
+            "{{local_date}}": local_now.date().isoformat(),
+            "{{local_date_minus_7}}": (local_now.date() - timedelta(days=7)).isoformat(),
+            "{{local_date_minus_14}}": (local_now.date() - timedelta(days=14)).isoformat(),
+            "{{local_date_minus_100}}": (local_now.date() - timedelta(days=100)).isoformat(),
+            "{{local_date_minus_465}}": (local_now.date() - timedelta(days=465)).isoformat(),
+            "{{local_date_plus_7}}": (local_now.date() + timedelta(days=7)).isoformat(),
+            "{{local_date_plus_14}}": (local_now.date() + timedelta(days=14)).isoformat(),
+        }
+        return re.sub(r"\{\{[^}]+\}\}", lambda match: replacements.get(match.group(0), match.group(0)), value)
+    if isinstance(value, list):
+        return [_resolve_template_value(item, local_now=local_now) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _resolve_template_value(item, local_now=local_now) for key, item in value.items()}
+    return value

@@ -226,6 +226,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       void fetchJson<{ jobs: ScheduledJobSummary[] }>("/api/admin/scheduled-jobs")
         .then((result) => setScheduledJobs(result.jobs))
         .catch(() => undefined);
+      loadScheduleConfig();
     }, 15_000);
     return () => window.clearInterval(timer);
   }, [canManageSchedules, schedulesMode]);
@@ -636,10 +637,8 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setIsSavingSchedule(true);
     setScheduleNotice("");
     try {
-      await fetchJson<{ ok: boolean; job_id: string }>(`/api/runs/${encodeURIComponent(job.action_id)}`, {
+      await fetchJson<{ ok: boolean; job_id: string }>(`/api/admin/schedules/${encodeURIComponent(job.job_id)}/run-now`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...job.options, execution_mode: job.options.execution_mode ?? "remote" }),
       });
       setScheduleNotice(`${job.job_label} queued now.`);
       loadScheduledJobs();
@@ -1800,7 +1799,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                 <div className="run-params-grid">
                   <label className="field">
                     <span>Job ID</span>
-                    <input type="text" value={scheduleJobId} onChange={(event) => setScheduleJobId(event.target.value)} placeholder="weekly_rs_close" required />
+                    <input type="text" value={scheduleJobId} onChange={(event) => setScheduleJobId(event.target.value)} placeholder="weekly_rs_close" required disabled={isEditingSchedule} />
                   </label>
                   <label className="field">
                     <span>Job Label</span>
@@ -2033,7 +2032,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
 }
 
 type TimelineRowState = "active" | "finished" | "upcoming" | "waiting" | "disabled";
-type ScheduleQueueState = "ready" | "waiting" | "blocked" | "running" | "no-worker" | "independent";
+type ScheduleQueueState = "ready" | "waiting" | "blocked" | "running" | "no-worker" | "independent" | "expired";
 type ScheduleTimelineView = "today" | "schedule";
 
 const MARKET_OPEN_MINUTE_ET = 9 * 60 + 30;
@@ -3104,6 +3103,13 @@ function resolveScheduleQueueState(
   summaryByJobId: Map<string, ScheduledJobSummary>,
   now: Date,
 ): { state: ScheduleQueueState; dependency: ScheduledJobConfig | null } {
+  const authoritative = config.queue_state;
+  if (authoritative) {
+    return {
+      state: authoritative.state,
+      dependency: authoritative.blocking_job_id ? configByJobId.get(authoritative.blocking_job_id) ?? null : null,
+    };
+  }
   if (/no compatible worker/i.test(summary?.message ?? "")) {
     return { state: "no-worker", dependency: null };
   }
@@ -3271,6 +3277,7 @@ function queueStateLabel(row: ScheduleTimelineRow): string {
   if (row.queueState === "blocked") return `Blocked: ${row.dependency?.job_label ?? "prerequisite failed"}`;
   if (row.queueState === "waiting") return `Waiting for ${row.dependency?.job_label ?? "prerequisite"}`;
   if (row.queueState === "ready") return "Ready";
+  if (row.queueState === "expired") return "Missed daily cutoff";
   return "Independent";
 }
 

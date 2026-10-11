@@ -1555,6 +1555,32 @@ def delete_schedule_config(
     return JSONResponse({"ok": True})
 
 
+@router.post("/admin/schedules/{job_id}/run-now", response_class=JSONResponse)
+def run_schedule_now(
+    request: Request,
+    job_id: str,
+    service: ScheduledJobService = Depends(get_scheduled_job_service),
+    principal: Principal = Depends(require_manage_exclusions),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    try:
+        result = service.run_now(job_id=job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_audit(
+        audit_service=audit_service,
+        principal=principal,
+        request=request,
+        action="admin.schedule.run_now",
+        resource_type="scheduled_job",
+        resource_id=str(result["scheduled_job_id"]),
+        resource_label=str(result["scheduled_job_id"]),
+        message=f"Queued scheduled job {result['scheduled_job_id']} now.",
+        metadata=result,
+    )
+    return JSONResponse({"ok": True, **result})
+
+
 @router.post("/admin/schedules/settings", response_class=JSONResponse)
 def update_schedule_settings(
     request: Request,

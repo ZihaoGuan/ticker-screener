@@ -443,11 +443,16 @@ class HistoryRepository:
                     ) AS dependency(job_id)
                     WHERE NOT EXISTS (
                         SELECT 1
-                        FROM job_runs AS provider
-                        WHERE provider.status = 'success'
-                          AND provider.request_payload->'options'->>'scheduled_job_id' = dependency.job_id
-                          AND COALESCE(provider.request_payload->>'dependency_key', '')
-                              = COALESCE(queued_job.request_payload->>'dependency_key', '')
+                        FROM (
+                            SELECT provider.status
+                            FROM job_runs AS provider
+                            WHERE provider.request_payload->'options'->>'scheduled_job_id' = dependency.job_id
+                              AND COALESCE(provider.request_payload->>'dependency_key', '')
+                                  = COALESCE(queued_job.request_payload->>'dependency_key', '')
+                            ORDER BY provider.created_at DESC, provider.id DESC
+                            LIMIT 1
+                        ) AS latest_provider
+                        WHERE latest_provider.status = 'success'
                     )
                   )
                   AND (
@@ -495,6 +500,30 @@ class HistoryRepository:
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
             connection.commit()
         return rows[0] if rows else None
+
+    def expire_queued_dependency_jobs(self) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        sql = """
+            UPDATE job_runs AS job
+            SET status = 'failed',
+                finished_at = NOW(),
+                result_payload = COALESCE(job.result_payload, '{}'::jsonb) ||
+                    jsonb_build_object('message', 'Prerequisites did not succeed before the daily cutoff.')
+            WHERE job.status = 'queued'
+              AND COALESCE(job.request_payload->>'execution_mode', 'local') = 'remote'
+              AND jsonb_array_length(COALESCE(job.request_payload->'dependency_job_ids', '[]'::jsonb)) > 0
+              AND NULLIF(job.request_payload->>'dependency_expires_at', '') IS NOT NULL
+              AND (job.request_payload->>'dependency_expires_at')::timestamptz < NOW()
+            RETURNING job.id, job_name, request_payload, result_payload
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows
 
     def list_github_job_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
         connection = self._connect()

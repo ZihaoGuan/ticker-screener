@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
 
 from scripts.run_scheduled_jobs import _resolve_template_value
 from src.webapp.services.run_service import RunService
@@ -135,14 +137,7 @@ class ScheduledJobServiceTests(unittest.TestCase):
                 depends_on_job_ids=["reload_prices"],
             )
 
-        self.service.upsert_job(
-            job_id="daily_rs",
-            job_label="Daily RS",
-            action_id="rs",
-            cron_expr="0 18 * * 1-5",
-            cron_tz="America/New_York",
-            enabled=True,
-        )
+    def test_run_now_preserves_schedule_dependency_identity(self) -> None:
         self.service.upsert_job(
             job_id="reload_prices",
             job_label="Reload prices",
@@ -150,19 +145,118 @@ class ScheduledJobServiceTests(unittest.TestCase):
             cron_expr="30 17 * * 1-5",
             cron_tz="America/New_York",
             enabled=True,
-            depends_on_job_ids=["daily_rs"],
+            worker_pool="market-data",
+        )
+        self.run_service.launch = MagicMock(return_value="remote-123")  # type: ignore[method-assign]
+
+        result = self.service.run_now(job_id="reload_prices")
+
+        self.assertEqual(result["job_id"], "remote-123")
+        options = self.run_service.launch.call_args.kwargs["options"]
+        policy = self.run_service.launch.call_args.kwargs["queue_policy"]
+        self.assertEqual(options["scheduled_job_id"], "reload_prices")
+        self.assertRegex(policy["dependency_key"], r"^\d{4}-\d{2}-\d{2}$")
+        self.assertEqual(policy["worker_pool"], "market-data")
+
+    def test_upsert_job_rejects_dependency_cycle(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+        self.service.upsert_job(
+            job_id="daily_rs",
+            job_label="Daily RS",
+            action_id="rs",
+            cron_expr="0 18 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            depends_on_job_ids=["reload_prices"],
         )
         with self.assertRaisesRegex(ValueError, "cycle"):
+            self.service.upsert_job(
+                job_id="reload_prices",
+                job_label="Reload prices",
+                action_id="reload_postgres_market_data_date",
+                cron_expr="30 17 * * 1-5",
+                cron_tz="America/New_York",
+                enabled=True,
+                depends_on_job_ids=["daily_rs"],
+            )
+
+    def test_context_uses_latest_remote_dependency_attempt_for_queue_state(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+        self.service.upsert_job(
+            job_id="daily_rs",
+            job_label="Daily RS",
+            action_id="rs",
+            cron_expr="0 18 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            depends_on_job_ids=["reload_prices"],
+        )
+        key = dt.datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        self.run_service.history_repository = MagicMock()
+        self.run_service.history_repository.list_remote_job_runs.return_value = [
+            {
+                "id": 22,
+                "status": "queued",
+                "request_payload": {"dependency_key": key, "options": {"scheduled_job_id": "daily_rs"}},
+            },
+            {
+                "id": 21,
+                "status": "failed",
+                "request_payload": {"dependency_key": key, "options": {"scheduled_job_id": "reload_prices"}},
+            },
+        ]
+        self.run_service.history_repository.list_remote_workers.return_value = []
+
+        context = self.service.get_context()
+        daily_rs = next(item for item in context["jobs"] if item["job_id"] == "daily_rs")
+
+        self.assertEqual(daily_rs["queue_state"]["state"], "blocked")
+        self.assertEqual(daily_rs["queue_state"]["blocking_job_id"], "reload_prices")
+
+    def test_delete_job_rejects_referenced_provider_and_cross_timezone_dependency(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+        self.service.upsert_job(
+            job_id="daily_rs",
+            job_label="Daily RS",
+            action_id="rs",
+            cron_expr="0 18 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            depends_on_job_ids=["reload_prices"],
+        )
+        with self.assertRaisesRegex(ValueError, "Cannot delete"):
+            self.service.delete_job(job_id="reload_prices")
+        with self.assertRaisesRegex(ValueError, "same timezone"):
             self.service.upsert_job(
                 job_id="daily_rs",
                 job_label="Daily RS",
                 action_id="rs",
                 cron_expr="0 18 * * 1-5",
-                cron_tz="America/New_York",
+                cron_tz="Pacific/Auckland",
                 enabled=True,
                 depends_on_job_ids=["reload_prices"],
             )
-
     def test_available_actions_include_market_data_sync_actions(self) -> None:
         actions = {item["id"] for item in self.service.get_context()["available_actions"]}
 

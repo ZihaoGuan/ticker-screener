@@ -3046,6 +3046,7 @@ class RunService:
         dependency_job_ids = sorted({str(item).strip() for item in dependencies if str(item).strip()})
 
         dependency_key = str(policy.get("dependency_key") or "").strip()
+        dependency_expires_at = str(policy.get("dependency_expires_at") or "").strip()
         worker_pool = str(policy.get("worker_pool") or "any").strip().lower()
         if not re.fullmatch(r"[a-z0-9_-]+", worker_pool):
             raise ValueError("Worker pool may contain only lowercase letters, numbers, underscores, and hyphens.")
@@ -3060,6 +3061,7 @@ class RunService:
             "queue_priority": priority,
             "dependency_job_ids": dependency_job_ids,
             "dependency_key": dependency_key,
+            "dependency_expires_at": dependency_expires_at,
             "worker_pool": worker_pool,
             "parallel_limit": parallel_limit,
         }
