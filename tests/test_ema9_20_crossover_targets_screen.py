@@ -9,9 +9,13 @@ import pandas as pd
 
 from src.config import AppConfig
 from src.artifact_paths import build_screener_artifact_paths
-from src.ema9_20_crossover_targets_screen import find_recent_ema9_20_crossover_target_hit, run_ema9_20_crossover_targets_screen
+from src.ema9_20_crossover_targets_screen import (
+    find_recent_ema9_20_crossover_target_hit,
+    run_ema9_20_crossover_targets_screen,
+)
 from src.ema9_20_crossover_targets_watchlist_builder import build_ema9_20_crossover_targets_watchlist
 from src.screener_catalog import build_screener_catalog
+from src.screener_engine import ScreenerInputBundle
 from src.universe import UniverseTicker
 from src.webapp.services.run_service import RunService
 
@@ -79,6 +83,76 @@ class Ema9_20CrossoverTargetsScreenTests(unittest.TestCase):
         self.assertEqual(bear.target_status, "bear_target_2_hit")
         self.assertEqual(bear.bear_target_1_bars_to_hit, 1)
         self.assertEqual(bear.bear_target_2_bars_to_hit, 1)
+
+    def test_runner_only_returns_buy_signals_on_the_as_of_bar(self) -> None:
+        frame = _frame(outcome="bull")
+        ticker = UniverseTicker(symbol="STALE")
+        with patch(
+            "src.ema9_20_crossover_targets_screen.resolve_database_url",
+            return_value="postgres://example",
+        ), patch(
+            "src.ema9_20_crossover_targets_screen.load_many_ticker_windows",
+            return_value={"STALE": frame},
+        ), patch(
+            "src.ema9_20_crossover_targets_screen.load_configured_cookstock"
+        ) as load_cookstock:
+            result = run_ema9_20_crossover_targets_screen(AppConfig(), [ticker], as_of_date=frame.index[-1].date())
+
+        self.assertEqual(result.passed_tickers, 0)
+        self.assertEqual(result.fresh_buy_signals, 0)
+        self.assertEqual(result.hits, [])
+        load_cookstock.assert_not_called()
+
+    def test_frontend_catalog_evaluator_rejects_an_old_buy_signal(self) -> None:
+        frame = _frame(outcome="bull")
+        spec = build_screener_catalog(AppConfig())["ema9_20_crossover_targets"]
+        assert spec.evaluator is not None
+
+        result = spec.evaluator(
+            ScreenerInputBundle(
+                ticker="STALE",
+                as_of_date=frame.index[-1].date(),
+                bars=frame,
+            )
+        )
+
+        self.assertFalse(result.passed)
+        self.assertIsNone(result.hit)
+
+    def test_as_of_date_does_not_look_at_later_bars(self) -> None:
+        frame = _frame()
+
+        hit = find_recent_ema9_20_crossover_target_hit(
+            frame,
+            ticker=UniverseTicker(symbol="TEST"),
+            as_of_date=frame.index[-2].date(),
+            require_fresh_signal=True,
+        )
+
+        self.assertIsNone(hit)
+
+    def test_bull_targets_use_pine_average_of_all_qualifying_bull_values(self) -> None:
+        frame = _frame()
+        hit = find_recent_ema9_20_crossover_target_hit(
+            frame,
+            ticker=UniverseTicker(symbol="TEST"),
+            as_of_date=frame.index[-1].date(),
+        )
+
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        close = frame["Close"].astype(float)
+        ema9 = close.ewm(span=9, adjust=False).mean()
+        ema20 = close.ewm(span=20, adjust=False).mean()
+        cross_up = ema9.gt(ema20) & ema9.shift(1).le(ema20.shift(1))
+        target_slice = slice(len(frame) - 1 - 500, len(frame))
+        above = close.gt(ema9) & close.gt(ema20)
+        pine_values = list(close.iloc[target_slice][above.iloc[target_slice]])
+        pine_values.extend(close.iloc[target_slice][cross_up.iloc[target_slice]])
+        expected_range = max(pine_values) - (sum(pine_values) / len(pine_values))
+
+        self.assertAlmostEqual(hit.bull_target_1, hit.signal_open + expected_range / 2.0)
+        self.assertAlmostEqual(hit.bull_target_2, hit.signal_open + expected_range)
 
     def test_database_first_runner_and_catalog_registration(self) -> None:
         frame = _frame()

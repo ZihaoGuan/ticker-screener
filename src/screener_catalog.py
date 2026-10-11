@@ -596,6 +596,7 @@ def _run_ema9_20_crossover_targets(bundle: ScreenerInputBundle) -> ScreenerEvalu
         bundle.bars,
         ticker=_ticker_from_bundle(bundle),
         as_of_date=bundle.as_of_date,
+        require_fresh_signal=True,
     )
     if hit is None:
         return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})

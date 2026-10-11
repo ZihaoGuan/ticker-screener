@@ -165,9 +165,15 @@ def find_recent_ema9_20_crossover_target_hit(
     *,
     ticker: UniverseTicker,
     as_of_date: dt.date,
+    require_fresh_signal: bool = False,
 ) -> Ema9_20CrossoverTargetHit | None:
     bars = _normalize_price_frame(frame)
-    minimum_rows = max(500, TARGET_LOOKBACK_BARS + TARGET_TRACKING_BARS + 1)
+    bars = bars[bars.index.date <= as_of_date]
+    minimum_rows = (
+        TARGET_LOOKBACK_BARS + 1
+        if require_fresh_signal
+        else max(500, TARGET_LOOKBACK_BARS + TARGET_TRACKING_BARS + 1)
+    )
     if len(bars) < minimum_rows:
         return None
 
@@ -178,14 +184,21 @@ def find_recent_ema9_20_crossover_target_hit(
     ema500 = close.ewm(span=500, adjust=False).mean()
     rsi14 = _wilder_rsi(close)
     bullish_cross = ema9.gt(ema20) & ema9.shift(1).le(ema20.shift(1))
-    candidate_indexes = [index for index in range(max(1, len(bars) - TARGET_TRACKING_BARS), len(bars)) if bool(bullish_cross.iloc[index])]
+    if require_fresh_signal:
+        candidate_indexes = [len(bars) - 1] if bool(bullish_cross.iloc[-1]) else []
+    else:
+        candidate_indexes = [
+            index
+            for index in range(max(1, len(bars) - TARGET_TRACKING_BARS), len(bars))
+            if bool(bullish_cross.iloc[index])
+        ]
     if not candidate_indexes:
         return None
     signal_index = candidate_indexes[-1]
     # Pine's `for i = 0 to 500` includes the signal bar plus 500 prior bars.
     start_index = max(0, signal_index - TARGET_LOOKBACK_BARS)
     target_slice = slice(start_index, signal_index + 1)
-    above_fast = close.ge(ema9) & close.ge(ema20)
+    above_fast = close.gt(ema9) & close.gt(ema20)
     below_fast = close.lt(ema9) & close.le(ema20)
     bullish_closes = close.iloc[target_slice][above_fast.iloc[target_slice]]
     bullish_cross_closes = close.iloc[target_slice][bullish_cross.iloc[target_slice]]
@@ -196,7 +209,10 @@ def find_recent_ema9_20_crossover_target_hit(
         return None
 
     signal_open = float(bars["Open"].iloc[signal_index])
-    bull_range = float(bullish_closes.max() - bullish_cross_closes.mean())
+    # Pine pushes qualifying closes into bullValues and pushes crossover closes
+    # into that same array a second time before taking the array average.
+    bullish_values = pd.concat([bullish_closes, bullish_cross_closes])
+    bull_range = float(bullish_values.max() - bullish_values.mean())
     bull_target_1 = signal_open + (bull_range / 2.0)
     bull_target_2 = signal_open + bull_range
     bear_target_1: float | None = None
@@ -276,7 +292,12 @@ def run_ema9_20_crossover_targets_screen(
         if frame is None or not db_frame_has_recent_coverage(frame, run_date) or len(frame) < 500:
             fallback_tickers.append(ticker)
             continue
-        hit = find_recent_ema9_20_crossover_target_hit(frame, ticker=ticker, as_of_date=run_date)
+        hit = find_recent_ema9_20_crossover_target_hit(
+            frame,
+            ticker=ticker,
+            as_of_date=run_date,
+            require_fresh_signal=True,
+        )
         if hit is not None:
             hits.append(hit)
 
@@ -286,7 +307,12 @@ def run_ema9_20_crossover_targets_screen(
             for ticker in fallback_tickers:
                 try:
                     financials = cookstock.cookFinancials(ticker.symbol, benchmarkTicker=config.benchmark_ticker, historyLookbackDays=PRICE_HISTORY_DAYS)
-                    hit = find_recent_ema9_20_crossover_target_hit(_build_price_frame(financials), ticker=ticker, as_of_date=run_date)
+                    hit = find_recent_ema9_20_crossover_target_hit(
+                        _build_price_frame(financials),
+                        ticker=ticker,
+                        as_of_date=run_date,
+                        require_fresh_signal=True,
+                    )
                     if hit is not None:
                         hits.append(hit)
                 except Exception as exc:
