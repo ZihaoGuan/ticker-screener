@@ -2046,6 +2046,7 @@ export type RatingsAdminStatusResponse = {
     current_job_run_id: number | null;
     last_heartbeat_at: string | null;
     updated_at: string | null;
+    worker_pools: string[];
   }>;
   notes: string[];
 };

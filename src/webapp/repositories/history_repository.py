@@ -28,6 +28,7 @@ def _json_dumps(value: Any) -> str:
 
 class HistoryRepository:
     DEFAULT_REMOTE_WORKER_STALE_SECONDS = 90
+    _REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY = 8_146_238
     _SCHEMA_ADVISORY_LOCK_KEY = 8_146_237
     _DEADLOCK_RETRY_ATTEMPTS = 3
     _DEADLOCK_RETRY_SLEEP_SECONDS = 0.2
@@ -402,25 +403,65 @@ class HistoryRepository:
                 row = cursor.fetchone()
         return int(row[0] or 0) if row else 0
 
-    def claim_remote_job_run(self, *, worker_name: str, code_version: str) -> dict[str, Any] | None:
+    def claim_remote_job_run(
+        self,
+        *,
+        worker_name: str,
+        code_version: str,
+        worker_pools: tuple[str, ...] = ("any",),
+    ) -> dict[str, Any] | None:
         connection = self._connect()
         if connection is None:
             return None
         sql = """
-            WITH candidate AS (
-                SELECT id
-                FROM job_runs
-                WHERE status = 'queued'
-                  AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote'
+            WITH queue_lock AS (
+                SELECT pg_advisory_xact_lock(%s)
+            ),
+            candidate AS (
+                SELECT queued_job.id
+                FROM job_runs AS queued_job
+                CROSS JOIN queue_lock
+                WHERE queued_job.status = 'queued'
+                  AND COALESCE(queued_job.request_payload->>'execution_mode', 'local') = 'remote'
                   AND (
-                    COALESCE(request_payload->>'target_worker', '') = ''
-                    OR request_payload->>'target_worker' = %s
+                    COALESCE(queued_job.request_payload->>'target_worker', '') = ''
+                    OR queued_job.request_payload->>'target_worker' = %s
                   )
                   AND (
-                    COALESCE(request_payload->>'code_version', '') = ''
-                    OR request_payload->>'code_version' = %s
+                    COALESCE(queued_job.request_payload->>'code_version', '') = ''
+                    OR queued_job.request_payload->>'code_version' = %s
                   )
-                ORDER BY created_at ASC, id ASC
+                  AND (
+                    COALESCE(queued_job.request_payload->>'worker_pool', 'any') = 'any'
+                    OR 'any' = ANY(%s)
+                    OR COALESCE(queued_job.request_payload->>'worker_pool', 'any') = ANY(%s)
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(
+                        COALESCE(queued_job.request_payload->'dependency_job_ids', '[]'::jsonb)
+                    ) AS dependency(job_id)
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM job_runs AS provider
+                        WHERE provider.status = 'success'
+                          AND provider.request_payload->'options'->>'scheduled_job_id' = dependency.job_id
+                          AND COALESCE(provider.request_payload->>'dependency_key', '')
+                              = COALESCE(queued_job.request_payload->>'dependency_key', '')
+                    )
+                  )
+                  AND (
+                    COALESCE(NULLIF(queued_job.request_payload->>'parallel_limit', '')::integer, 0) = 0
+                    OR (
+                        SELECT COUNT(*)
+                        FROM job_runs AS running_job
+                        WHERE running_job.status = 'running'
+                          AND COALESCE(running_job.request_payload->>'execution_mode', 'local') = 'remote'
+                    ) < COALESCE(NULLIF(queued_job.request_payload->>'parallel_limit', '')::integer, 0)
+                  )
+                ORDER BY COALESCE(NULLIF(queued_job.request_payload->>'queue_priority', '')::integer, 50) DESC,
+                         queued_job.created_at ASC,
+                         queued_job.id ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
@@ -437,8 +478,11 @@ class HistoryRepository:
                 cursor.execute(
                     sql,
                     (
+                        self._REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY,
                         worker_name,
                         code_version,
+                        list(worker_pools),
+                        list(worker_pools),
                         _json_dumps(
                             {
                                 "worker_name": worker_name,

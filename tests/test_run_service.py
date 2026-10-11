@@ -1070,6 +1070,32 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(kwargs["result_payload_patch"]["code_version"], "80663d4")
         self.assertEqual(captured_create["request_payload"]["code_version"], "80663d4")
 
+    def test_launch_remote_persists_validated_queue_policy(self) -> None:
+        captured_create: dict[str, object] = {}
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
+        service.history_repository.create_job_run = lambda **kwargs: captured_create.update(kwargs) or 902  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+        service.launch(
+            "rs",
+            options={"execution_mode": "remote"},
+            trigger_source="scheduler",
+            queue_policy={
+                "queue_priority": "75",
+                "dependency_job_ids": ["reload_prices", "reload_prices", ""],
+                "dependency_key": "2026-10-12",
+                "worker_pool": "general",
+                "parallel_limit": "4",
+            },
+        )
+
+        request_payload = captured_create["request_payload"]
+        self.assertEqual(request_payload["queue_priority"], 75)
+        self.assertEqual(request_payload["dependency_job_ids"], ["reload_prices"])
+        self.assertEqual(request_payload["dependency_key"], "2026-10-12")
+        self.assertEqual(request_payload["worker_pool"], "general")
+        self.assertEqual(request_payload["parallel_limit"], 4)
+
     def test_launch_remote_stays_queued_when_no_worker_is_healthy(self) -> None:
         captured_patch: dict[str, object] = {}
         service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")

@@ -36,6 +36,32 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertEqual(len(jobs), 1)
         self.assertEqual(jobs[0]["options"]["limit"], 25)
 
+    def test_list_jobs_normalizes_queue_policy_and_upsert_preserves_it(self) -> None:
+        config_path = self.project_root / "config" / "scheduled_jobs.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            '{"jobs":[{"job_id":"daily_rs","job_label":"Daily RS","action_id":"rs","cron_expr":"0 18 * * 1-5","cron_tz":"America/New_York","enabled":true,"options":{},"priority":75,"depends_on_job_ids":["reload_prices","reload_prices"],"worker_pool":"general"}]}\n',
+            encoding="utf-8",
+        )
+
+        job = self.service.list_jobs()[0]
+        self.assertEqual(job["priority"], 75)
+        self.assertEqual(job["depends_on_job_ids"], ["reload_prices"])
+        self.assertEqual(job["worker_pool"], "general")
+
+        saved = self.service.upsert_job(
+            job_id="daily_rs",
+            job_label="Daily RS updated",
+            action_id="rs",
+            cron_expr="5 18 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            options={},
+        )
+        self.assertEqual(saved["priority"], 75)
+        self.assertEqual(saved["depends_on_job_ids"], ["reload_prices"])
+        self.assertEqual(saved["worker_pool"], "general")
+
     def test_available_actions_include_market_data_sync_actions(self) -> None:
         actions = {item["id"] for item in self.service.get_context()["available_actions"]}
 

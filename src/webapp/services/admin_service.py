@@ -96,6 +96,7 @@ class AdminService:
                     "current_job_run_id": int(item["current_job_run_id"]) if item.get("current_job_run_id") is not None else None,
                     "last_heartbeat_at": self._to_iso(item.get("last_heartbeat_at")),
                     "updated_at": self._to_iso(item.get("updated_at")),
+                    "worker_pools": _worker_pools(item.get("metadata_json")),
                 }
                 for item in remote_workers
             ]
@@ -962,6 +963,15 @@ def _coerce_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _worker_pools(value: object) -> list[str]:
+    metadata = value if isinstance(value, dict) else {}
+    pools = metadata.get("worker_pools")
+    if not isinstance(pools, list):
+        return ["any"]
+    normalized = sorted({str(pool).strip() for pool in pools if str(pool).strip()})
+    return normalized or ["any"]
 
 
 _DEFAULT_SECTOR_OPTIONS: tuple[str, ...] = (

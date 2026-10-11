@@ -74,6 +74,8 @@ class DeployComposeServicesTest(unittest.TestCase):
         self.assertIn('"parallel-worker"', compose)
         self.assertIn('"parallel-worker-2"', compose)
         self.assertIn('"parallel-worker-3"', compose)
+        self.assertIn('"general,market-data"', compose)
+        self.assertEqual(compose.count('"general,finviz"'), 3)
         self.assertIn("image: ticker-screener:${TICKER_SCREENER_IMAGE_TAG:-dev}", compose)
         self.assertNotIn("- ..:/app", compose)
         self.assertEqual(compose.count("- ../config:/app/config"), 5)

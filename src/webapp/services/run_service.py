@@ -2635,7 +2635,14 @@ class RunService:
             self._terminate_process(process)
             return self._serialize_job(job)
 
-    def launch(self, action_id: str, *, options: dict[str, Any] | None = None, trigger_source: str = "manual") -> str:
+    def launch(
+        self,
+        action_id: str,
+        *,
+        options: dict[str, Any] | None = None,
+        trigger_source: str = "manual",
+        queue_policy: dict[str, Any] | None = None,
+    ) -> str:
         action = self._actions.get(action_id)
         if action is None:
             raise ValueError(f"Unknown run action: {action_id}")
@@ -2658,6 +2665,8 @@ class RunService:
             "code_version": self.code_version,
             "options": normalized,
         }
+        if queue_policy is not None:
+            request_payload.update(self._normalize_queue_policy(queue_policy))
         initial_status = "queued" if execution_mode in {"remote", "github"} else "running"
         job_run_id = self.history_repository.create_job_run(
             job_type=self._job_type_for_action(action_id),
@@ -3022,6 +3031,38 @@ class RunService:
         if "exclude_themes" in supported_field_ids:
             self._append_multi_args(command, "--exclude-themes", normalized_options.get("exclude_themes"))
         return command
+
+    def _normalize_queue_policy(self, policy: dict[str, Any]) -> dict[str, Any]:
+        try:
+            priority = int(policy.get("queue_priority", 50))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Queue priority must be an integer.") from exc
+        if priority < 0 or priority > 100:
+            raise ValueError("Queue priority must be between 0 and 100.")
+
+        dependencies = policy.get("dependency_job_ids", [])
+        if not isinstance(dependencies, list):
+            raise ValueError("Queue dependencies must be a list.")
+        dependency_job_ids = sorted({str(item).strip() for item in dependencies if str(item).strip()})
+
+        dependency_key = str(policy.get("dependency_key") or "").strip()
+        worker_pool = str(policy.get("worker_pool") or "any").strip().lower()
+        if not re.fullmatch(r"[a-z0-9_-]+", worker_pool):
+            raise ValueError("Worker pool may contain only lowercase letters, numbers, underscores, and hyphens.")
+        try:
+            parallel_limit = int(policy.get("parallel_limit") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Parallel limit must be an integer.") from exc
+        if parallel_limit < 0 or parallel_limit > 20:
+            raise ValueError("Parallel limit must be between 0 and 20.")
+
+        return {
+            "queue_priority": priority,
+            "dependency_job_ids": dependency_job_ids,
+            "dependency_key": dependency_key,
+            "worker_pool": worker_pool,
+            "parallel_limit": parallel_limit,
+        }
 
     def _normalize_options(self, action: RunAction, options: dict[str, Any]) -> dict[str, Any]:
         normalized: dict[str, Any] = {}

@@ -52,7 +52,7 @@ services:
       TICKER_SCREENER_ARTIFACTS_DIR: /artifacts
       TICKER_SCREENER_OUTPUT_DIR: /artifacts/output
       PLAYWRIGHT_EXECUTABLE_PATH: /usr/bin/chromium
-    command: ["python", "scripts/run_remote_worker.py", "--worker-name", "primary-worker"]
+    command: ["python", "scripts/run_remote_worker.py", "--worker-name", "primary-worker", "--pools", "general,market-data"]
     volumes:
       - ../config:/app/config
       - ../artifacts:/artifacts
@@ -71,7 +71,7 @@ services:
       TICKER_SCREENER_ARTIFACTS_DIR: /artifacts
       TICKER_SCREENER_OUTPUT_DIR: /artifacts/output
       PLAYWRIGHT_EXECUTABLE_PATH: /usr/bin/chromium
-    command: ["python", "scripts/run_remote_worker.py", "--worker-name", "parallel-worker"]
+    command: ["python", "scripts/run_remote_worker.py", "--worker-name", "parallel-worker", "--pools", "general,finviz"]
     volumes:
       - ../config:/app/config
       - ../artifacts:/artifacts
@@ -90,7 +90,7 @@ services:
       TICKER_SCREENER_ARTIFACTS_DIR: /artifacts
       TICKER_SCREENER_OUTPUT_DIR: /artifacts/output
       PLAYWRIGHT_EXECUTABLE_PATH: /usr/bin/chromium
-    command: ["python", "scripts/run_remote_worker.py", "--worker-name", "parallel-worker-2"]
+    command: ["python", "scripts/run_remote_worker.py", "--worker-name", "parallel-worker-2", "--pools", "general,finviz"]
     volumes:
       - ../config:/app/config
       - ../artifacts:/artifacts
@@ -109,7 +109,7 @@ services:
       TICKER_SCREENER_ARTIFACTS_DIR: /artifacts
       TICKER_SCREENER_OUTPUT_DIR: /artifacts/output
       PLAYWRIGHT_EXECUTABLE_PATH: /usr/bin/chromium
-    command: ["python", "scripts/run_remote_worker.py", "--worker-name", "parallel-worker-3"]
+    command: ["python", "scripts/run_remote_worker.py", "--worker-name", "parallel-worker-3", "--pools", "general,finviz"]
     volumes:
       - ../config:/app/config
       - ../artifacts:/artifacts

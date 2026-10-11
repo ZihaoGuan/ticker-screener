@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+import re
 import selectors
 import socket
 import subprocess
@@ -24,10 +25,24 @@ from src.webapp.services.run_service import RunService
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Poll queued remote jobs from Postgres and execute them on this worker.")
     parser.add_argument("--worker-name", default=socket.gethostname())
+    parser.add_argument(
+        "--pools",
+        default=os.getenv("TICKER_SCREENER_WORKER_POOLS", "any"),
+        help="Comma-separated worker pools; 'any' can claim every pool.",
+    )
     parser.add_argument("--poll-seconds", type=float, default=5.0)
     parser.add_argument("--heartbeat-seconds", type=float, default=5.0)
     parser.add_argument("--once", action="store_true", help="Claim and run at most one job, then exit.")
     return parser.parse_args()
+
+
+def _parse_worker_pools(value: object) -> tuple[str, ...]:
+    pools = {
+        pool
+        for item in str(value or "").split(",")
+        if (pool := item.strip().lower()) and re.fullmatch(r"[a-z0-9_-]+", pool)
+    }
+    return ("any",) if not pools or "any" in pools else tuple(sorted(pools))
 
 
 def _now_iso() -> str:
@@ -113,7 +128,14 @@ def _write_scheduled_status(
     tmp_path.replace(status_path)
 
 
-def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_name: str, heartbeat_seconds: float) -> int:
+def _run_claimed_job(
+    run_service: RunService,
+    row: dict[str, Any],
+    *,
+    worker_name: str,
+    worker_pools: tuple[str, ...] = ("any",),
+    heartbeat_seconds: float,
+) -> int:
     request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
     options = request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {}
     action_id = str(request_payload.get("action_id") or "")
@@ -166,6 +188,7 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
                 "last_completed_job_run_id": job_run_id,
                 "last_status": "failed",
                 "code_version": run_service.code_version,
+                "worker_pools": list(worker_pools),
             },
         )
         return 1
@@ -193,7 +216,11 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
         worker_name=worker_name,
         status="running",
         current_job_run_id=job_run_id,
-        metadata={"action_id": action_id, "code_version": run_service.code_version},
+        metadata={
+            "action_id": action_id,
+            "code_version": run_service.code_version,
+            "worker_pools": list(worker_pools),
+        },
     )
 
     assert process.stdout is not None
@@ -256,7 +283,11 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
                         worker_name=worker_name,
                         status="running",
                         current_job_run_id=job_run_id,
-                        metadata={"action_id": action_id, "code_version": run_service.code_version},
+                        metadata={
+                            "action_id": action_id,
+                            "code_version": run_service.code_version,
+                            "worker_pools": list(worker_pools),
+                        },
                     )
                     last_heartbeat = now
                 if return_code is not None:
@@ -314,6 +345,7 @@ def _run_claimed_job(run_service: RunService, row: dict[str, Any], *, worker_nam
             "last_completed_job_run_id": job_run_id,
             "last_status": final_status,
             "code_version": run_service.code_version,
+            "worker_pools": list(worker_pools),
         },
     )
     return int(process.returncode or 0)
@@ -326,17 +358,20 @@ def main() -> int:
         raise RuntimeError("No Postgres connection string configured. Set TICKER_SCREENER_DATABASE_URL for the worker.")
     run_service = RunService(project_root=PROJECT_ROOT, database_url=database_url)
     exit_code = 0
+    worker_name = str(args.worker_name).strip() or socket.gethostname()
+    worker_pools = _parse_worker_pools(args.pools)
 
     while True:
         run_service.history_repository.heartbeat_remote_worker(
-            worker_name=str(args.worker_name).strip() or socket.gethostname(),
+            worker_name=worker_name,
             status="idle",
             current_job_run_id=None,
-            metadata={"code_version": run_service.code_version},
+            metadata={"code_version": run_service.code_version, "worker_pools": list(worker_pools)},
         )
         claimed = run_service.history_repository.claim_remote_job_run(
-            worker_name=str(args.worker_name).strip() or socket.gethostname(),
+            worker_name=worker_name,
             code_version=run_service.code_version,
+            worker_pools=worker_pools,
         )
         if claimed is None:
             if args.once:
@@ -346,7 +381,8 @@ def main() -> int:
         exit_code = _run_claimed_job(
             run_service,
             claimed,
-            worker_name=str(args.worker_name).strip() or socket.gethostname(),
+            worker_name=worker_name,
+            worker_pools=worker_pools,
             heartbeat_seconds=max(1.0, float(args.heartbeat_seconds)),
         )
         if args.once:

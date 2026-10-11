@@ -107,6 +107,7 @@ class AdminServiceTests(unittest.TestCase):
                     "current_job_run_id": None,
                     "last_heartbeat_at": "2026-06-13T10:10:00+00:00",
                     "updated_at": "2026-06-13T10:10:00+00:00",
+                    "metadata_json": {"worker_pools": ["finviz", "general"]},
                 }
             ],
         ):
@@ -120,6 +121,7 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(payload["diagnostics"][0]["ticker"], "MSFT")
         self.assertEqual(payload["healthy_remote_worker_count"], 1)
         self.assertEqual(payload["remote_workers"][0]["worker_name"], "worker-a")
+        self.assertEqual(payload["remote_workers"][0]["worker_pools"], ["finviz", "general"])
 
     def test_get_missing_sector_context_reports_missing_database_url(self) -> None:
         service = AdminService(database_url="")

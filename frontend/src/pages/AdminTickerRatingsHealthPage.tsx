@@ -281,7 +281,7 @@ export function AdminTickerRatingsHealthPage() {
                 ) : (
                   ratingsStatus.remote_workers.map((worker) => (
                     <span key={worker.worker_name} className="symbol-pill">
-                      {worker.worker_name}: {worker.is_healthy ? "healthy" : "stale"}{worker.current_job_run_id ? ` · job ${worker.current_job_run_id}` : ""}
+                      {worker.worker_name}: {worker.is_healthy ? "healthy" : "stale"} · {worker.worker_pools.join(", ")}{worker.current_job_run_id ? ` · job ${worker.current_job_run_id}` : ""}
                     </span>
                   ))
                 )}

@@ -17,6 +17,8 @@ _COMMON_TIMEZONES = (
     "UTC",
 )
 _DEFAULT_MAX_PARALLEL_JOBS = 5
+_DEFAULT_QUEUE_PRIORITY = 50
+_DEFAULT_WORKER_POOL = "any"
 
 
 class ScheduledJobService:
@@ -83,6 +85,9 @@ class ScheduledJobService:
                     "cron_tz": str(item.get("cron_tz") or "America/New_York").strip() or "America/New_York",
                     "enabled": bool(item.get("enabled", True)),
                     "options": item.get("options") if isinstance(item.get("options"), dict) else {},
+                    "priority": _normalize_queue_priority(item.get("priority")),
+                    "depends_on_job_ids": _normalize_dependency_job_ids(item.get("depends_on_job_ids")),
+                    "worker_pool": _normalize_worker_pool(item.get("worker_pool")),
                 }
             )
         jobs = [item for item in normalized if item["job_id"] and item["action_id"] and item["cron_expr"]]
@@ -127,6 +132,10 @@ class ScheduledJobService:
 
         payload = self._load_jobs()
         jobs = [item for item in payload.get("jobs", []) if isinstance(item, dict)]
+        existing_job = next(
+            (item for item in jobs if str(item.get("job_id") or "").strip() == clean_job_id),
+            None,
+        )
         next_job = {
             "job_id": clean_job_id,
             "job_label": clean_job_label,
@@ -135,6 +144,11 @@ class ScheduledJobService:
             "cron_tz": clean_cron_tz,
             "enabled": bool(enabled),
             "options": clean_options,
+            # The schedule editor does not manage queue policy until Phase 4.
+            # Preserve production-local policy when an existing schedule is edited.
+            "priority": _normalize_queue_priority((existing_job or {}).get("priority")),
+            "depends_on_job_ids": _normalize_dependency_job_ids((existing_job or {}).get("depends_on_job_ids")),
+            "worker_pool": _normalize_worker_pool((existing_job or {}).get("worker_pool")),
         }
         replaced = False
         next_jobs: list[dict[str, Any]] = []
@@ -369,6 +383,25 @@ def _normalize_job_id(value: str) -> str:
 
 def _normalize_cron_expr(value: str) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _normalize_queue_priority(value: object) -> int:
+    try:
+        priority = int(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_QUEUE_PRIORITY
+    return min(100, max(0, priority))
+
+
+def _normalize_dependency_job_ids(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return sorted({job_id for item in value if (job_id := str(item or "").strip())})
+
+
+def _normalize_worker_pool(value: object) -> str:
+    pool = str(value or "").strip().lower()
+    return pool if re.fullmatch(r"[a-z0-9_-]+", pool or "") else _DEFAULT_WORKER_POOL
 
 
 def _validate_cron_expr(value: str) -> None:

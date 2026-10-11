@@ -343,6 +343,8 @@ Each queued remote job records the Git-SHA `code_version` of the web image that 
 
 The main deployment builds the new image and updates only `web` and `caddy`; it does not recreate existing workers. Four worker services (`primary-worker` plus three parallel workers) can claim different queued jobs concurrently, matching the production scheduler's `max_parallel_jobs` setting. After each web deployment, a serialized background watcher lets previous-version jobs finish and then automatically releases all workers to the current web image. A superseded watcher exits instead of rolling workers back. The **Release Compose Worker** workflow remains available for a manual release.
 
+The primary Compose worker advertises `general,market-data`; the three parallel workers advertise `general,finviz`. Jobs in the default `any` pool remain eligible for every worker.
+
 For a manual production release from `deploy/`:
 
 ```bash
@@ -379,6 +381,8 @@ The worker workflow:
 - restarts the worker service with `systemctl`
 
 Unlike the main web deploy workflow, the worker workflow does not run `docker-compose down` or restart the web stack.
+
+Set `TICKER_SCREENER_WORKER_POOLS` in the slave worker's preserved `.worker.env` to route its capacity, for example `finviz` for a lightweight Finviz-only worker or `general,finviz` for a mixed worker. Omit it to retain the backwards-compatible `any` pool, which can claim every job.
 
 The deploy script now preserves the server-local exclusion files (`config/smallcap_exclude_tickers.txt`, `config/manual_exclude_tickers.txt`, and `config/manual_include_tickers.txt`) across `git pull`. It temporarily restores the tracked repo versions so fast-forward deploys do not fail, then copies the server-local files back before rebuild. The same script still restores `frontend/package-lock.json` from `HEAD` and runs the narrow `git clean` for frontend build artefacts, which avoids `git pull` being blocked by a mutated lockfile while still not wiping unrelated local files. The frontend container also uses `npm ci` so the checked-in lockfile is respected instead of being rewritten during deploy.
 

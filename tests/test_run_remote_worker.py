@@ -66,6 +66,11 @@ class _UnknownActionRunService(_FailingJobRunService):
 
 
 class RunRemoteWorkerTests(unittest.TestCase):
+    def test_parse_worker_pools_defaults_to_any_and_normalizes_values(self) -> None:
+        self.assertEqual(module._parse_worker_pools(""), ("any",))
+        self.assertEqual(module._parse_worker_pools("general, Finviz, general"), ("finviz", "general"))
+        self.assertEqual(module._parse_worker_pools("general,any"), ("any",))
+
     def test_unknown_action_marks_claimed_job_failed_without_crashing_worker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = _UnknownActionRunService(Path(temp_dir))
@@ -79,6 +84,7 @@ class RunRemoteWorkerTests(unittest.TestCase):
                     "request_payload": {"action_id": "ema9_20_crossover_targets", "options": {}},
                 },
                 worker_name="test-worker",
+                worker_pools=("finviz",),
                 heartbeat_seconds=5.0,
             )
 
@@ -102,6 +108,7 @@ class RunRemoteWorkerTests(unittest.TestCase):
                     "request_payload": {"action_id": "finviz_target_price_50", "options": {}},
                 },
                 worker_name="test-worker",
+                worker_pools=("finviz",),
                 heartbeat_seconds=5.0,
             )
 
@@ -110,6 +117,7 @@ class RunRemoteWorkerTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertIn("FINAL_EXCEPTION", log_text)
         self.assertIn("FINAL_EXCEPTION", str(service.completed_job["log_tail"]))
+        self.assertEqual(service.history_repository.heartbeats[-1]["metadata"]["worker_pools"], ["finviz"])
 
     def test_write_scheduled_status_keeps_worker_log_and_persisted_screen_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

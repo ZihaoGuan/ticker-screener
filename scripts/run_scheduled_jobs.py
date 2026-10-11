@@ -287,6 +287,8 @@ def main() -> int:
     state = _load_state()
     state_changed = False
     time_snapshots: dict[str, dt.datetime] = {}
+    get_parallel_limit = getattr(schedule_service, "get_max_parallel_jobs", None)
+    parallel_limit = int(get_parallel_limit()) if callable(get_parallel_limit) else 0
 
     for job in schedule_service.list_jobs():
         if not job.get("enabled"):
@@ -319,7 +321,18 @@ def main() -> int:
                 "scheduled_artifact_file": artifact_path,
             }
         )
-        remote_job_id = run_service.launch(action_id, options=queue_options, trigger_source="scheduler")
+        remote_job_id = run_service.launch(
+            action_id,
+            options=queue_options,
+            trigger_source="scheduler",
+            queue_policy={
+                "queue_priority": job.get("priority", 50),
+                "dependency_job_ids": job.get("depends_on_job_ids", []),
+                "dependency_key": local_now.date().isoformat(),
+                "worker_pool": job.get("worker_pool", "any"),
+                "parallel_limit": parallel_limit,
+            },
+        )
         _write_scheduler_status(
             job_id=str(job["job_id"]),
             job_label=str(job["job_label"]),

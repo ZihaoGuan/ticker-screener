@@ -12,7 +12,7 @@ import scripts.run_scheduled_jobs as module
 
 class RunScheduledJobsTests(unittest.TestCase):
     def test_main_queues_due_job_without_running_web_container_command(self) -> None:
-        queued: list[tuple[str, dict[str, object], str]] = []
+        queued: list[tuple[str, dict[str, object], str, dict[str, object]]] = []
         saved_states: list[dict[str, str]] = []
 
         class _RunService:
@@ -24,13 +24,16 @@ class RunScheduledJobsTests(unittest.TestCase):
             def recover_remote_jobs(self) -> dict[str, int]:
                 return {"requeued": 0, "local_fallback_started": 0}
 
-            def launch(self, action_id: str, *, options: dict[str, object], trigger_source: str) -> str:
-                queued.append((action_id, options, trigger_source))
+            def launch(self, action_id: str, *, options: dict[str, object], trigger_source: str, queue_policy: dict[str, object]) -> str:
+                queued.append((action_id, options, trigger_source, queue_policy))
                 return "remote-123"
 
         class _ScheduleService:
             def __init__(self, **_: object) -> None:
                 pass
+
+            def get_max_parallel_jobs(self) -> int:
+                return 4
 
             def list_jobs(self) -> list[dict[str, object]]:
                 return [
@@ -42,6 +45,9 @@ class RunScheduledJobsTests(unittest.TestCase):
                         "cron_tz": "America/New_York",
                         "enabled": True,
                         "options": {"limit": 25},
+                        "priority": 75,
+                        "depends_on_job_ids": ["reload_prices"],
+                        "worker_pool": "general",
                     }
                 ]
 
@@ -59,6 +65,11 @@ class RunScheduledJobsTests(unittest.TestCase):
         self.assertEqual(queued[0][2], "scheduler")
         self.assertEqual(queued[0][1]["execution_mode"], "remote")
         self.assertEqual(queued[0][1]["scheduled_job_id"], "daily_rs")
+        self.assertEqual(queued[0][3]["queue_priority"], 75)
+        self.assertRegex(str(queued[0][3]["dependency_key"]), r"^\d{4}-\d{2}-\d{2}$")
+        self.assertEqual(queued[0][3]["dependency_job_ids"], ["reload_prices"])
+        self.assertEqual(queued[0][3]["worker_pool"], "general")
+        self.assertEqual(queued[0][3]["parallel_limit"], 4)
         self.assertEqual(len(saved_states), 1)
 
     def test_main_preserves_scheduled_github_execution_mode(self) -> None:
@@ -73,7 +84,7 @@ class RunScheduledJobsTests(unittest.TestCase):
             def recover_remote_jobs(self) -> dict[str, int]:
                 return {"requeued": 0, "local_fallback_started": 0}
 
-            def launch(self, _: str, *, options: dict[str, object], trigger_source: str) -> str:
+            def launch(self, _: str, *, options: dict[str, object], trigger_source: str, queue_policy: dict[str, object]) -> str:
                 queued.append(options)
                 return "remote-456"
 

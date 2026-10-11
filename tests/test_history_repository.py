@@ -33,6 +33,9 @@ class _FakeCursor:
             self.connection.unlock_calls += 1
             self._rows = []
             return
+        if normalized_sql.startswith("CREATE INDEX IF NOT EXISTS"):
+            self._rows = []
+            return
         if self.connection.raise_on_schema_apply:
             raise RuntimeError("schema apply failed")
         self.connection.schema_apply_calls += 1
@@ -77,6 +80,9 @@ class _FakeConnection:
     def transaction(self) -> _FakeTransaction:
         return _FakeTransaction()
 
+    def commit(self) -> None:
+        return None
+
 
 def _ready_rows() -> list[tuple[object, ...]]:
     rows: list[tuple[object, ...]] = []
@@ -115,6 +121,29 @@ class HistoryRepositoryEnsureSchemaTests(unittest.TestCase):
         self.assertIn("strategy_id = %s AND run_date = %s", sql)
         self.assertIn("ema9_20_crossover_targets", params or ())
         self.assertIn("2026-10-11", params or ())
+
+    def test_claim_remote_job_applies_priority_dependencies_pool_and_global_limit(self) -> None:
+        connection = _FakeConnection(schema_checks=[])
+        repository = HistoryRepository(database_url="postgres://example")
+        repository._connect = lambda: connection  # type: ignore[method-assign]
+
+        with patch.object(repository, "_rows_to_dicts", return_value=[]):
+            repository.claim_remote_job_run(
+                worker_name="worker-a",
+                code_version="image-a",
+                worker_pools=("general",),
+            )
+
+        sql, params = connection.executed_sql[0]
+        self.assertIn("pg_advisory_xact_lock", sql)
+        self.assertIn("jsonb_array_elements_text", sql)
+        self.assertIn("dependency_job_ids", sql)
+        self.assertIn("parallel_limit", sql)
+        self.assertIn("queue_priority", sql)
+        self.assertIn("worker_pool", sql)
+        self.assertIn("FOR UPDATE SKIP LOCKED", sql)
+        self.assertEqual(params[1:3], ("worker-a", "image-a"))
+        self.assertEqual(params[3:5], (["general"], ["general"]))
 
     def test_ensure_schema_unlocks_after_schema_apply_failure(self) -> None:
         connection = _FakeConnection(schema_checks=[[], []], raise_on_schema_apply=True)
