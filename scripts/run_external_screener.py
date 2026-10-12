@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -44,12 +45,48 @@ def _artifact_paths(summary_path: Path) -> dict[str, str]:
     return paths
 
 
+def _validate_database_requirements(options: dict[str, Any], environment: dict[str, str]) -> None:
+    market_data_source = str(options.get("market_data_source") or "").strip().lower()
+    if market_data_source == "database-first" and not environment.get("TICKER_SCREENER_DATABASE_URL", "").strip():
+        raise ValueError(
+            "GitHub database-first execution requires TICKER_SCREENER_DATABASE_URL. "
+            "Keep this schedule on a remote worker until private database access is configured."
+        )
+
+
+def _validate_nonempty_database_universe(summary_path: Path) -> None:
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("Screener did not write a valid run summary.") from exc
+    if not isinstance(summary, dict):
+        raise ValueError("Screener run summary must be an object.")
+
+    source = str(summary.get("source") or "").strip().lower()
+    total_tickers = summary.get("total_tickers")
+    if source != "database-universe" or total_tickers is None:
+        return
+    try:
+        is_empty = int(total_tickers) == 0
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Screener run summary has an invalid total_tickers value.") from exc
+    if is_empty:
+        raise ValueError(
+            "Screener received an empty database universe; refusing to publish an empty GitHub result."
+        )
+
+
 def run(*, action_id: str, options: dict[str, Any], artifacts_file: Path) -> dict[str, str]:
+    environment = os.environ.copy()
+    if options.get("market_data_source"):
+        environment["TICKER_SCREENER_MARKET_DATA_SOURCE"] = str(options["market_data_source"])
+    _validate_database_requirements(options, environment)
+
     service = RunService(project_root=PROJECT_ROOT)
     if "github" not in service.execution_modes_for_action(action_id):
         raise ValueError(f"GitHub execution is not enabled for {action_id}.")
     command = service.build_command(action_id, options)
-    completed = subprocess.run(command, cwd=PROJECT_ROOT, text=True, capture_output=True, check=False)
+    completed = subprocess.run(command, cwd=PROJECT_ROOT, text=True, capture_output=True, check=False, env=environment)
     if completed.stdout:
         print(completed.stdout, end="")
     if completed.stderr:
@@ -63,7 +100,9 @@ def run(*, action_id: str, options: dict[str, Any], artifacts_file: Path) -> dic
     ]
     if not summary_markers:
         raise ValueError("Screener did not report a run summary.")
-    paths = _artifact_paths(Path(summary_markers[-1]))
+    summary_path = Path(summary_markers[-1])
+    _validate_nonempty_database_universe(summary_path)
+    paths = _artifact_paths(summary_path)
     artifacts_file.write_text(json.dumps(paths), encoding="utf-8")
     return paths
 
