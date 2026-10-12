@@ -2417,6 +2417,25 @@ class RunService:
     _jobs: list[dict[str, Any]] = []
     _jobs_by_id: dict[str, dict[str, Any]] = {}
 
+    _github_additional_screener_actions = frozenset(
+        {
+            "canslim",
+            "earnings_trade_analyzer",
+            "earnings_weekly_criteria",
+            "finviz_analyst_recom_strongbuy",
+            "finviz_pattern_scanner",
+            "finviz_smallover_sales_growth_trend",
+            "finviz_target_price_50",
+            "legacy_peg",
+            "minervini_growth_acceleration",
+            "my_picks_sma50_reclaim",
+            "pead_screener",
+            "position_action_daily",
+            "sean_gap_up",
+            "venu_scanner",
+        }
+    )
+
     @staticmethod
     def _is_template_token(value: str) -> bool:
         stripped = str(value or "").strip()
@@ -2457,6 +2476,15 @@ class RunService:
             )
         )
 
+    def execution_modes_for_action(self, action_id: str) -> tuple[str, ...]:
+        action = self._actions.get(action_id)
+        if action is None:
+            raise ValueError(f"Unknown run action: {action_id}")
+        catalog_action_ids = build_screener_catalog(load_app_config())
+        if action_id in catalog_action_ids or action_id in self._github_additional_screener_actions:
+            return tuple(dict.fromkeys((*action.execution_modes, "github")))
+        return action.execution_modes
+
     def list_actions(self) -> list[dict[str, Any]]:
         filter_catalog = self._get_filter_catalog()
         default_execution_mode = "remote" if self.database_url else "local"
@@ -2468,7 +2496,7 @@ class RunService:
                 "bullish_subgroup": action.bullish_subgroup,
                 "command": " ".join([sys.executable, action.script_path, *action.extra_args]).strip(),
                 "supports_limit": action.supports_limit,
-                "execution_modes": list(action.execution_modes),
+                "execution_modes": list(self.execution_modes_for_action(action.action_id)),
                 "default_execution_mode": default_execution_mode,
                 "fields": [
                     {
@@ -2652,7 +2680,7 @@ class RunService:
         execution_mode = str(normalized.get("execution_mode") or default_execution_mode).strip().lower() or default_execution_mode
         if execution_mode not in {"local", "remote", "github"}:
             raise ValueError("Execution mode must be local, remote, or github.")
-        if execution_mode not in action.execution_modes:
+        if execution_mode not in self.execution_modes_for_action(action_id):
             raise ValueError(f"{action.label} does not support {execution_mode} execution.")
         if execution_mode in {"remote", "github"} and not self.database_url:
             raise ValueError("Remote execution requires a configured database connection.")

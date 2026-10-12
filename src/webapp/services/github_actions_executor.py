@@ -7,9 +7,6 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-PILOT_ACTIONS = frozenset({"finviz_analyst_recom_strongbuy"})
-
-
 @dataclass(frozen=True)
 class GitHubActionsSettings:
     token: str
@@ -31,8 +28,6 @@ class GitHubActionsExecutor:
         self.settings = settings
 
     def dispatch(self, *, job_run_id: int, action_id: str, code_version: str, options: dict[str, Any]) -> dict[str, Any]:
-        if action_id not in PILOT_ACTIONS:
-            raise ValueError(f"GitHub execution is not enabled for {action_id}.")
         if not self.settings.configured:
             raise ValueError("GitHub Actions executor is not configured.")
         payload = {

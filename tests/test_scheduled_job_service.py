@@ -273,6 +273,8 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         self.assertEqual(actions["rs"]["bias_group"], "bullish")
         self.assertEqual(actions["rs"]["bullish_subgroup"], "leaders")
+        self.assertIn("github", actions["rs"]["execution_modes"])
+        self.assertNotIn("github", actions["reload_postgres_market_data_date"]["execution_modes"])
         self.assertTrue(actions["rs"]["requires_daily_bars"])
         self.assertFalse(actions["sync_postgres_market_data"]["requires_daily_bars"])
 

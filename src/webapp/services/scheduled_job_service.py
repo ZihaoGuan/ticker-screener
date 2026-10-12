@@ -392,6 +392,7 @@ class ScheduledJobService:
                 "bias_group": item.get("bias_group") or "other",
                 "bullish_subgroup": item.get("bullish_subgroup") or "",
                 "fields": item.get("fields", []),
+                "execution_modes": item.get("execution_modes") or list(self.run_service.execution_modes_for_action(str(item["id"]))),
                 "requires_daily_bars": "daily_bars" in required_inputs_by_action.get(str(item["id"]), ()),
                 **_summarize_durations(
                     estimates_by_action.get(str(item["id"]), []),

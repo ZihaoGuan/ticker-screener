@@ -58,6 +58,12 @@ class RunServiceTests(unittest.TestCase):
 
         self.assertEqual(resolved, dt.date.today())
 
+    def test_github_execution_is_available_only_for_portable_screeners(self) -> None:
+        self.assertIn("github", self.service.execution_modes_for_action("rs"))
+        self.assertIn("github", self.service.execution_modes_for_action("finviz_target_price_50"))
+        self.assertNotIn("github", self.service.execution_modes_for_action("reload_postgres_market_data_date"))
+        self.assertNotIn("github", self.service.execution_modes_for_action("build_ticker_ratings"))
+
     def test_update_progress_uses_stage_markers_when_batch_progress_not_available(self) -> None:
         job = {
             "success_count": 0,
@@ -1142,7 +1148,7 @@ class RunServiceTests(unittest.TestCase):
         service.history_repository.create_job_run = lambda **kwargs: created.append(kwargs)  # type: ignore[method-assign]
 
         with self.assertRaisesRegex(ValueError, "does not support github execution"):
-            service.launch("rs", options={"execution_mode": "github"})
+            service.launch("reload_postgres_market_data_date", options={"execution_mode": "github", "trade_date": "2026-10-09"})
 
         self.assertEqual(created, [])
 

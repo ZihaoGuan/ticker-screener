@@ -1885,6 +1885,7 @@ export type ScheduledJobConfigResponse = {
     estimated_duration_seconds: number | null;
     estimate_sample_count: number;
     requires_daily_bars: boolean;
+    execution_modes: Array<"local" | "remote" | "github">;
     fields: Array<{
       id: string;
       label: string;
