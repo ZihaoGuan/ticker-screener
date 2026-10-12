@@ -4,11 +4,30 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.webapp.services.external_job_result_service import ExternalJobResultService
 
 
 class ExternalJobResultServiceTests(unittest.TestCase):
+    def test_download_uses_explicit_app_user_agent(self) -> None:
+        class _Response:
+            def __enter__(self) -> "_Response":
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            def read(self, _: int) -> bytes:
+                return b"{}"
+
+        with patch("src.webapp.services.external_job_result_service.urlopen", return_value=_Response()) as urlopen:
+            payload = ExternalJobResultService._download("https://artifacts.example/manifest.json")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(payload, b"{}")
+        self.assertEqual(request.get_header("User-agent"), "ticker-screener/1.0")
+
     def test_completion_persists_only_matching_github_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

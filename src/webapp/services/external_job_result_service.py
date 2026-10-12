@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from .screener_history_service import ScreenerHistoryService
 from src.webapp.repositories.history_repository import HistoryRepository
@@ -207,7 +207,8 @@ class ExternalJobResultService:
 
     @staticmethod
     def _download(url: str) -> bytes:
-        with urlopen(url, timeout=30) as response:
+        request = Request(url, headers={"User-Agent": "ticker-screener/1.0"})
+        with urlopen(request, timeout=30) as response:
             data = response.read(10 * 1024 * 1024 + 1)
         if len(data) > 10 * 1024 * 1024:
             raise ValueError("External artifact exceeds 10 MB limit.")
