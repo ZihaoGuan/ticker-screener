@@ -2726,41 +2726,20 @@ class RunService:
             return self._remote_job_id(job_run_id)
 
         if execution_mode == "github":
-            try:
-                dispatched = self._github_actions_executor().dispatch(
-                    job_run_id=int(job_run_id),
-                    action_id=action_id,
-                    code_version=self.code_version,
-                    options=normalized,
-                )
-            except Exception as exc:
+            if queue_policy is not None:
                 self.history_repository.patch_job_run_result(
                     job_run_id,
                     result_payload_patch={
+                        "job_id": self._remote_job_id(job_run_id),
                         "execution_mode": "github",
                         "executor": "github_actions",
-                        "progress_label": "GitHub dispatch failed",
-                        "message": str(exc),
+                        "progress_label": "Waiting for scheduled dispatch",
+                        "message": "Queued for GitHub Actions after schedule prerequisites succeed.",
                     },
-                    status="failed",
-                    finished_at=self._now_iso(),
+                    status="queued",
                 )
-                raise ValueError(str(exc)) from exc
-            run_id = int(dispatched.get("workflow_run_id") or 0)
-            if run_id <= 0:
-                raise ValueError("GitHub Actions did not return a workflow run id.")
-            self.history_repository.patch_job_run_result(
-                job_run_id,
-                result_payload_patch={
-                    "execution_mode": "github",
-                    "executor": "github_actions",
-                    "github_run_id": run_id,
-                    "github_run_url": str(dispatched.get("html_url") or ""),
-                    "progress_label": "Queued on GitHub",
-                    "message": "Queued for GitHub Actions.",
-                },
-                status="queued",
-            )
+                return self._remote_job_id(job_run_id)
+            self._dispatch_github_job_run(job_run_id=int(job_run_id), action_id=action_id, options=normalized)
             return self._remote_job_id(job_run_id)
 
         return self._start_local_job(
@@ -2771,6 +2750,67 @@ class RunService:
             job_run_id=job_run_id,
             trigger_source=trigger_source,
         )
+
+    def _dispatch_github_job_run(self, *, job_run_id: int, action_id: str, options: dict[str, Any]) -> None:
+        try:
+            dispatched = self._github_actions_executor().dispatch(
+                job_run_id=job_run_id,
+                action_id=action_id,
+                code_version=self.code_version,
+                options=options,
+            )
+        except Exception as exc:
+            self.history_repository.patch_job_run_result(
+                job_run_id,
+                result_payload_patch={
+                    "execution_mode": "github",
+                    "executor": "github_actions",
+                    "progress_label": "GitHub dispatch failed",
+                    "message": str(exc),
+                },
+                status="failed",
+                finished_at=self._now_iso(),
+            )
+            raise ValueError(str(exc)) from exc
+        run_id = int(dispatched.get("workflow_run_id") or 0)
+        if run_id <= 0:
+            message = "GitHub Actions did not return a workflow run id."
+            self.history_repository.patch_job_run_result(
+                job_run_id,
+                result_payload_patch={"progress_label": "GitHub dispatch failed", "message": message},
+                status="failed",
+                finished_at=self._now_iso(),
+            )
+            raise ValueError(message)
+        self.history_repository.patch_job_run_result(
+            job_run_id,
+            result_payload_patch={
+                "execution_mode": "github",
+                "executor": "github_actions",
+                "github_run_id": run_id,
+                "github_run_url": str(dispatched.get("html_url") or ""),
+                "progress_label": "Queued on GitHub",
+                "message": "Queued for GitHub Actions.",
+            },
+            status="queued",
+        )
+
+    def dispatch_ready_scheduled_github_jobs(self) -> dict[str, int]:
+        dispatched = 0
+        failed = 0
+        while True:
+            row = self.history_repository.claim_ready_scheduled_github_job_run()
+            if row is None:
+                break
+            request = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
+            options = request.get("options") if isinstance(request.get("options"), dict) else {}
+            action_id = str(request.get("action_id") or "")
+            try:
+                self._dispatch_github_job_run(job_run_id=int(row["id"]), action_id=action_id, options=options)
+                dispatched += 1
+            except ValueError:
+                failed += 1
+        return {"dispatched": dispatched, "failed": failed}
 
     def has_healthy_remote_workers(self) -> bool:
         return self.history_repository.healthy_remote_worker_count(stale_after_seconds=self.REMOTE_WORKER_STALE_SECONDS) > 0

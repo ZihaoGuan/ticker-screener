@@ -76,6 +76,7 @@ class ScheduledJobService:
             local_now = datetime.now(ZoneInfo(str(job["cron_tz"])))
             key = local_now.date().isoformat()
             current = latest.get((str(job["job_id"]), key))
+            execution_mode = str((job.get("options") or {}).get("execution_mode") or "remote").lower()
             dependencies = [by_job_id[item] for item in job.get("depends_on_job_ids", []) if item in by_job_id]
             dependency_runs = [latest.get((str(item["job_id"]), key)) for item in dependencies]
             failed = next((run for run in dependency_runs if run and str(run.get("status")) in {"failed", "interrupted"}), None)
@@ -93,7 +94,7 @@ class ScheduledJobService:
             elif unfinished:
                 state = "waiting"
                 blocking_job_id = str(unfinished["job_id"])
-            elif current and str(current.get("status")) == "queued" and not _has_compatible_worker(workers, str(job.get("worker_pool") or "any")):
+            elif current and str(current.get("status")) == "queued" and execution_mode != "github" and not _has_compatible_worker(workers, str(job.get("worker_pool") or "any")):
                 state = "no-worker"
             elif current and str(current.get("status")) == "queued":
                 state = "ready"

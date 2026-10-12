@@ -512,7 +512,7 @@ class HistoryRepository:
                 result_payload = COALESCE(job.result_payload, '{}'::jsonb) ||
                     jsonb_build_object('message', 'Prerequisites did not succeed before the daily cutoff.')
             WHERE job.status = 'queued'
-              AND COALESCE(job.request_payload->>'execution_mode', 'local') = 'remote'
+              AND COALESCE(job.request_payload->>'execution_mode', 'local') IN ('remote', 'github')
               AND jsonb_array_length(COALESCE(job.request_payload->'dependency_job_ids', '[]'::jsonb)) > 0
               AND NULLIF(job.request_payload->>'dependency_expires_at', '') IS NOT NULL
               AND (job.request_payload->>'dependency_expires_at')::timestamptz < NOW()
@@ -524,6 +524,69 @@ class HistoryRepository:
                 rows = self._rows_to_dicts(cursor, cursor.fetchall())
             connection.commit()
         return rows
+
+    def claim_ready_scheduled_github_job_run(self) -> dict[str, Any] | None:
+        """Claim one scheduled GitHub job after its latest prerequisites succeed."""
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            WITH queue_lock AS (
+                SELECT pg_advisory_xact_lock(%s)
+            ),
+            candidate AS (
+                SELECT queued_job.id
+                FROM job_runs AS queued_job
+                CROSS JOIN queue_lock
+                WHERE queued_job.status = 'queued'
+                  AND COALESCE(queued_job.request_payload->>'execution_mode', '') = 'github'
+                  AND queued_job.request_payload->'options' ? 'scheduled_job_id'
+                  AND COALESCE(queued_job.result_payload->>'github_run_id', '') = ''
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(
+                        COALESCE(queued_job.request_payload->'dependency_job_ids', '[]'::jsonb)
+                    ) AS dependency(job_id)
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM (
+                            SELECT provider.status
+                            FROM job_runs AS provider
+                            WHERE provider.request_payload->'options'->>'scheduled_job_id' = dependency.job_id
+                              AND COALESCE(provider.request_payload->>'dependency_key', '')
+                                  = COALESCE(queued_job.request_payload->>'dependency_key', '')
+                            ORDER BY provider.created_at DESC, provider.id DESC
+                            LIMIT 1
+                        ) AS latest_provider
+                        WHERE latest_provider.status = 'success'
+                    )
+                  )
+                ORDER BY COALESCE(NULLIF(queued_job.request_payload->>'queue_priority', '')::integer, 50) DESC,
+                         queued_job.created_at ASC,
+                         queued_job.id ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE job_runs AS job
+            SET status = 'running',
+                result_payload = COALESCE(job.result_payload, '{}'::jsonb) || %s::jsonb
+            FROM candidate
+            WHERE job.id = candidate.id
+            RETURNING job.id, job.parent_job_run_id, job.job_type, job.job_name, job.status, job.trigger_source,
+                      job.request_payload, job.result_payload, job.artifact_path, job.started_at, job.finished_at, job.created_at
+        """
+        patch = {
+            "execution_mode": "github",
+            "executor": "github_actions",
+            "progress_label": "Dispatching to GitHub",
+            "message": "Prerequisites satisfied; dispatching to GitHub Actions.",
+        }
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (self._REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY, _json_dumps(patch)))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows[0] if rows else None
 
     def list_github_job_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
         connection = self._connect()

@@ -36,6 +36,7 @@ type ScheduledActionOption = {
   estimated_duration_seconds: number | null;
   estimate_sample_count: number;
   requires_daily_bars: boolean;
+  execution_modes: Array<"local" | "remote" | "github">;
   fields: Array<{
     id: string;
     label: string;
@@ -101,6 +102,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [schedulePriority, setSchedulePriority] = useState("50");
   const [scheduleDependsOnJobIds, setScheduleDependsOnJobIds] = useState<string[]>([]);
   const [scheduleWorkerPool, setScheduleWorkerPool] = useState("any");
+  const [scheduleExecutionMode, setScheduleExecutionMode] = useState<"remote" | "github">("remote");
   const [scheduleOptionsJson, setScheduleOptionsJson] = useState("{}");
   const [lastSuggestedOptionsJson, setLastSuggestedOptionsJson] = useState("{}");
   const [scheduleActionSearch, setScheduleActionSearch] = useState("");
@@ -424,9 +426,10 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       priority: Number(schedulePriority),
       dependencyIds: scheduleDependsOnJobIds,
       workerPool: scheduleWorkerPool,
+      executionMode: scheduleExecutionMode,
       configs: scheduledConfigs,
     }),
-    [scheduleCadence, scheduleCronTz, scheduleDependsOnJobIds, schedulePriority, scheduleTime, scheduleWorkerPool, scheduledConfigs],
+    [scheduleCadence, scheduleCronTz, scheduleDependsOnJobIds, scheduleExecutionMode, schedulePriority, scheduleTime, scheduleWorkerPool, scheduledConfigs],
   );
 
   useEffect(() => {
@@ -722,6 +725,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setSchedulePriority("50");
     setScheduleDependsOnJobIds([]);
     setScheduleWorkerPool("any");
+    setScheduleExecutionMode("remote");
     setScheduleActionSearch("");
     const nextSuggested = buildScheduleOptionsTemplate(nextAction);
     setScheduleOptionsJson(nextSuggested);
@@ -734,7 +738,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setIsSavingSchedule(true);
     setScheduleNotice("");
     try {
-      const parsedOptions = parseScheduleOptionsJson(scheduleOptionsJson);
+      const parsedOptions = { ...parseScheduleOptionsJson(scheduleOptionsJson), execution_mode: scheduleExecutionMode };
       const scheduleCronPayload = resolveScheduleCronDraft(scheduleCronDraftRef.current);
       await fetchJson<{ ok: boolean }>("/api/admin/schedules", {
         method: "POST",
@@ -785,8 +789,11 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     setSchedulePriority(String(job.priority));
     setScheduleDependsOnJobIds(job.depends_on_job_ids);
     setScheduleWorkerPool(job.worker_pool);
+    setScheduleExecutionMode(job.options.execution_mode === "github" ? "github" : "remote");
     setScheduleActionSearch("");
-    const serialized = JSON.stringify(job.options ?? {}, null, 2);
+    const editableOptions = { ...(job.options ?? {}) };
+    delete editableOptions.execution_mode;
+    const serialized = JSON.stringify(editableOptions, null, 2);
     setScheduleOptionsJson(serialized);
     setLastSuggestedOptionsJson(serialized);
     lastAutoScheduleIdentityRef.current = { jobId: job.job_id, jobLabel: job.job_label };
@@ -1745,7 +1752,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                             </td>
                             <td data-label="Execution policy">
                               <div className="schedule-cell-stack">
-                                <strong>{formatPriorityLabel(job.priority)} · {formatWorkerPoolLabel(job.worker_pool)}</strong>
+                                <strong>{formatScheduledExecutionMode(job)} · {formatPriorityLabel(job.priority)} · {formatWorkerPoolLabel(job.worker_pool)}</strong>
                                 <span className="file-meta">{formatScheduleDependencies(job, scheduledConfigs)}</span>
                               </div>
                             </td>
@@ -1816,7 +1823,12 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                     <select
                       className="schedule-action-chooser"
                       value={scheduleActionId}
-                      onChange={(event) => setScheduleActionId(event.target.value)}
+                      onChange={(event) => {
+                        const nextActionId = event.target.value;
+                        setScheduleActionId(nextActionId);
+                        const nextAction = availableScheduledActions.find((item) => item.id === nextActionId);
+                        if (!nextAction?.execution_modes.includes("github")) setScheduleExecutionMode("remote");
+                      }}
                       size={Math.min(Math.max(filteredScheduledActions.length, 4), 6)}
                     >
                       {groupedScheduledActions.length === 0 ? <option value={scheduleActionId}>No matching screeners</option> : null}
@@ -1893,6 +1905,14 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                   </div>
                   <div className="run-params-grid">
                     <label className="field">
+                      <span>Execution location</span>
+                      <select value={scheduleExecutionMode} onChange={(event) => setScheduleExecutionMode(event.target.value as "remote" | "github")}>
+                        <option value="remote">Remote worker queue</option>
+                        {selectedScheduledAction?.execution_modes.includes("github") ? <option value="github">GitHub Actions</option> : null}
+                      </select>
+                      <small className="file-meta">GitHub runs publish the screener result back to this app.</small>
+                    </label>
+                    <label className="field">
                       <span>Priority</span>
                       <select value={schedulePriority} onChange={(event) => setSchedulePriority(event.target.value)}>
                         <option value="100">Critical</option>
@@ -1902,7 +1922,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                       </select>
                     </label>
                     <label className="field">
-                      <span>Worker pool</span>
+                      <span>{scheduleExecutionMode === "github" ? "Fallback worker pool" : "Worker pool"}</span>
                       <select value={scheduleWorkerPool} onChange={(event) => setScheduleWorkerPool(event.target.value)}>
                         <option value="any">Any</option>
                         <option value="general">General</option>
@@ -2960,6 +2980,10 @@ function formatScheduleDependencies(job: ScheduledJobConfig, configs: ScheduledJ
   return `Waits for: ${job.depends_on_job_ids.map((jobId) => labels.get(jobId) ?? jobId).join(", ")}`;
 }
 
+function formatScheduledExecutionMode(job: ScheduledJobConfig): string {
+  return job.options.execution_mode === "github" ? "GitHub Actions" : "Remote";
+}
+
 function describeExecutionPolicy({
   cadence,
   time,
@@ -2967,6 +2991,7 @@ function describeExecutionPolicy({
   priority,
   dependencyIds,
   workerPool,
+  executionMode,
   configs,
 }: {
   cadence: ScheduleCadence;
@@ -2975,6 +3000,7 @@ function describeExecutionPolicy({
   priority: number;
   dependencyIds: string[];
   workerPool: string;
+  executionMode: "remote" | "github";
   configs: ScheduledJobConfig[];
 }): string {
   const timezoneLabel = timezone === "America/New_York" ? "New York" : timezone;
@@ -2988,7 +3014,8 @@ function describeExecutionPolicy({
   const dependencyText = dependencyIds.length
     ? `waits for ${dependencyIds.map((jobId) => configs.find((job) => job.job_id === jobId)?.job_label ?? jobId).join(", ")}`
     : "independent";
-  return `${cadenceLabel} ${displayTime} ${timezoneLabel} · ${formatPriorityLabel(priority)} priority · ${dependencyText} · ${formatWorkerPoolLabel(workerPool)} workers`;
+  const executionText = executionMode === "github" ? `GitHub Actions · ${formatWorkerPoolLabel(workerPool)} fallback workers` : `${formatWorkerPoolLabel(workerPool)} workers`;
+  return `${cadenceLabel} ${displayTime} ${timezoneLabel} · ${formatPriorityLabel(priority)} priority · ${dependencyText} · ${executionText}`;
 }
 
 function findPrimaryScheduleTimezone(configs: ScheduledJobConfig[]): string {

@@ -1142,6 +1142,52 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(executor.kwargs["code_version"], "pilot-sha")
         self.assertEqual(captured_patch["kwargs"]["result_payload_patch"]["github_run_id"], 654)
 
+    def test_scheduled_github_run_waits_for_scheduler_dispatch(self) -> None:
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
+        service.history_repository.create_job_run = lambda **kwargs: 904  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = MagicMock()  # type: ignore[method-assign]
+        service._github_actions_executor = MagicMock()  # type: ignore[method-assign]
+
+        job_id = service.launch(
+            "rs",
+            options={"execution_mode": "github"},
+            trigger_source="scheduler",
+            queue_policy={"dependency_job_ids": ["reload_prices"], "dependency_key": "2026-10-12"},
+        )
+
+        self.assertEqual(job_id, "remote-904")
+        service._github_actions_executor.assert_not_called()
+        self.assertEqual(
+            service.history_repository.patch_job_run_result.call_args.kwargs["result_payload_patch"]["progress_label"],
+            "Waiting for scheduled dispatch",
+        )
+
+    def test_dispatch_ready_scheduled_github_jobs_dispatches_only_claimed_rows(self) -> None:
+        class _Executor:
+            def dispatch(self, **kwargs: object) -> dict[str, object]:
+                self.kwargs = kwargs
+                return {"workflow_run_id": 905, "html_url": "https://github.example/runs/905"}
+
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
+        service.history_repository.claim_ready_scheduled_github_job_run = MagicMock(  # type: ignore[method-assign]
+            side_effect=[
+                {
+                    "id": 904,
+                    "request_payload": {"action_id": "rs", "options": {"execution_mode": "github"}},
+                },
+                None,
+            ]
+        )
+        service.history_repository.patch_job_run_result = MagicMock()  # type: ignore[method-assign]
+        executor = _Executor()
+        service._github_actions_executor = lambda: executor  # type: ignore[method-assign]
+
+        result = service.dispatch_ready_scheduled_github_jobs()
+
+        self.assertEqual(result, {"dispatched": 1, "failed": 0})
+        self.assertEqual(executor.kwargs["job_run_id"], 904)
+        self.assertEqual(executor.kwargs["action_id"], "rs")
+
     def test_launch_rejects_unsupported_execution_mode_before_creating_job(self) -> None:
         created: list[object] = []
         service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")

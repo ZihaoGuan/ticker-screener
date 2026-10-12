@@ -325,6 +325,10 @@ def main() -> int:
 
     if state_changed:
         _save_state(state)
+    dispatch_github = getattr(run_service, "dispatch_ready_scheduled_github_jobs", None)
+    github_dispatch = dispatch_github() if callable(dispatch_github) else {"dispatched": 0, "failed": 0}
+    if github_dispatch["dispatched"] or github_dispatch["failed"]:
+        print(f"github scheduled dispatch: dispatched={github_dispatch['dispatched']} failed={github_dispatch['failed']}")
     return 0
 
 

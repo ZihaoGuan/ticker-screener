@@ -145,6 +145,22 @@ class HistoryRepositoryEnsureSchemaTests(unittest.TestCase):
         self.assertEqual(params[1:3], ("worker-a", "image-a"))
         self.assertEqual(params[3:5], (["general"], ["general"]))
 
+    def test_claim_scheduled_github_job_requires_successful_dependencies_and_no_prior_dispatch(self) -> None:
+        connection = _FakeConnection(schema_checks=[])
+        repository = HistoryRepository(database_url="postgres://example")
+        repository._connect = lambda: connection  # type: ignore[method-assign]
+
+        with patch.object(repository, "_rows_to_dicts", return_value=[]):
+            repository.claim_ready_scheduled_github_job_run()
+
+        sql, params = connection.executed_sql[0]
+        self.assertIn("execution_mode', '') = 'github'", sql)
+        self.assertIn("scheduled_job_id", sql)
+        self.assertIn("github_run_id", sql)
+        self.assertIn("latest_provider.status = 'success'", sql)
+        self.assertIn("FOR UPDATE SKIP LOCKED", sql)
+        self.assertEqual(params[0], repository._REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY)
+
     def test_ensure_schema_unlocks_after_schema_apply_failure(self) -> None:
         connection = _FakeConnection(schema_checks=[[], []], raise_on_schema_apply=True)
         repository = HistoryRepository(database_url="postgres://example")
