@@ -69,7 +69,7 @@ jobs:
 
       - name: Acknowledge execution
         run: |
-          curl --fail --silent --show-error \
+          curl --fail-with-body --silent --show-error --retry 12 --retry-all-errors --retry-delay 10 --retry-max-time 300 \
             -H "X-External-Job-Token: ${EXTERNAL_JOB_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{\"github_run_id\":${GITHUB_RUN_ID},\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
@@ -113,12 +113,13 @@ jobs:
       - name: Report completion
         if: ${{ always() }}
         run: |
+          FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           if [ "${{ steps.screen.outcome }}" = "success" ] && [ -n "${{ steps.publish.outputs.manifest_url }}" ]; then
-            PAYLOAD="{\"github_run_id\":${GITHUB_RUN_ID},\"status\":\"success\",\"manifest_url\":\"${{ steps.publish.outputs.manifest_url }}\"}"
+            PAYLOAD="{\"github_run_id\":${GITHUB_RUN_ID},\"status\":\"success\",\"manifest_url\":\"${{ steps.publish.outputs.manifest_url }}\",\"finished_at\":\"${FINISHED_AT}\"}"
           else
-            PAYLOAD="{\"github_run_id\":${GITHUB_RUN_ID},\"status\":\"failed\",\"message\":\"GitHub workflow failed before result publication.\"}"
+            PAYLOAD="{\"github_run_id\":${GITHUB_RUN_ID},\"status\":\"failed\",\"message\":\"GitHub workflow failed before result publication.\",\"finished_at\":\"${FINISHED_AT}\"}"
           fi
-          curl --silent --show-error --retry 3 \
+          curl --fail-with-body --silent --show-error --retry 12 --retry-all-errors --retry-delay 10 --retry-max-time 300 \
             -H "X-External-Job-Token: ${EXTERNAL_JOB_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD" \

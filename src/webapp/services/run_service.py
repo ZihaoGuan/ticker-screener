@@ -25,6 +25,7 @@ from src.universe_filters import build_filter_option_catalog
 from src.universe import UniverseTicker, load_universe
 from src.universe_filters import UniverseFilterCriteria, filter_universe_by_criteria
 from src.webapp.config import load_webapp_config
+from src.webapp.services.external_job_result_service import ExternalJobResultService
 from src.webapp.services.screener_history_service import ScreenerHistoryService
 from src.webapp.services.discord_notification_service import DiscordNotificationService
 from src.webapp.services.github_actions_executor import GitHubActionsExecutor, GitHubActionsSettings
@@ -57,6 +58,7 @@ class RunField:
 
 class RunService:
     REMOTE_WORKER_STALE_SECONDS = 90
+    GITHUB_RESULT_RECOVERY_TIMEOUT_MINUTES = 30
     _progress_pattern = re.compile(r"\[(\d{1,6})/(\d{1,6})\]")
     _passed_pattern = re.compile(r"passed=(\d{1,6})")
     _stage_pattern = re.compile(r"^Stage (\d{1,2})/(\d{1,2}): (.+)$")
@@ -2782,6 +2784,8 @@ class RunService:
                 finished_at=self._now_iso(),
             )
             raise ValueError(message)
+        artifact_base_url = load_webapp_config().external_job_artifact_base_url.rstrip("/")
+        manifest_url = f"{artifact_base_url}/external-jobs/{job_run_id}/attempt-1/manifest.json" if artifact_base_url else ""
         self.history_repository.patch_job_run_result(
             job_run_id,
             result_payload_patch={
@@ -2789,6 +2793,8 @@ class RunService:
                 "executor": "github_actions",
                 "github_run_id": run_id,
                 "github_run_url": str(dispatched.get("html_url") or ""),
+                "github_attempt": 1,
+                "external_manifest_url": manifest_url,
                 "progress_label": "Queued on GitHub",
                 "message": "Queued for GitHub Actions.",
             },
@@ -2825,8 +2831,9 @@ class RunService:
         return {"requeued": len(recovered), "local_fallback_started": 0}
 
     def reconcile_github_jobs(self) -> dict[str, int]:
-        """Recover only GitHub infrastructure failures; script failures stay visible."""
+        """Reconcile GitHub failures and import results whose callback was missed."""
         recovered = 0
+        imported = 0
         for row in self.history_repository.list_github_job_runs():
             result = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
             run_id = int(result.get("github_run_id") or 0)
@@ -2836,20 +2843,6 @@ class RunService:
             options = request.get("options") if isinstance(request.get("options"), dict) else {}
             timeout_minutes = max(1, int(options.get("github_dispatch_timeout_minutes") or 10))
             created_at = row.get("created_at")
-            if isinstance(created_at, dt.datetime):
-                created_utc = created_at.astimezone(dt.timezone.utc)
-                age = dt.datetime.now(dt.timezone.utc) - created_utc
-                if str(row.get("status") or "") == "queued" and age > dt.timedelta(minutes=timeout_minutes):
-                    try:
-                        self._github_actions_executor().cancel(run_id)
-                    except Exception:
-                        pass
-                    message = f"GitHub dispatch exceeded the {timeout_minutes}-minute queue timeout."
-                    if self.history_repository.fallback_github_job_run(
-                        job_run_id=int(row["id"]), github_run_id=run_id, message=message
-                    ):
-                        recovered += 1
-                    continue
             try:
                 remote = self._github_actions_executor().get_status(run_id)
             except Exception:
@@ -2857,6 +2850,19 @@ class RunService:
             status = str(remote.get("status") or "").lower()
             conclusion = str(remote.get("conclusion") or "").lower()
             if status != "completed":
+                if isinstance(created_at, dt.datetime):
+                    created_utc = created_at.astimezone(dt.timezone.utc)
+                    age = dt.datetime.now(dt.timezone.utc) - created_utc
+                    if str(row.get("status") or "") == "queued" and age > dt.timedelta(minutes=timeout_minutes):
+                        try:
+                            self._github_actions_executor().cancel(run_id)
+                        except Exception:
+                            pass
+                        message = f"GitHub dispatch exceeded the {timeout_minutes}-minute queue timeout."
+                        if self.history_repository.fallback_github_job_run(
+                            job_run_id=int(row["id"]), github_run_id=run_id, message=message
+                        ):
+                            recovered += 1
                 continue
             if conclusion in {"cancelled", "timed_out", "action_required"}:
                 try:
@@ -2867,7 +2873,53 @@ class RunService:
                     recovered += 1
             elif conclusion and conclusion != "success":
                 self.history_repository.patch_job_run_result(int(row["id"]), result_payload_patch={"github_conclusion": conclusion, "progress_label": "GitHub failed", "message": f"GitHub workflow concluded: {conclusion}."}, status="failed", finished_at=self._now_iso())
-        return {"requeued": recovered}
+            elif conclusion == "success":
+                try:
+                    self._recover_completed_github_job(row=row, finished_at=str(remote.get("updated_at") or ""))
+                    imported += 1
+                except Exception as exc:
+                    age_minutes = 0.0
+                    if isinstance(created_at, dt.datetime):
+                        age_minutes = (dt.datetime.now(dt.timezone.utc) - created_at.astimezone(dt.timezone.utc)).total_seconds() / 60
+                    timeout_minutes = max(1, int(options.get("github_result_recovery_timeout_minutes") or self.GITHUB_RESULT_RECOVERY_TIMEOUT_MINUTES))
+                    if age_minutes >= timeout_minutes:
+                        self.history_repository.patch_job_run_result(
+                            int(row["id"]),
+                            result_payload_patch={"github_conclusion": "success", "progress_label": "GitHub result unavailable", "message": str(exc)},
+                            status="failed",
+                            finished_at=self._now_iso(),
+                        )
+                    else:
+                        self.history_repository.patch_job_run_result(
+                            int(row["id"]),
+                            result_payload_patch={"github_conclusion": "success", "progress_label": "Recovering GitHub result", "message": str(exc)},
+                            status="running",
+                        )
+        return {"requeued": recovered, "imported": imported}
+
+    def _recover_completed_github_job(self, *, row: dict[str, Any], finished_at: str) -> None:
+        result = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
+        job_run_id = int(row["id"])
+        github_run_id = int(result.get("github_run_id") or 0)
+        if github_run_id <= 0:
+            raise ValueError("GitHub result cannot be recovered without a workflow run id.")
+        manifest_url = str(result.get("external_manifest_url") or "").strip()
+        if not manifest_url:
+            base_url = load_webapp_config().external_job_artifact_base_url.rstrip("/")
+            if not base_url:
+                raise ValueError("External artifact base URL is not configured.")
+            attempt = max(1, int(result.get("github_attempt") or 1))
+            manifest_url = f"{base_url}/external-jobs/{job_run_id}/attempt-{attempt}/manifest.json"
+        config = load_webapp_config()
+        ExternalJobResultService(
+            repository=self.history_repository,
+            history=self.screener_history_service,
+            artifacts_dir=self.artifacts_dir,
+            artifact_base_url=config.external_job_artifact_base_url,
+        ).complete(
+            job_run_id=job_run_id,
+            payload={"github_run_id": github_run_id, "status": "success", "manifest_url": manifest_url, "finished_at": finished_at},
+        )
 
     def resume_remote_job_locally(self, row: dict[str, Any]) -> str:
         request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}

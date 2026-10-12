@@ -288,11 +288,13 @@ def main() -> int:
                 message="Prerequisites did not succeed before the daily cutoff.",
             )
     reconcile_github = getattr(run_service, "reconcile_github_jobs", None)
-    github_recovery = reconcile_github() if callable(reconcile_github) else {"requeued": 0}
+    github_recovery = reconcile_github() if callable(reconcile_github) else {"requeued": 0, "imported": 0}
     if recovery["requeued"]:
         print(f"remote recovery: requeued={recovery['requeued']}")
     if github_recovery["requeued"]:
         print(f"github recovery: requeued={github_recovery['requeued']}")
+    if github_recovery.get("imported", 0):
+        print(f"github recovery: imported={github_recovery['imported']}")
     actions = {
         action.action_id: action
         for action in run_service._actions.values()

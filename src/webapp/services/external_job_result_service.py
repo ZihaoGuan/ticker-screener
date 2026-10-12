@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 from pathlib import Path
@@ -37,6 +38,10 @@ class ExternalJobResultService:
         if not expected_run_id or expected_run_id != received_run_id:
             raise ValueError("GitHub workflow run does not own this job.")
         status = str(payload.get("status") or "").lower()
+        existing_screen_run_id = int(result_payload.get("screen_run_id") or 0)
+        if existing_screen_run_id:
+            return {"status": "success", "screen_run_id": existing_screen_run_id}
+        finished_at = self._completion_time(payload.get("finished_at"))
         if status == "failed":
             message = str(payload.get("message") or "GitHub workflow failed.")
             self.repository.patch_job_run_result(
@@ -47,7 +52,7 @@ class ExternalJobResultService:
                     "github_conclusion": "failure",
                 },
                 status="failed",
-                finished_at=str(payload.get("finished_at") or "") or None,
+                finished_at=finished_at,
             )
             self._write_scheduled_status(
                 request_payload=request_payload,
@@ -55,6 +60,7 @@ class ExternalJobResultService:
                 message=message,
                 artifact_file="",
                 screen_run_id=None,
+                finished_at=finished_at,
             )
             return {"status": "failed"}
         if status != "success":
@@ -80,6 +86,8 @@ class ExternalJobResultService:
         saved["summary"].write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         options = request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {}
         screen_run_id = self.history.persist_screen_run(strategy_id=action_id, options=options, summary_payload=summary, raw_payload=raw, job_run_id=job_run_id)
+        persisted = self.history.get_run(screen_run_id, include_hits=False) if screen_run_id is not None else None
+        success_count = int(persisted.get("hit_count") or 0) if isinstance(persisted, dict) else 0
         self.repository.patch_job_run_result(
             job_run_id,
             result_payload_patch={
@@ -90,9 +98,11 @@ class ExternalJobResultService:
                 "raw_results_file": str(saved["raw"]),
                 "watchlist_file": str(saved["watchlist"]),
                 "github_conclusion": "success",
+                "success_count": success_count,
             },
             status="success",
             artifact_path=str(saved["summary"]),
+            finished_at=finished_at,
         )
         self._write_scheduled_status(
             request_payload=request_payload,
@@ -100,6 +110,7 @@ class ExternalJobResultService:
             message="GitHub artifacts validated and persisted.",
             artifact_file=str(saved["summary"]),
             screen_run_id=screen_run_id,
+            finished_at=finished_at,
         )
         return {"status": "success", "screen_run_id": screen_run_id}
 
@@ -139,6 +150,7 @@ class ExternalJobResultService:
         message: str,
         artifact_file: str,
         screen_run_id: int | None,
+        finished_at: str | None = None,
     ) -> None:
         options = request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {}
         scheduled_job_id = str(options.get("scheduled_job_id") or "").strip()
@@ -151,7 +163,7 @@ class ExternalJobResultService:
             "job_label": str(options.get("scheduled_job_label") or scheduled_job_id),
             "status": status,
             "last_started_at": None,
-            "last_finished_at": None,
+            "last_finished_at": finished_at,
             "exit_code": 0 if status == "success" else (1 if status == "failed" else None),
             "log_file": "",
             "artifact_file": artifact_file or options.get("scheduled_artifact_file") or None,
@@ -210,3 +222,18 @@ class ExternalJobResultService:
         if not isinstance(value, dict):
             raise ValueError("External artifact must be an object.")
         return value
+
+    @staticmethod
+    def _now_iso() -> str:
+        return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @classmethod
+    def _completion_time(cls, value: Any) -> str:
+        candidate = str(value or "").strip()
+        if not candidate:
+            return cls._now_iso()
+        try:
+            dt.datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+        except ValueError:
+            return cls._now_iso()
+        return candidate

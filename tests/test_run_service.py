@@ -1188,6 +1188,32 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(executor.kwargs["job_run_id"], 904)
         self.assertEqual(executor.kwargs["action_id"], "rs")
 
+    def test_reconcile_github_job_imports_completed_result_after_callback_is_missed(self) -> None:
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
+        service.history_repository.list_github_job_runs = MagicMock(  # type: ignore[method-assign]
+            return_value=[
+                {
+                    "id": 904,
+                    "status": "running",
+                    "created_at": dt.datetime.now(dt.timezone.utc),
+                    "request_payload": {"execution_mode": "github", "options": {}},
+                    "result_payload": {"github_run_id": 905},
+                }
+            ]
+        )
+        executor = MagicMock()
+        executor.get_status.return_value = {"status": "completed", "conclusion": "success", "updated_at": "2026-10-12T01:02:03Z"}
+        service._github_actions_executor = lambda: executor  # type: ignore[method-assign]
+        service._recover_completed_github_job = MagicMock()  # type: ignore[method-assign]
+
+        result = service.reconcile_github_jobs()
+
+        self.assertEqual(result, {"requeued": 0, "imported": 1})
+        service._recover_completed_github_job.assert_called_once_with(  # type: ignore[attr-defined]
+            row=service.history_repository.list_github_job_runs.return_value[0],
+            finished_at="2026-10-12T01:02:03Z",
+        )
+
     def test_launch_rejects_unsupported_execution_mode_before_creating_job(self) -> None:
         created: list[object] = []
         service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
