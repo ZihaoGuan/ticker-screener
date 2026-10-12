@@ -65,7 +65,7 @@ jobs:
             requirements-finviz.txt
 
       - name: Install screener dependencies
-        run: python -m pip install -r requirements.txt -r requirements-finviz.txt awscli
+        run: python -m pip install -r requirements.txt -r requirements-finviz.txt "psycopg[binary]>=3.2" awscli
 
       - name: Acknowledge execution
         run: |
@@ -77,7 +77,55 @@ jobs:
 
       - name: Run shared screener
         id: screen
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_PORT: ${{ secrets.ORACLE_PORT }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          DB_TUNNEL_KEY: ${{ secrets.TICKER_SCREENER_DB_TUNNEL_KEY }}
+          DB_TUNNEL_KNOWN_HOSTS: ${{ secrets.TICKER_SCREENER_DB_TUNNEL_KNOWN_HOSTS }}
+          DB_PASSWORD: ${{ secrets.TICKER_SCREENER_GITHUB_DB_PASSWORD }}
         run: |
+          set -euo pipefail
+          market_data_source="$(python -c 'import json, os; options = json.loads(os.environ["OPTIONS_JSON"]); print(str(options.get("market_data_source") or "").strip().lower())')"
+          if [ "$market_data_source" = "database-first" ]; then
+            for required_variable in ORACLE_HOST ORACLE_USER DB_TUNNEL_KEY DB_TUNNEL_KNOWN_HOSTS DB_PASSWORD; do
+              test -n "${!required_variable}" || { echo "Missing required GitHub secret: ${required_variable}" >&2; exit 1; }
+            done
+
+            tunnel_port="${ORACLE_PORT:-22}"
+            tunnel_dir="$(mktemp -d)"
+            tunnel_socket="${RUNNER_TEMP}/ticker-screener-db-${GITHUB_RUN_ID}.sock"
+            cleanup() {
+              ssh -S "$tunnel_socket" -O exit -p "$tunnel_port" "${ORACLE_USER}@${ORACLE_HOST}" >/dev/null 2>&1 || true
+              rm -rf "$tunnel_dir"
+              rm -f "$tunnel_socket"
+            }
+            trap cleanup EXIT
+
+            printf '%s\n' "$DB_TUNNEL_KEY" > "$tunnel_dir/id_ed25519"
+            printf '%s\n' "$DB_TUNNEL_KNOWN_HOSTS" > "$tunnel_dir/known_hosts"
+            chmod 600 "$tunnel_dir/id_ed25519"
+
+            ssh -M -S "$tunnel_socket" -fNT \
+              -i "$tunnel_dir/id_ed25519" \
+              -o BatchMode=yes \
+              -o ExitOnForwardFailure=yes \
+              -o IdentitiesOnly=yes \
+              -o KbdInteractiveAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o ServerAliveCountMax=3 \
+              -o ServerAliveInterval=30 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$tunnel_dir/known_hosts" \
+              -L 127.0.0.1:15432:127.0.0.1:5432 \
+              -p "$tunnel_port" \
+              "${ORACLE_USER}@${ORACLE_HOST}"
+
+            database_password_encoded="$(python -c 'import os; from urllib.parse import quote; print(quote(os.environ["DB_PASSWORD"], safe=""))')"
+            export TICKER_SCREENER_DATABASE_URL="postgresql://github_screener_ro:${database_password_encoded}@127.0.0.1:15432/ticker_screener?sslmode=disable&application_name=github_external_screener"
+            python -c 'import os, psycopg; connection = psycopg.connect(os.environ["TICKER_SCREENER_DATABASE_URL"]); cursor = connection.execute("SELECT 1 FROM public.ticker_metadata LIMIT 1"); cursor.fetchone(); connection.close(); print("Read-only database tunnel ready.")'
+          fi
+
           python scripts/run_external_screener.py \
             --action-id "$ACTION_ID" \
             --options-json "$OPTIONS_JSON" \
