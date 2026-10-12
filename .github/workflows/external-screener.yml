@@ -121,7 +121,7 @@ jobs:
               -p "$tunnel_port" \
               "${ORACLE_USER}@${ORACLE_HOST}"
 
-            database_password_encoded="$(python -c 'import os; from urllib.parse import quote; print(quote(os.environ["DB_PASSWORD"], safe=""))')"
+            database_password_encoded="$(python -c 'import os; from urllib.parse import quote; print(quote(os.environ["DB_PASSWORD"].strip(), safe=""))')"
             export TICKER_SCREENER_DATABASE_URL="postgresql://github_screener_ro:${database_password_encoded}@127.0.0.1:15432/ticker_screener?sslmode=disable&application_name=github_external_screener"
             python -c 'import os, psycopg; connection = psycopg.connect(os.environ["TICKER_SCREENER_DATABASE_URL"]); cursor = connection.execute("SELECT 1 FROM public.ticker_metadata LIMIT 1"); cursor.fetchone(); connection.close(); print("Read-only database tunnel ready.")'
           fi
