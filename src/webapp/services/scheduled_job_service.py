@@ -26,6 +26,20 @@ _DEFAULT_WORKER_POOL = "any"
 _POLICY_UNSET = object()
 
 
+def _iso_timestamp(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    text = str(value or "").strip()
+    return text or None
+
+
+def _job_worker_started_at(run: dict[str, Any] | None) -> str | None:
+    if not run:
+        return None
+    result = run.get("result_payload") if isinstance(run.get("result_payload"), dict) else {}
+    return _iso_timestamp(result.get("started_at"))
+
+
 class ScheduledJobService:
     def __init__(self, *, project_root: Path, run_service: RunService) -> None:
         self.project_root = project_root
@@ -51,7 +65,7 @@ class ScheduledJobService:
         job is waiting for dependencies or for a compatible worker.
         """
         repository = getattr(self.run_service, "history_repository", None)
-        list_runs = getattr(repository, "list_remote_job_runs", None)
+        list_runs = getattr(repository, "list_scheduled_job_runs", None)
         list_workers = getattr(repository, "list_remote_workers", None)
         if not callable(list_runs):
             return
@@ -84,6 +98,7 @@ class ScheduledJobService:
             unfinished = next((item for item, run in zip(dependencies, dependency_runs) if not run or str(run.get("status")) != "success"), None)
             state = "independent" if not dependencies else "ready"
             blocking_job_id = ""
+            blocking_run: dict[str, Any] | None = None
             if current and str(current.get("status")) == "running":
                 state = "running"
             elif current and str(current.get("status")) == "failed":
@@ -92,9 +107,11 @@ class ScheduledJobService:
             elif failed:
                 state = "blocked"
                 blocking_job_id = str((failed.get("request_payload") or {}).get("options", {}).get("scheduled_job_id") or "")
+                blocking_run = failed
             elif unfinished:
                 state = "waiting"
                 blocking_job_id = str(unfinished["job_id"])
+                blocking_run = latest.get((blocking_job_id, key))
             elif current and str(current.get("status")) == "queued" and execution_mode != "github" and not _has_compatible_worker(workers, str(job.get("worker_pool") or "any")):
                 state = "no-worker"
             elif current and str(current.get("status")) == "queued":
@@ -103,6 +120,9 @@ class ScheduledJobService:
                 "state": state,
                 "job_run_id": current.get("id") if current else None,
                 "blocking_job_id": blocking_job_id or None,
+                "blocking_job_run_id": blocking_run.get("id") if blocking_run else None,
+                "queued_at": _iso_timestamp(current.get("created_at")) if current else None,
+                "worker_started_at": _job_worker_started_at(current),
             }
 
     def get_action_activity(self, *, run_jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -159,6 +179,7 @@ class ScheduledJobService:
                 }
             )
         jobs = [item for item in normalized if item["job_id"] and item["action_id"] and item["cron_expr"]]
+        jobs = [self._with_required_price_reload_dependency(job, jobs=jobs, strict=False) for job in jobs]
         estimates = {job["job_id"]: self._estimate_job_duration(job["job_id"]) for job in jobs}
         for job in jobs:
             job.update(estimates[job["job_id"]])
@@ -247,6 +268,9 @@ class ScheduledJobService:
         if not replaced:
             next_jobs.append(next_job)
         _validate_schedule_dependencies(next_jobs)
+        next_job = self._with_required_price_reload_dependency(next_job, jobs=next_jobs, strict=True)
+        next_jobs = [next_job if str(item.get("job_id") or "").strip() == clean_job_id else item for item in next_jobs]
+        _validate_schedule_dependencies(next_jobs)
         payload["jobs"] = sorted(next_jobs, key=lambda item: str(item.get("job_label") or item.get("job_id") or ""))
         self._write_jobs(payload)
         return next_job
@@ -311,6 +335,7 @@ class ScheduledJobService:
         return ""
 
     def enqueue_job(self, *, job: dict[str, Any], local_now: datetime, trigger_source: str = "scheduler") -> str:
+        job = self._with_required_price_reload_dependency(job, jobs=self.list_jobs(), strict=True)
         action_id = str(job["action_id"])
         if action_id not in self.run_service._actions:
             raise ValueError(f"Unknown action_id: {action_id}")
@@ -346,6 +371,54 @@ class ScheduledJobService:
             artifact_file=artifact_path,
         )
         return remote_job_id
+
+    def _with_required_price_reload_dependency(
+        self,
+        job: dict[str, Any],
+        *,
+        jobs: list[dict[str, Any]],
+        strict: bool,
+    ) -> dict[str, Any]:
+        if not self._requires_price_reload(job):
+            return job
+        reload_job = next(
+            (
+                candidate
+                for candidate in jobs
+                if str(candidate.get("action_id") or "") == "reload_postgres_market_data_date"
+                and str(candidate.get("cron_tz") or "America/New_York")
+                == str(job.get("cron_tz") or "America/New_York")
+            ),
+            None,
+        )
+        if reload_job is None or not bool(reload_job.get("enabled", True)):
+            if strict and bool(job.get("enabled", True)):
+                raise ValueError(
+                    "This schedule requires an enabled Reload Postgres Market Data Date schedule in the same timezone."
+                )
+            return job
+        consumer_days = _simple_cron_days(str(job.get("cron_expr") or ""))
+        reload_days = _simple_cron_days(str(reload_job.get("cron_expr") or ""))
+        if consumer_days is not None and reload_days is not None and not consumer_days.intersection(reload_days):
+            if strict and bool(job.get("enabled", True)):
+                raise ValueError("This schedule requires a price reload that runs on the same day.")
+            return job
+        dependencies = _normalize_dependency_job_ids(job.get("depends_on_job_ids"))
+        reload_job_id = str(reload_job["job_id"])
+        if reload_job_id in dependencies:
+            return job
+        return {**job, "depends_on_job_ids": [*dependencies, reload_job_id]}
+
+    def _requires_price_reload(self, job: dict[str, Any]) -> bool:
+        action_id = str(job.get("action_id") or "")
+        if action_id == "reload_postgres_market_data_date":
+            return False
+        options = job.get("options") if isinstance(job.get("options"), dict) else {}
+        if str(options.get("market_data_source") or "").strip().lower() == "database-first":
+            return True
+        catalog = build_screener_catalog(load_app_config())
+        spec = catalog.get(action_id)
+        return bool(spec and "daily_bars" in spec.required_inputs)
 
     def _write_status(self, *, job_id: str, job_label: str, message: str, artifact_file: str) -> None:
         status_dir = self.artifacts_dir / "status"

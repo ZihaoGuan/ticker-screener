@@ -2561,7 +2561,7 @@ function ScheduleTaskInspector({
   const summary = row.summary;
   const isFailed = row.state === "finished" && summary?.status === "failed";
   const isSuccessful = row.state === "finished" && summary?.status === "success";
-  const shouldShowLog = row.state === "active" || isFailed;
+  const shouldShowLog = row.queueState === "running" || isFailed;
   const [logText, setLogText] = useState("");
   const [isLogLoading, setIsLogLoading] = useState(false);
   const [logNotice, setLogNotice] = useState("");
@@ -2569,7 +2569,9 @@ function ScheduleTaskInspector({
   const resultHref = isSuccessful && summary?.persisted_to_db === true && summary.screen_run_id != null
     ? `/scanner/${encodeURIComponent(row.config.action_id)}`
     : null;
-  const startedAt = summary?.last_started_at ? new Date(summary.last_started_at) : null;
+  const queuedAt = scheduleQueueTimestamp(row.config.queue_state?.queued_at);
+  const workerStartedAt = scheduleQueueTimestamp(row.config.queue_state?.worker_started_at);
+  const startedAt = workerStartedAt ?? scheduleQueueTimestamp(summary?.last_started_at);
   const finishedAt = summary?.last_finished_at ? new Date(summary.last_finished_at) : null;
   const actualSeconds = startedAt && finishedAt ? Math.max(0, Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000)) : null;
   const expectedFinish = timelineExpectedFinish(row, timezone);
@@ -2631,12 +2633,16 @@ function ScheduleTaskInspector({
           <strong className={`schedule-task-status schedule-task-status-${isFailed ? "failed" : row.queueState}`}>{isFailed ? "failed" : queueStateLabel(row)}</strong>
         </div>
         <div>
-          <span>{isSuccessful ? "Finished" : row.state === "active" ? "Expected finish" : "Typical duration"}</span>
-          <strong>{isSuccessful && finishedAt ? formatTimelineTimestamp(finishedAt, timezone) : row.state === "active" ? expectedFinish ?? "ETA unavailable" : formatEstimatedDuration(row.config.estimated_duration_seconds)}</strong>
+          <span>Queued</span>
+          <strong>{queuedAt ? formatTimelineTimestamp(queuedAt, timezone) : "Not queued"}</strong>
         </div>
         <div>
-          <span>{isSuccessful ? "Actual duration" : row.state === "active" ? "Elapsed" : "Next trigger"}</span>
-          <strong>{isSuccessful ? (actualSeconds ? formatEstimatedDuration(actualSeconds).replace("~", "") : "Unavailable") : row.state === "active" ? (startedAt ? formatElapsedDuration(now.getTime() - startedAt.getTime()) : "Not reported") : formatMinuteOfDay(row.minute)}</strong>
+          <span>Execution began</span>
+          <strong>{startedAt ? formatTimelineTimestamp(startedAt, timezone) : row.queueState === "running" ? "Not reported" : "Not started"}</strong>
+        </div>
+        <div>
+          <span>{isSuccessful ? "Actual duration" : row.queueState === "running" ? "Elapsed" : "Typical duration"}</span>
+          <strong>{isSuccessful ? (actualSeconds ? formatEstimatedDuration(actualSeconds).replace("~", "") : "Unavailable") : row.queueState === "running" ? (startedAt ? formatElapsedDuration(now.getTime() - startedAt.getTime()) : "Not reported") : formatEstimatedDuration(row.config.estimated_duration_seconds)}</strong>
         </div>
       </div>
 
@@ -2645,7 +2651,7 @@ function ScheduleTaskInspector({
         <section className={`schedule-dependency-chain schedule-dependency-chain-${row.queueState}`}>
           <span>Prerequisite</span>
           <strong>{row.dependency.job_label}</strong>
-          <p>{queueStateLabel(row)}.</p>
+          <p>{queueStateLabel(row)}{row.config.queue_state?.blocking_job_run_id ? ` · run #${row.config.queue_state.blocking_job_run_id}` : ""}.</p>
         </section>
       ) : null}
       {row.state === "active" ? <p className="schedule-task-inspector-message">Schedule status refreshes every 15 seconds. Log output refreshes every 2 seconds.</p> : null}
@@ -3076,7 +3082,7 @@ function buildScheduleTimeline(
       summary,
       minute,
       durationMinutes: Math.max((config.estimated_duration_seconds ?? 0) / 60, 8),
-      state: getTimelineRowState(config, summary, minute, nowMinute, now),
+      state: getTimelineRowState(config, summary, queue.state, minute, nowMinute, now),
       queueState: queue.state,
       dependency: queue.dependency,
     });
@@ -3111,7 +3117,13 @@ function buildScheduleMap(
     if (isRegularMarketMinute(minute)) return;
     const summary = summaryByJobId.get(config.job_id) ?? null;
     const queue = resolveScheduleQueueState(config, summary, configByJobId, summaryByJobId, now);
-    const state: TimelineRowState = !config.enabled ? "disabled" : summary?.status === "running" || summary?.status === "queued" ? "active" : "upcoming";
+    const state: TimelineRowState = !config.enabled
+      ? "disabled"
+      : queue.state === "running"
+        ? "active"
+        : queue.state === "waiting" || queue.state === "blocked" || queue.state === "no-worker" || queue.state === "ready"
+          ? "waiting"
+          : "upcoming";
     groupByCadence.get(cadence.cadence)?.rows.push({
       config,
       summary,
@@ -3188,11 +3200,19 @@ function zonedDateTimeToDate(day: ReturnType<typeof getZonedDateParts>, hour: nu
   return candidate;
 }
 
-function getTimelineRowState(config: ScheduledJobConfig, summary: ScheduledJobSummary | null, minute: number, nowMinute: number, now: Date): TimelineRowState {
+function getTimelineRowState(
+  config: ScheduledJobConfig,
+  summary: ScheduledJobSummary | null,
+  queueState: ScheduleQueueState,
+  minute: number,
+  nowMinute: number,
+  now: Date,
+): TimelineRowState {
   const status = summary?.status ?? "unknown";
   const ranToday = Boolean(summary?.last_started_at && isSameZonedDate(new Date(summary.last_started_at), now, config.cron_tz));
   if (!config.enabled) return "disabled";
-  if (status === "running" || status === "queued") return "active";
+  if (queueState === "running") return "active";
+  if (queueState === "waiting" || queueState === "blocked" || queueState === "no-worker" || queueState === "ready") return "waiting";
   if (ranToday && (status === "success" || status === "failed")) return "finished";
   return minute > nowMinute ? "upcoming" : "waiting";
 }
@@ -3337,10 +3357,12 @@ function timelineStateLabel(state: TimelineRowState): string {
 function timelineExpectedFinish(row: ScheduleTimelineRow, timezone?: string): string | null {
   const estimate = row.config.estimated_duration_seconds;
   if (!estimate || estimate < 1) return null;
-  if (row.state === "active" && row.summary?.last_started_at) {
-    const startedAt = new Date(row.summary.last_started_at).getTime();
-    if (!Number.isNaN(startedAt)) {
-      const finish = new Date(startedAt + estimate * 1_000);
+  const startedAt = scheduleQueueTimestamp(row.config.queue_state?.worker_started_at)
+    ?? scheduleQueueTimestamp(row.summary?.last_started_at);
+  if (row.queueState === "running" && startedAt) {
+    const startedAtMilliseconds = startedAt.getTime();
+    if (!Number.isNaN(startedAtMilliseconds)) {
+      const finish = new Date(startedAtMilliseconds + estimate * 1_000);
       return `ETA ${timezone ? formatTimelineTimestamp(finish, timezone) : formatMinuteOfDay(finish.getHours() * 60 + finish.getMinutes())}`;
     }
   }
@@ -3356,6 +3378,12 @@ function formatTimelineTimestamp(date: Date, timezone: string): string {
     minute: "2-digit",
     hourCycle: "h23",
   }).format(date);
+}
+
+function scheduleQueueTimestamp(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp;
 }
 
 function formatElapsedDuration(milliseconds: number): string {

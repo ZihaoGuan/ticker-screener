@@ -1872,6 +1872,9 @@ export type ScheduledJobConfig = {
     state: "ready" | "waiting" | "blocked" | "running" | "no-worker" | "independent" | "expired";
     job_run_id: number | null;
     blocking_job_id: string | null;
+    blocking_job_run_id: number | null;
+    queued_at: string | null;
+    worker_started_at: string | null;
   };
 };
 

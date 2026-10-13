@@ -340,7 +340,19 @@ def main() -> int:
             print(f"skipped scheduled job {job['job_id']} ({action_id}): {skip_reason}")
             continue
 
-        remote_job_id = schedule_service.enqueue_job(job=job, local_now=local_now)
+        try:
+            remote_job_id = schedule_service.enqueue_job(job=job, local_now=local_now)
+        except ValueError as exc:
+            state[str(job["job_id"])] = slot_key
+            state_changed = True
+            _write_scheduler_status(
+                job_id=str(job["job_id"]),
+                job_label=str(job.get("job_label") or job["job_id"]),
+                status="failed",
+                message=str(exc),
+            )
+            print(f"failed scheduled job {job['job_id']} ({action_id}): {exc}")
+            continue
         state[str(job["job_id"])] = slot_key
         state_changed = True
         print(f"queued scheduled job {job['job_id']} ({action_id}) at {local_now.isoformat()} {cron_tz}")

@@ -128,6 +128,7 @@ class ExternalJobResultService:
             result_payload_patch={
                 "progress_label": "Running on GitHub",
                 "message": "GitHub workflow is running.",
+                "started_at": str(payload.get("at") or ""),
                 "github_heartbeat_at": str(payload.get("at") or ""),
             },
             status="running",

@@ -310,6 +310,25 @@ class HistoryRepository:
                 cursor.execute(sql, (max(1, int(limit)),))
                 return self._rows_to_dicts(cursor, cursor.fetchall())
 
+    def list_scheduled_job_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Return recent remote or GitHub jobs created by schedule definitions."""
+        connection = self._connect()
+        if connection is None:
+            return []
+        sql = """
+            SELECT id, parent_job_run_id, job_type, job_name, status, trigger_source,
+                   request_payload, result_payload, artifact_path, started_at, finished_at, created_at
+            FROM job_runs
+            WHERE COALESCE(request_payload->>'execution_mode', 'local') IN ('remote', 'github')
+              AND request_payload->'options' ? 'scheduled_job_id'
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (max(1, int(limit)),))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
     def has_active_remote_job_run(self, *, action_id: str, code_version: str = "") -> bool:
         connection = self._connect()
         if connection is None:

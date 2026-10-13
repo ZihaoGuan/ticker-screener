@@ -83,14 +83,6 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
     def test_upsert_job_validates_and_persists_queue_policy(self) -> None:
         self.service.upsert_job(
-            job_id="daily_rs",
-            job_label="Daily RS",
-            action_id="rs",
-            cron_expr="0 18 * * 1-5",
-            cron_tz="America/New_York",
-            enabled=True,
-        )
-        self.service.upsert_job(
             job_id="reload_prices",
             job_label="Reload prices",
             action_id="reload_postgres_market_data_date",
@@ -133,6 +125,131 @@ class ScheduledJobServiceTests(unittest.TestCase):
             self.service.upsert_job(**kwargs, depends_on_job_ids=["daily_rs"])
         with self.assertRaisesRegex(ValueError, "unknown schedule"):
             self.service.upsert_job(**kwargs, depends_on_job_ids=["reload_prices"])
+
+    def test_upsert_adds_price_reload_dependency_for_daily_bar_screener(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+
+        job = self.service.upsert_job(
+            job_id="daily_rs",
+            job_label="Daily RS",
+            action_id="rs",
+            cron_expr="0 18 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+
+        self.assertEqual(job["depends_on_job_ids"], ["reload_prices"])
+
+    def test_upsert_adds_price_reload_dependency_for_database_first_option(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+
+        job = self.service.upsert_job(
+            job_id="canslim",
+            job_label="CAN SLIM",
+            action_id="canslim",
+            cron_expr="0 18 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+            options={"market_data_source": "database-first"},
+        )
+
+        self.assertEqual(job["depends_on_job_ids"], ["reload_prices"])
+
+    def test_upsert_keeps_finviz_schedule_independent(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+
+        job = self.service.upsert_job(
+            job_id="finviz_target_price",
+            job_label="Finviz Target Price",
+            action_id="finviz_target_price_50",
+            cron_expr="0 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+
+        self.assertEqual(job["depends_on_job_ids"], [])
+
+    def test_upsert_rejects_price_dependent_schedule_without_enabled_reload(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires an enabled Reload Postgres Market Data Date schedule"):
+            self.service.upsert_job(
+                job_id="daily_rs",
+                job_label="Daily RS",
+                action_id="rs",
+                cron_expr="0 18 * * 1-5",
+                cron_tz="America/New_York",
+                enabled=True,
+            )
+
+    def test_upsert_rejects_price_dependent_schedule_when_reload_never_runs_that_day(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "runs on the same day"):
+            self.service.upsert_job(
+                job_id="weekly_rs",
+                job_label="Weekly RS",
+                action_id="rs",
+                cron_expr="0 18 * * 6",
+                cron_tz="America/New_York",
+                enabled=True,
+            )
+
+    def test_enqueue_job_adds_price_reload_dependency_for_legacy_schedule(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+        self.run_service.launch = MagicMock(return_value="remote-123")  # type: ignore[method-assign]
+
+        self.service.enqueue_job(
+            job={
+                "job_id": "daily_rs",
+                "job_label": "Daily RS",
+                "action_id": "rs",
+                "cron_expr": "0 18 * * 1-5",
+                "cron_tz": "America/New_York",
+                "enabled": True,
+                "options": {},
+                "priority": 50,
+                "depends_on_job_ids": [],
+                "worker_pool": "any",
+            },
+            local_now=dt.datetime(2026, 10, 13, 18, 0, tzinfo=ZoneInfo("America/New_York")),
+        )
+
+        policy = self.run_service.launch.call_args.kwargs["queue_policy"]
+        self.assertEqual(policy["dependency_job_ids"], ["reload_prices"])
 
     def test_upsert_job_rejects_disabled_provider_and_dependency_cycle(self) -> None:
         self.service.upsert_job(
@@ -282,15 +399,17 @@ class ScheduledJobServiceTests(unittest.TestCase):
         )
         key = dt.datetime.now(ZoneInfo("America/New_York")).date().isoformat()
         self.run_service.history_repository = MagicMock()
-        self.run_service.history_repository.list_remote_job_runs.return_value = [
+        self.run_service.history_repository.list_scheduled_job_runs.return_value = [
             {
                 "id": 22,
                 "status": "queued",
+                "created_at": "2026-10-13T21:00:00Z",
                 "request_payload": {"dependency_key": key, "options": {"scheduled_job_id": "daily_rs"}},
             },
             {
                 "id": 21,
                 "status": "failed",
+                "created_at": "2026-10-13T20:00:00Z",
                 "request_payload": {"dependency_key": key, "options": {"scheduled_job_id": "reload_prices"}},
             },
         ]
@@ -301,6 +420,39 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         self.assertEqual(daily_rs["queue_state"]["state"], "blocked")
         self.assertEqual(daily_rs["queue_state"]["blocking_job_id"], "reload_prices")
+        self.assertEqual(daily_rs["queue_state"]["blocking_job_run_id"], 21)
+        self.assertEqual(daily_rs["queue_state"]["queued_at"], "2026-10-13T21:00:00Z")
+        self.assertIsNone(daily_rs["queue_state"]["worker_started_at"])
+
+    def test_context_reports_actual_worker_start_from_result_payload(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+        key = dt.datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        self.run_service.history_repository = MagicMock()
+        self.run_service.history_repository.list_scheduled_job_runs.return_value = [
+            {
+                "id": 24,
+                "status": "running",
+                "created_at": "2026-10-13T20:00:00Z",
+                "result_payload": {"started_at": "2026-10-13T20:02:00Z"},
+                "request_payload": {"dependency_key": key, "options": {"scheduled_job_id": "reload_prices"}},
+            }
+        ]
+        self.run_service.history_repository.list_remote_workers.return_value = []
+
+        context = self.service.get_context()
+        reload_prices = next(item for item in context["jobs"] if item["job_id"] == "reload_prices")
+
+        self.assertEqual(reload_prices["queue_state"]["state"], "running")
+        self.assertEqual(reload_prices["queue_state"]["job_run_id"], 24)
+        self.assertEqual(reload_prices["queue_state"]["queued_at"], "2026-10-13T20:00:00Z")
+        self.assertEqual(reload_prices["queue_state"]["worker_started_at"], "2026-10-13T20:02:00Z")
 
     def test_delete_job_rejects_referenced_provider_and_cross_timezone_dependency(self) -> None:
         self.service.upsert_job(
@@ -506,6 +658,14 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertEqual(job["options"]["as_of_date"], "{{local_date}}")
 
     def test_upsert_job_allows_clearing_existing_options(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="0 16 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
         self.service.upsert_job(
             job_id="rs_daily",
             job_label="RS Daily",

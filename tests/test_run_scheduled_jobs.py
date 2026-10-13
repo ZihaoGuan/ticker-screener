@@ -149,6 +149,43 @@ class RunScheduledJobsTests(unittest.TestCase):
         self.assertEqual(len(saved_states), 1)
         self.assertIn("build_scanner_top_hits_snapshot@", saved_states[0]["build_scanner_top_hits_snapshot"])
 
+    def test_main_records_invalid_scheduled_dependency_without_stopping_scheduler(self) -> None:
+        saved_states: list[dict[str, str]] = []
+        statuses: list[dict[str, object]] = []
+
+        class _RunService:
+            _actions = {"rs": SimpleNamespace(action_id="rs")}
+
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def recover_remote_jobs(self) -> dict[str, int]:
+                return {"requeued": 0, "local_fallback_started": 0}
+
+        class _ScheduleService:
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def list_jobs(self) -> list[dict[str, object]]:
+                return [{"job_id": "daily_rs", "job_label": "Daily RS", "action_id": "rs", "cron_expr": "* * * * *", "cron_tz": "America/New_York", "enabled": True}]
+
+            def enqueue_job(self, **_: object) -> str:
+                raise ValueError("This schedule requires an enabled Reload Postgres Market Data Date schedule in the same timezone.")
+
+        with (
+            patch.object(module, "load_webapp_config", return_value=SimpleNamespace(database_url="postgresql://queue-test", artifacts_dir=module.PROJECT_ROOT / "artifacts")),
+            patch.object(module, "RunService", _RunService),
+            patch.object(module, "ScheduledJobService", _ScheduleService),
+            patch.object(module, "_load_state", return_value={}),
+            patch.object(module, "_save_state", side_effect=lambda state: saved_states.append(dict(state))),
+            patch.object(module, "_write_scheduler_status", side_effect=lambda **kwargs: statuses.append(kwargs)),
+        ):
+            self.assertEqual(module.main(), 0)
+
+        self.assertEqual(len(saved_states), 1)
+        self.assertEqual(statuses[0]["status"], "failed")
+        self.assertIn("requires an enabled", str(statuses[0]["message"]))
+
     def test_main_preserves_scheduled_github_execution_mode(self) -> None:
         queued: list[dict[str, object]] = []
 

@@ -93,6 +93,19 @@ def _ready_rows() -> list[tuple[object, ...]]:
 
 
 class HistoryRepositoryEnsureSchemaTests(unittest.TestCase):
+    def test_list_scheduled_job_runs_includes_remote_and_github_only(self) -> None:
+        connection = _FakeConnection(schema_checks=[])
+        repository = HistoryRepository(database_url="postgres://example")
+        repository._connect = lambda: connection  # type: ignore[method-assign]
+
+        with patch.object(repository, "_rows_to_dicts", return_value=[]):
+            repository.list_scheduled_job_runs(limit=42)
+
+        sql, params = connection.executed_sql[0]
+        self.assertIn("IN ('remote', 'github')", sql)
+        self.assertIn("scheduled_job_id", sql)
+        self.assertEqual(params, (42,))
+
     def test_ensure_schema_skips_full_schema_apply_when_history_schema_exists(self) -> None:
         connection = _FakeConnection(schema_checks=[_ready_rows()])
         repository = HistoryRepository(database_url="postgres://example")

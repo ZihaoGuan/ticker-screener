@@ -101,3 +101,32 @@ class ExternalJobResultServiceTests(unittest.TestCase):
         result = service.complete(job_run_id=44, payload={"github_run_id": 77, "status": "success"})
 
         self.assertEqual(result, {"status": "success", "screen_run_id": 9})
+
+    def test_heartbeat_records_actual_github_start_time(self) -> None:
+        class _Repository:
+            def __init__(self) -> None:
+                self.patch: dict[str, object] | None = None
+
+            def get_job_run(self, _: int) -> dict[str, object]:
+                return {
+                    "id": 44,
+                    "status": "queued",
+                    "request_payload": {"options": {}},
+                    "result_payload": {"executor": "github_actions", "github_run_id": 77},
+                }
+
+            def patch_job_run_result(self, _: int, **kwargs: object) -> None:
+                self.patch = kwargs
+
+        repository = _Repository()
+        service = ExternalJobResultService(
+            repository=repository,  # type: ignore[arg-type]
+            history=object(),  # type: ignore[arg-type]
+            artifacts_dir=Path("/tmp"),
+            artifact_base_url="https://artifacts.example",
+        )
+
+        result = service.heartbeat(job_run_id=44, payload={"github_run_id": 77, "at": "2026-10-13T20:02:00Z"})
+
+        self.assertEqual(result, {"status": "running"})
+        self.assertEqual(repository.patch["result_payload_patch"]["started_at"], "2026-10-13T20:02:00Z")  # type: ignore[index]
