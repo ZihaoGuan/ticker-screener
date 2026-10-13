@@ -172,6 +172,10 @@ def _existing_trade_date_row_count(connection, trade_date: dt.date) -> int:
     return int(row[0] or 0) if row else 0
 
 
+def _minimum_replacement_row_count(target_ticker_count: int) -> int:
+    return max(1, math.ceil(target_ticker_count * 0.9))
+
+
 def _validate_replacement_rows(
     rows: list[tuple[object, ...]],
     trade_date: dt.date,
@@ -348,8 +352,7 @@ def main() -> int:
         source_by_ticker.update({ticker: args.source_label for ticker in yfinance_histories})
         source_by_ticker.update({ticker: args.source_label for ticker in retry_histories})
         bar_rows = _build_daily_bar_rows(histories, args.source_label, updated_at, source_by_ticker)
-        baseline_rows = existing_row_count if existing_row_count else len(tickers)
-        minimum_row_count = max(1, math.ceil(min(baseline_rows, len(tickers)) * 0.9))
+        minimum_row_count = _minimum_replacement_row_count(len(tickers))
         _validate_replacement_rows(bar_rows, trade_date, minimum_row_count=minimum_row_count)
         deleted, total_rows = _replace_trade_date_atomically(connection, trade_date, bar_rows, args.batch_size)
 

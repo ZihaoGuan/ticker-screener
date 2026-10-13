@@ -13,12 +13,16 @@ from scripts.reload_postgres_market_data_date import (
     _download_yfinance_pass,
     _filter_reload_tickers,
     _load_active_metadata_tickers,
+    _minimum_replacement_row_count,
     _replace_trade_date_atomically,
     _validate_replacement_rows,
 )
 
 
 class ReloadPostgresMarketDataDateTests(unittest.TestCase):
+    def test_minimum_replacement_coverage_uses_eligible_universe_not_partial_existing_rows(self) -> None:
+        self.assertEqual(_minimum_replacement_row_count(3_789), 3_411)
+
     def test_load_active_metadata_tickers_skips_inactive_rows(self) -> None:
         cursor = MagicMock()
         cursor.fetchall.return_value = [("AAPL", True), ("DEAD", False), ("", True)]
