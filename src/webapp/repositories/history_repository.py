@@ -310,6 +310,29 @@ class HistoryRepository:
                 cursor.execute(sql, (max(1, int(limit)),))
                 return self._rows_to_dicts(cursor, cursor.fetchall())
 
+    def has_active_remote_job_run(self, *, action_id: str, code_version: str = "") -> bool:
+        connection = self._connect()
+        if connection is None:
+            return False
+        sql = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM job_runs
+                WHERE request_payload->>'action_id' = %s
+                  AND COALESCE(request_payload->>'execution_mode', 'local') = 'remote'
+                  AND status IN ('queued', 'running')
+                  AND (
+                    status = 'running'
+                    OR COALESCE(request_payload->>'code_version', '') IN ('', %s)
+                  )
+            )
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (str(action_id or "").strip(), str(code_version or "").strip()))
+                row = cursor.fetchone()
+        return bool(row and row[0])
+
     def list_local_job_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
         connection = self._connect()
         if connection is None:

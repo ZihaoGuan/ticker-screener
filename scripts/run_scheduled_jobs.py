@@ -332,6 +332,14 @@ def main() -> int:
         if state.get(str(job["job_id"])) == slot_key:
             continue
 
+        best_effort_skip_reason = getattr(schedule_service, "best_effort_skip_reason", None)
+        skip_reason = best_effort_skip_reason(job) if callable(best_effort_skip_reason) else ""
+        if skip_reason:
+            state[str(job["job_id"])] = slot_key
+            state_changed = True
+            print(f"skipped scheduled job {job['job_id']} ({action_id}): {skip_reason}")
+            continue
+
         remote_job_id = schedule_service.enqueue_job(job=job, local_now=local_now)
         state[str(job["job_id"])] = slot_key
         state_changed = True

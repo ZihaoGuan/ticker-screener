@@ -175,6 +175,64 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertRegex(policy["dependency_key"], r"^\d{4}-\d{2}-\d{2}$")
         self.assertEqual(policy["worker_pool"], "market-data")
 
+    def test_best_effort_top_hits_snapshot_skips_without_idle_worker(self) -> None:
+        self.run_service.history_repository = MagicMock()
+        self.run_service.history_repository.has_active_remote_job_run.return_value = False
+        self.run_service.history_repository.list_remote_workers.return_value = [
+            {
+                "status": "running",
+                "current_job_run_id": 42,
+                "is_healthy": True,
+                "metadata_json": {"code_version": self.run_service.code_version, "worker_pools": ["any"]},
+            }
+        ]
+
+        reason = self.service.best_effort_skip_reason(
+            {
+                "action_id": "build_scanner_top_hits_snapshot",
+                "options": {"execution_mode": "remote"},
+                "worker_pool": "any",
+            }
+        )
+
+        self.assertEqual(reason, "no compatible worker is idle")
+
+    def test_best_effort_top_hits_snapshot_skips_when_snapshot_is_active(self) -> None:
+        self.run_service.history_repository = MagicMock()
+        self.run_service.history_repository.has_active_remote_job_run.return_value = True
+
+        reason = self.service.best_effort_skip_reason(
+            {
+                "action_id": "build_scanner_top_hits_snapshot",
+                "options": {"execution_mode": "remote"},
+                "worker_pool": "any",
+            }
+        )
+
+        self.assertEqual(reason, "another Top Hits snapshot is already queued or running")
+
+    def test_best_effort_top_hits_snapshot_runs_with_idle_compatible_worker(self) -> None:
+        self.run_service.history_repository = MagicMock()
+        self.run_service.history_repository.has_active_remote_job_run.return_value = False
+        self.run_service.history_repository.list_remote_workers.return_value = [
+            {
+                "status": "idle",
+                "current_job_run_id": None,
+                "is_healthy": True,
+                "metadata_json": {"code_version": self.run_service.code_version, "worker_pools": ["general"]},
+            }
+        ]
+
+        reason = self.service.best_effort_skip_reason(
+            {
+                "action_id": "build_scanner_top_hits_snapshot",
+                "options": {"execution_mode": "remote"},
+                "worker_pool": "general",
+            }
+        )
+
+        self.assertEqual(reason, "")
+
     def test_upsert_job_rejects_dependency_cycle(self) -> None:
         self.service.upsert_job(
             job_id="reload_prices",

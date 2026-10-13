@@ -100,6 +100,55 @@ class RunScheduledJobsTests(unittest.TestCase):
         self.assertEqual(queued[0][3]["parallel_limit"], 4)
         self.assertEqual(len(saved_states), 1)
 
+    def test_main_drops_best_effort_snapshot_when_no_worker_is_idle(self) -> None:
+        saved_states: list[dict[str, str]] = []
+
+        class _RunService:
+            _actions = {"build_scanner_top_hits_snapshot": SimpleNamespace(action_id="build_scanner_top_hits_snapshot")}
+
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def recover_remote_jobs(self) -> dict[str, int]:
+                return {"requeued": 0, "local_fallback_started": 0}
+
+        class _ScheduleService:
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def list_jobs(self) -> list[dict[str, object]]:
+                return [
+                    {
+                        "job_id": "build_scanner_top_hits_snapshot",
+                        "action_id": "build_scanner_top_hits_snapshot",
+                        "cron_expr": "* * * * *",
+                        "cron_tz": "America/New_York",
+                        "enabled": True,
+                    }
+                ]
+
+            def best_effort_skip_reason(self, _job: dict[str, object]) -> str:
+                return "no compatible worker is idle"
+
+            def enqueue_job(self, **_: object) -> str:
+                raise AssertionError("a best-effort snapshot must not be queued without an idle worker")
+
+        with (
+            patch.object(
+                module,
+                "load_webapp_config",
+                return_value=SimpleNamespace(database_url="postgresql://queue-test", artifacts_dir=module.PROJECT_ROOT / "artifacts"),
+            ),
+            patch.object(module, "RunService", _RunService),
+            patch.object(module, "ScheduledJobService", _ScheduleService),
+            patch.object(module, "_load_state", return_value={}),
+            patch.object(module, "_save_state", side_effect=lambda state: saved_states.append(dict(state))),
+        ):
+            self.assertEqual(module.main(), 0)
+
+        self.assertEqual(len(saved_states), 1)
+        self.assertIn("build_scanner_top_hits_snapshot@", saved_states[0]["build_scanner_top_hits_snapshot"])
+
     def test_main_preserves_scheduled_github_execution_mode(self) -> None:
         queued: list[dict[str, object]] = []
 

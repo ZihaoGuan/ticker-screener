@@ -279,6 +279,37 @@ class ScheduledJobService:
         remote_job_id = self.enqueue_job(job=job, local_now=local_now, trigger_source="manual")
         return {"job_id": remote_job_id, "scheduled_job_id": clean_job_id}
 
+    def best_effort_skip_reason(self, job: dict[str, Any]) -> str:
+        """Return why a low-priority scheduled occurrence should be dropped.
+
+        Top Hits runs every five minutes and is derived data, so retaining a prior
+        snapshot is preferable to building a queue while workers are occupied.
+        Manual runs deliberately bypass this admission check.
+        """
+        if str(job.get("action_id") or "") != "build_scanner_top_hits_snapshot":
+            return ""
+        options = job.get("options") if isinstance(job.get("options"), dict) else {}
+        if str(options.get("execution_mode") or "remote").strip().lower() != "remote":
+            return ""
+        repository = getattr(self.run_service, "history_repository", None)
+        has_active = getattr(repository, "has_active_remote_job_run", None)
+        list_workers = getattr(repository, "list_remote_workers", None)
+        if not callable(has_active) or not callable(list_workers):
+            return "worker capacity is unavailable"
+        try:
+            if has_active(action_id=str(job["action_id"]), code_version=self.run_service.code_version):
+                return "another Top Hits snapshot is already queued or running"
+            workers = list_workers()
+        except Exception:
+            return "worker capacity is unavailable"
+        if not _has_idle_compatible_worker(
+            workers,
+            str(job.get("worker_pool") or "any"),
+            code_version=self.run_service.code_version,
+        ):
+            return "no compatible worker is idle"
+        return ""
+
     def enqueue_job(self, *, job: dict[str, Any], local_now: datetime, trigger_source: str = "scheduler") -> str:
         action_id = str(job["action_id"])
         if action_id not in self.run_service._actions:
@@ -595,6 +626,31 @@ def _has_compatible_worker(workers: list[dict[str, Any]], worker_pool: str) -> b
         if not bool(worker.get("is_healthy")):
             continue
         metadata = worker.get("metadata_json") if isinstance(worker.get("metadata_json"), dict) else {}
+        pools = metadata.get("worker_pools") if isinstance(metadata.get("worker_pools"), list) else []
+        normalized_pools = {_normalize_worker_pool(item) for item in pools}
+        if requested == "any" or "any" in normalized_pools or requested in normalized_pools:
+            return True
+    return False
+
+
+def _has_idle_compatible_worker(
+    workers: list[dict[str, Any]],
+    worker_pool: str,
+    *,
+    code_version: str,
+) -> bool:
+    requested = _normalize_worker_pool(worker_pool)
+    for worker in workers:
+        if not bool(worker.get("is_healthy")):
+            continue
+        if str(worker.get("status") or "").strip().lower() != "idle":
+            continue
+        if worker.get("current_job_run_id") is not None:
+            continue
+        metadata = worker.get("metadata_json") if isinstance(worker.get("metadata_json"), dict) else {}
+        worker_version = str(metadata.get("code_version") or "").strip()
+        if code_version and worker_version and worker_version != code_version:
+            continue
         pools = metadata.get("worker_pools") if isinstance(metadata.get("worker_pools"), list) else []
         normalized_pools = {_normalize_worker_pool(item) for item in pools}
         if requested == "any" or "any" in normalized_pools or requested in normalized_pools:
