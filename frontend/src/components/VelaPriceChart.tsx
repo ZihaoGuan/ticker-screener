@@ -15,6 +15,7 @@ type VelaPriceChartProps = Pick<PriceChartProps, "ticker" | "candles" | "overlay
 
 type PineStatus = "starting" | "ready" | "error" | "disabled";
 type IndicatorKey = "extension" | "priceOverlays" | "relativeStrength" | "emaVwapRsi";
+type VelaDataError = { ticker: string; message: string };
 
 const MARKET_OVEREXTENDED_ID = "ticker-screener-market-overextended";
 const PRICE_OVERLAYS_ID = "ticker-screener-price-overlays";
@@ -49,7 +50,7 @@ export function buildRelativeStrengthSource(benchmarkTicker: string, benchmarkAn
 export function VelaPriceChart({ ticker, candles, overlays, fallback }: VelaPriceChartProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<Vela | null>(null);
-  const [dataError, setDataError] = useState<string | null>(null);
+  const [dataError, setDataError] = useState<VelaDataError | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [isPineEnabled, setIsPineEnabled] = useState(true);
   const [arePriceOverlaysEnabled, setArePriceOverlaysEnabled] = useState(true);
@@ -97,7 +98,9 @@ export function VelaPriceChart({ ticker, candles, overlays, fallback }: VelaPric
       chartRef.current = chart;
       chart.data.registerProvider(
         TICKER_SCREENER_VELA_PROVIDER,
-        new TickerScreenerVelaProvider(latestCandleTime, [ticker, benchmarkTicker]),
+        new TickerScreenerVelaProvider(latestCandleTime, [ticker, benchmarkTicker], (failedTicker, error) => {
+          if (!disposed) setDataError({ ticker: failedTicker, message: error.message });
+        }),
       );
       chart.registerEngine("pine", new PineWorkerEngine());
 
@@ -139,12 +142,12 @@ export function VelaPriceChart({ ticker, candles, overlays, fallback }: VelaPric
         }
       }).catch((error: unknown) => {
         if (!disposed) {
-          setDataError(error instanceof Error ? error.message : "Vela could not load ticker-screener market data.");
+          setDataError((current) => current ?? { ticker, message: error instanceof Error ? error.message : "Vela could not load ticker-screener market data." });
         }
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Vela could not initialize.";
-      setDataError(message);
+      setDataError({ ticker, message });
     }
 
     return () => {
@@ -161,7 +164,7 @@ export function VelaPriceChart({ ticker, candles, overlays, fallback }: VelaPric
   }, [ticker]);
 
   if (dataError) {
-    return <VelaDataRecovery ticker={ticker} error={dataError} fallback={fallback} onRetry={() => { setDataError(null); setRetryNonce((current) => current + 1); }} />;
+    return <VelaDataRecovery ticker={dataError.ticker} error={dataError.message} fallback={fallback} onRetry={() => { setDataError(null); setRetryNonce((current) => current + 1); }} />;
   }
 
   return (

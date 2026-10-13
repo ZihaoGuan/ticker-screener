@@ -19,6 +19,7 @@ type OhlcvRangeResponse = {
 };
 
 type SupportedTimeframe = "1D" | "1W" | "1M";
+type ProviderErrorHandler = (ticker: string, error: Error) => void;
 
 function normalizeTicker(ticker: string): string {
   const normalized = ticker.trim().toUpperCase();
@@ -110,7 +111,11 @@ export class TickerScreenerVelaProvider implements DataProvider {
   private readonly inFlight = new Map<string, Promise<OHLCV[]>>();
   private readonly indexedSymbols: SymbolDescriptor[];
 
-  constructor(private readonly latestTime?: number, indexedTickers: readonly string[] = []) {
+  constructor(
+    private readonly latestTime?: number,
+    indexedTickers: readonly string[] = [],
+    private readonly onError?: ProviderErrorHandler,
+  ) {
     this.indexedSymbols = [...new Set(indexedTickers.map(normalizeTicker))].map((ticker) => ({
       ticker,
       description: ticker,
@@ -145,6 +150,11 @@ export class TickerScreenerVelaProvider implements DataProvider {
       .then((payload) => {
         const bars = aggregateBars(validateBars(payload.bars), resolvedTimeframe);
         return range.limit && range.limit > 0 ? bars.slice(-range.limit) : bars;
+      })
+      .catch((error: unknown) => {
+        const resolvedError = error instanceof Error ? error : new Error("Vela could not load ticker-screener market data.");
+        this.onError?.(symbol, resolvedError);
+        throw resolvedError;
       })
       .finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, request);
