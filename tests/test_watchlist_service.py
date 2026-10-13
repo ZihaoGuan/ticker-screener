@@ -740,9 +740,9 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(pltr["ticker"], "PLTR")
         self.assertEqual(pltr["scanner_count"], 3)
         self.assertEqual(pltr["scanner_labels"], ["RS New High Before Price", "RS Phase", "Fearzone"])
-        self.assertEqual(pltr["day_close"], 132.45)
+        self.assertEqual(pltr["day_close"], 190.3)
         self.assertEqual(pltr["market_cap"], 3_000_000_000.0)
-        self.assertEqual(pltr["change_pct"], 2.1)
+        self.assertAlmostEqual(pltr["change_pct"], ((190.3 / 189.9) - 1.0) * 100.0)
         self.assertIsInstance(pltr["change_from_52wk_low_pct"], float)
         self.assertGreater(pltr["change_from_52wk_low_pct"], 0.0)
         self.assertEqual(pltr["rs_rating"], 97.0)
@@ -771,6 +771,8 @@ class WatchlistServiceTests(unittest.TestCase):
         guru_definitions = {item["id"] for item in payload["guru_board"]["definitions"]}
         self.assertNotIn("rs_phase", guru_definitions)
         guru_pltr = next(row for row in payload["guru_board"]["rows"] if row["ticker"] == "PLTR")
+        self.assertEqual(guru_pltr["day_close"], 190.3)
+        self.assertAlmostEqual(guru_pltr["change_pct"], ((190.3 / 189.9) - 1.0) * 100.0)
         self.assertEqual(guru_pltr["rs_phase_active_days"], 8)
 
     def test_get_scanner_top_hits_payload_suppresses_ticker_like_company_names(self) -> None:

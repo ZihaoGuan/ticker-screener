@@ -3185,8 +3185,9 @@ class WatchlistService:
             latest = frame.iloc[-1]
             latest_close = _coerce_optional_float(latest.get("Close"))
             previous_close = _coerce_optional_float(frame.iloc[-2].get("Close")) if len(frame.index) >= 2 else None
-            change_pct = row.get("change_pct")
-            if latest_close is not None and row.get("day_close") is None:
+            if latest_close is not None:
+                # Scanner artifacts describe the signal-time price. Top Hits is a
+                # current market view, so its displayed price must follow daily bars.
                 row["day_close"] = latest_close
             row["change_from_52wk_low_pct"] = _compute_pct_from_52wk_low(frame, latest_close)
             bollinger_snapshot = compute_latest_bollinger_snapshot(frame)
@@ -3198,7 +3199,7 @@ class WatchlistService:
                 row["rs_days_21d_pct"] = metrics["rs_days_pct"]
                 row["up_on_down_days_21d"] = metrics["up_on_down_days"]
                 row["up_on_down_days_21d_pct"] = metrics["up_on_down_days_pct"]
-            if change_pct is None and latest_close is not None and previous_close is not None and previous_close > 0:
+            if latest_close is not None and previous_close is not None and previous_close > 0:
                 row["change_pct"] = ((latest_close / previous_close) - 1.0) * 100.0
             _attach_guru_market_badges(row, frame)
 
