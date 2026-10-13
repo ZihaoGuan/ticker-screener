@@ -137,20 +137,24 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     cadenceTouched: false,
   });
 
-  const loadScheduledJobs = () => {
+  const loadScheduledJobs = (showLoading = false) => {
     if (!canManageSchedules) {
       setScheduledJobs([]);
       setIsLoadingScheduledJobs(false);
       return;
     }
-    setIsLoadingScheduledJobs(true);
+    if (showLoading) setIsLoadingScheduledJobs(true);
     void fetchJson<{ jobs: ScheduledJobSummary[] }>("/api/admin/scheduled-jobs")
       .then((result) => setScheduledJobs(result.jobs))
-      .catch(() => setScheduledJobs([]))
-      .finally(() => setIsLoadingScheduledJobs(false));
+      .catch(() => {
+        if (showLoading) setScheduledJobs([]);
+      })
+      .finally(() => {
+        if (showLoading) setIsLoadingScheduledJobs(false);
+      });
   };
 
-  const loadScheduleConfig = () => {
+  const loadScheduleConfig = (showLoading = false) => {
     if (!canManageSchedules) {
       setScheduledConfigs([]);
       setAvailableScheduledActions([]);
@@ -160,7 +164,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       setIsLoadingScheduleConfig(false);
       return;
     }
-    setIsLoadingScheduleConfig(true);
+    if (showLoading) setIsLoadingScheduleConfig(true);
     void fetchJson<ScheduledJobConfigResponse>("/api/admin/schedules")
       .then((result) => {
         setScheduledConfigs(result.jobs);
@@ -173,13 +177,16 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         }
       })
       .catch(() => {
+        if (!showLoading) return;
         setScheduledConfigs([]);
         setAvailableScheduledActions([]);
         setCommonTimezones([]);
         setSchedulerCommand("");
         setMaxParallelJobs("5");
       })
-      .finally(() => setIsLoadingScheduleConfig(false));
+      .finally(() => {
+        if (showLoading) setIsLoadingScheduleConfig(false);
+      });
   };
 
   useEffect(() => {
@@ -216,9 +223,10 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   }, [schedulesMode]);
 
   useEffect(() => {
-    loadScheduledJobs();
-    loadScheduleConfig();
-  }, [canManageSchedules]);
+    if (!schedulesMode) return;
+    loadScheduledJobs(true);
+    loadScheduleConfig(true);
+  }, [canManageSchedules, schedulesMode]);
 
   useEffect(() => {
     if (!schedulesMode || !canManageSchedules) {
@@ -228,7 +236,6 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
       void fetchJson<{ jobs: ScheduledJobSummary[] }>("/api/admin/scheduled-jobs")
         .then((result) => setScheduledJobs(result.jobs))
         .catch(() => undefined);
-      loadScheduleConfig();
     }, 15_000);
     return () => window.clearInterval(timer);
   }, [canManageSchedules, schedulesMode]);
@@ -1752,7 +1759,8 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                             </td>
                             <td data-label="Execution policy">
                               <div className="schedule-cell-stack">
-                                <strong>{formatScheduledExecutionMode(job)} · {formatPriorityLabel(job.priority)} · {formatWorkerPoolLabel(job.worker_pool)}</strong>
+                                <ScheduledExecutionModeBadge job={job} />
+                                <strong>{formatPriorityLabel(job.priority)} · {job.options.execution_mode === "github" ? `Fallback: ${formatWorkerPoolLabel(job.worker_pool)}` : formatWorkerPoolLabel(job.worker_pool)}</strong>
                                 <span className="file-meta">{formatScheduleDependencies(job, scheduledConfigs)}</span>
                               </div>
                             </td>
@@ -1905,12 +1913,13 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                   </div>
                   <div className="run-params-grid">
                     <label className="field">
-                      <span>Execution location</span>
+                      <span>Primary execution mode</span>
                       <select value={scheduleExecutionMode} onChange={(event) => setScheduleExecutionMode(event.target.value as "remote" | "github")}>
-                        <option value="remote">Remote worker queue</option>
+                        <option value="remote">Remote worker</option>
                         {selectedScheduledAction?.execution_modes.includes("github") ? <option value="github">GitHub Actions</option> : null}
                       </select>
-                      <small className="file-meta">GitHub runs publish the screener result back to this app.</small>
+                      <span className={`schedule-policy-mode-note schedule-policy-mode-note-${scheduleExecutionMode}`}>Primary: {scheduleExecutionMode === "github" ? "GitHub Actions" : "Remote worker"}</span>
+                      <small className="file-meta">{scheduleExecutionMode === "github" ? "GitHub publishes the result back to this app." : "Runs on the configured worker pool."}</small>
                     </label>
                     <label className="field">
                       <span>Priority</span>
@@ -2330,6 +2339,7 @@ function ScheduleTimeline({
                 <div className="schedule-timeline-row" key={row.config.job_id}>
                   <button className="schedule-timeline-task" type="button" onClick={() => setSelectedOccurrence({ jobId: row.config.job_id, dayKey: "today" })}>
                     <span className="schedule-task-title">{row.config.job_label}</span>
+                    <ScheduledExecutionModeBadge job={row.config} />
                     <span className="schedule-task-meta">{row.config.action_id} · {formatMinuteOfDay(row.minute)} · {queueStateLabel(row)}</span>
                   </button>
                   <div className="schedule-timeline-track">
@@ -2484,6 +2494,7 @@ function ScheduleMap({
                     <div className="schedule-timeline-row" key={row.config.job_id}>
                       <button className="schedule-timeline-task" type="button" onClick={() => onInspect(row.config.job_id)}>
                         <span className="schedule-task-title">{row.config.job_label}</span>
+                        <ScheduledExecutionModeBadge job={row.config} />
                         <span className="schedule-task-meta">{row.config.action_id} · {formatScheduleMapTime(row, primaryTimezone)} · {queueStateLabel(row)}</span>
                       </button>
                       <div className="schedule-timeline-track">
@@ -2609,6 +2620,7 @@ function ScheduleTaskInspector({
           <span className="eyebrow">Task inspector</span>
           <h3 id="schedule-task-inspector-title">{row.config.job_label}</h3>
           <p>{row.config.action_id} · {formatMinuteOfDay(row.minute)} · {timezone}</p>
+          <ScheduledExecutionModeBadge job={row.config} />
         </div>
         <button className="ghost-button" type="button" onClick={onClose} aria-label="Close task inspector">Close</button>
       </div>
@@ -2981,7 +2993,13 @@ function formatScheduleDependencies(job: ScheduledJobConfig, configs: ScheduledJ
 }
 
 function formatScheduledExecutionMode(job: ScheduledJobConfig): string {
-  return job.options.execution_mode === "github" ? "GitHub Actions" : "Remote";
+  return job.options.execution_mode === "github" ? "GitHub Actions" : "Remote worker";
+}
+
+function ScheduledExecutionModeBadge({ job }: { job: ScheduledJobConfig }) {
+  const mode = formatScheduledExecutionMode(job);
+  const isGitHub = mode === "GitHub Actions";
+  return <span className={`schedule-execution-badge schedule-execution-badge-${isGitHub ? "github" : "remote"}`}>{mode} primary</span>;
 }
 
 function describeExecutionPolicy({

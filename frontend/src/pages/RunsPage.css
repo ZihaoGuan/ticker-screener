@@ -747,6 +747,11 @@
   white-space: nowrap;
 }
 
+.schedule-timeline-task .schedule-execution-badge {
+  font-size: 9px;
+  padding: 4px 6px;
+}
+
 .schedule-task-meta {
   color: var(--color-text-dim);
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1179,6 +1184,10 @@
   margin: 0;
 }
 
+.schedule-task-inspector-header .schedule-execution-badge {
+  margin-top: 8px;
+}
+
 .schedule-task-inspector-details {
   display: grid;
   gap: 12px;
@@ -1321,6 +1330,35 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.schedule-execution-badge,
+.schedule-policy-mode-note {
+  align-items: center;
+  align-self: flex-start;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
+.schedule-execution-badge-github,
+.schedule-policy-mode-note-github {
+  background: rgba(167, 139, 250, 0.18);
+  border-color: rgba(196, 181, 253, 0.52);
+  color: #e9e2ff;
+}
+
+.schedule-execution-badge-remote,
+.schedule-policy-mode-note-remote {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #d4d4d8;
 }
 
 .schedule-chip {
