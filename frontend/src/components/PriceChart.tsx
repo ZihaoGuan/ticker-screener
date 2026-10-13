@@ -1,4 +1,4 @@
-import { ColorType, LineStyle, createChart, type IChartApi, type ISeriesApi } from "lightweight-charts";
+import { ColorType, LineStyle, createChart, type IChartApi, type ISeriesApi, type SeriesMarker } from "lightweight-charts";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createGapZonePrimitive } from "./GapZonePrimitive";
 import { createHighTightFlagPrimitive } from "./HighTightFlagPrimitive";
@@ -34,7 +34,7 @@ export type PriceChartProps = {
   candles: CandlePoint[];
   overlays?: Pick<
     WatchlistChartResponse,
-    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "anchored_vwap_52w_low" | "market_extension" | "rs_line" | "rs_ema21" | "rs_phase" | "rs_markers" | "rs_phase_markers" | "setup_markers" | "benchmark_ticker" | "fearzone_panel"
+    "ma20" | "ma50" | "ma200" | "ema8" | "ema21" | "weekly_ema8" | "ipo_vwap" | "anchored_vwap_52w_low" | "market_extension" | "rs_line" | "rs_ema21" | "rs_phase" | "daily_rs_rating" | "rs_markers" | "rs_phase_markers" | "setup_markers" | "benchmark_ticker" | "fearzone_panel"
   >;
   annotations?: ChartAnnotations;
   extraAnnotations?: ChartAnnotations[];
@@ -93,6 +93,21 @@ type PriceChannel = {
   boundary: ChannelLinePoint[];
 };
 
+function scaleRsLineToPrice(
+  rsLine: Array<{ time: string; value: number }>,
+  candles: CandlePoint[],
+): Array<{ time: string; value: number }> {
+  const latestRs = rsLine[rsLine.length - 1]?.value;
+  const latestClose = candles[candles.length - 1]?.close;
+  if (!Number.isFinite(latestRs) || !Number.isFinite(latestClose) || latestRs === 0) {
+    return [];
+  }
+  const scale = (latestClose * 0.8) / latestRs;
+  return rsLine
+    .map((point) => ({ time: point.time, value: point.value * scale }))
+    .filter((point) => Number.isFinite(point.value));
+}
+
 type PriceChannelOverlay = {
   up: PriceChannel | null;
   down: PriceChannel | null;
@@ -144,10 +159,8 @@ export function PriceChart({
   onHoverTimeChange,
 }: PriceChartProps) {
   const priceRootRef = useRef<HTMLDivElement | null>(null);
-  const rsRootRef = useRef<HTMLDivElement | null>(null);
   const fibRootRef = useRef<HTMLDivElement | null>(null);
   const priceChartApiRef = useRef<IChartApi | null>(null);
-  const rsChartApiRef = useRef<IChartApi | null>(null);
   const fibChartApiRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const lastHoverTimeRef = useRef<string | null>(null);
@@ -196,13 +209,14 @@ export function PriceChart({
     [overlays?.market_extension],
   );
   const rsLine = useMemo(() => overlays?.rs_line ?? [], [overlays?.rs_line]);
-  const rsEma21 = useMemo(() => overlays?.rs_ema21 ?? [], [overlays?.rs_ema21]);
+  const dailyRsRating = useMemo(() => overlays?.daily_rs_rating ?? [], [overlays?.daily_rs_rating]);
   const rsMarkers = useMemo(() => overlays?.rs_markers ?? [], [overlays?.rs_markers]);
   const rsPhaseMarkers = useMemo(() => overlays?.rs_phase_markers ?? [], [overlays?.rs_phase_markers]);
   const fearzonePanel = useMemo(() => overlays?.fearzone_panel ?? { rows: [], signals: [] }, [overlays?.fearzone_panel]);
-  const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
   const fibOverlay = useMemo(() => (options.fibOverlay ? buildStructuralFibOverlay(candles) : null), [candles, options.fibOverlay]);
-  const showRsPane = options.rsLine && rsLine.length > 0;
+  const showRsOverlay = options.rsLine && rsLine.length > 0;
+  const scaledRsLine = useMemo(() => scaleRsLineToPrice(rsLine, candles), [candles, rsLine]);
+  const latestRsRating = dailyRsRating[dailyRsRating.length - 1]?.value ?? null;
   const showFibPane = options.fibOverlay && fibOverlay !== null;
   const showFearzonePanel = useMemo(() => forceFearzonePanel || fearzonePanel.rows.length > 0, [fearzonePanel.rows.length, forceFearzonePanel]);
   const visibleGapZones = useMemo(
@@ -239,7 +253,7 @@ export function PriceChart({
   };
 
   useEffect(() => {
-    if (!priceRootRef.current || !rsRootRef.current || !fibRootRef.current) {
+    if (!priceRootRef.current || !fibRootRef.current) {
       return;
     }
 
@@ -272,35 +286,6 @@ export function PriceChart({
       },
     });
 
-    const rsChart = createChart(rsRootRef.current, {
-      height: 152,
-      layout: {
-        background: { type: ColorType.Solid, color: "#111114" },
-        textColor: "#d4d4d8",
-      },
-      grid: {
-        vertLines: { color: "#27272a" },
-        horzLines: { color: "#27272a" },
-      },
-      rightPriceScale: {
-        borderColor: "#3f3f46",
-      },
-      timeScale: {
-        borderColor: "#3f3f46",
-        visible: true,
-      },
-      crosshair: {
-        mode: 0,
-        vertLine: {
-          visible: false,
-          labelVisible: false,
-        },
-        horzLine: {
-          visible: false,
-          labelVisible: false,
-        },
-      },
-    });
     const fibChart = createChart(fibRootRef.current, {
       height: 228,
       layout: {
@@ -331,10 +316,9 @@ export function PriceChart({
       },
     });
     priceChartApiRef.current = priceChart;
-    rsChartApiRef.current = rsChart;
     fibChartApiRef.current = fibChart;
 
-    priceChart.timeScale().applyOptions({ visible: !showRsPane && !showFibPane });
+    priceChart.timeScale().applyOptions({ visible: !showFibPane });
 
     const candleSeries = priceChart.addCandlestickSeries({
       upColor: "#10b981",
@@ -372,6 +356,7 @@ export function PriceChart({
     const bollingerUpperSeries = priceChart.addLineSeries({ color: "rgba(244, 114, 182, 0.9)", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false });
     const bollingerMiddleSeries = priceChart.addLineSeries({ color: "rgba(251, 191, 36, 0.75)", lineWidth: 1, priceLineVisible: false });
     const bollingerLowerSeries = priceChart.addLineSeries({ color: "rgba(244, 114, 182, 0.9)", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false });
+    const rsOverlaySeries = priceChart.addLineSeries({ color: "#2563eb", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
     const fibImpulseSeries = fibChart.addLineSeries({
       color: "rgba(248, 250, 252, 0.75)",
       lineWidth: 1,
@@ -380,8 +365,6 @@ export function PriceChart({
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     });
-    const rsSeries = rsChart.addLineSeries({ color: "#60a5fa", lineWidth: 2, priceLineVisible: false });
-    const rsEma21Series = rsChart.addLineSeries({ color: "rgba(251, 191, 36, 0.92)", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false });
     candleSeriesRef.current = candleSeries;
     const annotationSeries = annotationLines.map((line) =>
       priceChart.addLineSeries({
@@ -513,8 +496,7 @@ export function PriceChart({
     bollingerMiddleSeries.setData(options.bollingerBands ? bollingerBands.middle : []);
     bollingerLowerSeries.setData(options.bollingerBands ? bollingerBands.lower : []);
     fibImpulseSeries.setData(showFibPane ? fibOverlay?.impulseLine ?? [] : []);
-    rsSeries.setData(showRsPane ? rsLine : []);
-    rsEma21Series.setData(showRsPane ? rsEma21 : []);
+    rsOverlaySeries.setData(showRsOverlay ? scaledRsLine : []);
     flexResistanceSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.backfit ?? [] : []);
     flexResistanceProjectionSeries.setData(options.flexSr ? flexibleSrOverlay?.resistance?.projection ?? [] : []);
     flexSupportSeries.setData(options.flexSr ? flexibleSrOverlay?.support?.backfit ?? [] : []);
@@ -579,14 +561,6 @@ export function PriceChart({
       });
     }
     if (options.rsSignals) {
-      for (const marker of rsMarkers) {
-        priceMarkers.push({
-          time: marker.time,
-          position: "belowBar" as const,
-          color: marker.kind === "daily_new_high_before_price" ? "#bfdbfe" : "#60a5fa",
-          shape: marker.kind === "daily_new_high_before_price" ? "circle" as const : "square" as const,
-        });
-      }
       for (const marker of rsPhaseMarkers) {
         priceMarkers.push({
           time: marker.time,
@@ -673,49 +647,42 @@ export function PriceChart({
       }
     }
 
-    if (options.rsSignals && (rsMarkers.length > 0 || rsPhaseMarkers.length > 0)) {
-      rsSeries.setMarkers(
-        [
-          ...rsMarkers.map((marker) => ({
+    if (showRsOverlay) {
+      const overlayMarkers: Array<SeriesMarker<string>> = options.rsSignals
+        ? rsMarkers.map((marker) => ({
             time: marker.time,
-            position: "aboveBar" as const,
-            color: marker.kind === "daily_new_high_before_price" ? "#bfdbfe" : "#60a5fa",
-            shape: marker.kind === "daily_new_high_before_price" ? "circle" as const : "square" as const,
-          })),
-          ...rsPhaseMarkers.map((marker) => ({
-            time: marker.time,
-            position: marker.kind === "reclaim" ? "belowBar" as const : "aboveBar" as const,
-            color: marker.kind === "reclaim" ? "#22c55e" : "#fb7185",
+            position: "inBar" as const,
+            color: marker.kind === "daily_new_high_before_price" ? "#7dd3fc" : "#2563eb",
             shape: "circle" as const,
-          })),
-        ],
-      );
+          }))
+        : [];
+      const latestRsPoint = scaledRsLine[scaledRsLine.length - 1];
+      if (latestRsPoint && latestRsRating != null && Number.isFinite(latestRsRating)) {
+        overlayMarkers.push({
+          time: latestRsPoint.time,
+          position: "inBar" as const,
+          color: "#2563eb",
+          shape: "circle" as const,
+          text: `RS Rating ${latestRsRating.toFixed(0)}`,
+        });
+      }
+      if (overlayMarkers.length > 0) {
+        rsOverlaySeries.setMarkers(overlayMarkers);
+      }
     }
 
     priceChart.timeScale().fitContent();
-    if (showRsPane) {
-      rsChart.timeScale().fitContent();
-    }
     if (showFibPane) {
       fibChart.timeScale().fitContent();
     }
-    rsChart.timeScale().applyOptions({ visible: showRsPane });
     fibChart.timeScale().applyOptions({ visible: showFibPane });
-    rsChart.applyOptions({ handleScroll: showRsPane, handleScale: showRsPane });
     fibChart.applyOptions({ handleScroll: showFibPane, handleScale: showFibPane });
-    if (!showRsPane && rsRootRef.current) {
-      rsRootRef.current.style.display = "none";
-    } else if (rsRootRef.current) {
-      rsRootRef.current.style.display = "";
-    }
     if (!showFibPane && fibRootRef.current) {
       fibRootRef.current.style.display = "none";
     } else if (fibRootRef.current) {
       fibRootRef.current.style.display = "";
     }
 
-    let syncingPriceToRs = false;
-    let syncingRsToPrice = false;
     let syncingPriceToFib = false;
     let syncingFibToPrice = false;
     const syncVisibleIndexRange = (from: number, to: number) => {
@@ -738,11 +705,6 @@ export function PriceChart({
       syncVisibleIndexRange(0, candles.length - 1);
     }
     priceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-      if (showRsPane && range && !syncingRsToPrice) {
-        syncingPriceToRs = true;
-        rsChart.timeScale().setVisibleRange(range);
-        syncingPriceToRs = false;
-      }
       if (showFibPane && range && !syncingFibToPrice) {
         syncingPriceToFib = true;
         fibChart.timeScale().setVisibleRange(range);
@@ -759,14 +721,6 @@ export function PriceChart({
       const width = priceRootRef.current?.clientWidth ?? 0;
       updateHoverGuideFromSurface({ point: param.point, time: param.time }, width);
     });
-    rsChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-      if (!showRsPane || !range || syncingPriceToRs) {
-        return;
-      }
-      syncingRsToPrice = true;
-      priceChart.timeScale().setVisibleRange(range);
-      syncingRsToPrice = false;
-    });
     fibChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
       if (!showFibPane || !range || syncingPriceToFib) {
         return;
@@ -774,13 +728,6 @@ export function PriceChart({
       syncingFibToPrice = true;
       priceChart.timeScale().setVisibleRange(range);
       syncingFibToPrice = false;
-    });
-    rsChart.subscribeCrosshairMove((param) => {
-      if (!showRsPane) {
-        return;
-      }
-      const width = rsRootRef.current?.clientWidth ?? 0;
-      updateHoverGuideFromSurface({ point: param.point, time: param.time }, width);
     });
     fibChart.subscribeCrosshairMove((param) => {
       if (!showFibPane) {
@@ -797,7 +744,6 @@ export function PriceChart({
         const width = priceRootRef.current?.clientWidth ?? 0;
         if (width > 0) {
           priceChart.applyOptions({ width });
-          rsChart.applyOptions({ width });
           fibChart.applyOptions({ width });
         }
       });
@@ -809,15 +755,12 @@ export function PriceChart({
       cancelAnimationFrame(resizeFrame);
       candleSeriesRef.current = null;
       priceChartApiRef.current = null;
-      rsChartApiRef.current = null;
       fibChartApiRef.current = null;
       priceChart.remove();
-      rsChart.remove();
       fibChart.remove();
     };
   }, [
     annotations,
-    benchmarkTicker,
     candles,
     ema8,
     ema21,
@@ -829,7 +772,7 @@ export function PriceChart({
     bollingerBands,
     fibOverlay,
     rsLine,
-    rsEma21,
+    dailyRsRating,
     rsMarkers,
     rsPhaseMarkers,
     ticker,
@@ -846,7 +789,9 @@ export function PriceChart({
     options.gapZones,
     options.htfBox,
     options.rsSignals,
-    showRsPane,
+    showRsOverlay,
+    scaledRsLine,
+    latestRsRating,
     visibleGapZones,
     highTightFlagBox,
     annotationLines,
@@ -892,9 +837,6 @@ export function PriceChart({
     }
     if (direction === "reset") {
       priceChart.timeScale().fitContent();
-      if (showRsPane && rsChartApiRef.current) {
-        rsChartApiRef.current.timeScale().fitContent();
-      }
       if (showFibPane && fibChartApiRef.current) {
         fibChartApiRef.current.timeScale().fitContent();
       }
@@ -1009,11 +951,6 @@ export function PriceChart({
       <div className="chart-pane">
         <div ref={fibRootRef} className="chart-card chart-card-rs" aria-hidden="true" />
         {showFibPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
-      </div>
-      {showRsPane ? <div className="chart-rs-header">RS line vs {benchmarkTicker} · 21 EMA</div> : null}
-      <div className="chart-pane">
-        <div ref={rsRootRef} className="chart-card chart-card-rs" aria-hidden="true" />
-        {showRsPane && hoverGuide ? <div className="chart-hover-guide" style={{ left: `${hoverGuide.xRatio * 100}%` }} /> : null}
       </div>
       {showFearzonePanel ? (
         <FearzonePanel

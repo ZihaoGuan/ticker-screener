@@ -2257,8 +2257,8 @@ class WatchlistService:
         if rs_line is not None and benchmark_frame is not None and not benchmark_frame.empty:
             rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
                 rs_line=rs_line,
-                price_reference=frame["Close"].reindex(rs_line.index),
-                lookback=50,
+                price_reference=frame["High"].reindex(rs_line.index),
+                lookback=250,
             )
         for index, row in frame.iterrows():
             if index not in visible_index_set:
@@ -4913,7 +4913,7 @@ def _compute_rs_new_high_flags(rs_line: pd.Series, price_reference: pd.Series, l
     rolling_rs_high = aligned["rs_line"].rolling(window=lookback, min_periods=1).max().shift(1)
     rolling_price_high = aligned["price_reference"].rolling(window=lookback, min_periods=1).max().shift(1)
     new_high = aligned["rs_line"] >= rolling_rs_high
-    new_high_before_price = new_high & (aligned["price_reference"] <= rolling_price_high)
+    new_high_before_price = new_high & (aligned["price_reference"] < rolling_price_high)
     return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
 
 

@@ -37,7 +37,7 @@ type ChartToggle = { key: keyof ChartVisibility; label: string };
 const COMMON_CHART_TOGGLES: ChartToggle[] = [
   { key: "ema8", label: "EMA 8" },
   { key: "ema21", label: "EMA 21" },
-  { key: "rsLine", label: "RS line" },
+  { key: "rsLine", label: "RS rating overlay" },
   { key: "sellSignals", label: "Sell signals" },
 ];
 

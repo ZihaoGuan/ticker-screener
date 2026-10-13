@@ -17,12 +17,25 @@ from src.webapp.services.watchlist_service import (
     _clear_chart_payload_cache,
     _classify_position_bucket,
     _filter_scanner_top_hits_payload,
+    _compute_rs_new_high_flags,
     _scanner_freshness,
     _scanner_top_hits_source_fingerprint,
 )
 
 
 class WatchlistServiceTests(unittest.TestCase):
+    def test_rs_new_high_before_price_uses_highs_and_requires_price_to_lag(self) -> None:
+        index = pd.date_range(start="2026-01-02", periods=4, freq="B")
+        rs_line = pd.Series([1.0, 1.1, 1.2, 1.2], index=index)
+        highs = pd.Series([10.0, 12.0, 11.0, 12.0], index=index)
+
+        new_high, before_price = _compute_rs_new_high_flags(rs_line, highs, lookback=3)
+
+        self.assertTrue(new_high.iloc[2])
+        self.assertTrue(before_price.iloc[2])
+        self.assertTrue(new_high.iloc[3])
+        self.assertFalse(before_price.iloc[3])
+
     def setUp(self) -> None:
         _clear_chart_payload_cache()
         self.temp_dir = tempfile.TemporaryDirectory()

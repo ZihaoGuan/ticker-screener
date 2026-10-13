@@ -20,15 +20,28 @@ const PRICE_OVERLAYS_ID = "ticker-screener-price-overlays";
 const RELATIVE_STRENGTH_ID = "ticker-screener-relative-strength";
 const EMA_VWAP_RSI_TARGETS_ID = "ticker-screener-ema-vwap-rsi-targets";
 const RELATIVE_STRENGTH_BENCHMARK_PLACEHOLDER = "__TICKER_SCREENER_BENCHMARK__";
+const RELATIVE_STRENGTH_BENCHMARK_ANCHOR_PLACEHOLDER = "__TICKER_SCREENER_BENCHMARK_ANCHOR__";
+const RELATIVE_STRENGTH_RATING_PLACEHOLDER = "__TICKER_SCREENER_RS_RATING__";
 
-function buildRelativeStrengthSource(benchmarkTicker: string): string {
-  const occurrences = relativeStrengthSource.split(RELATIVE_STRENGTH_BENCHMARK_PLACEHOLDER).length - 1;
+function replaceRelativeStrengthPlaceholder(source: string, placeholder: string, value: string): string {
+  const occurrences = source.split(placeholder).length - 1;
   if (occurrences !== 1) {
-    throw new Error("The relative-strength Pine script is missing its benchmark placeholder.");
+    throw new Error(`The relative-strength Pine script is missing its ${placeholder} placeholder.`);
   }
-  return relativeStrengthSource.replace(
-    RELATIVE_STRENGTH_BENCHMARK_PLACEHOLDER,
-    toVelaTicker(benchmarkTicker),
+  return source.replace(placeholder, value);
+}
+
+function buildRelativeStrengthSource(benchmarkTicker: string, benchmarkAnchor: number | null, rating: number | null): string {
+  const anchor = benchmarkAnchor != null && Number.isFinite(benchmarkAnchor) ? String(benchmarkAnchor) : "na";
+  const latestRating = rating != null && Number.isFinite(rating) ? String(rating) : "na";
+  return replaceRelativeStrengthPlaceholder(
+    replaceRelativeStrengthPlaceholder(
+      replaceRelativeStrengthPlaceholder(relativeStrengthSource, RELATIVE_STRENGTH_BENCHMARK_PLACEHOLDER, toVelaTicker(benchmarkTicker)),
+      RELATIVE_STRENGTH_BENCHMARK_ANCHOR_PLACEHOLDER,
+      anchor,
+    ),
+    RELATIVE_STRENGTH_RATING_PLACEHOLDER,
+    latestRating,
   );
 }
 
@@ -47,9 +60,13 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
   });
   const [indicatorErrors, setIndicatorErrors] = useState<Partial<Record<IndicatorKey, string>>>({});
   const benchmarkTicker = overlays?.benchmark_ticker ?? "SPY";
+  const latestRsLine = overlays?.rs_line?.[overlays.rs_line.length - 1]?.value ?? null;
+  const latestRating = overlays?.daily_rs_rating?.[overlays.daily_rs_rating.length - 1]?.value ?? null;
+  const latestClose = candles[candles.length - 1]?.close ?? null;
+  const benchmarkAnchor = latestRsLine != null && latestRsLine !== 0 && latestClose != null ? latestClose / latestRsLine : null;
   const configuredRelativeStrengthSource = useMemo(
-    () => buildRelativeStrengthSource(benchmarkTicker),
-    [benchmarkTicker],
+    () => buildRelativeStrengthSource(benchmarkTicker, benchmarkAnchor, latestRating),
+    [benchmarkAnchor, benchmarkTicker, latestRating],
   );
   const latestCandleTime = useMemo(() => {
     const lastCandle = candles[candles.length - 1];

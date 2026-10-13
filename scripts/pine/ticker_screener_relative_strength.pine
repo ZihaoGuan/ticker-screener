@@ -1,12 +1,26 @@
 //@version=6
-indicator("Ticker Screener Relative Strength", shorttitle="TS RS", overlay=false)
+indicator("Ticker Screener RS Rating", shorttitle="TS RS Rating", overlay=true)
 
 // The host replaces this default with its configured benchmark before compilation.
 // PineTS 0.2.15 records string input overrides but does not apply them while
 // evaluating input.string(), so the chart also indexes this bare symbol in Vela.
 benchmark = input.string("__TICKER_SCREENER_BENCHMARK__", "Benchmark")
 benchmarkClose = request.security(benchmark, "D", close)
+benchmarkAnchor = __TICKER_SCREENER_BENCHMARK_ANCHOR__
+latestRating = __TICKER_SCREENER_RS_RATING__
 rsLine = benchmarkClose > 0 ? close / benchmarkClose : na
+rsDisplay = not na(rsLine) and not na(benchmarkAnchor) ? rsLine * benchmarkAnchor * 0.8 : na
 
-plot(rsLine, "RS line", color=color.rgb(56, 189, 248), linewidth=2)
-plot(ta.ema(rsLine, 21), "RS 21 EMA", color=color.rgb(245, 158, 11), linewidth=2)
+lookback = math.min(250, bar_index + 1)
+rsNewHigh = rsLine == ta.highest(rsLine, lookback)
+priceNewHigh = high == ta.highest(high, lookback)
+rsNewHighBeforePrice = rsNewHigh and not priceNewHigh
+
+plot(rsDisplay, "RS Rating line", color=color.rgb(37, 99, 235), linewidth=2)
+plotshape(rsNewHigh and not rsNewHighBeforePrice ? rsDisplay : na, "RS new high", shape.circle, location.absolute, color=color.rgb(37, 99, 235), size=size.tiny)
+plotshape(rsNewHighBeforePrice ? rsDisplay : na, "RS new high before price", shape.circle, location.absolute, color=color.rgb(125, 211, 252), size=size.small)
+
+var label ratingLabel = na
+if barstate.islast and not na(rsDisplay) and not na(latestRating)
+    label.delete(ratingLabel)
+    ratingLabel := label.new(bar_index, rsDisplay, "RS Rating\n" + str.tostring(latestRating, "#"), color=color.new(color.blue, 100), textcolor=color.blue, style=label.style_label_left)
