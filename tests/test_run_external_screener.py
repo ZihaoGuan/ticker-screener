@@ -116,5 +116,6 @@ class RunExternalScreenerTests(unittest.TestCase):
                         )
 
             environment = run_process.call_args.kwargs["env"]
+            self.assertEqual(environment["TICKER_SCREENER_SKIP_SCREEN_RUN_PERSISTENCE"], "1")
             self.assertEqual(environment["TICKER_SCREENER_MARKET_DATA_SOURCE"], "database-first")
             self.assertEqual(environment["TICKER_SCREENER_DATABASE_URL"], "postgresql://readonly")

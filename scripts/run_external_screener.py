@@ -78,6 +78,7 @@ def _validate_nonempty_database_universe(summary_path: Path) -> None:
 
 def run(*, action_id: str, options: dict[str, Any], artifacts_file: Path) -> dict[str, str]:
     environment = os.environ.copy()
+    environment["TICKER_SCREENER_SKIP_SCREEN_RUN_PERSISTENCE"] = "1"
     if options.get("market_data_source"):
         environment["TICKER_SCREENER_MARKET_DATA_SOURCE"] = str(options["market_data_source"])
     _validate_database_requirements(options, environment)

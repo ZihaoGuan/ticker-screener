@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,8 @@ def persist_screen_run_artifacts_if_configured(
     summary_path: Path,
     option_overrides: dict[str, Any] | None = None,
 ) -> int | None:
+    if os.environ.get("TICKER_SCREENER_SKIP_SCREEN_RUN_PERSISTENCE") == "1":
+        return None
     if not summary_path.exists():
         return None
     try:

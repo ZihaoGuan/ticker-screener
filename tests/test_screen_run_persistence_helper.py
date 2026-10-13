@@ -23,6 +23,18 @@ class _FakeHistoryService:
 
 
 class ScreenRunPersistenceHelperTests(unittest.TestCase):
+    def test_skips_persistence_when_external_runner_sets_flag(self) -> None:
+        with patch.dict("os.environ", {"TICKER_SCREENER_SKIP_SCREEN_RUN_PERSISTENCE": "1"}), patch(
+            "scripts._screen_run_persistence.load_webapp_config"
+        ) as load_config:
+            run_id = persist_screen_run_artifacts_if_configured(
+                args=argparse.Namespace(),
+                summary_path=Path("/missing-summary.json"),
+            )
+
+        self.assertIsNone(run_id)
+        load_config.assert_not_called()
+
     def test_persist_screen_run_artifacts_if_configured_loads_summary_and_raw(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
