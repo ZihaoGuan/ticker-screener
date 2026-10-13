@@ -380,6 +380,33 @@ def _normalize_history_frame(history: "pd.DataFrame" | None) -> "pd.DataFrame":
     return frame
 
 
+def _validate_history_frame(ticker: str, history: "pd.DataFrame") -> None:
+    """Reject malformed source bars before they can replace persisted history."""
+    import math
+    import pandas as pd
+
+    frame = _normalize_history_frame(history)
+    if frame.empty:
+        raise ValueError(f"{ticker}: source returned no daily bars")
+    if frame.index.has_duplicates:
+        raise ValueError(f"{ticker}: source returned duplicate trade dates")
+    previous_date: dt.date | None = None
+    for index, row in frame.iterrows():
+        trade_date = pd.Timestamp(index).date()
+        if previous_date is not None and trade_date <= previous_date:
+            raise ValueError(f"{ticker}: source returned unsorted trade date {trade_date.isoformat()}")
+        previous_date = trade_date
+        try:
+            open_value, high_value, low_value, close_value = (float(row[column]) for column in ("Open", "High", "Low", "Close"))
+            volume = float(row["Volume"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{ticker}: incomplete OHLCV data on {trade_date.isoformat()}") from exc
+        if not all(math.isfinite(value) for value in (open_value, high_value, low_value, close_value, volume)):
+            raise ValueError(f"{ticker}: non-finite OHLCV data on {trade_date.isoformat()}")
+        if high_value < max(open_value, close_value) or low_value > min(open_value, close_value) or volume < 0:
+            raise ValueError(f"{ticker}: invalid OHLCV range on {trade_date.isoformat()}")
+
+
 def _frame_window(frame: "pd.DataFrame", start_date: dt.date, end_date: dt.date) -> "pd.DataFrame":
     import pandas as pd
 
@@ -1166,8 +1193,18 @@ def main() -> int:
                         args.stale_after_days,
                         source=history_source,
                     )
-                    normalized_histories[ticker] = augmented_history
-                    history_sources[ticker] = history_source if history_source != "yfinance" else args.source_label
+                    try:
+                        _validate_history_frame(ticker, augmented_history)
+                    except ValueError as exc:
+                        outcome = TickerSyncOutcome(
+                            ticker=ticker,
+                            status="failed_invalid_ohlcv",
+                            reason=str(exc),
+                            source=history_source,
+                        )
+                    else:
+                        normalized_histories[ticker] = augmented_history
+                        history_sources[ticker] = history_source if history_source != "yfinance" else args.source_label
                     chunk_outcomes.append(outcome)
                     continue
 
@@ -1182,8 +1219,18 @@ def main() -> int:
                     single_ticker_sleep_seconds=args.single_ticker_sleep_seconds,
                 )
                 if not diagnosed_history.empty and outcome.status.startswith("synced"):
-                    normalized_histories[ticker] = diagnosed_history
-                    history_sources[ticker] = outcome.source or args.source_label
+                    try:
+                        _validate_history_frame(ticker, diagnosed_history)
+                    except ValueError as exc:
+                        outcome = TickerSyncOutcome(
+                            ticker=ticker,
+                            status="failed_invalid_ohlcv",
+                            reason=str(exc),
+                            source=outcome.source,
+                        )
+                    else:
+                        normalized_histories[ticker] = diagnosed_history
+                        history_sources[ticker] = outcome.source or args.source_label
                 chunk_outcomes.append(outcome)
 
             outcomes.extend(chunk_outcomes)
@@ -1250,6 +1297,9 @@ def main() -> int:
     print(f"summary_partials={total_partials}", flush=True)
     print(f"summary_overflow_skipped={skipped_overflow_rows}", flush=True)
     print(f"manifest_path={manifest_path}", flush=True)
+    if args.replace_existing_history and total_failures:
+        print("postgres_sync=failed", flush=True)
+        return 1
     print("postgres_sync=done", flush=True)
     return 0
 

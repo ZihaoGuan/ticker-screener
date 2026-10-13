@@ -6,6 +6,17 @@ from unittest.mock import patch
 
 
 class SyncPostgresMarketDataFallbackTests(unittest.TestCase):
+    def test_invalid_source_history_is_rejected_before_replacement(self) -> None:
+        import pandas as pd
+        import scripts.sync_postgres_market_data as script
+
+        invalid_history = pd.DataFrame(
+            [{"Date": pd.Timestamp("2026-07-15"), "Open": 10.0, "High": 9.0, "Low": 8.0, "Close": 10.5, "Volume": 1_000}],
+        ).set_index("Date")
+
+        with self.assertRaisesRegex(ValueError, "invalid OHLCV range on 2026-07-15"):
+            script._validate_history_frame("HPE", invalid_history)
+
     def test_yfinance_symbol_uses_hyphen_for_share_classes(self) -> None:
         import scripts.sync_postgres_market_data as script
 

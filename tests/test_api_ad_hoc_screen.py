@@ -55,7 +55,8 @@ class _FakeRunService:
         self.log_path.write_text("line one\nline two\n", encoding="utf-8")
 
     def launch(self, action_id: str, *, options: dict[str, object] | None = None):
-        _ = options
+        self.last_launch_action = action_id
+        self.last_launch_options = options
         return f"{action_id}-job"
 
     def list_actions(self):
@@ -1197,9 +1198,10 @@ class _FakeRrgService:
 class ApiAdHocScreenTests(unittest.TestCase):
     def setUp(self) -> None:
         self.scheduled_job_service = _FakeScheduledJobService()
+        self.run_service = _FakeRunService()
         app.dependency_overrides[get_ad_hoc_screen_service] = lambda: _FakeAdHocService()
         app.dependency_overrides[get_admin_service] = lambda: _FakeAdminService()
-        app.dependency_overrides[get_run_service] = lambda: _FakeRunService()
+        app.dependency_overrides[get_run_service] = lambda: self.run_service
         app.dependency_overrides[get_scheduled_job_service] = lambda: self.scheduled_job_service
         app.dependency_overrides[get_screener_history_service] = lambda: _FakeScreenerHistoryService()
         app.dependency_overrides[get_auth_service] = lambda: _FakeAuthService()
@@ -1269,6 +1271,29 @@ class ApiAdHocScreenTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["ticker"], "NVDA")
         self.assertEqual(payload["setup_markers"][0]["kind"], "ftd_sweep_breakout")
+
+    def test_history_replacement_requires_one_ticker_and_is_admin_only(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=7,
+            email="admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+
+        response = self.client.post(
+            "/api/admin/history-sync",
+            json={"tickers": ["HPE"], "replace_existing_history": True},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.run_service.last_launch_action, "sync_postgres_market_data")
+        self.assertEqual(self.run_service.last_launch_options, {"tickers": ["HPE"], "replace_existing_history": True})
+
+        rejected = self.client.post(
+            "/api/admin/history-sync",
+            json={"tickers": ["HPE", "RBRK"], "replace_existing_history": True},
+        )
+        self.assertEqual(rejected.status_code, 400)
 
     def test_anonymous_can_get_scanner_board(self) -> None:
         response = self.client.get("/api/scanner-board")

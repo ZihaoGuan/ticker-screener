@@ -3073,6 +3073,8 @@ class RunService:
             command.append("--retry-failed-from-manifest")
         if action_id == "sync_postgres_market_data" and normalized_options.get("include_excluded_tickers"):
             command.append("--include-excluded-tickers")
+        if action_id == "sync_postgres_market_data" and normalized_options.get("replace_existing_history"):
+            command.append("--replace-existing-history")
         if normalized_options.get("ensure_schema"):
             command.append("--ensure-schema")
         if normalized_options.get("strategy_ids_json"):
@@ -3282,6 +3284,8 @@ class RunService:
 
         if "include_excluded_tickers" in options:
             normalized["include_excluded_tickers"] = bool(options.get("include_excluded_tickers"))
+        if "replace_existing_history" in options:
+            normalized["replace_existing_history"] = bool(options.get("replace_existing_history"))
         if "retry_failed_from_manifest" in options:
             normalized["retry_failed_from_manifest"] = bool(options.get("retry_failed_from_manifest"))
         if "ensure_schema" in options:

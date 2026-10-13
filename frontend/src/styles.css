@@ -715,6 +715,11 @@ a {
   gap: 10px;
 }
 
+.vela-data-recovery {
+  display: grid;
+  gap: 10px;
+}
+
 .vela-chart-root {
   min-height: 520px;
   overflow: hidden;

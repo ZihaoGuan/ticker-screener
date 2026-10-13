@@ -1837,9 +1837,13 @@ def launch_history_sync(
 ) -> JSONResponse:
     request_payload = payload or {}
     options: dict[str, object] = {}
-    for key in ("start_date", "end_date", "tickers", "chunk_size", "include_excluded_tickers"):
+    for key in ("start_date", "end_date", "tickers", "chunk_size", "include_excluded_tickers", "replace_existing_history"):
         if key in request_payload:
             options[key] = request_payload[key]
+    if options.get("replace_existing_history"):
+        tickers = options.get("tickers")
+        if not isinstance(tickers, list) or len(tickers) != 1:
+            raise HTTPException(status_code=400, detail="Replacing price history requires exactly one ticker.")
     try:
         job_id = service.launch("sync_postgres_market_data", options=options)
     except ValueError as exc:

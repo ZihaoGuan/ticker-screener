@@ -1,15 +1,16 @@
 import { Vela } from "@luxalgo/vela";
 import { PineWorkerEngine } from "@luxalgo/vela-pinets";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import emaVwapRsiTargetsSource from "../../../scripts/pine/ema_vwap_rsi_targets.pine?raw";
 import marketOverextendedSource from "../../../scripts/pine/market_overextended_indicator.pine?raw";
 import priceOverlaysSource from "../../../scripts/pine/ticker_screener_price_overlays.pine?raw";
 import relativeStrengthSource from "../../../scripts/pine/ticker_screener_relative_strength.pine?raw";
 import { TickerScreenerVelaProvider, TICKER_SCREENER_VELA_PROVIDER, toVelaProviderSymbol, toVelaTicker } from "../lib/velaMarketData";
 import type { PriceChartProps } from "./PriceChart";
+import { VelaDataRecovery } from "./VelaDataRecovery";
 
 type VelaPriceChartProps = Pick<PriceChartProps, "ticker" | "candles" | "overlays"> & {
-  onUnavailable: (message: string) => void;
+  fallback: ReactNode;
 };
 
 type PineStatus = "starting" | "ready" | "error" | "disabled";
@@ -45,9 +46,11 @@ export function buildRelativeStrengthSource(benchmarkTicker: string, benchmarkAn
   );
 }
 
-export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: VelaPriceChartProps) {
+export function VelaPriceChart({ ticker, candles, overlays, fallback }: VelaPriceChartProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<Vela | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [isPineEnabled, setIsPineEnabled] = useState(true);
   const [arePriceOverlaysEnabled, setArePriceOverlaysEnabled] = useState(true);
   const [isRelativeStrengthEnabled, setIsRelativeStrengthEnabled] = useState(true);
@@ -75,7 +78,7 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
   }, [candles]);
 
   useEffect(() => {
-    if (!rootRef.current) {
+    if (!rootRef.current || dataError) {
       return;
     }
 
@@ -136,12 +139,12 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
         }
       }).catch((error: unknown) => {
         if (!disposed) {
-          onUnavailable(error instanceof Error ? error.message : "Vela could not load ticker-screener market data.");
+          setDataError(error instanceof Error ? error.message : "Vela could not load ticker-screener market data.");
         }
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Vela could not initialize.";
-      onUnavailable(message);
+      setDataError(message);
     }
 
     return () => {
@@ -151,7 +154,15 @@ export function VelaPriceChart({ ticker, candles, overlays, onUnavailable }: Vel
         chartRef.current = null;
       }
     };
-  }, [arePriceOverlaysEnabled, benchmarkTicker, configuredRelativeStrengthSource, isEmaVwapRsiEnabled, isPineEnabled, isRelativeStrengthEnabled, latestCandleTime, onUnavailable, ticker]);
+  }, [arePriceOverlaysEnabled, benchmarkTicker, configuredRelativeStrengthSource, dataError, isEmaVwapRsiEnabled, isPineEnabled, isRelativeStrengthEnabled, latestCandleTime, retryNonce, ticker]);
+
+  useEffect(() => {
+    setDataError(null);
+  }, [ticker]);
+
+  if (dataError) {
+    return <VelaDataRecovery ticker={ticker} error={dataError} fallback={fallback} onRetry={() => { setDataError(null); setRetryNonce((current) => current + 1); }} />;
+  }
 
   return (
     <div className="vela-chart-stack">

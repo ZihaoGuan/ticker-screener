@@ -716,6 +716,14 @@ class RunServiceTests(unittest.TestCase):
         tickers_index = command.index("--tickers")
         self.assertEqual(command[tickers_index + 1 : tickers_index + 3], ["AAPL", "NVDA"])
 
+    def test_sync_job_can_replace_one_tickers_history(self) -> None:
+        command = self.service.build_command(
+            "sync_postgres_market_data",
+            {"tickers": ["HPE"], "replace_existing_history": True},
+        )
+
+        self.assertIn("--replace-existing-history", command)
+
     def test_build_command_supports_reload_postgres_market_data_date(self) -> None:
         command = self.service.build_command(
             "reload_postgres_market_data_date",

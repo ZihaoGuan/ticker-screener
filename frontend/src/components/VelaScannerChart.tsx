@@ -5,6 +5,7 @@ import scannerOverlaysSource from "../../../scripts/pine/ticker_screener_scanner
 import { TickerScreenerVelaProvider, TICKER_SCREENER_VELA_PROVIDER, toVelaProviderSymbol } from "../lib/velaMarketData";
 import type { CandlePoint, WatchlistChartResponse } from "../lib/types";
 import { buildRelativeStrengthSource } from "./VelaPriceChart";
+import { VelaDataRecovery } from "./VelaDataRecovery";
 
 type VelaScannerChartProps = {
   ticker: string;
@@ -68,7 +69,8 @@ export function VelaScannerChart({
   fallback,
 }: VelaScannerChartProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const [unavailable, setUnavailable] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const benchmarkTicker = overlays.benchmark_ticker || "SPY";
   const latestRsLine = overlays.rs_line[overlays.rs_line.length - 1]?.value ?? null;
   const latestRating = overlays.daily_rs_rating?.[overlays.daily_rs_rating.length - 1]?.value ?? dailyRs ?? null;
@@ -89,7 +91,7 @@ export function VelaScannerChart({
   );
 
   useEffect(() => {
-    if (!rootRef.current || unavailable) return;
+    if (!rootRef.current || dataError) return;
     let disposed = false;
     let chart: Vela | null = null;
     try {
@@ -114,25 +116,29 @@ export function VelaScannerChart({
           const outcome = await chart!.runIndicator(source, { id, title: id === RELATIVE_STRENGTH_ID ? `RS Rating vs ${benchmarkTicker}` : "Scanner overlays" });
           if (disposed) return;
           if (!outcome.ok || !outcome.handle) {
-            setUnavailable(true);
+            setDataError(outcome.error?.message || "The Vela indicator could not run.");
             return;
           }
-          outcome.handle.on("error", () => {
-            if (!disposed) setUnavailable(true);
+          outcome.handle.on("error", ({ error }) => {
+            if (!disposed) setDataError(error.message || "The Vela indicator failed while running.");
           });
         }
-      }).catch(() => {
-        if (!disposed) setUnavailable(true);
+      }).catch((error: unknown) => {
+        if (!disposed) setDataError(error instanceof Error ? error.message : "Vela could not load ticker-screener market data.");
       });
-    } catch {
-      setUnavailable(true);
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Vela could not initialize.");
     }
     return () => {
       disposed = true;
       chart?.destroy();
     };
-  }, [benchmarkTicker, chartType, configuredOverlaysSource, height, latestCandleTime, range, relativeStrengthSource, showVolume, ticker, timeframe, unavailable]);
+  }, [benchmarkTicker, chartType, configuredOverlaysSource, dataError, height, latestCandleTime, range, relativeStrengthSource, retryNonce, showVolume, ticker, timeframe]);
 
-  if (unavailable) return <>{fallback}</>;
+  useEffect(() => {
+    setDataError(null);
+  }, [ticker]);
+
+  if (dataError) return <VelaDataRecovery ticker={ticker} error={dataError} fallback={fallback} onRetry={() => { setDataError(null); setRetryNonce((current) => current + 1); }} />;
   return <div ref={rootRef} className="vela-scanner-chart" style={{ height }} aria-label={`${ticker} Vela chart`} />;
 }
