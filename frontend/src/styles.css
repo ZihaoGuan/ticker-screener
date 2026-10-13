@@ -721,6 +721,12 @@ a {
   position: relative;
 }
 
+.vela-scanner-chart {
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
 .vela-chart-toolbar,
 .chart-engine-selector,
 .vela-pine-statuses {

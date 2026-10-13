@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { preloadChartsPage } from "../App";
 import { useAuth } from "../auth/AuthContext";
@@ -65,6 +65,7 @@ type TopHitsFilterPreset = {
 };
 type TopHitsPresetStore = { presets: Record<string, TopHitsFilterPreset>; defaultPresetName: string };
 const LIST_PAGE_SIZE = 50;
+const VelaScannerChart = lazy(() => import("../components/VelaScannerChart").then((module) => ({ default: module.VelaScannerChart })));
 const CHART_WORKSPACE_STORAGE_KEY = "top-hits-chart-workspace";
 const DEFAULT_CHART_WORKSPACE: ChartWorkspace = {
   gridColumns: 2,
@@ -1417,7 +1418,27 @@ function BoardChartWorkspace({
             {isChartLoading ? <LoadingBlock label={`Loading ${selection.ticker} chart...`} /> : null}
             {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
             {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
-            {!isChartLoading && !chartError && chartCandles.length > 0 ? <ScannerMiniChart ticker={selection.ticker} candles={chartCandles} chartType={workspace.chartType} height={330} showVolume={workspace.showVolume} ema8={workspace.showEma8 ? ema8 : []} ema21={workspace.showEma21 ? ema21 : []} ema200={ema200} rsMarkers={chartPayload?.rs_markers ?? []} /> : null}
+            {!isChartLoading && !chartError && chartCandles.length > 0 ? (
+              <Suspense fallback={<LoadingBlock label={`Loading ${selection.ticker} Vela chart…`} />}>
+                <VelaScannerChart
+                  ticker={selection.ticker}
+                  candles={chartCandles}
+                  overlays={chartPayload!}
+                  dailyRs={selection.dailyRs}
+                  height={330}
+                  timeframe={workspace.timeframe}
+                  range={workspace.range}
+                  chartType={workspace.chartType}
+                  showVolume={workspace.showVolume}
+                  showEma8={workspace.showEma8}
+                  showEma21={workspace.showEma21}
+                  showEma60={false}
+                  showEma200
+                  showSma50={false}
+                  fallback={<ScannerMiniChart ticker={selection.ticker} candles={chartCandles} chartType={workspace.chartType} height={330} showVolume={workspace.showVolume} ema8={workspace.showEma8 ? ema8 : []} ema21={workspace.showEma21 ? ema21 : []} ema200={ema200} rsMarkers={chartPayload?.rs_markers ?? []} />}
+                />
+              </Suspense>
+            ) : null}
           </div>
           <div className="board-chart-panel-context">
             <span>{selection.sector || "Sector unavailable"}</span>
@@ -2231,17 +2252,25 @@ function ScannerTopHitChartCard({
         {!isChartLoading && chartError ? <p className="panel-copy">{chartError}</p> : null}
         {!isChartLoading && !chartError && chartCandles.length === 0 ? <p className="panel-copy">No chart data.</p> : null}
         {!isChartLoading && !chartError && chartCandles.length > 0 ? (
-          <ScannerMiniChart
-            ticker={row.ticker}
-            candles={chartCandles}
-            chartType={workspace.chartType}
-            height={workspace.gridColumns === 2 ? 360 : 300}
-            showVolume={workspace.showVolume}
-            ema8={ema8}
-            ema21={ema21}
-            ema60={ema60}
-            sma50={sma50}
-          />
+          <Suspense fallback={<LoadingBlock label={`Loading ${row.ticker} Vela chart…`} />}>
+            <VelaScannerChart
+              ticker={row.ticker}
+              candles={chartCandles}
+              overlays={chartPayload!}
+              dailyRs={row.daily_rs_rating ?? row.rs_rating}
+              height={workspace.gridColumns === 2 ? 360 : workspace.gridColumns === 3 ? 300 : 250}
+              timeframe="daily"
+              range={workspace.range}
+              chartType={workspace.chartType}
+              showVolume={workspace.showVolume}
+              showEma8={workspace.showEma8}
+              showEma21={workspace.showEma21}
+              showEma60={workspace.showEma60}
+              showEma200={false}
+              showSma50={workspace.showSma50}
+              fallback={<ScannerMiniChart ticker={row.ticker} candles={chartCandles} chartType={workspace.chartType} height={workspace.gridColumns === 2 ? 360 : workspace.gridColumns === 3 ? 300 : 250} showVolume={workspace.showVolume} ema8={ema8} ema21={ema21} ema60={ema60} sma50={sma50} rsMarkers={chartPayload?.rs_markers ?? []} />}
+            />
+          </Suspense>
         ) : null}
       </div>
       <div className="scanner-chart-card-footer">

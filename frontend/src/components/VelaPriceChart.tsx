@@ -31,7 +31,7 @@ function replaceRelativeStrengthPlaceholder(source: string, placeholder: string,
   return source.replace(placeholder, value);
 }
 
-function buildRelativeStrengthSource(benchmarkTicker: string, benchmarkAnchor: number | null, rating: number | null): string {
+export function buildRelativeStrengthSource(benchmarkTicker: string, benchmarkAnchor: number | null, rating: number | null): string {
   const anchor = benchmarkAnchor != null && Number.isFinite(benchmarkAnchor) ? String(benchmarkAnchor) : "na";
   const latestRating = rating != null && Number.isFinite(rating) ? String(rating) : "na";
   return replaceRelativeStrengthPlaceholder(

@@ -1,0 +1,14 @@
+//@version=6
+indicator("Ticker Screener Scanner Overlays", shorttitle="TS Scanner", overlay=true)
+
+showEma8 = __TICKER_SCREENER_SHOW_EMA8__
+showEma21 = __TICKER_SCREENER_SHOW_EMA21__
+showEma60 = __TICKER_SCREENER_SHOW_EMA60__
+showEma200 = __TICKER_SCREENER_SHOW_EMA200__
+showSma50 = __TICKER_SCREENER_SHOW_SMA50__
+
+plot(showEma8 ? ta.ema(close, 8) : na, "EMA 8", color=color.rgb(34, 211, 238), linewidth=2)
+plot(showEma21 ? ta.ema(close, 21) : na, "EMA 21", color=color.rgb(245, 158, 11), linewidth=2)
+plot(showEma60 ? ta.ema(close, 60) : na, "EMA 60", color=color.rgb(167, 139, 250), linewidth=2)
+plot(showEma200 ? ta.ema(close, 200) : na, "EMA 200", color=color.rgb(239, 68, 68), linewidth=2)
+plot(showSma50 ? ta.sma(close, 50) : na, "SMA 50", color=color.rgb(251, 113, 133), linewidth=2)

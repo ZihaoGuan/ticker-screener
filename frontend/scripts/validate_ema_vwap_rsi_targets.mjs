@@ -58,3 +58,24 @@ if (!rsModel || rsModel.series.length < 1 || !hasRatingLabel) {
 }
 
 console.log(`Validated RS Rating overlay: ${JSON.stringify({ series: rsModel.series.length, labels: rsModel.labels.length })}`);
+
+const scannerOverlaysTemplate = await readFile(resolve(scriptDirectory, "../../scripts/pine/ticker_screener_scanner_overlays.pine"), "utf8");
+const scannerOverlaysSource = scannerOverlaysTemplate
+  .replace("__TICKER_SCREENER_SHOW_EMA8__", "true")
+  .replace("__TICKER_SCREENER_SHOW_EMA21__", "true")
+  .replace("__TICKER_SCREENER_SHOW_EMA60__", "false")
+  .replace("__TICKER_SCREENER_SHOW_EMA200__", "true")
+  .replace("__TICKER_SCREENER_SHOW_SMA50__", "true");
+const scannerPrepared = await engine.prepare(scannerOverlaysSource, "scanner-overlays-validation");
+let scannerModel;
+await new Promise((resolve, reject) => {
+  engine.execute(
+    { prepared: scannerPrepared, market: { symbol: "TEST", timeframe: "1D" }, bars, mode: "static" },
+    { onModel: (value) => { scannerModel = value; }, onError: reject, onDone: resolve },
+  );
+});
+if (!scannerModel || scannerModel.series.length !== 5) {
+  throw new Error(`Unexpected scanner overlay output: ${JSON.stringify(scannerModel ? { series: scannerModel.series.length } : null)}`);
+}
+
+console.log(`Validated scanner overlays: ${JSON.stringify({ series: scannerModel.series.length })}`);

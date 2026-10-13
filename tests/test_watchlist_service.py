@@ -1467,7 +1467,7 @@ class WatchlistServiceTests(unittest.TestCase):
 
         with patch(
             "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
-            return_value={"NVDA": frame.copy(), "AAPL": frame.copy()},
+            return_value={"NVDA": frame.copy(), "AAPL": frame.copy(), "SPY": frame.copy()},
         ) as bulk_load_mock, patch(
             "src.webapp.services.watchlist_service._download_history_frame",
         ) as download_mock:
@@ -1478,12 +1478,15 @@ class WatchlistServiceTests(unittest.TestCase):
             )
 
         bulk_load_mock.assert_called_once()
-        self.assertEqual(bulk_load_mock.call_args.args[0], ["NVDA", "AAPL"])
+        self.assertEqual(bulk_load_mock.call_args.args[0], ["NVDA", "AAPL", "SPY"])
         download_mock.assert_not_called()
         self.assertEqual(set(payload["rows"]), {"NVDA", "AAPL"})
         self.assertEqual(payload["rows"]["NVDA"]["candles"][-1]["time"], latest_date.isoformat())
         self.assertEqual(payload["rows"]["NVDA"]["volume"][-1]["value"], 1_200_000)
         self.assertTrue(payload["rows"]["NVDA"]["ema21"])
+        self.assertTrue(payload["rows"]["NVDA"]["rs_line"])
+        self.assertTrue(payload["rows"]["NVDA"]["daily_rs_rating"])
+        self.assertTrue(payload["rows"]["NVDA"]["rs_markers"])
         self.assertEqual(payload["rows"]["NVDA"]["data_source"], "database")
         self.assertEqual(payload["resolved_as_of_date"], latest_date.isoformat())
 
@@ -1498,19 +1501,21 @@ class WatchlistServiceTests(unittest.TestCase):
 
         with patch(
             "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
-            return_value={"NVDA": frame.copy()},
+            return_value={"NVDA": frame.copy(), "SPY": frame.copy()},
         ) as bulk_load_mock, patch(
             "src.webapp.services.watchlist_service._download_history_frame",
         ) as download_mock:
             payload = service.get_chart_preview_payload("nvda", period="6mo", as_of_date=latest_date)
 
         bulk_load_mock.assert_called_once()
-        self.assertEqual(bulk_load_mock.call_args.args[0], ["NVDA"])
+        self.assertEqual(bulk_load_mock.call_args.args[0], ["NVDA", "SPY"])
         download_mock.assert_not_called()
         self.assertEqual(payload["ticker"], "NVDA")
         self.assertEqual(payload["candles"][-1]["time"], latest_date.isoformat())
         self.assertTrue(payload["ema21"])
-        self.assertEqual(payload["rs_line"], [])
+        self.assertTrue(payload["rs_line"])
+        self.assertTrue(payload["daily_rs_rating"])
+        self.assertTrue(payload["rs_markers"])
         self.assertIsNone(payload["vcs"])
 
     def test_get_ohlcv_range_payload_returns_database_bars_and_coverage_metadata(self) -> None:

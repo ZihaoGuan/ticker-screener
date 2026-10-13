@@ -1972,8 +1972,11 @@ class WatchlistService:
         if normalized_tickers:
             if self.market_data_source == "database-first" and self.database_url:
                 try:
+                    requested_tickers = list(normalized_tickers)
+                    if self.benchmark_ticker not in requested_tickers:
+                        requested_tickers.append(self.benchmark_ticker)
                     frames = load_many_ticker_windows_for_range(
-                        normalized_tickers,
+                        requested_tickers,
                         start_date=chart_request.fetch_start_date,
                         end_date=chart_request.fetch_end_date,
                         trading_days_needed=chart_request.warmup_trading_days,
@@ -1981,6 +1984,7 @@ class WatchlistService:
                     )
                 except Exception:
                     frames = {}
+                benchmark_frame = _normalize_download_frame(frames.get(self.benchmark_ticker))
                 for ticker in normalized_tickers:
                     frame = _normalize_download_frame(frames.get(ticker))
                     if _frame_covers_requested_window(
@@ -1995,6 +1999,7 @@ class WatchlistService:
                             benchmark_ticker=self.benchmark_ticker,
                             chart_request=chart_request,
                             frame=frame,
+                            benchmark_frame=benchmark_frame,
                             data_source="database",
                         )
                     else:
@@ -2006,6 +2011,11 @@ class WatchlistService:
                             data_source="database-miss",
                         )
             else:
+                benchmark_frame = _download_history_frame(
+                    ticker=self.benchmark_ticker,
+                    start_date=chart_request.fetch_start_date,
+                    end_date=chart_request.fetch_end_date,
+                )
                 for ticker in normalized_tickers:
                     frame = _download_history_frame(
                         ticker=ticker,
@@ -2019,6 +2029,7 @@ class WatchlistService:
                         benchmark_ticker=self.benchmark_ticker,
                         chart_request=chart_request,
                         frame=frame,
+                        benchmark_frame=benchmark_frame,
                         data_source="internet",
                     )
 
@@ -3562,6 +3573,7 @@ def _build_chart_preview_payload(
     benchmark_ticker: str,
     chart_request: _ChartRequest,
     frame: pd.DataFrame | None,
+    benchmark_frame: pd.DataFrame | None,
     data_source: str,
 ) -> dict[str, Any]:
     normalized_frame = _normalize_download_frame(frame)
@@ -3631,6 +3643,28 @@ def _build_chart_preview_payload(
     payload["volume"] = volume
     payload["ema8"] = ema8
     payload["ema21"] = ema21
+    normalized_benchmark_frame = _normalize_download_frame(benchmark_frame)
+    if normalized_benchmark_frame is not None and not normalized_benchmark_frame.empty:
+        rs_line = _compute_rs_line(normalized_frame["Close"], normalized_benchmark_frame["Close"])
+        daily_rs_rating = _compute_rs_rating_series(normalized_frame["Close"], normalized_benchmark_frame["Close"])
+        rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
+            rs_line=rs_line,
+            price_reference=normalized_frame["High"].reindex(rs_line.index),
+            lookback=250,
+        )
+        for index in visible_frame.index:
+            time_value = pd.Timestamp(index).date().isoformat()
+            if index in rs_line.index and pd.notna(rs_line.loc[index]):
+                payload["rs_line"].append({"time": time_value, "value": float(rs_line.loc[index])})
+            if index in daily_rs_rating.index and pd.notna(daily_rs_rating.loc[index]):
+                payload["daily_rs_rating"].append({"time": time_value, "value": float(daily_rs_rating.loc[index])})
+            if bool(rs_new_high.get(index, False)):
+                payload["rs_markers"].append(
+                    {
+                        "time": time_value,
+                        "kind": "daily_new_high_before_price" if bool(rs_new_high_before_price.get(index, False)) else "daily_new_high",
+                    }
+                )
     return payload
 
 
