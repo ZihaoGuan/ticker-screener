@@ -5,6 +5,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import scripts.run_remote_worker as module
 
@@ -66,6 +68,42 @@ class _UnknownActionRunService(_FailingJobRunService):
 
 
 class RunRemoteWorkerTests(unittest.TestCase):
+    def test_main_passes_configured_artifacts_directory_to_run_service(self) -> None:
+        captured: dict[str, object] = {}
+
+        class _Repository:
+            def heartbeat_remote_worker(self, **_: object) -> None:
+                return None
+
+            def claim_remote_job_run(self, **_: object) -> None:
+                return None
+
+        class _ConfiguredRunService:
+            code_version = "test-image"
+
+            def __init__(self, **kwargs: object) -> None:
+                captured.update(kwargs)
+                self.history_repository = _Repository()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir) / "persistent-artifacts"
+            with (
+                patch.object(
+                    module,
+                    "load_webapp_config",
+                    return_value=SimpleNamespace(database_url="postgresql://worker-test", artifacts_dir=artifacts_dir),
+                ),
+                patch.object(module, "RunService", _ConfiguredRunService),
+                patch.object(
+                    module,
+                    "parse_args",
+                    return_value=SimpleNamespace(worker_name="test-worker", pools="any", poll_seconds=1, heartbeat_seconds=1, once=True),
+                ),
+            ):
+                self.assertEqual(module.main(), 0)
+
+        self.assertEqual(captured["artifacts_dir"], artifacts_dir)
+
     def test_parse_worker_pools_defaults_to_any_and_normalizes_values(self) -> None:
         self.assertEqual(module._parse_worker_pools(""), ("any",))
         self.assertEqual(module._parse_worker_pools("general, Finviz, general"), ("finviz", "general"))

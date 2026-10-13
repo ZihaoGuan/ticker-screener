@@ -11,6 +11,19 @@ import scripts.run_scheduled_jobs as module
 
 
 class RunScheduledJobsTests(unittest.TestCase):
+    def test_configure_artifact_paths_uses_persistent_artifacts_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifacts_dir = Path(temp_dir) / "persistent-artifacts"
+            original_paths = (module.ARTIFACTS_DIR, module.STATUS_DIR, module.STATE_FILE)
+            try:
+                module._configure_artifact_paths(artifacts_dir)
+
+                self.assertEqual(module.ARTIFACTS_DIR, artifacts_dir)
+                self.assertEqual(module.STATUS_DIR, artifacts_dir / "status")
+                self.assertEqual(module.STATE_FILE, artifacts_dir / "status" / "scheduler-state.json")
+            finally:
+                module.ARTIFACTS_DIR, module.STATUS_DIR, module.STATE_FILE = original_paths
+
     def test_main_queues_due_job_without_running_web_container_command(self) -> None:
         queued: list[tuple[str, dict[str, object], str, dict[str, object]]] = []
         saved_states: list[dict[str, str]] = []
@@ -60,7 +73,14 @@ class RunScheduledJobsTests(unittest.TestCase):
                 )
 
         with (
-            patch.object(module, "load_webapp_config", return_value=SimpleNamespace(database_url="postgresql://queue-test")),
+            patch.object(
+                module,
+                "load_webapp_config",
+                return_value=SimpleNamespace(
+                    database_url="postgresql://queue-test",
+                    artifacts_dir=module.PROJECT_ROOT / "artifacts",
+                ),
+            ),
             patch.object(module, "RunService", _RunService),
             patch.object(module, "ScheduledJobService", _ScheduleService),
             patch.object(module, "_load_state", return_value={}),
@@ -122,7 +142,14 @@ class RunScheduledJobsTests(unittest.TestCase):
                 )
 
         with (
-            patch.object(module, "load_webapp_config", return_value=SimpleNamespace(database_url="postgresql://queue-test")),
+            patch.object(
+                module,
+                "load_webapp_config",
+                return_value=SimpleNamespace(
+                    database_url="postgresql://queue-test",
+                    artifacts_dir=module.PROJECT_ROOT / "artifacts",
+                ),
+            ),
             patch.object(module, "RunService", _RunService),
             patch.object(module, "ScheduledJobService", _ScheduleService),
             patch.object(module, "_load_state", return_value={}),

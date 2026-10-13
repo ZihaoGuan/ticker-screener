@@ -353,10 +353,14 @@ def _run_claimed_job(
 
 def main() -> int:
     args = parse_args()
-    database_url = load_webapp_config().database_url
-    if not database_url:
+    config = load_webapp_config()
+    if not config.database_url:
         raise RuntimeError("No Postgres connection string configured. Set TICKER_SCREENER_DATABASE_URL for the worker.")
-    run_service = RunService(project_root=PROJECT_ROOT, database_url=database_url)
+    run_service = RunService(
+        project_root=PROJECT_ROOT,
+        database_url=config.database_url,
+        artifacts_dir=config.artifacts_dir,
+    )
     exit_code = 0
     worker_name = str(args.worker_name).strip() or socket.gethostname()
     worker_pools = _parse_worker_pools(args.pools)

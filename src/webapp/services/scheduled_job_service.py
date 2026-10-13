@@ -30,6 +30,7 @@ class ScheduledJobService:
     def __init__(self, *, project_root: Path, run_service: RunService) -> None:
         self.project_root = project_root
         self.run_service = run_service
+        self.artifacts_dir = run_service.artifacts_dir
         self.config_path = project_root / "config" / "scheduled_jobs.json"
 
     def get_context(self) -> dict[str, Any]:
@@ -284,7 +285,7 @@ class ScheduledJobService:
             raise ValueError(f"Unknown action_id: {action_id}")
         resolved_options = _resolve_template_value(job.get("options") or {}, local_now=local_now)
         queue_options = dict(resolved_options) if isinstance(resolved_options, dict) else {}
-        artifact_path = _artifact_path_for_job(self.project_root, job, local_now=local_now)
+        artifact_path = _artifact_path_for_job(self.artifacts_dir, job, local_now=local_now)
         queue_options.setdefault("execution_mode", "remote")
         queue_options.update(
             {
@@ -316,7 +317,7 @@ class ScheduledJobService:
         return remote_job_id
 
     def _write_status(self, *, job_id: str, job_label: str, message: str, artifact_file: str) -> None:
-        status_dir = self.project_root / "artifacts" / "status"
+        status_dir = self.artifacts_dir / "status"
         status_dir.mkdir(parents=True, exist_ok=True)
         status_path = status_dir / f"{job_id}.json"
         payload = {
@@ -404,7 +405,7 @@ class ScheduledJobService:
         ]
 
     def _estimate_job_duration(self, job_id: str) -> dict[str, Any]:
-        log_dir = self.project_root / "artifacts" / "status" / "logs"
+        log_dir = self.artifacts_dir / "status" / "logs"
         if not log_dir.is_dir():
             return _summarize_durations([])
         active_log = self._active_log_file(job_id)
@@ -421,7 +422,7 @@ class ScheduledJobService:
         return _summarize_durations(durations)
 
     def _active_log_file(self, job_id: str) -> Path | None:
-        status_path = self.project_root / "artifacts" / "status" / f"{job_id}.json"
+        status_path = self.artifacts_dir / "status" / f"{job_id}.json"
         try:
             status = json.loads(status_path.read_text(encoding="utf-8"))
         except Exception:
@@ -432,7 +433,7 @@ class ScheduledJobService:
         return Path(log_file) if isinstance(log_file, str) and log_file else None
 
     def _scheduled_status(self, job: dict[str, Any]) -> dict[str, Any] | None:
-        status_path = self.project_root / "artifacts" / "status" / f"{job['job_id']}.json"
+        status_path = self.artifacts_dir / "status" / f"{job['job_id']}.json"
         try:
             payload = json.loads(status_path.read_text(encoding="utf-8"))
         except Exception:
@@ -663,9 +664,9 @@ def _simple_cron_days(cron_expr: str) -> set[int] | None:
     return None
 
 
-def _artifact_path_for_job(project_root: Path, job: dict[str, Any], *, local_now: datetime) -> str:
+def _artifact_path_for_job(artifacts_dir: Path, job: dict[str, Any], *, local_now: datetime) -> str:
     if str(job.get("action_id") or "") == "weekly_rs":
-        return str(project_root / "artifacts" / "watchlists" / f"weekly_rs_new_high_{local_now.date().isoformat()}.json")
+        return str(artifacts_dir / "watchlists" / f"weekly_rs_new_high_{local_now.date().isoformat()}.json")
     return ""
 
 

@@ -22,6 +22,23 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.run_service = RunService(project_root=self.project_root)
         self.service = ScheduledJobService(project_root=self.project_root, run_service=self.run_service)
 
+    def test_status_files_use_run_service_artifacts_directory(self) -> None:
+        artifacts_dir = self.project_root / "persistent-artifacts"
+        service = ScheduledJobService(
+            project_root=self.project_root,
+            run_service=RunService(project_root=self.project_root, artifacts_dir=artifacts_dir),
+        )
+
+        service._write_status(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            message="Queued.",
+            artifact_file="",
+        )
+
+        self.assertTrue((artifacts_dir / "status" / "reload_prices.json").exists())
+        self.assertFalse((self.project_root / "artifacts" / "status" / "reload_prices.json").exists())
+
     def test_upsert_job_persists_options(self) -> None:
         job = self.service.upsert_job(
             job_id="earnings_this_plus_next",

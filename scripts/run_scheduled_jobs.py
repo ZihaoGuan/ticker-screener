@@ -26,6 +26,13 @@ _SNAPSHOT_WAITING_PATTERN = re.compile(r"^SNAPSHOT_WAITING:\s*(.+)$", re.MULTILI
 _SNAPSHOT_CURRENT_PATTERN = re.compile(r"^SNAPSHOT_CURRENT:\s*(.+)$", re.MULTILINE)
 
 
+def _configure_artifact_paths(artifacts_dir: Path) -> None:
+    global ARTIFACTS_DIR, STATUS_DIR, STATE_FILE
+    ARTIFACTS_DIR = Path(artifacts_dir)
+    STATUS_DIR = ARTIFACTS_DIR / "status"
+    STATE_FILE = STATUS_DIR / "scheduler-state.json"
+
+
 def _load_state() -> dict[str, str]:
     if not STATE_FILE.exists():
         return {}
@@ -271,7 +278,12 @@ def _resolve_template_value(value: object, *, local_now: dt.datetime) -> object:
 
 def main() -> int:
     web_config = load_webapp_config()
-    run_service = RunService(project_root=PROJECT_ROOT, database_url=web_config.database_url)
+    _configure_artifact_paths(web_config.artifacts_dir)
+    run_service = RunService(
+        project_root=PROJECT_ROOT,
+        database_url=web_config.database_url,
+        artifacts_dir=web_config.artifacts_dir,
+    )
     schedule_service = ScheduledJobService(project_root=PROJECT_ROOT, run_service=run_service)
     recovery = run_service.recover_remote_jobs()
     history_repository = getattr(run_service, "history_repository", None)
