@@ -33,6 +33,15 @@ class ReloadPostgresMarketDataDateTests(unittest.TestCase):
         self.assertEqual(len(adjustments), 1)
         _validate_replacement_rows(rows, dt.date(2026, 10, 13), minimum_row_count=1)
 
+    def test_normalize_replacement_rows_repairs_the_agd_sub_cent_rounding_discrepancy(self) -> None:
+        row = ("AGD", dt.date(2026, 10, 13), 11.32, 11.3137, 11.25, 11.3, 11.3, 70_888, 0.0, 1.0, "yfinance", dt.datetime.now(dt.timezone.utc))
+
+        rows, adjustments = _normalize_replacement_rows([row])
+
+        self.assertEqual(rows[0][3], 11.32)
+        self.assertEqual(len(adjustments), 1)
+        _validate_replacement_rows(rows, dt.date(2026, 10, 13), minimum_row_count=1)
+
     def test_normalize_replacement_rows_repairs_a_tiny_low_rounding_discrepancy(self) -> None:
         row = ("AAPL", dt.date(2026, 10, 13), 145.0, 146.0, 144.610005, 144.61, 144.61, 270_142, 0.0, 1.0, "yfinance", dt.datetime.now(dt.timezone.utc))
 

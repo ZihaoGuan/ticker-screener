@@ -202,7 +202,9 @@ def _normalize_replacement_rows(rows: list[tuple[object, ...]]) -> tuple[list[tu
 
         candle_high = max(open_value, close_value)
         candle_low = min(open_value, close_value)
-        tolerance = min(0.01, max(candle_high * 0.0001, 0.000001))
+        # Yahoo occasionally supplies a fractional high/low that is less than
+        # one cent outside the open/close range (for example, AGD).
+        tolerance = 0.01
         if high_value < candle_high:
             if candle_high - high_value > tolerance:
                 raise RuntimeError(f"Invalid OHLCV replacement row for ticker={ticker}.")
