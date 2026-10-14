@@ -543,6 +543,69 @@ class HistoryRepository:
             connection.commit()
         return rows[0] if rows else None
 
+    def move_queued_remote_job_to_github(self, *, job_run_id: int) -> dict[str, Any] | None:
+        """Atomically reserve one ready remote job for GitHub dispatch."""
+        connection = self._connect()
+        if connection is None:
+            return None
+        sql = """
+            WITH queue_lock AS (
+                SELECT pg_advisory_xact_lock(%s)
+            ),
+            candidate AS (
+                SELECT queued_job.id
+                FROM job_runs AS queued_job
+                CROSS JOIN queue_lock
+                WHERE queued_job.id = %s
+                  AND queued_job.status = 'queued'
+                  AND COALESCE(queued_job.request_payload->>'execution_mode', 'local') = 'remote'
+                  AND COALESCE(queued_job.request_payload->>'target_worker', '') = ''
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(
+                        COALESCE(queued_job.request_payload->'dependency_job_ids', '[]'::jsonb)
+                    ) AS dependency(job_id)
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM (
+                            SELECT provider.status
+                            FROM job_runs AS provider
+                            WHERE provider.request_payload->'options'->>'scheduled_job_id' = dependency.job_id
+                              AND COALESCE(provider.request_payload->>'dependency_key', '')
+                                  = COALESCE(queued_job.request_payload->>'dependency_key', '')
+                            ORDER BY provider.created_at DESC, provider.id DESC
+                            LIMIT 1
+                        ) AS latest_provider
+                        WHERE latest_provider.status = 'success'
+                    )
+                  )
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE job_runs AS job
+            SET status = 'running',
+                request_payload = jsonb_set(
+                    jsonb_set(job.request_payload, '{execution_mode}', '"github"'::jsonb, true),
+                    '{options,execution_mode}', '"github"'::jsonb, true
+                ),
+                result_payload = COALESCE(job.result_payload, '{}'::jsonb) || %s::jsonb
+            FROM candidate
+            WHERE job.id = candidate.id
+            RETURNING job.id, job.parent_job_run_id, job.job_type, job.job_name, job.status, job.trigger_source,
+                      job.request_payload, job.result_payload, job.artifact_path, job.started_at, job.finished_at, job.created_at
+        """
+        patch = {
+            "execution_mode": "github",
+            "executor": "github_actions",
+            "progress_label": "Dispatching to GitHub",
+            "message": "Moved from the remote queue; dispatching to GitHub Actions.",
+        }
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (self._REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY, int(job_run_id), _json_dumps(patch)))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+            connection.commit()
+        return rows[0] if rows else None
+
     def expire_queued_dependency_jobs(self) -> list[dict[str, Any]]:
         connection = self._connect()
         if connection is None:

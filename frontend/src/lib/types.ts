@@ -915,6 +915,17 @@ export type RunPrecheckResponse = {
 export type JobsResponse = {
   actions: RunAction[];
   action_activity: ScreenerActionActivity[];
+  execution: {
+    remote_workers: Array<{
+      worker_name: string;
+      status: string;
+      is_healthy: boolean;
+      worker_pools: string[];
+      code_version: string;
+      current_job: ExecutionJob | null;
+    }>;
+    github_jobs: ExecutionJob[];
+  };
   jobs: {
     job_id: string;
     action_id: string;
@@ -942,6 +953,8 @@ export type JobsResponse = {
     backtest_run_id?: number | null;
     cancel_requested: boolean;
     execution_mode?: "local" | "remote" | "github";
+    can_move_to_github?: boolean;
+    move_to_github_reason?: string;
     trigger_source?: "manual" | "scheduler" | "retry" | "system";
     worker_name?: string;
     target_worker?: string;
@@ -2194,6 +2207,20 @@ export type PortfolioImportResponse = {
     row: number;
     message: string;
   }>;
+};
+
+export type ExecutionJob = {
+  job_id: string;
+  action_id: string;
+  label: string;
+  status: JobStatus;
+  started_at: string;
+  progress_percent: number | null;
+  progress_label: string | null;
+  execution_mode: "local" | "remote" | "github";
+  github_run_id?: number | null;
+  github_run_url?: string;
+  duration_seconds: number;
 };
 
 export type PortfolioRefreshResponse = {

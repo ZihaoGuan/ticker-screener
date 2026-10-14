@@ -192,10 +192,12 @@ def _job_stream_signature(job: dict[str, object]) -> str:
 def _jobs_payload(service: RunService) -> dict[str, object]:
     jobs = service.list_jobs()
     schedule_service = ScheduledJobService(project_root=service.project_root, run_service=service)
+    get_execution_overview = getattr(service, "get_execution_overview", None)
     return {
         "actions": service.list_actions(),
         "jobs": jobs,
         "action_activity": schedule_service.get_action_activity(run_jobs=jobs),
+        "execution": get_execution_overview() if callable(get_execution_overview) else {"remote_workers": [], "github_jobs": []},
     }
 
 
@@ -644,6 +646,30 @@ def cancel_job(
         resource_id=job_id,
         resource_label=str(job.get("label") or job_id),
         message=f"Requested cancellation for job {job_id}.",
+        metadata={"job_id": job_id, "action_id": job.get("action_id")},
+    )
+    return JSONResponse({"ok": True, "job": job})
+
+
+@router.post("/jobs/{job_id}/move-to-github", response_class=JSONResponse)
+def move_job_to_github(
+    request: Request,
+    job_id: str,
+    service: RunService = Depends(get_run_service),
+    principal: Principal = Depends(require_run_screeners),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JSONResponse:
+    try:
+        job = service.move_queued_job_to_github(job_id)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if message.startswith("Unknown job") else 409 if message.startswith("Job is no longer") else 400
+        raise HTTPException(status_code=status_code, detail=message) from exc
+    _record_audit(
+        audit_service=audit_service, principal=principal, request=request,
+        action="runs.move_to_github", resource_type="run_job", resource_id=job_id,
+        resource_label=str(job.get("label") or job_id),
+        message=f"Moved queued job {job_id} to GitHub Actions.",
         metadata={"job_id": job_id, "action_id": job.get("action_id")},
     )
     return JSONResponse({"ok": True, "job": job})

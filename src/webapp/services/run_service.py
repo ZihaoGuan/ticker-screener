@@ -2524,6 +2524,46 @@ class RunService:
         jobs = self._dedupe_jobs(self._sort_jobs(jobs))[:limit]
         return self._attach_child_jobs(jobs)
 
+    def get_execution_overview(self) -> dict[str, list[dict[str, Any]]]:
+        """Return the live remote-worker and GitHub execution state for Run Center."""
+        workers: list[dict[str, Any]] = []
+        for worker in self.history_repository.list_remote_workers(
+            stale_after_seconds=self.REMOTE_WORKER_STALE_SECONDS
+        ):
+            metadata = worker.get("metadata_json") if isinstance(worker.get("metadata_json"), dict) else {}
+            current_job_run_id = worker.get("current_job_run_id")
+            current_row = self.history_repository.get_job_run(current_job_run_id) if current_job_run_id is not None else None
+            workers.append(
+                {
+                    "worker_name": str(worker.get("worker_name") or ""),
+                    "status": str(worker.get("status") or "unknown"),
+                    "is_healthy": bool(worker.get("is_healthy")),
+                    "worker_pools": [str(pool) for pool in metadata.get("worker_pools", []) if str(pool).strip()],
+                    "code_version": str(metadata.get("code_version") or ""),
+                    "current_job": self._execution_job_summary(current_row),
+                }
+            )
+        return {
+            "remote_workers": workers,
+            "github_jobs": [
+                summary
+                for row in self.history_repository.list_github_job_runs()
+                if (summary := self._execution_job_summary(row)) is not None
+            ],
+        }
+
+    def _execution_job_summary(self, row: dict[str, Any] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        job = self._serialize_remote_job_run(row)
+        return {
+            key: job.get(key)
+            for key in (
+                "job_id", "action_id", "label", "status", "started_at", "progress_percent", "progress_label",
+                "execution_mode", "github_run_id", "github_run_url", "duration_seconds",
+            )
+        }
+
     def get_job(self, job_id: str) -> dict[str, Any]:
         with self._jobs_lock:
             job = self._jobs_by_id.get(job_id)
@@ -2665,6 +2705,33 @@ class RunService:
             self._terminate_process(process)
             return self._serialize_job(job)
 
+    def move_queued_job_to_github(self, job_id: str) -> dict[str, Any]:
+        remote_job = self._load_remote_job(job_id)
+        if remote_job is None:
+            raise ValueError(f"Unknown job: {job_id}")
+        if remote_job["status"] != "queued":
+            raise ValueError("Only queued jobs can move to GitHub Actions.")
+        if remote_job["execution_mode"] != "remote":
+            raise ValueError("Job is not queued for a remote worker.")
+        if remote_job["target_worker"]:
+            raise ValueError("Jobs assigned to a specific worker cannot move to GitHub Actions.")
+        if "github" not in self.execution_modes_for_action(remote_job["action_id"]):
+            raise ValueError(f"{remote_job['label']} does not support GitHub Actions.")
+
+        row = self.history_repository.move_queued_remote_job_to_github(job_run_id=int(remote_job["job_run_id"]))
+        if row is None:
+            raise ValueError("Job is no longer ready to move to GitHub Actions.")
+        request = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}
+        options = request.get("options") if isinstance(request.get("options"), dict) else {}
+        self._dispatch_github_job_run(
+            job_run_id=int(row["id"]),
+            action_id=str(request.get("action_id") or ""),
+            options=options,
+            code_version=str(request.get("code_version") or self.code_version),
+        )
+        dispatched = self.history_repository.get_job_run(int(row["id"]))
+        return self._serialize_remote_job_run(dispatched or row)
+
     def launch(
         self,
         action_id: str,
@@ -2753,12 +2820,14 @@ class RunService:
             trigger_source=trigger_source,
         )
 
-    def _dispatch_github_job_run(self, *, job_run_id: int, action_id: str, options: dict[str, Any]) -> None:
+    def _dispatch_github_job_run(
+        self, *, job_run_id: int, action_id: str, options: dict[str, Any], code_version: str | None = None
+    ) -> None:
         try:
             dispatched = self._github_actions_executor().dispatch(
                 job_run_id=job_run_id,
                 action_id=action_id,
-                code_version=self.code_version,
+                code_version=code_version or self.code_version,
                 options=options,
             )
         except Exception as exc:
@@ -3661,6 +3730,13 @@ class RunService:
         job_run_id = int(row["id"])
         watchlist_file = str(result_payload.get("watchlist_file") or "")
         watchlist_stem = self._watchlist_stem_from_path(watchlist_file)
+        target_worker = str(options.get("target_worker") or request_payload.get("target_worker") or "")
+        can_move_to_github, move_to_github_reason = self._github_move_eligibility(
+            action_id=action_id,
+            status=str(row.get("status") or ""),
+            execution_mode=str(request_payload.get("execution_mode") or "remote"),
+            target_worker=target_worker,
+        )
         return {
             "job_id": self._remote_job_id(job_run_id),
             "action_id": action_id,
@@ -3692,11 +3768,32 @@ class RunService:
             "worker_name": str(result_payload.get("worker_name") or ("github-actions" if result_payload.get("executor") == "github_actions" else "")),
             "github_run_id": result_payload.get("github_run_id"),
             "github_run_url": str(result_payload.get("github_run_url") or ""),
-            "target_worker": str(options.get("target_worker") or ""),
+            "target_worker": target_worker,
+            "can_move_to_github": can_move_to_github,
+            "move_to_github_reason": move_to_github_reason,
             "duration_seconds": self._duration_seconds_from_iso(started_at, finished_at),
             "child_jobs": [],
             "child_job_summary": {"total": 0, "running": 0, "success": 0, "failed": 0, "cancelled": 0},
         }
+
+    def _github_move_eligibility(
+        self, *, action_id: str, status: str, execution_mode: str, target_worker: str
+    ) -> tuple[bool, str]:
+        if status != "queued":
+            return False, "Only queued jobs can move to GitHub Actions."
+        if execution_mode != "remote":
+            return False, "Job is not queued for a remote worker."
+        if target_worker:
+            return False, "Job is assigned to a specific worker."
+        if not action_id:
+            return False, "This screener does not support GitHub Actions."
+        try:
+            supports_github = "github" in self.execution_modes_for_action(action_id)
+        except ValueError:
+            supports_github = False
+        if not supports_github:
+            return False, "This screener does not support GitHub Actions."
+        return True, ""
 
     def _serialize_persisted_local_job_run(self, row: dict[str, Any]) -> dict[str, Any] | None:
         request_payload = row.get("request_payload") if isinstance(row.get("request_payload"), dict) else {}

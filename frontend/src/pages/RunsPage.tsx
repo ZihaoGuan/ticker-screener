@@ -11,6 +11,7 @@ import { formatLocalDateTime } from "../lib/format";
 import type {
   BacktestRunDetailV1,
   BacktestRunsResponseV1,
+  ExecutionJob,
   JobsResponse,
   OverlapWarmCoverageResponse,
   ScheduledJobConfig,
@@ -79,6 +80,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isCancellingJobId, setIsCancellingJobId] = useState("");
+  const [isMovingToGithubJobId, setIsMovingToGithubJobId] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJobSummary[]>([]);
@@ -707,6 +709,21 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     }
   };
 
+  const handleMoveToGithub = async (jobId: string) => {
+    setIsMovingToGithubJobId(jobId);
+    setBatchRunNotice("");
+    try {
+      await fetchJson<{ ok: boolean; job: JobsResponse["jobs"][number] }>(`/api/jobs/${jobId}/move-to-github`, {
+        method: "POST",
+      });
+      setBatchRunNotice("Moved job to GitHub Actions.");
+    } catch (error) {
+      setBatchRunNotice(error instanceof Error ? error.message : "Could not move job to GitHub Actions.");
+    } finally {
+      setIsMovingToGithubJobId("");
+    }
+  };
+
   const resetScheduleForm = () => {
     setIsEditingSchedule(false);
     const nextActionId = sortedScheduledActions[0]?.id ?? "weekly_rs";
@@ -1019,6 +1036,16 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     <>
       <div className="page-grid">
         {screenersSectionMode ? <ScreenersSubnav activeMode={mode} /> : null}
+        {screenersMode ? (
+          <ExecutionOverview
+            overview={payload?.execution}
+            formatDuration={formatDuration}
+            onInspectJob={(jobId) => {
+              setSelectedJobId(jobId);
+              setSelectedChildJobId(null);
+            }}
+          />
+        ) : null}
         {!schedulesMode ? (
         <Panel
           title={screenersMode ? "Screener Launcher v2" : pageTitle}
@@ -1417,6 +1444,18 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                             disabled={isCancellingJobId === job.job_id}
                           >
                             {isCancellingJobId === job.job_id ? "Stopping..." : "Stop"}
+                          </button>
+                        ) : job.can_move_to_github ? (
+                          <button
+                            className="table-action-button screeners-history-action"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleMoveToGithub(job.job_id);
+                            }}
+                            disabled={isMovingToGithubJobId === job.job_id}
+                          >
+                            {isMovingToGithubJobId === job.job_id ? "Moving..." : "Run on GitHub"}
                           </button>
                         ) : job.watchlist_url ? (
                           <Link className="table-action-button table-link-button screeners-history-action" to={job.watchlist_url} onClick={(event) => event.stopPropagation()}>
@@ -2708,6 +2747,96 @@ function ScreenersSubnav({ activeMode }: { activeMode: RunsPageMode }) {
         </NavLink>
       </div>
     </section>
+  );
+}
+
+function ExecutionOverview({
+  overview,
+  formatDuration,
+  onInspectJob,
+}: {
+  overview: JobsResponse["execution"] | undefined;
+  formatDuration: (seconds: number) => string;
+  onInspectJob: (jobId: string) => void;
+}) {
+  const workers = overview?.remote_workers ?? [];
+  const githubJobs = overview?.github_jobs ?? [];
+  const runningWorkers = workers.filter((worker) => worker.current_job && worker.is_healthy).length;
+
+  return (
+    <Panel
+      title="Live execution"
+      aside={<span className="file-meta">{runningWorkers}/{workers.length} remote workers busy · {githubJobs.length} GitHub active</span>}
+      className="execution-overview-panel"
+    >
+      <div className="execution-overview-grid">
+        <section className="execution-overview-section" aria-labelledby="remote-workers-title">
+          <div className="execution-overview-section-head">
+            <div>
+              <h3 id="remote-workers-title">Remote workers</h3>
+              <p>Only remote jobs consume Oracle worker capacity.</p>
+            </div>
+            <span className="execution-count">{workers.length}</span>
+          </div>
+          {workers.length === 0 ? <p className="panel-copy">No remote workers have checked in.</p> : null}
+          <div className="execution-worker-list">
+            {workers.map((worker) => {
+              const state = !worker.is_healthy ? "stale" : worker.current_job ? "running" : "idle";
+              return (
+                <article className={`execution-worker-row is-${state}`} key={worker.worker_name}>
+                  <div className="execution-worker-summary">
+                    <div>
+                      <strong>{worker.worker_name}</strong>
+                      <span className="file-meta">{worker.worker_pools.length ? worker.worker_pools.map(formatWorkerPoolLabel).join(" · ") : "Any pool"}</span>
+                    </div>
+                    <span className={`execution-state execution-state-${state}`}>{state === "running" ? "Running" : state === "idle" ? "Available" : "Stale"}</span>
+                  </div>
+                  {worker.current_job ? <ExecutionJobSummary job={worker.current_job} formatDuration={formatDuration} onInspectJob={onInspectJob} /> : <p className="execution-idle-copy">{state === "stale" ? "No recent worker heartbeat." : "Available for the next compatible job."}</p>}
+                  {worker.code_version ? <span className="file-meta mono">{worker.code_version.slice(0, 12)}</span> : null}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+        <section className="execution-overview-section" aria-labelledby="github-actions-title">
+          <div className="execution-overview-section-head">
+            <div>
+              <h3 id="github-actions-title">GitHub Actions</h3>
+              <p>Runs outside the Oracle worker pool.</p>
+            </div>
+            <span className="execution-count">{githubJobs.length}</span>
+          </div>
+          {githubJobs.length === 0 ? <p className="panel-copy">No GitHub screeners are active.</p> : null}
+          <div className="execution-worker-list">
+            {githubJobs.map((job) => <ExecutionJobSummary job={job} formatDuration={formatDuration} onInspectJob={onInspectJob} github key={job.job_id} />)}
+          </div>
+        </section>
+      </div>
+    </Panel>
+  );
+}
+
+function ExecutionJobSummary({ job, formatDuration, onInspectJob, github = false }: { job: ExecutionJob; formatDuration: (seconds: number) => string; onInspectJob: (jobId: string) => void; github?: boolean }) {
+  const stateLabel = github
+    ? job.status === "running"
+      ? "Running on GitHub"
+      : job.github_run_id
+        ? "Queued on GitHub"
+        : "Waiting to dispatch"
+    : job.progress_label || "Starting…";
+  return (
+    <div className="execution-job-summary">
+      <div className="execution-job-copy">
+        <strong>{job.label}</strong>
+        <span className="file-meta mono">#{job.job_id} · {job.action_id}</span>
+        <span className="file-meta">{stateLabel} · {formatDuration(job.duration_seconds)}</span>
+      </div>
+      <div className="execution-job-actions">
+        {job.progress_percent != null ? <ProgressBar status={job.status} progress={job.progress_percent} label={job.progress_label ?? undefined} compact /> : null}
+        <button className="table-action-button" type="button" onClick={() => onInspectJob(job.job_id)}>Inspect run</button>
+        {github && job.github_run_url ? <a className="table-action-button table-link-button" href={job.github_run_url} target="_blank" rel="noreferrer">Open GitHub</a> : null}
+      </div>
+    </div>
   );
 }
 

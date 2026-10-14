@@ -1150,6 +1150,42 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(executor.kwargs["code_version"], "pilot-sha")
         self.assertEqual(captured_patch["kwargs"]["result_payload_patch"]["github_run_id"], 654)
 
+    def test_move_queued_remote_job_to_github_preserves_original_code_version(self) -> None:
+        class _Executor:
+            def dispatch(self, **kwargs: object) -> dict[str, object]:
+                self.kwargs = kwargs
+                return {"workflow_run_id": 906, "html_url": "https://github.example/runs/906"}
+
+        row = {
+            "id": 906, "parent_job_run_id": None, "job_type": "screen_run", "job_name": "Run RS",
+            "status": "queued", "trigger_source": "manual",
+            "request_payload": {"action_id": "rs", "execution_mode": "remote", "code_version": "original-release", "options": {"execution_mode": "remote"}},
+            "result_payload": {"progress_label": "Queued for remote worker"}, "artifact_path": "",
+            "started_at": dt.datetime(2026, 10, 13, tzinfo=dt.timezone.utc), "finished_at": None,
+            "created_at": dt.datetime(2026, 10, 13, tzinfo=dt.timezone.utc),
+        }
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test", code_version="new-release")
+        service.history_repository.get_job_run = MagicMock(side_effect=[row, row])  # type: ignore[method-assign]
+        service.history_repository.move_queued_remote_job_to_github = MagicMock(return_value=row)  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = MagicMock()  # type: ignore[method-assign]
+        executor = _Executor()
+        service._github_actions_executor = lambda: executor  # type: ignore[method-assign]
+
+        result = service.move_queued_job_to_github("remote-906")
+
+        self.assertEqual(result["job_id"], "remote-906")
+        self.assertEqual(executor.kwargs["code_version"], "original-release")
+        service.history_repository.move_queued_remote_job_to_github.assert_called_once_with(job_run_id=906)
+
+    def test_queued_remote_job_exposes_github_move_eligibility(self) -> None:
+        payload = self.service._serialize_remote_job_run({
+            "id": 907, "job_name": "Run RS", "status": "queued",
+            "request_payload": {"action_id": "rs", "execution_mode": "remote", "options": {}},
+            "result_payload": {}, "started_at": None, "finished_at": None,
+        })
+        self.assertTrue(payload["can_move_to_github"])
+        self.assertEqual(payload["move_to_github_reason"], "")
+
     def test_scheduled_github_run_waits_for_scheduler_dispatch(self) -> None:
         service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
         service.history_repository.create_job_run = lambda **kwargs: 904  # type: ignore[method-assign]
@@ -1297,6 +1333,23 @@ class RunServiceTests(unittest.TestCase):
         self.assertEqual(payload[0]["status"], "queued")
         self.assertEqual(payload[0]["target_worker"], "worker-b")
         self.assertEqual(payload[0]["execution_mode"], "remote")
+
+    def test_execution_overview_keeps_remote_workers_and_github_jobs_separate(self) -> None:
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test")
+        service.history_repository.list_remote_workers = MagicMock(return_value=[  # type: ignore[method-assign]
+            {"worker_name": "worker-a", "status": "running", "is_healthy": True, "current_job_run_id": 801, "metadata_json": {"worker_pools": ["general"], "code_version": "abc123"}},
+            {"worker_name": "worker-b", "status": "idle", "is_healthy": True, "current_job_run_id": None, "metadata_json": {"worker_pools": ["finviz"]}},
+        ])
+        remote_row = {"id": 801, "job_name": "Run RS", "status": "running", "trigger_source": "manual", "started_at": dt.datetime(2026, 10, 14, tzinfo=dt.timezone.utc), "finished_at": None, "request_payload": {"action_id": "rs", "execution_mode": "remote", "options": {}}, "result_payload": {"job_id": "remote-801", "progress_label": "25/100 screening", "progress_percent": 25}}
+        github_row = {"id": 802, "job_name": "Run Cup Handle", "status": "running", "trigger_source": "scheduler", "started_at": dt.datetime(2026, 10, 14, tzinfo=dt.timezone.utc), "finished_at": None, "request_payload": {"action_id": "cup_handle", "execution_mode": "github", "options": {}}, "result_payload": {"job_id": "remote-802", "github_run_id": 123, "github_run_url": "https://github.example/runs/123"}}
+        service.history_repository.get_job_run = MagicMock(return_value=remote_row)  # type: ignore[method-assign]
+        service.history_repository.list_github_job_runs = MagicMock(return_value=[github_row])  # type: ignore[method-assign]
+
+        overview = service.get_execution_overview()
+
+        self.assertEqual(overview["remote_workers"][0]["current_job"]["job_id"], "remote-801")
+        self.assertIsNone(overview["remote_workers"][1]["current_job"])
+        self.assertEqual(overview["github_jobs"][0]["job_id"], "remote-802")
 
     def test_list_jobs_includes_persisted_local_jobs_when_memory_is_empty(self) -> None:
         self.service.history_repository.list_local_job_runs = lambda limit=20: [  # type: ignore[method-assign]

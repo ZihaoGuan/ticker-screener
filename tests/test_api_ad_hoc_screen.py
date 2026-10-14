@@ -59,6 +59,10 @@ class _FakeRunService:
         self.last_launch_options = options
         return f"{action_id}-job"
 
+    def move_queued_job_to_github(self, job_id: str):
+        self.moved_job_id = job_id
+        return {"job_id": job_id, "action_id": "rs", "label": "Run RS", "execution_mode": "github"}
+
     def list_actions(self):
         return [{"id": "rs", "label": "Run RS"}]
 
@@ -1420,6 +1424,15 @@ class ApiAdHocScreenTests(unittest.TestCase):
         response = self.client.post("/api/runs/rs", json={})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["job_id"], "rs-job")
+
+    def test_premium_can_move_queued_job_to_github(self) -> None:
+        app.dependency_overrides[get_current_principal] = lambda: principal_for_user(
+            user_id=2, email="premium@example.com", role="premium", is_active=True
+        )
+        response = self.client.post("/api/jobs/remote-123/move-to-github")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(self.run_service.moved_job_id, "remote-123")
 
     def test_premium_can_stream_job_log(self) -> None:
         app.dependency_overrides[get_current_principal] = lambda: principal_for_user(

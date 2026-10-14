@@ -174,6 +174,20 @@ class HistoryRepositoryEnsureSchemaTests(unittest.TestCase):
         self.assertIn("FOR UPDATE SKIP LOCKED", sql)
         self.assertEqual(params[0], repository._REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY)
 
+    def test_move_queued_remote_job_to_github_uses_the_remote_claim_lock(self) -> None:
+        connection = _FakeConnection(schema_checks=[])
+        repository = HistoryRepository(database_url="postgres://example")
+        repository._connect = lambda: connection  # type: ignore[method-assign]
+        with patch.object(repository, "_rows_to_dicts", return_value=[]):
+            repository.move_queued_remote_job_to_github(job_run_id=818)
+        sql, params = connection.executed_sql[0]
+        self.assertIn("pg_advisory_xact_lock", sql)
+        self.assertIn("queued_job.id = %s", sql)
+        self.assertIn("latest_provider.status = 'success'", sql)
+        self.assertIn("'{options,execution_mode}'", sql)
+        self.assertEqual(params[0], repository._REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY)
+        self.assertEqual(params[1], 818)
+
     def test_ensure_schema_unlocks_after_schema_apply_failure(self) -> None:
         connection = _FakeConnection(schema_checks=[[], []], raise_on_schema_apply=True)
         repository = HistoryRepository(database_url="postgres://example")

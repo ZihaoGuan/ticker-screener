@@ -353,6 +353,96 @@
   grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
 }
 
+.execution-overview-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.execution-overview-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.execution-overview-section + .execution-overview-section {
+  border-left: 1px solid #27272a;
+  padding-left: 16px;
+}
+
+.execution-overview-section-head,
+.execution-worker-summary,
+.execution-job-summary,
+.execution-job-actions {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.execution-overview-section-head h3,
+.execution-overview-section-head p,
+.execution-worker-summary strong,
+.execution-worker-summary span,
+.execution-job-copy strong,
+.execution-job-copy span {
+  display: block;
+}
+
+.execution-overview-section-head h3 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.execution-overview-section-head p,
+.execution-idle-copy {
+  color: #a1a1aa;
+  font-size: 13px;
+  margin: 0;
+}
+
+.execution-count,
+.execution-state {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.execution-count {
+  background: rgba(96, 165, 250, 0.12);
+  color: #bfdbfe;
+}
+
+.execution-worker-list {
+  display: grid;
+  gap: 8px;
+}
+
+.execution-worker-row,
+.execution-job-summary {
+  background: #111114;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.execution-worker-row.is-running { border-color: rgba(96, 165, 250, 0.48); }
+.execution-worker-row.is-stale { border-color: rgba(251, 113, 133, 0.48); }
+.execution-state-running { background: rgba(96, 165, 250, 0.12); color: #bfdbfe; }
+.execution-state-idle { background: rgba(78, 222, 163, 0.12); color: #baf7d9; }
+.execution-state-stale { background: rgba(251, 113, 133, 0.12); color: #fecdd3; }
+
+.execution-job-summary { grid-template-columns: minmax(0, 1fr) auto; }
+.execution-job-copy,
+.execution-job-actions { display: grid; gap: 4px; min-width: 0; }
+.execution-job-actions { align-content: start; justify-items: end; }
+.execution-job-actions .progress-bar { min-width: 120px; }
+
 .screeners-history-panel .data-table thead th,
 .screeners-scheduled-panel .data-table thead th,
 .screeners-scheduler-config-panel .data-table thead th {
@@ -1632,6 +1722,16 @@
   .screeners-history-console-grid {
     grid-template-columns: 1fr;
   }
+
+  .execution-overview-grid { grid-template-columns: 1fr; }
+  .execution-overview-section + .execution-overview-section {
+    border-left: 0;
+    border-top: 1px solid #27272a;
+    padding-left: 0;
+    padding-top: 16px;
+  }
+  .execution-job-summary { grid-template-columns: 1fr; }
+  .execution-job-actions { justify-items: start; }
 
   .screeners-subnav-panel {
     align-items: flex-start;
