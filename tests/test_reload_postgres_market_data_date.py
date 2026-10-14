@@ -15,11 +15,22 @@ from scripts.reload_postgres_market_data_date import (
     _load_active_metadata_tickers,
     _minimum_replacement_row_count,
     _replace_trade_date_atomically,
+    _rows_for_trade_date,
     _validate_replacement_rows,
 )
 
 
 class ReloadPostgresMarketDataDateTests(unittest.TestCase):
+    def test_rows_for_trade_date_skips_stale_provider_rows(self) -> None:
+        requested_date = dt.date(2026, 10, 13)
+        matching_row = ("AAPL", requested_date, 200.0, 205.0, 198.0, 204.0, 204.0, 10_000)
+        stale_row = ("BHAVR", dt.date(2026, 10, 12), 10.0, 11.0, 10.0, 10.5, 10.5, 100)
+
+        rows, stale_tickers = _rows_for_trade_date([matching_row, stale_row], requested_date)
+
+        self.assertEqual(rows, [matching_row])
+        self.assertEqual(stale_tickers, {"BHAVR"})
+
     def test_validate_replacement_rows_accepts_provider_ohlcv_values(self) -> None:
         row = ("EURKR", dt.date(2026, 10, 13), 0.4181, 0.4499, 0.4499, 0.4499, 0.4499, 361, 0.0, 1.0, "yfinance", dt.datetime.now(dt.timezone.utc))
 

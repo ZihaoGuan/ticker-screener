@@ -176,6 +176,12 @@ def _minimum_replacement_row_count(target_ticker_count: int) -> int:
     return max(1, math.ceil(target_ticker_count * 0.9))
 
 
+def _rows_for_trade_date(rows: list[tuple[object, ...]], trade_date: dt.date) -> tuple[list[tuple[object, ...]], set[str]]:
+    matching_rows = [row for row in rows if row[1] == trade_date]
+    stale_tickers = {str(row[0]) for row in rows if row[1] != trade_date}
+    return matching_rows, stale_tickers
+
+
 def _validate_replacement_rows(
     rows: list[tuple[object, ...]],
     trade_date: dt.date,
@@ -334,6 +340,7 @@ def main() -> int:
         source_by_ticker.update({ticker: args.source_label for ticker in yfinance_histories})
         source_by_ticker.update({ticker: args.source_label for ticker in retry_histories})
         bar_rows = _build_daily_bar_rows(histories, args.source_label, updated_at, source_by_ticker)
+        bar_rows, stale_tickers = _rows_for_trade_date(bar_rows, trade_date)
         minimum_row_count = _minimum_replacement_row_count(len(tickers))
         _validate_replacement_rows(bar_rows, trade_date, minimum_row_count=minimum_row_count)
         deleted, total_rows = _replace_trade_date_atomically(connection, trade_date, bar_rows, args.batch_size)
@@ -342,7 +349,8 @@ def main() -> int:
         print(f"summary_target_tickers={len(tickers)}", flush=True)
         print(f"summary_reloaded_rows={total_rows}", flush=True)
         print(f"summary_deleted_rows={deleted}", flush=True)
-        print(f"summary_missing_tickers={len(unresolved_tickers)}", flush=True)
+        print(f"summary_missing_tickers={len(set(unresolved_tickers) | stale_tickers)}", flush=True)
+        print(f"summary_stale_provider_tickers={len(stale_tickers)}", flush=True)
         print(f"summary_yfinance_retry_tickers={len(retry_tickers)}", flush=True)
         print(f"summary_source_massive_rows={len(massive_histories)}", flush=True)
         print(f"summary_source_{args.source_label}_rows={len(yfinance_histories) + len(retry_histories)}", flush=True)
