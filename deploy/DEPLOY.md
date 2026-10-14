@@ -313,6 +313,12 @@ for preserve_path in ${PRESERVE_PATHS}; do
     cp "${BACKUP_DIR}/${preserve_path}" "${preserve_path}"
   fi
 done
+./scripts/cleanup_compose_releases.sh
+available_kib="$(df -Pk "${APP_DIR}" | awk 'NR == 2 {print $4}')"
+if [ "${available_kib:-0}" -lt 5242880 ]; then
+  echo "Less than 5 GiB remains after safe Docker cleanup; refusing to start a new build." >&2
+  exit 1
+fi
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/npm-home -e npm_config_cache=/tmp/npm-cache -v "${APP_DIR}:/app" -w /app/frontend node:20 sh -c "mkdir -p /tmp/npm-home /tmp/npm-cache && npm ci && npm run build"
 IMAGE_TAG="$(git rev-parse --short=12 HEAD)"
 docker build --build-arg CODE_VERSION="${IMAGE_TAG}" -t "ticker-screener:${IMAGE_TAG}" "${APP_DIR}"
@@ -342,6 +348,20 @@ up -d --force-recreate db web caddy
 Each queued remote job records the Git-SHA `code_version` of the web image that created it. A worker claims only jobs for its own image version (with a compatibility exception for legacy jobs that predate the field). This means a web deployment can move to a newer image while an in-flight worker process continues using the old image and source tree.
 
 The main deployment builds the new image and updates only `web` and `caddy`; it does not recreate existing workers. Four worker services (`primary-worker` plus three parallel workers) can claim different queued jobs concurrently, matching the production scheduler's `max_parallel_jobs` setting. After each web deployment, a serialized background watcher lets previous-version jobs finish and then automatically releases all workers to the current web image. A superseded watcher exits instead of rolling workers back. The **Release Compose Worker** workflow remains available for a manual release.
+
+The release watcher waits only for work that a healthy old-version worker can
+actually claim. A queued job whose requested image no longer has a healthy
+worker receives a ten-minute grace period, then is marked cancelled with an
+audit message rather than blocking later worker releases. Running jobs always
+continue to drain.
+
+Before an image build, and after a successful worker release, deployment runs
+`scripts/cleanup_compose_releases.sh`. It removes only exited ticker-screener
+web/worker containers, dangling layers, stale build cache, and unreferenced
+`ticker-screener:<sha>` images. It preserves images referenced by any
+container plus the three newest application images. It never removes
+PostgreSQL, Caddy, Docker volumes, or unrelated Docker images. The build stops
+before starting if safe cleanup still leaves less than 5 GiB free.
 
 The primary Compose worker advertises `general,market-data`; the three parallel workers advertise `general,finviz`. Jobs in the default `any` pool remain eligible for every worker.
 

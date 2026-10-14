@@ -176,6 +176,49 @@ def _minimum_replacement_row_count(target_ticker_count: int) -> int:
     return max(1, math.ceil(target_ticker_count * 0.9))
 
 
+def _normalize_replacement_rows(rows: list[tuple[object, ...]]) -> tuple[list[tuple[object, ...]], list[str]]:
+    """Repair provider rounding that puts a high/low just outside the candle body."""
+    normalized_rows: list[tuple[object, ...]] = []
+    adjustments: list[str] = []
+    for row in rows:
+        ticker, row_date, open_price, high, low, close, adj_close, volume, *rest = row
+        try:
+            open_value, high_value, low_value, close_value, adj_close_value, volume_float = (
+                float(open_price),
+                float(high),
+                float(low),
+                float(close),
+                float(adj_close),
+                float(volume),
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"Invalid OHLCV replacement row for ticker={ticker}.") from exc
+        if (
+            not all(math.isfinite(value) for value in (open_value, high_value, low_value, close_value, adj_close_value, volume_float))
+            or min(open_value, high_value, low_value, close_value, adj_close_value) <= 0
+            or volume_float < 0
+        ):
+            raise RuntimeError(f"Invalid OHLCV replacement row for ticker={ticker}.")
+
+        candle_high = max(open_value, close_value)
+        candle_low = min(open_value, close_value)
+        tolerance = min(0.01, max(candle_high * 0.0001, 0.000001))
+        if high_value < candle_high:
+            if candle_high - high_value > tolerance:
+                raise RuntimeError(f"Invalid OHLCV replacement row for ticker={ticker}.")
+            adjustments.append(f"ticker={ticker} high={high_value} normalized_high={candle_high}")
+            high_value = candle_high
+        if low_value > candle_low:
+            if low_value - candle_low > tolerance:
+                raise RuntimeError(f"Invalid OHLCV replacement row for ticker={ticker}.")
+            adjustments.append(f"ticker={ticker} low={low_value} normalized_low={candle_low}")
+            low_value = candle_low
+        normalized_rows.append(
+            (ticker, row_date, open_value, high_value, low_value, close_value, adj_close_value, int(volume_float), *rest)
+        )
+    return normalized_rows, adjustments
+
+
 def _validate_replacement_rows(
     rows: list[tuple[object, ...]],
     trade_date: dt.date,
@@ -199,9 +242,12 @@ def _validate_replacement_rows(
                 float(close),
                 float(adj_close),
             )
-            volume_value = int(volume)
+            volume_float = float(volume)
         except (TypeError, ValueError) as exc:
             raise RuntimeError(f"Invalid OHLCV replacement row for ticker={ticker}.") from exc
+        if not all(math.isfinite(value) for value in (open_value, high_value, low_value, close_value, adj_close_value, volume_float)):
+            raise RuntimeError(f"Invalid OHLCV replacement row for ticker={ticker}.")
+        volume_value = int(volume_float)
         if (
             min(open_value, high_value, low_value, close_value, adj_close_value) <= 0
             or volume_value < 0
@@ -352,6 +398,9 @@ def main() -> int:
         source_by_ticker.update({ticker: args.source_label for ticker in yfinance_histories})
         source_by_ticker.update({ticker: args.source_label for ticker in retry_histories})
         bar_rows = _build_daily_bar_rows(histories, args.source_label, updated_at, source_by_ticker)
+        bar_rows, normalization_adjustments = _normalize_replacement_rows(bar_rows)
+        for adjustment in normalization_adjustments:
+            print(f"normalized_ohlcv {adjustment}", flush=True)
         minimum_row_count = _minimum_replacement_row_count(len(tickers))
         _validate_replacement_rows(bar_rows, trade_date, minimum_row_count=minimum_row_count)
         deleted, total_rows = _replace_trade_date_atomically(connection, trade_date, bar_rows, args.batch_size)
@@ -364,6 +413,7 @@ def main() -> int:
         print(f"summary_yfinance_retry_tickers={len(retry_tickers)}", flush=True)
         print(f"summary_source_massive_rows={len(massive_histories)}", flush=True)
         print(f"summary_source_{args.source_label}_rows={len(yfinance_histories) + len(retry_histories)}", flush=True)
+        print(f"summary_normalized_ohlcv_rows={len(normalization_adjustments)}", flush=True)
 
     return 0
 

@@ -91,7 +91,16 @@ class DeployComposeServicesTest(unittest.TestCase):
         self.assertIn("sh scripts/check_active_remote_jobs.sh", workflow)
         self.assertIn("scripts/upgrade_compose_worker.sh", workflow)
         self.assertIn("scripts/upgrade_compose_worker_when_drained.sh", workflow)
+        self.assertIn("scripts/cleanup_compose_releases.sh", workflow)
+        self.assertIn('df -Pk "${APP_DIR}"', workflow)
+        self.assertIn("5242880", workflow)
         self.assertIn("Scheduled automatic worker release", workflow)
+
+    def test_manual_worker_release_runs_cleanup_after_a_healthy_upgrade(self) -> None:
+        workflow = (PROJECT_ROOT / ".github" / "workflows" / "release-compose-worker.yml").read_text(encoding="utf-8")
+
+        self.assertIn('../scripts/upgrade_compose_worker.sh "${IMAGE_TAG}"', workflow)
+        self.assertIn('../scripts/cleanup_compose_releases.sh "${IMAGE_TAG}"', workflow)
 
     def test_manual_web_release_derives_an_immutable_image_tag_without_editing_env(self) -> None:
         script = WEB_RELEASE_SCRIPT.read_text(encoding="utf-8")

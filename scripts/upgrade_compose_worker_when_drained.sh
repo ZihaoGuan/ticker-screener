@@ -16,6 +16,7 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 deploy_dir="${TICKER_SCREENER_DEPLOY_DIR:-${script_dir}/../deploy}"
 status_dir="${TICKER_SCREENER_WORKER_UPGRADE_STATUS_DIR:-${script_dir}/../artifacts/status}"
 upgrade_script="${TICKER_SCREENER_WORKER_UPGRADE_SCRIPT:-${script_dir}/upgrade_compose_worker.sh}"
+cleanup_script="${TICKER_SCREENER_RELEASE_CLEANUP_SCRIPT:-${script_dir}/cleanup_compose_releases.sh}"
 poll_seconds="${TICKER_SCREENER_WORKER_UPGRADE_POLL_SECONDS:-15}"
 mkdir -p "$status_dir"
 
@@ -41,6 +42,7 @@ while true; do
   fi
 
   if "$upgrade_script" "$image_tag"; then
+    "$cleanup_script" "$image_tag"
     echo "Worker release ${image_tag} completed after drain."
     exit 0
   fi

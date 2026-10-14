@@ -45,6 +45,8 @@ def _run_script(tmp_path: Path, *, web_image: str, succeed_on_attempt: int) -> t
         "printf '%s\\n' \"$attempts\" > \"$ATTEMPTS_FILE\"\n"
         "[ \"$attempts\" -ge \"$SUCCEED_ON_ATTEMPT\" ]\n",
     )
+    cleanup_script = tmp_path / "cleanup.sh"
+    _write_executable(cleanup_script, "#!/bin/sh\nprintf '%s\\n' \"$1\" > \"$CLEANUP_FILE\"\n")
     env = os.environ.copy()
     env.update(
         {
@@ -55,7 +57,9 @@ def _run_script(tmp_path: Path, *, web_image: str, succeed_on_attempt: int) -> t
             "TICKER_SCREENER_DEPLOY_DIR": str(tmp_path),
             "TICKER_SCREENER_WORKER_UPGRADE_STATUS_DIR": str(tmp_path / "status"),
             "TICKER_SCREENER_WORKER_UPGRADE_SCRIPT": str(upgrade_script),
+            "TICKER_SCREENER_RELEASE_CLEANUP_SCRIPT": str(cleanup_script),
             "TICKER_SCREENER_WORKER_UPGRADE_POLL_SECONDS": "0",
+            "CLEANUP_FILE": str(tmp_path / "cleanup"),
         }
     )
     result = subprocess.run(
@@ -81,6 +85,7 @@ class UpgradeComposeWorkerWhenDrainedTest(unittest.TestCase):
             self.assertEqual(attempts, 2)
             self.assertIn("waiting for previous-version jobs", result.stdout)
             self.assertIn("completed after drain", result.stdout)
+            self.assertEqual((Path(tmp_dir) / "cleanup").read_text(encoding="utf-8").strip(), "80663d4")
 
     def test_exits_without_release_when_web_version_was_superseded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -91,6 +96,7 @@ class UpgradeComposeWorkerWhenDrainedTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(attempts, 0)
             self.assertIn("superseded", result.stdout)
+            self.assertFalse((Path(tmp_dir) / "cleanup").exists())
 
 
 if __name__ == "__main__":

@@ -34,3 +34,4 @@ jobs:
             set -euo pipefail
             cd "${APP_DIR}/deploy"
             ../scripts/upgrade_compose_worker.sh "${IMAGE_TAG}"
+            ../scripts/cleanup_compose_releases.sh "${IMAGE_TAG}"

@@ -97,6 +97,12 @@ jobs:
               fi
             done
             cd "${APP_DIR}"
+            ./scripts/cleanup_compose_releases.sh
+            available_kib="$(df -Pk "${APP_DIR}" | awk 'NR == 2 {print $4}')"
+            if [ "${available_kib:-0}" -lt 5242880 ]; then
+              echo "Less than 5 GiB remains after safe Docker cleanup; refusing to start a new build." >&2
+              exit 1
+            fi
             VELA_PREVIEW=false
             if [ -f deploy/.env ] && grep -qx 'VITE_ENABLE_VELA_PREVIEW=true' deploy/.env; then
               VELA_PREVIEW=true

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -14,12 +15,46 @@ from scripts.reload_postgres_market_data_date import (
     _filter_reload_tickers,
     _load_active_metadata_tickers,
     _minimum_replacement_row_count,
+    _normalize_replacement_rows,
     _replace_trade_date_atomically,
     _validate_replacement_rows,
 )
 
 
 class ReloadPostgresMarketDataDateTests(unittest.TestCase):
+    def test_normalize_replacement_rows_repairs_the_afg_rounding_discrepancy(self) -> None:
+        row = ("AFG", dt.date(2026, 10, 13), 145.0, 144.990005, 143.154999, 144.610001, 144.610001, 270_142, 0.0, 1.0, "yfinance", dt.datetime.now(dt.timezone.utc))
+
+        rows, adjustments = _normalize_replacement_rows([row])
+
+        self.assertEqual(rows[0][3], 145.0)
+        self.assertEqual(rows[0][10], "yfinance")
+        self.assertEqual(rows[0][7], 270_142)
+        self.assertEqual(len(adjustments), 1)
+        _validate_replacement_rows(rows, dt.date(2026, 10, 13), minimum_row_count=1)
+
+    def test_normalize_replacement_rows_repairs_a_tiny_low_rounding_discrepancy(self) -> None:
+        row = ("AAPL", dt.date(2026, 10, 13), 145.0, 146.0, 144.610005, 144.61, 144.61, 270_142, 0.0, 1.0, "yfinance", dt.datetime.now(dt.timezone.utc))
+
+        rows, adjustments = _normalize_replacement_rows([row])
+
+        self.assertEqual(rows[0][4], 144.61)
+        self.assertEqual(len(adjustments), 1)
+
+    def test_normalize_replacement_rows_rejects_materially_invalid_envelope(self) -> None:
+        row = ("AFG", dt.date(2026, 10, 13), 145.0, 144.98, 143.15, 144.61, 144.61, 270_142, 0.0, 1.0, "yfinance", dt.datetime.now(dt.timezone.utc))
+
+        with self.assertRaisesRegex(RuntimeError, "AFG"):
+            _normalize_replacement_rows([row])
+
+    def test_validate_replacement_rows_rejects_non_finite_values(self) -> None:
+        for invalid_high in (math.nan, math.inf):
+            with self.subTest(invalid_high=invalid_high):
+                row = ("AAPL", dt.date(2026, 10, 9), 200.0, invalid_high, 198.0, 204.0, 204.0, 10_000, 0.0, 1.0, "massive", dt.datetime.now(dt.timezone.utc))
+
+                with self.assertRaisesRegex(RuntimeError, "AAPL"):
+                    _validate_replacement_rows([row], dt.date(2026, 10, 9), minimum_row_count=1)
+
     def test_minimum_replacement_coverage_uses_eligible_universe_not_partial_existing_rows(self) -> None:
         self.assertEqual(_minimum_replacement_row_count(3_789), 3_411)
 
