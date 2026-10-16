@@ -1101,6 +1101,7 @@ class WatchlistService:
         scanner_groups: list[list[str]] | None = None,
         daily_rs_min: float | None = None,
         daily_rs_max: float | None = None,
+        section: str = "all",
     ) -> dict[str, Any]:
         """Read the latest completed Top Hits snapshot without doing enrichment.
 
@@ -1111,7 +1112,7 @@ class WatchlistService:
         target_date = _latest_completed_trading_day(reference_now)
         persisted = self._load_latest_persisted_scanner_top_hits_payload()
         if persisted is None:
-            return _filter_scanner_top_hits_payload({
+            persisted = {
                 "generated_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
                 "reference_now_new_york": reference_now.astimezone(_NEW_YORK_TZ).isoformat(),
                 "target_trading_date": target_date.isoformat(),
@@ -1134,19 +1135,29 @@ class WatchlistService:
                     "freshness": "missing",
                     "refresh_status": "idle",
                 },
-            }, scanner_groups, daily_rs_min, daily_rs_max)
-        snapshot_date = _coerce_optional_date(persisted.get("target_trading_date"))
-        age_seconds = _snapshot_age_seconds(persisted.get("snapshot_generated_at"), reference_now)
-        refresh_state = _load_scanner_top_hits_refresh_state(self.repository.artifacts_dir / "status")
-        persisted["snapshot"] = {
-            "snapshot_run_id": persisted.pop("_snapshot_run_id", None),
-            "snapshot_generated_at": persisted.pop("_snapshot_generated_at", persisted.get("generated_at") or None),
-            "source_data_as_of": persisted.get("target_trading_date") or None,
-            "age_seconds": age_seconds,
-            "freshness": "fresh" if snapshot_date == target_date else "stale",
-            **refresh_state,
-        }
-        return _filter_scanner_top_hits_payload(persisted, scanner_groups, daily_rs_min, daily_rs_max)
+            }
+        else:
+            snapshot_date = _coerce_optional_date(persisted.get("target_trading_date"))
+            age_seconds = _snapshot_age_seconds(persisted.get("snapshot_generated_at"), reference_now)
+            refresh_state = _load_scanner_top_hits_refresh_state(self.repository.artifacts_dir / "status")
+            persisted["snapshot"] = {
+                "snapshot_run_id": persisted.pop("_snapshot_run_id", None),
+                "snapshot_generated_at": persisted.pop("_snapshot_generated_at", persisted.get("generated_at") or None),
+                "source_data_as_of": persisted.get("target_trading_date") or None,
+                "age_seconds": age_seconds,
+                "freshness": "fresh" if snapshot_date == target_date else "stale",
+                **refresh_state,
+            }
+        payload = _filter_scanner_top_hits_payload(persisted, scanner_groups, daily_rs_min, daily_rs_max)
+        if section == "list":
+            payload = {key: value for key, value in payload.items() if key != "guru_board"}
+            payload["rows"] = [_project_scanner_top_hit_list_row(row) for row in payload.get("rows", []) if isinstance(row, dict)]
+        elif section == "guru":
+            guru_board = payload.get("guru_board") or {}
+            payload = {key: value for key, value in payload.items() if key not in {"rows", "guru_board"}}
+            payload["rows"] = []
+            payload["guru_board"] = guru_board
+        return payload
 
     def get_scanner_top_hits_snapshot_refresh_state(
         self,
@@ -1756,8 +1767,10 @@ class WatchlistService:
                 self.repository.load_watchlist(str(previous_meta.get("stem") or ""))
             )
         ) if previous_meta else set()
-        entries = self._enrich_entries(self._filter_excluded_entries(self.repository.load_watchlist(stem)))
-        self._attach_entry_latest_rating_snapshots(entries)
+        entries = self._enrich_entries(
+            self._filter_excluded_entries(self.repository.load_watchlist(stem)),
+            use_live_universe=False,
+        )
         self._attach_entry_technical_indicator_ratings(entries)
         has_previous_scan = previous_meta is not None
         if has_previous_scan:
@@ -2888,20 +2901,32 @@ class WatchlistService:
         benchmark_frame = _download_history_frame(ticker=benchmark_ticker, start_date=start_date, end_date=end_date)
         return ticker_frame, benchmark_frame, "internet"
 
-    def _enrich_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        universe_index = self._get_universe_index()
+    def _enrich_entries(self, entries: list[dict[str, Any]], *, use_live_universe: bool = True) -> list[dict[str, Any]]:
+        repaired_entries = [repair_shifted_finviz_row(dict(raw_entry)) for raw_entry in entries]
+        if use_live_universe:
+            metadata_map = self._get_universe_index()
+        elif self.database_url:
+            try:
+                metadata_map = load_ticker_metadata_map(
+                    [normalize_ticker_symbol(str(entry.get("ticker", ""))) for entry in repaired_entries],
+                    database_url=self.database_url,
+                )
+            except Exception as exc:
+                logger.warning("Watchlist database metadata unavailable; preserving scanner entry metadata: %s", exc)
+                metadata_map = {}
+        else:
+            metadata_map = {}
         overrides = load_ticker_theme_overrides()
         theme_catalog = self._get_theme_catalog()
-        repaired_entries = [repair_shifted_finviz_row(dict(raw_entry)) for raw_entry in entries]
         latest_market_map = self._load_latest_market_snapshot_map(repaired_entries)
         enriched: list[dict[str, Any]] = []
         for raw_entry in repaired_entries:
             entry = dict(raw_entry)
             ticker = normalize_ticker_symbol(str(entry.get("ticker", "")))
-            metadata = universe_index.get(ticker)
-            sector = _coalesce_sector(entry.get("sector"), metadata.sector if metadata else None)
-            industry = _coalesce_text(entry.get("industry"), metadata.industry if metadata else None)
-            exchange = _coalesce_text(entry.get("exchange"), metadata.exchange if metadata else None)
+            metadata = metadata_map.get(ticker)
+            sector = _coalesce_sector(entry.get("sector"), _metadata_field(metadata, "sector"))
+            industry = _coalesce_text(entry.get("industry"), _metadata_field(metadata, "industry"))
+            exchange = _coalesce_text(entry.get("exchange"), _metadata_field(metadata, "exchange"))
             theme_tags = _normalize_theme_tags(entry.get("theme_tags"))
             if not theme_tags and ticker:
                 theme_tags = infer_theme_tags_for_ticker(
@@ -5728,6 +5753,10 @@ def _coalesce_text(*values: object) -> str | None:
     return None
 
 
+def _metadata_field(metadata: Any, field: str) -> Any:
+    return metadata.get(field) if isinstance(metadata, dict) else getattr(metadata, field, None)
+
+
 def _coalesce_sector(*values: object) -> str | None:
     for value in values:
         text = str(value or "").strip()
@@ -5757,6 +5786,25 @@ def _sanitize_scanner_top_hit_sectors(rows: list[dict[str, Any]]) -> None:
     for row in rows:
         if "sector" in row:
             row["sector"] = _coalesce_sector(row.get("sector")) or ""
+
+
+_SCANNER_TOP_HIT_LIST_FIELDS = (
+    "ticker", "company", "sector", "industry", "market_cap", "day_close", "change_pct",
+    "change_from_52wk_low_pct", "bollinger_band_status", "perf_year_pct", "perf_ytd_pct",
+    "atr_to_sma50", "earnings_days", "rmv", "pullback_quality", "etf_count", "funds", "top_hit",
+    "rs_rating", "rs_evidence_score", "rs_evidence_max_score", "rs_days_21d", "rs_days_21d_pct",
+    "rs_phase_active_days", "rs_phase_state", "rs_phase_badge_label", "up_on_down_days_21d",
+    "up_on_down_days_21d_pct", "relative_strength_evidence", "ta_rating", "fa_rating",
+    "fa_current_rank", "technical_indicator_ratings", "scanner_count", "scanner_ids", "scanner_labels", "scanners",
+    "sector_momentum", "position_action", "relative_trend_strength", "strike_zone", "stage_analysis",
+    "position_bucket", "daily_rs_rating", "weekly_rs_rating", "rs_rating_3m",
+    "rs_rating_6m", "growth_acceleration_score", "growth_acceleration_label", "growth_acceleration_pass_count",
+    "canslim_score", "canslim_max_score", "vcp_score", "vcp_rating",
+)
+
+
+def _project_scanner_top_hit_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {field: row[field] for field in _SCANNER_TOP_HIT_LIST_FIELDS if field in row}
 
 
 def _filter_scanner_top_hits_payload(

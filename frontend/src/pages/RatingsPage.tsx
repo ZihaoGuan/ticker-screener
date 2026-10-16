@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { fetchJson } from "../lib/api";
 import { formatCount, formatLocalDate } from "../lib/format";
@@ -10,6 +11,8 @@ import type {
   TopTechnicalIndicatorRatingsResponse,
   TopTechnicalRatingEntry,
   TopTechnicalRatingsResponse,
+  MyPicksContextResponse,
+  MyPickRow,
 } from "../lib/types";
 
 type RatingsMode = "fundamental" | "technical" | "technical-indicator";
@@ -125,6 +128,8 @@ function rankChangeTitle(row: Pick<TopRatingEntry, "current_rank" | "previous_ra
 }
 
 export function RatingsPage() {
+  const auth = useAuth();
+  const canManageMyPicks = auth.hasCapability("manage_exclusions");
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedMode = searchParams.get("mode");
   const requestedLimitParam = searchParams.get("limit");
@@ -142,6 +147,88 @@ export function RatingsPage() {
   const [notice, setNotice] = useState("");
   const [announcement, setAnnouncement] = useState("");
   const [retryKey, setRetryKey] = useState(0);
+  const [myPickTickers, setMyPickTickers] = useState<Set<string>>(new Set());
+  const [myPicksLoading, setMyPicksLoading] = useState(false);
+  const [myPicksLoaded, setMyPicksLoaded] = useState(false);
+  const [myPicksError, setMyPicksError] = useState("");
+  const [myPicksRetryKey, setMyPicksRetryKey] = useState(0);
+  const [savingMyPickTickers, setSavingMyPickTickers] = useState<Record<string, boolean>>({});
+  const [myPicksSuccess, setMyPicksSuccess] = useState("");
+  const [myPicksAddError, setMyPicksAddError] = useState("");
+
+  useEffect(() => {
+    if (!canManageMyPicks) {
+      setMyPickTickers(new Set());
+      setMyPicksError("");
+      setMyPicksLoading(false);
+      setMyPicksLoaded(false);
+      return;
+    }
+    let ignore = false;
+    setMyPicksLoading(true);
+    setMyPicksLoaded(false);
+    setMyPicksError("");
+    void fetchJson<MyPicksContextResponse>("/api/admin/my-picks")
+      .then((response) => {
+        if (!ignore) {
+          setMyPickTickers(new Set(response.rows.map((row) => row.ticker.toUpperCase())));
+          setMyPicksLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!ignore) setMyPicksError("My Picks membership couldn't be loaded. Retry before changing membership.");
+      })
+      .finally(() => {
+        if (!ignore) setMyPicksLoading(false);
+      });
+    return () => { ignore = true; };
+  }, [canManageMyPicks, myPicksRetryKey]);
+
+  async function addToMyPicks(ticker: string) {
+    const normalizedTicker = ticker.trim().toUpperCase();
+    if (!canManageMyPicks || myPicksLoading || myPicksError || myPickTickers.has(normalizedTicker) || savingMyPickTickers[normalizedTicker]) return;
+    setSavingMyPickTickers((current) => ({ ...current, [normalizedTicker]: true }));
+    setMyPicksSuccess("");
+    setMyPicksAddError("");
+    try {
+      await fetchJson<{ ok: boolean; pick: MyPickRow }>("/api/admin/my-picks", {
+        method: "POST",
+        body: JSON.stringify({ ticker: normalizedTicker, notes: "Added from top ratings." }),
+      });
+      setMyPickTickers((current) => new Set([...current, normalizedTicker]));
+      setMyPicksSuccess(`${normalizedTicker} added to My Picks.`);
+    } catch (error) {
+      setMyPicksAddError(error instanceof Error ? error.message : `Couldn't add ${normalizedTicker} to My Picks.`);
+    } finally {
+      setSavingMyPickTickers((current) => {
+        const next = { ...current };
+        delete next[normalizedTicker];
+        return next;
+      });
+    }
+  }
+
+  function renderTickerCell(ticker: string) {
+    const normalizedTicker = ticker.toUpperCase();
+    const selected = myPickTickers.has(normalizedTicker);
+    const saving = Boolean(savingMyPickTickers[normalizedTicker]);
+    const unavailable = !myPicksLoaded || myPicksLoading || Boolean(myPicksError);
+    return <div className="ratings-ticker-cell">
+      {canManageMyPicks && myPicksLoaded ? <button
+        className={`ratings-pick-button${selected ? " is-selected" : ""}`}
+        type="button"
+        aria-label={selected ? `${ticker} is in My Picks` : saving ? `Adding ${ticker} to My Picks` : `Add ${ticker} to My Picks`}
+        aria-pressed={selected}
+        title={selected ? "In My Picks" : "Add to My Picks"}
+        disabled={selected || saving || unavailable}
+        onClick={() => void addToMyPicks(ticker)}
+      >
+        <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false"><path d="m8 1.4 2 4.05 4.47.65-3.24 3.16.76 4.45L8 11.61l-3.99 2.1.76-4.45L1.53 6.1 6 5.45 8 1.4Z" /></svg>
+        <span className="visually-hidden">{selected ? "In My Picks" : saving ? "Adding to My Picks" : "Add to My Picks"}</span>
+      </button> : null}
+      <Link className="ratings-ticker-link" to={`/charts?ticker=${encodeURIComponent(ticker)}`}>{ticker}</Link>
+    </div>;
+  }
 
   useEffect(() => {
     if (
@@ -362,6 +449,11 @@ export function RatingsPage() {
           </div>
         </div>
         <span className="visually-hidden" role="status" aria-live="polite">{announcement}</span>
+        {canManageMyPicks ? <>
+          {myPicksSuccess ? <div className="ratings-picks-notice" role="status" aria-live="polite">{myPicksSuccess}</div> : null}
+          {myPicksAddError ? <div className="ratings-picks-error" role="alert">{myPicksAddError}</div> : null}
+          {myPicksError ? <div className="ratings-picks-error" role="alert">{myPicksError} <button type="button" className="ghost-button" onClick={() => setMyPicksRetryKey((value) => value + 1)}>Retry</button></div> : myPicksLoading ? <div className="ratings-picks-loading" role="status">Loading My Picks membership…</div> : null}
+        </> : null}
         {isLoading && rows.length === 0 ? <LoadingBlock label={mode === "technical" ? "Loading technical leaders…" : mode === "technical-indicator" ? "Loading multi-timeframe signals…" : "Loading fundamental leaders…"} /> : null}
         {isRefreshing ? <div className="ratings-refreshing" role="status">Updating leaderboard… Current results remain visible until the refresh finishes.</div> : null}
         {!isLoading && rows.length === 0 && !notice ? (
@@ -399,7 +491,7 @@ export function RatingsPage() {
                   <tr key={`${row.ticker}-${row.as_of_date}`}>
                     <td data-label="#">{row.current_rank ?? index + 1}</td>
                     <td data-label="Ticker">
-                      <Link className="ratings-ticker-link" to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
+                      {renderTickerCell(row.ticker)}
                     </td>
                     <td data-label="Sector / Industry">
                       {[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}
@@ -453,7 +545,7 @@ export function RatingsPage() {
                   <tr key={`${row.ticker}-${row.as_of_date}`}>
                     <td data-label="#">{row.current_rank ?? index + 1}</td>
                     <td data-label="Ticker">
-                      <Link className="ratings-ticker-link" to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
+                      {renderTickerCell(row.ticker)}
                     </td>
                     <td data-label="Sector / Industry">
                       {[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}
@@ -506,7 +598,7 @@ export function RatingsPage() {
                   <tr key={`${row.ticker}-${row.as_of_date}`}>
                     <td data-label="#">{row.current_rank ?? index + 1}</td>
                     <td data-label="Ticker">
-                      <Link className="ratings-ticker-link" to={`/charts?ticker=${encodeURIComponent(row.ticker)}`}>{row.ticker}</Link>
+                      {renderTickerCell(row.ticker)}
                     </td>
                     <td data-label="Sector / Industry">
                       {[row.sector, row.industry].filter(Boolean).join(" / ") || "-"}

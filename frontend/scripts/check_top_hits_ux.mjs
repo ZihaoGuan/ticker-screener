@@ -9,17 +9,30 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   const scanners = Array.from({ length: 12 }, (_, i) => ({ id: `scanner_${i}`, label: `Scanner ${String(i).padStart(2, '0')}` }));
   const row = { ticker: 'TEST', company: 'Example Company', sector: 'Technology', industry: 'Software', scanner_count: scanners.length, scanners, scanner_labels: scanners.map(s => s.label) };
+  const topHitsRequests = { list: 0, guru: 0 };
   let admin = true;
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    const section = new URL(route.request().url()).searchParams.get('section') || 'all';
+    if (path === '/api/scanner-board/top-hits' && section === 'guru') topHitsRequests.guru += 1;
+    if (path === '/api/scanner-board/top-hits' && section === 'list') topHitsRequests.list += 1;
     const body = path === '/api/auth/me' ? { authenticated: admin, role: admin ? 'admin' : 'visitor', user: null, capabilities: admin ? ['view_results', 'manage_exclusions'] : ['view_results'] }
-      : path === '/api/scanner-board/top-hits' ? { rows: [row, { ...row, ticker: 'OTHER', scanners: scanners.slice(0, 2), scanner_count: 2 }], total_unique_tickers: 2, total_live_scanners: 12 }
+      : path === '/api/scanner-board/top-hits' ? (() => {
+        if (section === 'guru') {
+          return { rows: [], guru_board: { definitions: [], total_unique_tickers: 0, total_scanner_matches: 0, confluence_ticker_count: 0, rows: [] } };
+        }
+        return { rows: [row, { ...row, ticker: 'OTHER', scanners: scanners.slice(0, 2), scanner_count: 2 }], total_unique_tickers: 2, total_live_scanners: 12 };
+      })()
       : { rows: [] };
     await route.fulfill({ json: body });
   });
+  const listResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/scanner-board/top-hits' && new URL(response.url()).searchParams.get('section') === 'list');
   await page.goto(process.env.TOP_HITS_URL || 'http://127.0.0.1:5173/scanner/top-hits');
+  await listResponse;
   const cells = page.locator('td[data-label="Scanners"]');
-  await page.getByText('No tickers match current filters.', { exact: true }).waitFor();
+  await page.getByText('Loading scanner top hits…', { exact: true }).waitFor({ state: 'hidden' });
+  const initialListRequests = topHitsRequests.list;
+  assert.ok(initialListRequests >= 1 && initialListRequests <= 2 && topHitsRequests.guru === 0, 'Initial view fetches only the compact list section');
   assert.match(
     await page.getByLabel('Scanner filter expression').innerText(),
     /Qullamaggie[\s\S]*Weekly Candidate Pool[\s\S]*kai_s2[\s\S]*AND Group 2[\s\S]*one_year_winners/i,
@@ -80,7 +93,18 @@ try {
   await cells.first().waitFor();
   await page.getByLabel('My momentum', { exact: true }).check();
   await page.getByRole('button', { name: 'Charts', exact: true }).click();
-  assert.match(await page.locator('.scanner-top-hit-chart-card').first().innerText(), /My momentum/i);
+  await page.locator('.scanner-top-hit-chart-card .scanner-chart-card-details summary').first().click();
+  assert.match(await page.locator('.scanner-top-hit-chart-card .scanner-chart-card-details').first().innerText(), /My momentum/i);
+  await page.getByRole('button', { name: 'List', exact: true }).click();
+  const guruResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/scanner-board/top-hits' && new URL(response.url()).searchParams.get('section') === 'guru');
+  await page.getByRole('button', { name: 'Guru Board', exact: true }).click();
+  await guruResponse;
+  await page.getByText('Loading Guru Board data…', { exact: true }).waitFor({ state: 'hidden' });
+  const guruRequests = topHitsRequests.guru;
+  assert.ok(guruRequests >= 1, 'Guru section loads only after selecting the view');
+  await page.getByRole('button', { name: 'List', exact: true }).click();
+  await page.getByRole('button', { name: 'Guru Board', exact: true }).click();
+  assert.equal(topHitsRequests.guru, guruRequests, 'Loaded Guru section stays cached when switching views');
   await page.getByRole('button', { name: 'List', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Mobile page fits viewport');
@@ -96,5 +120,5 @@ try {
   await page.locator('.scanner-result-table-wrap').evaluate(el => { el.scrollLeft = 800; });
   assert.ok(Math.abs((await pinned.boundingBox()).x - visitorBefore.x) < 2, 'Visitor ticker stays pinned without pick column');
   assert.deepEqual(errors, []);
-  console.log('Top Hits UX passed: grouped filters, saved default preset, rename persistence, search, reset, chart badges, desktop pinning, visitor layout, mobile width.');
+  console.log('Top Hits UX passed: grouped filters, lazy list/Guru requests, saved default preset, rename persistence, search, reset, chart badges, desktop pinning, visitor layout, mobile width.');
 } finally { await browser.close(); }

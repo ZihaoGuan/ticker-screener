@@ -146,6 +146,10 @@ export function ScannerTopHitsPage() {
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [payload, setPayload] = useState<ScannerTopHitsResponse | null>(null);
+  const [guruPayload, setGuruPayload] = useState<ScannerTopHitsResponse | null>(null);
+  const [guruLoading, setGuruLoading] = useState(false);
+  const [guruNotice, setGuruNotice] = useState("");
+  const [guruReloadKey, setGuruReloadKey] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [notice, setNotice] = useState("");
@@ -278,7 +282,7 @@ export function ScannerTopHitsPage() {
     const controller = new AbortController();
     setIsLoading(true);
     setNotice("");
-    void fetchJson<ScannerTopHitsResponse>("/api/scanner-board/top-hits", { signal: controller.signal })
+    void fetchJson<ScannerTopHitsResponse>("/api/scanner-board/top-hits?section=list", { signal: controller.signal })
       .then(setPayload)
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -289,6 +293,22 @@ export function ScannerTopHitsPage() {
       });
     return () => controller.abort();
   }, [reloadKey]);
+
+  useEffect(() => {
+    if (!(viewMode === "guru" || viewMode === "sectors" || viewMode === "position") || guruPayload || guruNotice) return;
+    const controller = new AbortController();
+    setGuruLoading(true);
+    setGuruNotice("");
+    void fetchJson<ScannerTopHitsResponse>("/api/scanner-board/top-hits?section=guru", { signal: controller.signal })
+      .then(setGuruPayload)
+      .catch((error) => {
+        if (!controller.signal.aborted) setGuruNotice(error instanceof Error ? error.message : "Failed to load Guru Board data.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setGuruLoading(false);
+      });
+    return () => controller.abort();
+  }, [guruNotice, guruPayload, guruReloadKey, viewMode]);
 
   useEffect(() => {
     if (viewMode !== "etf-portfolios" || etfPayload || etfLoading) return;
@@ -324,7 +344,7 @@ export function ScannerTopHitsPage() {
   }, [canManageMyPicks]);
 
   const rows = payload?.rows ?? [];
-  const guruBoard = payload?.guru_board;
+  const guruBoard = guruPayload?.guru_board;
   const snapshot = payload?.snapshot;
   const sectors = useMemo(
     () => Array.from(new Set(rows.map((row) => row.sector).filter((sector) => sector && sector !== "Unknown sector"))).sort(),
@@ -987,7 +1007,9 @@ export function ScannerTopHitsPage() {
         {isLoading && !payload ? <LoadingBlock label="Loading scanner top hits…" /> : null}
         {notice ? <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></p> : null}
         {!notice && myPicksNotice ? <p className="panel-copy earnings-console-note">{myPicksNotice}</p> : null}
-        {!isLoading && !notice && !etfLoading && viewMode !== "etf-portfolios" && ((viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
+        {!isLoading && !notice && !guruLoading && !guruNotice && !etfLoading && viewMode !== "etf-portfolios" && ((viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
+        {guruLoading && (viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? <LoadingBlock label="Loading Guru Board data…" /> : null}
+        {guruNotice && (viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? <p className="panel-copy" role="alert">{guruNotice} <button className="ghost-button" type="button" onClick={() => { setGuruNotice(""); setGuruPayload(null); setGuruReloadKey((value) => value + 1); }}>Retry</button></p> : null}
         {viewMode === "etf-portfolios" ? (
           <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
             <MomentumEtfPortfolioBoard

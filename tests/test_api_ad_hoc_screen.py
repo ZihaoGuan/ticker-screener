@@ -519,9 +519,11 @@ class _FakeWatchlistService:
         scanner_groups=None,
         daily_rs_min=None,
         daily_rs_max=None,
+        section="all",
     ):
         return {
             "rows": [],
+            "section": section,
             "scanner_groups": scanner_groups or [],
             "daily_rs_range": {"min": daily_rs_min, "max": daily_rs_max},
         }
@@ -1318,6 +1320,11 @@ class ApiAdHocScreenTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["scanner_groups"], [["a", "b", "c"], ["d"]])
         self.assertEqual(response.json()["daily_rs_range"], {"min": 90.0, "max": 97.0})
+
+    def test_top_hits_accepts_section_projection(self) -> None:
+        response = self.client.get("/api/scanner-board/top-hits?section=guru")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["section"], "guru")
 
     def test_anonymous_can_get_scanner_watchlist_detail(self) -> None:
         response = self.client.get("/api/watchlists/rs_new_high_before_price_2026-06-12")

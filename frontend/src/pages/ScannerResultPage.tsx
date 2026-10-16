@@ -6,20 +6,7 @@ import { ScannerMiniChart } from "../components/ScannerMiniChart";
 import { fetchJson } from "../lib/api";
 import { buildChartCandles } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime } from "../lib/format";
-import type {
-  CandlePoint,
-  ScannerBoardCard,
-  ScannerBoardResponse,
-  TechnicalIndicatorRatingCell,
-  TopRatingEntry,
-  TopTechnicalIndicatorRatingEntry,
-  TopTechnicalIndicatorRatingsResponse,
-  TopRatingsResponse,
-  TopTechnicalRatingEntry,
-  TopTechnicalRatingsResponse,
-  WatchlistChartResponse,
-  WatchlistDetailResponse,
-} from "../lib/types";
+import type { CandlePoint, ScannerBoardCard, ScannerBoardResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse, WatchlistDetailResponse } from "../lib/types";
 
 type SortKey = "als" | "ta" | "fa" | "ars" | "rsPhaseDays" | "ticker" | "company" | "sector" | "volume" | "change";
 type SortDirection = "asc" | "desc";
@@ -67,7 +54,6 @@ type TargetDetails = {
   bearTarget2HitDate: string;
 };
 
-const MAX_RATINGS_ROWS = 500;
 const LIST_PAGE_SIZE = 50;
 const CHART_PAGE_SIZE = 12;
 
@@ -76,10 +62,8 @@ export function ScannerResultPage() {
   const [board, setBoard] = useState<ScannerBoardResponse | null>(null);
   const [card, setCard] = useState<ScannerBoardCard | null>(null);
   const [detail, setDetail] = useState<WatchlistDetailResponse | null>(null);
-  const [fundamentalPayload, setFundamentalPayload] = useState<TopRatingsResponse | null>(null);
-  const [technicalPayload, setTechnicalPayload] = useState<TopTechnicalRatingsResponse | null>(null);
-  const [technicalIndicatorPayload, setTechnicalIndicatorPayload] = useState<TopTechnicalIndicatorRatingsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [sectorFilter, setSectorFilter] = useState("all");
@@ -131,9 +115,6 @@ export function ScannerResultPage() {
         setBoard(null);
         setCard(null);
         setDetail(null);
-        setFundamentalPayload(null);
-        setTechnicalPayload(null);
-        setTechnicalIndicatorPayload(null);
         setNotice(error instanceof Error ? error.message : "Failed to load scanner list.");
       } finally {
         if (!ignore) {
@@ -146,53 +127,11 @@ export function ScannerResultPage() {
     return () => {
       ignore = true;
     };
-  }, [scannerId]);
-
-  useEffect(() => {
-    let ignore = false;
-
-    void Promise.all([
-      fetchJson<TopRatingsResponse>(`/api/ratings/top?limit=${MAX_RATINGS_ROWS}`),
-      fetchJson<TopTechnicalRatingsResponse>(`/api/ratings/technical/top?limit=${MAX_RATINGS_ROWS}`),
-      fetchJson<TopTechnicalIndicatorRatingsResponse>(`/api/ratings/technical-indicator/top?limit=${MAX_RATINGS_ROWS}`),
-    ])
-      .then(([fundamentalRows, technicalRows, technicalIndicatorRows]) => {
-        if (ignore) {
-          return;
-        }
-        setFundamentalPayload(fundamentalRows);
-        setTechnicalPayload(technicalRows);
-        setTechnicalIndicatorPayload(technicalIndicatorRows);
-      })
-      .catch(() => {
-        if (ignore) {
-          return;
-        }
-        setFundamentalPayload(null);
-        setTechnicalPayload(null);
-        setTechnicalIndicatorPayload(null);
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
-
-  const fundamentalMap = useMemo(() => {
-    return new Map((fundamentalPayload?.rows ?? []).map((row) => [row.ticker.toUpperCase(), row] satisfies [string, TopRatingEntry]));
-  }, [fundamentalPayload?.rows]);
-
-  const technicalMap = useMemo(() => {
-    return new Map((technicalPayload?.rows ?? []).map((row) => [row.ticker.toUpperCase(), row] satisfies [string, TopTechnicalRatingEntry]));
-  }, [technicalPayload?.rows]);
-
-  const technicalIndicatorMap = useMemo(() => {
-    return new Map((technicalIndicatorPayload?.rows ?? []).map((row) => [row.ticker.toUpperCase(), row] satisfies [string, TopTechnicalIndicatorRatingEntry]));
-  }, [technicalIndicatorPayload?.rows]);
+  }, [scannerId, reloadKey]);
 
   const rows = useMemo(() => {
-    return (detail?.entries ?? []).map((entry) => buildScannerRow(entry, card?.stem ?? "", fundamentalMap, technicalMap, technicalIndicatorMap));
-  }, [card?.stem, detail?.entries, fundamentalMap, technicalMap, technicalIndicatorMap]);
+    return (detail?.entries ?? []).map((entry) => buildScannerRow(entry, card?.stem ?? ""));
+  }, [card?.stem, detail?.entries]);
 
   const newTickerCount = useMemo(() => rows.filter((row) => row.isNew).length, [rows]);
 
@@ -370,13 +309,15 @@ export function ScannerResultPage() {
             <span className="scanner-result-kicker">Precision Utility</span>
             <h1>{card?.label ?? "Scanner Detail"}</h1>
           </div>
-          <span className={`scanner-result-status${rows.length > 0 ? " is-live" : ""}`}>{rows.length > 0 ? "Pattern Detected" : "No Active Hits"}</span>
+          <span className={`scanner-result-status${!isLoading && !notice && rows.length > 0 ? " is-live" : ""}`} aria-live="polite">
+            {isLoading ? "Loading signals…" : notice ? "Unable to load signals" : rows.length > 0 ? "Persisted signals" : "No Active Hits"}
+          </span>
         </div>
-        <p className="scanner-result-copy">{card?.description ?? "Open scanner to review latest persisted result list."}</p>
+        <p className="scanner-result-copy">{card?.description ?? "Review the latest persisted scanner signals."} Ratings use a 0–100 scale unless marked TA or FA (0–10); ALS is the mean of available underlying ratings.</p>
         <div className="scanner-result-metrics">
           <div className="scanner-result-metric">
-            <span className="eyebrow">Target Trading Day</span>
-            <strong>{formatLocalDate(board?.target_trading_date)}</strong>
+            <span className="eyebrow">Data through</span>
+            <strong>{isLoading ? "Loading…" : formatLocalDate(board?.target_trading_date)}</strong>
           </div>
           <div className="scanner-result-metric">
             <span className="eyebrow">Captured</span>
@@ -384,7 +325,7 @@ export function ScannerResultPage() {
           </div>
           <div className="scanner-result-metric">
             <span className="eyebrow">Signals</span>
-            <strong>{formatCount(filteredRows.length)}</strong>
+            <strong>{isLoading || notice ? "--" : formatCount(filteredRows.length)}</strong>
           </div>
           <div className="scanner-result-metric">
             <span className="eyebrow">New Vs Prev</span>
@@ -431,6 +372,7 @@ export function ScannerResultPage() {
               type="button"
               className={`scanner-result-view-chip${viewMode === "charts" ? " is-active" : ""}`}
               onClick={() => setViewMode("charts")}
+              aria-pressed={viewMode === "charts"}
             >
               Charts
             </button>
@@ -438,6 +380,7 @@ export function ScannerResultPage() {
               type="button"
               className={`scanner-result-view-chip${viewMode === "list" ? " is-active" : ""}`}
               onClick={() => setViewMode("list")}
+              aria-pressed={viewMode === "list"}
             >
               List
             </button>
@@ -449,7 +392,7 @@ export function ScannerResultPage() {
         <div className="scanner-result-toolbar-left">
           <strong>Showing {formatCount(filteredRows.length)} results</strong>
           <span>View: {viewMode === "charts" ? "Charts" : "List"}</span>
-          <span>Sorted by: {labelForSort(sortBy)} ({sortDirection})</span>
+          <span>Sorted by: {labelForSort(sortBy)} ({sortDirection === "asc" ? "ascending" : "descending"})</span>
           <span>Page {normalizedPage} / {formatCount(totalPages)}</span>
         </div>
         <div className="scanner-result-toolbar-right">
@@ -459,9 +402,9 @@ export function ScannerResultPage() {
         </div>
       </section>
 
-      <section className="scanner-result-table-shell panel">
+      <section className="scanner-result-table-shell panel" aria-live="polite" aria-busy={isLoading}>
         {isLoading ? <LoadingBlock label="Loading scanner result list…" /> : null}
-        {!isLoading && notice ? <p className="panel-copy">{notice}</p> : null}
+        {!isLoading && notice ? <div className="scanner-result-error" role="alert"><p className="panel-copy">{notice}</p><button className="ghost-button" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></div> : null}
         {!isLoading && !notice && filteredRows.length === 0 ? <p className="panel-copy">No tickers match current scanner filters.</p> : null}
         {!isLoading && filteredRows.length > 0 ? (
           <>
@@ -527,23 +470,14 @@ export function ScannerResultPage() {
                   <thead>
                     <tr>
                       <th>#</th>
-                      <th className="pinned-ticker">{renderSortHeader("Symbol", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                      <th>{renderSortHeader("Company", "company", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                      <th>{renderSortHeader("Sector", "sector", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                      <th>{renderSortHeader("Day Vol", "volume", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                      <th>{renderSortHeader("Change %", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                      <th>1Y %</th>
-                      <th>YTD %</th>
-                      <th>{renderSortHeader("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                      <th>1D</th>
-                      <th>1W</th>
-                      <th>{renderSortHeader("FA", "fa", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                      <th>CANSLIM</th>
-                      <th>Accel</th>
-                      <th>{renderSortHeader("ARS", "ars", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                      <th>{renderSortHeader("RS Phase", "rsPhaseDays", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
-                      <th>Daily RS</th>
-                      <th>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th className="pinned-ticker" aria-sort={sortBy === "ticker" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>{renderSortHeader("Symbol", "ticker", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th aria-sort={sortBy === "company" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>{renderSortHeader("Company", "company", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th aria-sort={sortBy === "sector" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>{renderSortHeader("Sector", "sector", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th aria-sort={sortBy === "volume" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>{renderSortHeader("Day Vol", "volume", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th aria-sort={sortBy === "change" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>{renderSortHeader("Change %", "change", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th aria-sort={sortBy === "ta" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>{renderSortHeader("TA", "ta", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th aria-sort={sortBy === "als" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>{renderSortHeader("ALS Score", "als", sortBy, sortDirection, setSortBy, setSortDirection)}</th>
+                      <th>More</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -571,24 +505,21 @@ export function ScannerResultPage() {
                         </td>
                         <td data-label="Day Vol">{formatVolume(row.dayVolume)}</td>
                         <td data-label="Change %">{renderChange(row.changePct)}</td>
-                        <td data-label="1Y %">{renderChange(row.perfYearPct)}</td>
-                        <td data-label="YTD %">{renderChange(row.perfYtdPct)}</td>
                         <td data-label="TA">
                           <span className={`scanner-score-pill ${toneForScore(row.taScore, 10)}`}>{formatTenPointScore(row.taScore)}</span>
                         </td>
-                        <td data-label="1D">{row.technicalIndicator1d || "--"}</td>
-                        <td data-label="1W">{row.technicalIndicator1w || "--"}</td>
-                        <td data-label="FA">
-                          <span className={`scanner-score-pill ${toneForScore(row.faScore, 10)}`}>{formatTenPointScore(row.faScore)}</span>
-                        </td>
-                        <td data-label="CANSLIM">{formatCanslimScore(row.canslimScore, row.canslimMaxScore)}</td>
-                        <td data-label="Accel">{formatAccelerationScore(row.accelScore, row.accelLabel)}</td>
-                        <td data-label="ARS">{formatPercentScore(row.arsScore)}</td>
-                        <td data-label="RS Phase">{row.rsPhaseBadgeLabel ? <span className={`scanner-score-pill ${rsPhaseBadgeClass(row.rsPhaseState)}`}>{row.rsPhaseBadgeLabel}</span> : formatPhaseDays(row.rsPhaseActiveDays)}</td>
-                        <td data-label="Daily RS">{formatPercentScore(row.dailyRsRating)}</td>
                         <td data-label="ALS Score" className="scanner-result-als-cell">
                           {formatIntegerScore(row.alsScore)}
                         </td>
+                        <td data-label="More"><details className="scanner-result-more"><summary>Advanced</summary><dl>
+                          <div><dt>1Y / YTD</dt><dd>{formatChangeValue(row.perfYearPct)} / {formatChangeValue(row.perfYtdPct)}</dd></div>
+                          <div><dt>FA</dt><dd>{formatTenPointScore(row.faScore)}</dd></div>
+                          <div><dt>1D / 1W indicators</dt><dd>{row.technicalIndicator1d || "--"} / {row.technicalIndicator1w || "--"}</dd></div>
+                          <div><dt>CANSLIM</dt><dd>{formatCanslimScore(row.canslimScore, row.canslimMaxScore)}</dd></div>
+                          <div><dt>Acceleration</dt><dd>{formatAccelerationScore(row.accelScore, row.accelLabel)}</dd></div>
+                          <div><dt>ARS</dt><dd>{formatPercentScore(row.arsScore)}</dd></div>
+                          <div><dt>RS phase / Daily RS</dt><dd>{row.rsPhaseBadgeLabel || formatPhaseDays(row.rsPhaseActiveDays)} / {formatPercentScore(row.dailyRsRating)}</dd></div>
+                        </dl></details></td>
                       </tr>
                     ))}
                   </tbody>
@@ -604,13 +535,6 @@ export function ScannerResultPage() {
             />
             <div className="scanner-result-footer">
               <span>Page {normalizedPage} shows {formatCount(pagedRows.length)} stocks</span>
-              <div className="scanner-result-preview-pills">
-                {pagedRows.slice(0, 5).map((row) => (
-                  <span key={`preview-${row.ticker}`} className="scanner-card-pill">
-                    {row.ticker}
-                  </span>
-                ))}
-              </div>
             </div>
           </>
         ) : null}
@@ -620,24 +544,15 @@ export function ScannerResultPage() {
         <div className="scanner-result-note-icon">i</div>
         <div>
           <h2>Scanner Logic Note</h2>
-          <p className="panel-copy">{topNote || "Scanner detail uses latest persisted watchlist plus latest rating tables when available."}</p>
+          <p className="panel-copy">{topNote || "Signals come from the latest persisted scanner run. TA and FA are technical and fundamental ratings on a 0–10 scale. ARS and Daily RS use 0–100; ALS averages available TA, FA, and ARS ratings. Use Advanced on each row for secondary measures."}</p>
         </div>
       </section>
     </div>
   );
 }
 
-function buildScannerRow(
-  entry: Record<string, unknown>,
-  stem: string,
-  fundamentalMap: Map<string, TopRatingEntry>,
-  technicalMap: Map<string, TopTechnicalRatingEntry>,
-  technicalIndicatorMap: Map<string, TopTechnicalIndicatorRatingEntry>,
-): ScannerRow {
+function buildScannerRow(entry: Record<string, unknown>, stem: string): ScannerRow {
   const ticker = String(entry.ticker ?? "").trim().toUpperCase();
-  const fundamental = fundamentalMap.get(ticker);
-  const technical = technicalMap.get(ticker);
-  const technicalIndicator = technicalIndicatorMap.get(ticker);
   const directPerfYear = typeof entry.perf_year_pct === "number" ? entry.perf_year_pct : null;
   const directPerfYtd = typeof entry.perf_ytd_pct === "number" ? entry.perf_ytd_pct : null;
   const directCanslimScore = typeof entry.canslim_score === "number" ? entry.canslim_score : null;
@@ -648,24 +563,24 @@ function buildScannerRow(
   const directDailyRsRating = typeof entry.daily_rs_rating === "number" ? entry.daily_rs_rating : null;
   const directAccelerationScore = typeof entry.growth_acceleration_score === "number" ? entry.growth_acceleration_score : typeof entry.acceleration_score === "number" ? entry.acceleration_score : null;
   const directAccelerationLabel = typeof entry.growth_acceleration_label === "string" ? entry.growth_acceleration_label : typeof entry.acceleration_label === "string" ? entry.acceleration_label : "";
-  const technicalOverall = directTechnicalOverall ?? technical?.overall_rating ?? null;
-  const fundamentalOverall = directFundamentalOverall ?? fundamental?.overall_rating ?? null;
-  const leadershipOverall = directLeadershipOverall ?? technical?.leadership_score ?? null;
+  const technicalOverall = directTechnicalOverall;
+  const fundamentalOverall = directFundamentalOverall;
+  const leadershipOverall = directLeadershipOverall;
   const directTechnicalIndicator = normalizeDirectTechnicalIndicatorRatings(entry.technical_indicator_ratings);
-  const dailyIndicator = directTechnicalIndicator["1d"] ?? technicalIndicator?.daily;
-  const weeklyIndicator = directTechnicalIndicator["1w"] ?? technicalIndicator?.weekly;
+  const dailyIndicator = directTechnicalIndicator["1d"];
+  const weeklyIndicator = directTechnicalIndicator["1w"];
   return {
     ticker,
     company: String(entry.company_name ?? ""),
-    sector: String(entry.sector ?? fundamental?.sector ?? "Unknown sector"),
-    industry: String(entry.industry ?? fundamental?.industry ?? ""),
+    sector: String(entry.sector ?? "Unknown sector"),
+    industry: String(entry.industry ?? ""),
     summary: String(entry.summary ?? ""),
     setupLabel: String(entry.setup_label ?? ""),
     chartHref: buildChartHref(ticker, stem),
     dayVolume: resolveDisplayVolume(entry),
     changePct: resolveDisplayChangePct(entry),
-    perfYearPct: directPerfYear ?? fundamental?.perf_year_pct ?? null,
-    perfYtdPct: directPerfYtd ?? fundamental?.perf_ytd_pct ?? null,
+    perfYearPct: directPerfYear,
+    perfYtdPct: directPerfYtd,
     canslimScore: directCanslimScore,
     canslimMaxScore: directCanslimMaxScore,
     accelScore: directAccelerationScore,
@@ -676,7 +591,7 @@ function buildScannerRow(
     rsPhaseActiveDays: resolveRsPhaseActiveDays(entry),
     rsPhaseBadgeLabel: resolveRsPhaseBadgeLabel(entry),
     rsPhaseState: String(entry.rs_phase_state ?? "").trim(),
-    dailyRsRating: directDailyRsRating ?? technical?.daily_rs_rating ?? null,
+    dailyRsRating: directDailyRsRating,
     alsScore: averagePresent([technicalOverall, fundamentalOverall, leadershipOverall]),
     technicalIndicator1d: dailyIndicator?.rating_label ?? "",
     technicalIndicator1w: weeklyIndicator?.rating_label ?? "",
@@ -883,6 +798,10 @@ function renderChange(value: number | null) {
       {value.toFixed(2)}%
     </span>
   );
+}
+
+function formatChangeValue(value: number | null) {
+  return value == null ? "--" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
 function formatPercentScore(value: number | null) {

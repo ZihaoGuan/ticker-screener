@@ -4610,6 +4610,70 @@ dialog.modal-backdrop:not([open]) {
   vertical-align: top;
 }
 
+.ratings-ticker-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ratings-pick-button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ratings-pick-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.ratings-pick-button:hover:not(:disabled),
+.ratings-pick-button:focus-visible {
+  color: var(--color-accent, #b9dd72);
+  border-color: currentColor;
+  outline: none;
+}
+
+.ratings-pick-button.is-selected {
+  color: var(--color-accent, #b9dd72);
+}
+
+.ratings-pick-button.is-selected svg {
+  fill: currentColor;
+}
+
+.ratings-pick-button:disabled:not(.is-selected) {
+  opacity: .45;
+  cursor: wait;
+}
+
+.ratings-picks-error,
+.ratings-picks-loading,
+.ratings-picks-notice {
+  padding: 8px 0;
+  color: var(--color-muted);
+  font-size: .85rem;
+}
+
+.ratings-picks-notice {
+  color: var(--color-accent, #b9dd72);
+}
+
+.ratings-picks-error {
+  color: var(--color-danger, #f08b86);
+}
+
 .ratings-table th:first-child,
 .ratings-table td:first-child {
   background: var(--color-surface);
@@ -6154,6 +6218,25 @@ dialog.modal-backdrop:not([open]) {
   flex-wrap: wrap;
 }
 
+.scanner-result-more summary { cursor: pointer; color: #fbbf24; font-weight: 700; }
+.scanner-result-more dl { display: grid; gap: 6px; min-width: 220px; margin: 8px 0 0; }
+.scanner-result-more dl div { display: flex; justify-content: space-between; gap: 12px; }
+.scanner-result-more dt { color: #a1a1aa; }
+.scanner-result-more dd { margin: 0; text-align: right; }
+.scanner-result-error { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  .scanner-result-table-wrap { overflow-x: visible; }
+  .scanner-result-table { display: block; width: 100%; min-width: 0; }
+  .scanner-result-table thead { display: none; }
+  .scanner-result-table tbody { display: grid; gap: 10px; }
+  .scanner-result-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid #3f3f46; border-radius: 10px; padding: 8px; }
+  .scanner-result-table tbody td { min-width: 0; padding: 8px; overflow-wrap: anywhere; }
+  .scanner-result-table tbody td::before { content: attr(data-label); display: block; margin-bottom: 5px; color: #a1a1aa; font-size: 11px; }
+  .scanner-result-table tbody td:nth-child(2), .scanner-result-table tbody td:nth-child(3), .scanner-result-table tbody td:last-child { grid-column: 1 / -1; }
+  .scanner-result-more dl { min-width: 0; }
+}
+
 .scanner-top-hits-toolbar {
   display: flex;
   align-items: flex-start;
@@ -6987,4 +7070,26 @@ dialog.modal-backdrop:not([open]) {
   .scanner-top-hits-page .scanner-result-metrics {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+}
+
+@media (min-width: 1081px) {
+  .scanner-result-page .scanner-result-metrics,
+  .scanner-result-page .scanner-result-filter-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .scanner-result-page .scanner-result-chart-grid,
+  .scanner-result-page .scanner-result-chart-grid.is-2-col,
+  .scanner-result-page .scanner-result-chart-grid.is-3-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 641px) and (max-width: 1080px) {
+  .scanner-result-page .scanner-result-metrics,
+  .scanner-result-page .scanner-result-filter-grid,
+  .scanner-result-page .scanner-result-chart-grid,
+  .scanner-result-page .scanner-result-chart-grid.is-2-col,
+  .scanner-result-page .scanner-result-chart-grid.is-3-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .scanner-result-page .scanner-result-metrics,
+  .scanner-result-page .scanner-result-filter-grid,
+  .scanner-result-page .scanner-result-chart-grid,
+  .scanner-result-page .scanner-result-chart-grid.is-2-col,
+  .scanner-result-page .scanner-result-chart-grid.is-3-col { grid-template-columns: 1fr; }
 }
