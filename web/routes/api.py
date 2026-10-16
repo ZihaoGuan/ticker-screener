@@ -1016,6 +1016,7 @@ def scanner_board_refresh_data(
 
 @router.get("/scanner-board/top-hits", response_class=JSONResponse)
 def scanner_top_hits_data(
+    section: str = Query(default="all", pattern="^(all|list|guru)$"),
     scanner_group: list[str] | None = Query(
         default=None,
         description="Repeat for AND groups; comma-separated scanner IDs within each group use OR.",
@@ -1034,6 +1035,7 @@ def scanner_top_hits_data(
             scanner_groups=scanner_groups,
             daily_rs_min=daily_rs_min,
             daily_rs_max=daily_rs_max,
+            section=section,
         )
     )
 

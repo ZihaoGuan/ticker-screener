@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import copy
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -196,6 +197,51 @@ class WatchlistServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["entry_count"], 1)
         self.assertEqual(payload["entries"][0]["ticker"], "NVDA")
+
+    def test_get_watchlist_detail_uses_batched_db_metadata_without_live_universe(self) -> None:
+        path = Path(self.temp_dir.name) / "watchlists" / "fearzone_2026-06-13.json"
+        path.write_text(json.dumps([{"ticker": "NVDA"}]), encoding="utf-8")
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        def attach_indicators(entries):
+            for entry in entries:
+                entry["technical_indicator_ratings"] = {"1d": {"rating_label": "Bullish"}}
+
+        with (
+            patch("src.webapp.services.watchlist_service.load_universe") as load_universe,
+            patch("src.webapp.services.watchlist_service.load_ticker_metadata_map", return_value={
+                "NVDA": {"sector": "Database Sector", "industry": "Database Industry", "exchange": "NASDAQ"},
+            }) as load_metadata,
+            patch("src.webapp.services.watchlist_service.load_etf_catalog", return_value=[]),
+            patch("src.webapp.services.watchlist_service.load_ticker_theme_overrides", return_value={}),
+            patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()),
+            patch.object(service, "_attach_entry_latest_rating_snapshots", wraps=service._attach_entry_latest_rating_snapshots) as ratings,
+            patch.object(service, "_attach_entry_technical_indicator_ratings", side_effect=attach_indicators) as indicators,
+        ):
+            payload = service.get_watchlist_detail("fearzone_2026-06-13")
+
+        load_universe.assert_not_called()
+        load_metadata.assert_called_once_with(["NVDA"], database_url="postgres://example")
+        ratings.assert_called_once()
+        indicators.assert_called_once()
+        self.assertEqual(payload["entries"][0]["sector"], "Database Sector")
+        self.assertEqual(payload["entries"][0]["industry"], "Database Industry")
+        self.assertEqual(payload["entries"][0]["exchange"], "NASDAQ")
+        self.assertEqual(payload["entries"][0]["technical_indicator_ratings"]["1d"]["rating_label"], "Bullish")
+
+    def test_get_watchlist_detail_preserves_entry_metadata_when_db_metadata_is_empty(self) -> None:
+        path = Path(self.temp_dir.name) / "watchlists" / "fearzone_2026-06-13.json"
+        path.write_text(json.dumps([{"ticker": "NVDA", "sector": "Stored Sector", "industry": "Stored Industry"}]), encoding="utf-8")
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        with (
+            patch("src.webapp.services.watchlist_service.load_ticker_metadata_map", return_value={}),
+            patch("src.webapp.services.watchlist_service.load_etf_catalog", return_value=[]),
+            patch("src.webapp.services.watchlist_service.load_ticker_theme_overrides", return_value={}),
+            patch("src.webapp.services.watchlist_service.load_excluded_tickers", return_value=set()),
+        ):
+            payload = service.get_watchlist_detail("fearzone_2026-06-13")
+
+        self.assertEqual(payload["entries"][0]["sector"], "Stored Sector")
+        self.assertEqual(payload["entries"][0]["industry"], "Stored Industry")
 
     def test_get_watchlist_detail_repairs_shifted_finviz_rows(self) -> None:
         path = Path(self.temp_dir.name) / "watchlists" / "venu_scanner_2026-07-21.json"
@@ -1291,6 +1337,30 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [{"ticker": "PLTR", "scanner_count": 2, "daily_rs_rating": 96}])
         self.assertEqual(payload["snapshot"]["snapshot_run_id"], 902)
         self.assertEqual(payload["snapshot"]["freshness"], "fresh")
+
+    def test_top_hits_sections_project_list_and_guru_payloads(self) -> None:
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
+        persisted = {
+            "target_trading_date": "2026-06-12",
+            "generated_at": "2026-06-13T00:40:00Z",
+            "rows": [{"ticker": "NVDA", "scanner_count": 3, "company": "NVIDIA", "scanners": [], "scanner_ids": ["rs"], "funds": [{"ticker": "MOAT"}], "top_hit": True, "relative_trend_strength": {"score": 87}, "unprojected_debug_blob": "x" * 1000}],
+            "guru_board": {"definitions": [], "rows": [{"ticker": "NVDA", "stage_analysis": {"large": "x" * 5000}}]},
+        }
+        with patch.object(service, "_load_latest_persisted_scanner_top_hits_payload", side_effect=lambda: copy.deepcopy(persisted)):
+            full = service.get_scanner_top_hits_snapshot_payload(now=dt.datetime(2026, 6, 13, 1, tzinfo=dt.timezone.utc))
+            compact = service.get_scanner_top_hits_snapshot_payload(now=dt.datetime(2026, 6, 13, 1, tzinfo=dt.timezone.utc), section="list")
+            guru = service.get_scanner_top_hits_snapshot_payload(now=dt.datetime(2026, 6, 13, 1, tzinfo=dt.timezone.utc), section="guru")
+
+        self.assertIn("guru_board", full)
+        self.assertNotIn("guru_board", compact)
+        self.assertEqual(compact["rows"][0]["relative_trend_strength"], {"score": 87})
+        self.assertEqual(compact["rows"][0]["scanner_ids"], ["rs"])
+        self.assertEqual(compact["rows"][0]["funds"], [{"ticker": "MOAT"}])
+        self.assertTrue(compact["rows"][0]["top_hit"])
+        self.assertNotIn("unprojected_debug_blob", compact["rows"][0])
+        self.assertEqual(guru["rows"], [])
+        self.assertEqual(guru["guru_board"]["rows"][0]["ticker"], "NVDA")
+        self.assertLess(len(json.dumps(compact)), len(json.dumps(full)))
 
     def test_top_hits_refresh_state_tracks_source_fingerprint_and_scheduler_waiting_status(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
