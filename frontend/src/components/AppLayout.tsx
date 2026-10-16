@@ -10,6 +10,7 @@ const navItems = [
   { to: "/ratings", label: "Ratings", icon: "R" },
   { to: "/guide", label: "Guide", icon: "G", roles: ["premium", "admin"] as RoleName[] },
   { to: "/charts", label: "Charts", icon: "C" },
+  { to: "/position-calculator", label: "Risk", icon: "R" },
   { to: "/earnings", label: "Earnings", icon: "E" },
   { to: "/daily-reports", label: "Daily Reports", icon: "V", roles: ["premium", "admin"] as RoleName[] },
   { to: "/watchlists", label: "Watchlists", icon: "W", roles: ["admin"] as RoleName[] },

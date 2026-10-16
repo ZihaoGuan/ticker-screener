@@ -51,6 +51,7 @@ export function preloadChartsPage() {
   void loadChartsPage();
 }
 const ChartsPage = lazyPage(loadChartsPage, "ChartsPage");
+const PositionCalculatorPage = lazyPage(() => import("./pages/PositionCalculatorPage"), "PositionCalculatorPage");
 const EarningsPage = lazyPage(() => import("./pages/EarningsPage"), "EarningsPage");
 const ScannerBoardPage = lazyPage(() => import("./pages/ScannerBoardPage"), "ScannerBoardPage");
 const ScannerTopHitsPage = lazyPage(() => import("./pages/ScannerTopHitsPage"), "ScannerTopHitsPage");
@@ -98,6 +99,7 @@ export default function App() {
             }
           />
           <Route path="/charts" element={<ChartsPage />} />
+          <Route path="/position-calculator" element={<AuthenticatedRoute><PositionCalculatorPage /></AuthenticatedRoute>} />
           <Route path="/earnings" element={<EarningsPage />} />
           <Route
             path="/scanner"
@@ -319,6 +321,13 @@ function HomeRoute() {
     return <LoadingBlock label="Checking access…" />;
   }
   return auth.authenticated ? <DashboardPage /> : <LandingPage />;
+}
+
+function AuthenticatedRoute({ children }: { children: React.ReactNode }) {
+  const auth = useAuth();
+  const location = useLocation();
+  if (auth.isLoading) return <LoadingBlock label="Checking access…" />;
+  return auth.authenticated ? <>{children}</> : <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
 }
 
 function LegacyRrgRedirect() {
