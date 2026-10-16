@@ -1987,11 +1987,7 @@ class WatchlistService:
                 benchmark_frame = _normalize_download_frame(frames.get(self.benchmark_ticker))
                 for ticker in normalized_tickers:
                     frame = _normalize_download_frame(frames.get(ticker))
-                    if _frame_covers_requested_window(
-                        frame,
-                        start_date=chart_request.visible_start_date,
-                        end_date=chart_request.fetch_end_date,
-                    ):
+                    if db_frame_has_recent_coverage(frame, chart_request.fetch_end_date):
                         rows[ticker] = _build_chart_preview_payload(
                             ticker=ticker,
                             period=period,

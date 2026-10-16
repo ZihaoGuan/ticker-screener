@@ -1490,6 +1490,34 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"]["NVDA"]["data_source"], "database")
         self.assertEqual(payload["resolved_as_of_date"], latest_date.isoformat())
 
+    def test_get_chart_preview_payloads_uses_recent_listing_database_frame(self) -> None:
+        service = WatchlistService(
+            artifacts_dir=Path(self.temp_dir.name),
+            database_url="postgres://example",
+            market_data_source="database-first",
+        )
+        frame = self._long_price_frame().tail(60)
+        latest_date = frame.index[-1].date()
+
+        with patch(
+            "src.webapp.services.watchlist_service.load_many_ticker_windows_for_range",
+            return_value={"HNGE": frame.copy(), "SPY": frame.copy()},
+        ), patch(
+            "src.webapp.services.watchlist_service._download_history_frame",
+        ) as download_mock:
+            payload = service.get_chart_preview_payloads(
+                ["HNGE"],
+                period="18mo",
+                as_of_date=latest_date,
+            )
+
+        row = payload["rows"]["HNGE"]
+        self.assertEqual(row["data_source"], "database")
+        self.assertTrue(row["candles"])
+        self.assertEqual(row["candles"][0]["time"], frame.index[0].date().isoformat())
+        self.assertEqual(row["candles"][-1]["time"], latest_date.isoformat())
+        download_mock.assert_not_called()
+
     def test_get_chart_preview_payload_returns_single_lightweight_chart(self) -> None:
         service = WatchlistService(
             artifacts_dir=Path(self.temp_dir.name),
