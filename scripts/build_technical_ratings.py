@@ -16,6 +16,7 @@ from src.market_data_access import load_many_ticker_windows
 from src.ratings.calculator import build_technical_rating
 from src.ratings.models import TechnicalSnapshotInput
 from src.ratings.repository import RatingsRepository
+from src.ticker_filters import filter_symbols, load_excluded_tickers
 from src.webapp.config import load_webapp_config
 
 
@@ -256,6 +257,12 @@ def _build_technical_snapshot_input(
     return snapshot
 
 
+def _select_target_tickers(repository, *, tickers, sectors, limit, excluded):
+    candidates = repository.list_active_tickers(tickers=tickers, sectors=sectors)
+    eligible = filter_symbols(candidates, excluded)
+    return eligible[: int(limit)] if limit is not None and int(limit) > 0 else eligible
+
+
 def main() -> int:
     args = parse_args()
     web_config = load_webapp_config()
@@ -268,10 +275,12 @@ def main() -> int:
     repository = RatingsRepository(database_url)
     selected_tickers = tuple(str(item).strip().upper() for item in (args.tickers or []) if str(item).strip())
     selected_sectors = tuple(str(item).strip() for item in (args.include_sectors or []) if str(item).strip())
-    target_tickers = repository.list_active_tickers(
+    target_tickers = _select_target_tickers(
+        repository,
         tickers=selected_tickers or None,
         sectors=selected_sectors or None,
         limit=args.limit,
+        excluded=load_excluded_tickers(app_config),
     )
     print(
         "loading_technical_universe "

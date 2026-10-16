@@ -10,10 +10,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import today_label
+from src.config import load_app_config, today_label
 from src.market_data_access import load_many_ticker_windows
 from src.ratings.repository import RatingsRepository
 from src.ratings.technical_indicator import build_multi_timeframe_technical_indicator_ratings
+from src.ticker_filters import filter_symbols, load_excluded_tickers
 from src.webapp.config import load_webapp_config
 
 
@@ -27,6 +28,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _select_target_tickers(repository, *, tickers, sectors, limit, excluded):
+    candidates = repository.list_active_tickers(tickers=tickers, sectors=sectors)
+    eligible = filter_symbols(candidates, excluded)
+    return eligible[: int(limit)] if limit is not None and int(limit) > 0 else eligible
+
+
 def main() -> int:
     args = parse_args()
     web_config = load_webapp_config()
@@ -35,12 +42,15 @@ def main() -> int:
         raise RuntimeError("No Postgres connection string configured. Pass --database-url or set TICKER_SCREENER_DATABASE_URL.")
     as_of_date = dt.date.fromisoformat(str(args.as_of_date))
     repository = RatingsRepository(database_url)
+    app_config = load_app_config()
     selected_tickers = tuple(str(item).strip().upper() for item in (args.tickers or []) if str(item).strip())
     selected_sectors = tuple(str(item).strip() for item in (args.include_sectors or []) if str(item).strip())
-    target_tickers = repository.list_active_tickers(
+    target_tickers = _select_target_tickers(
+        repository,
         tickers=selected_tickers or None,
         sectors=selected_sectors or None,
         limit=args.limit,
+        excluded=load_excluded_tickers(app_config),
     )
     print(
         "loading_technical_indicator_universe "
