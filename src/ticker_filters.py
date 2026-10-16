@@ -131,7 +131,7 @@ def _is_share_class_ticker(ticker: str) -> bool:
 def _is_special_suffix_excluded_ticker(ticker: str) -> bool:
     if len(ticker) != 5:
         return False
-    return ticker.endswith(("WS", "W", "U"))
+    return ticker.endswith(("WS", "W", "U", "R"))
 
 
 def is_excluded_ticker(ticker: str, excluded: set[str]) -> bool:

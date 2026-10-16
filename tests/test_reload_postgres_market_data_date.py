@@ -17,10 +17,130 @@ from scripts.reload_postgres_market_data_date import (
     _replace_trade_date_atomically,
     _rows_for_trade_date,
     _validate_replacement_rows,
+    _advance_no_price_observations,
+    _is_consecutive_trade_session,
+    _provider_incident_detected,
+    _replace_and_record_no_price_observations,
+    _select_recovery_probes,
 )
 
 
 class ReloadPostgresMarketDataDateTests(unittest.TestCase):
+    def test_five_character_r_rights_are_excluded_but_other_lengths_are_not(self) -> None:
+        from src.ticker_filters import filter_symbols
+
+        self.assertEqual(filter_symbols(["AACBR", "ABCR", "ABCDEF R"], set()), ["ABCR", "ABCDEF R"])
+
+    def test_no_price_policy_requires_three_distinct_consecutive_trade_sessions(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            registry_path = Path(directory) / "no-price-3d.txt"
+            registry_path.write_text("MANUAL # preserve me\n", encoding="utf-8")
+            for day in (14, 15):
+                _advance_no_price_observations(
+                    state_path, registry_path, dt.date(2026, 10, day), {"CWAN"}, set(),
+                    probe_tickers=set(), allow_observations=True,
+                )
+            self.assertNotIn("CWAN", registry_path.read_text(encoding="utf-8"))
+            result = _advance_no_price_observations(
+                state_path, registry_path, dt.date(2026, 10, 16), {"CWAN"}, set(),
+                probe_tickers=set(), allow_observations=True,
+            )
+            contents = registry_path.read_text(encoding="utf-8")
+            self.assertIn("CWAN", contents)
+            self.assertIn("MANUAL # preserve me", contents)
+            self.assertEqual(result["new_exclusions"], 1)
+
+    def test_no_price_streak_resets_when_trade_sessions_are_not_consecutive(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            registry_path = Path(directory) / "no-price-3d.txt"
+            for day in (13, 14, 16):
+                _advance_no_price_observations(
+                    state_path, registry_path, dt.date(2026, 10, day), {"CWAN"}, set(),
+                    probe_tickers=set(), allow_observations=True,
+                )
+            self.assertNotIn("CWAN", registry_path.read_text(encoding="utf-8"))
+
+    def test_weekend_and_regular_holiday_gaps_still_count_as_consecutive_sessions(self) -> None:
+        self.assertTrue(_is_consecutive_trade_session(dt.date(2026, 10, 16), dt.date(2026, 10, 19)))
+        self.assertTrue(_is_consecutive_trade_session(dt.date(2026, 11, 25), dt.date(2026, 11, 27)))
+
+    def test_provider_incident_guard_and_failed_reload_do_not_advance_state(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        self.assertTrue(_provider_incident_detected(target_count=100, missing_count=10, failed_chunks=0))
+        self.assertTrue(_provider_incident_detected(target_count=100, missing_count=1, failed_chunks=1))
+        self.assertFalse(_provider_incident_detected(target_count=100, missing_count=1, failed_chunks=0))
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            registry_path = Path(directory) / "no-price-3d.txt"
+            result = _advance_no_price_observations(
+                state_path, registry_path, dt.date(2026, 10, 16), {"CWAN"}, set(),
+                probe_tickers=set(), allow_observations=False,
+            )
+            self.assertEqual(result["observations"], 0)
+            self.assertFalse(state_path.exists())
+
+    def test_failed_atomic_replacement_does_not_advance_no_price_state(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            registry_path = Path(directory) / "no-price-3d.txt"
+            with patch("scripts.reload_postgres_market_data_date._replace_trade_date_atomically", side_effect=RuntimeError("insert failed")):
+                with self.assertRaisesRegex(RuntimeError, "insert failed"):
+                    _replace_and_record_no_price_observations(
+                        MagicMock(), dt.date(2026, 10, 16), [], 100, state_path, registry_path,
+                        {"CWAN"}, set(), probe_tickers=set(), allow_observations=True,
+                    )
+            self.assertFalse(state_path.exists())
+
+    def test_manual_include_suppresses_auto_exclusion_and_valid_probe_recovers(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            registry_path = Path(directory) / "no-price-3d.txt"
+            manual_include = Path(directory) / "manual_include_tickers.txt"
+            for day in (14, 15, 16):
+                _advance_no_price_observations(
+                    state_path, registry_path, dt.date(2026, 10, day), {"CWAN"}, set(),
+                    probe_tickers=set(), allow_observations=True,
+                )
+            manual_include.write_text("CWAN\n", encoding="utf-8")
+            self.assertIn("CWAN", registry_path.read_text(encoding="utf-8"))
+            from dataclasses import replace
+            from src.config import AppConfig
+            from src.ticker_filters import load_excluded_tickers
+
+            config = replace(
+                AppConfig(),
+                manual_included_tickers_file=str(manual_include),
+                auto_excluded_tickers_dir=str(registry_path.parent),
+                special_security_tickers_file=str(Path(directory) / "missing-special.csv"),
+                excluded_tickers_file=str(Path(directory) / "missing-base.txt"),
+                manual_excluded_tickers_file=str(Path(directory) / "missing-manual.txt"),
+            )
+            self.assertNotIn("CWAN", load_excluded_tickers(config))
+            probes = _select_recovery_probes(state_path, registry_path, dt.date(2026, 10, 19), max_probes=5)
+            self.assertEqual(probes, ["CWAN"])
+            result = _advance_no_price_observations(
+                state_path, registry_path, dt.date(2026, 10, 19), set(), {"CWAN"},
+                probe_tickers={"CWAN"}, allow_observations=True,
+            )
+            self.assertEqual(result["recoveries"], 1)
+            self.assertNotIn("CWAN", registry_path.read_text(encoding="utf-8"))
+
     def test_rows_for_trade_date_skips_stale_provider_rows(self) -> None:
         requested_date = dt.date(2026, 10, 13)
         matching_row = ("AAPL", requested_date, 200.0, 205.0, 198.0, 204.0, 204.0, 10_000)
@@ -72,12 +192,13 @@ class ReloadPostgresMarketDataDateTests(unittest.TestCase):
         )
 
         with patch("scripts.reload_postgres_market_data_date._download_history", return_value=iter([chunk])) as download:
-            histories, chunks, unresolved = _download_yfinance_pass(
+            histories, chunks, unresolved, failed_chunks = _download_yfinance_pass(
                 ["AAPL", "MSFT"], dt.date(2026, 10, 9), args, pass_name="primary", starting_chunk=0
             )
 
         self.assertEqual(set(histories), {"AAPL"})
         self.assertEqual((chunks, unresolved), (1, ["MSFT"]))
+        self.assertEqual(failed_chunks, 0)
         self.assertEqual(download.call_args.args[0], ["AAPL", "MSFT"])
 
     def test_replace_trade_date_atomically_rolls_back_on_insert_error(self) -> None:

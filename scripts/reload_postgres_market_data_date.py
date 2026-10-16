@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import calendar
 import datetime as dt
+import fcntl
 import json
 import math
 import os
 from pathlib import Path
 import sys
+import tempfile
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
@@ -176,6 +179,211 @@ def _minimum_replacement_row_count(target_ticker_count: int) -> int:
     return max(1, math.ceil(target_ticker_count * 0.9))
 
 
+def _nth_weekday(year: int, month: int, weekday: int, occurrence: int) -> dt.date:
+    first_weekday, days_in_month = calendar.monthrange(year, month)
+    day = 1 + (weekday - first_weekday) % 7 + (occurrence - 1) * 7
+    if day > days_in_month:
+        day -= 7
+    return dt.date(year, month, day)
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> dt.date:
+    last = dt.date(year, month, calendar.monthrange(year, month)[1])
+    return last - dt.timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _easter_sunday(year: int) -> dt.date:
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = (h + l - 7 * m + 114) % 31 + 1
+    return dt.date(year, month, day)
+
+
+def _observed_holiday(day: dt.date) -> dt.date:
+    if day.weekday() == 5:
+        return day - dt.timedelta(days=1)
+    if day.weekday() == 6:
+        return day + dt.timedelta(days=1)
+    return day
+
+
+def _us_market_holidays(year: int) -> set[dt.date]:
+    holidays: set[dt.date] = set()
+    for holiday_year in (year - 1, year, year + 1):
+        observed_holidays = {
+            _observed_holiday(dt.date(holiday_year, 1, 1)),
+            _nth_weekday(holiday_year, 1, calendar.MONDAY, 3),
+            _nth_weekday(holiday_year, 2, calendar.MONDAY, 3),
+            _easter_sunday(holiday_year) - dt.timedelta(days=2),
+            _last_weekday(holiday_year, 5, calendar.MONDAY),
+            _observed_holiday(dt.date(holiday_year, 7, 4)),
+            _nth_weekday(holiday_year, 9, calendar.MONDAY, 1),
+            _nth_weekday(holiday_year, 11, calendar.THURSDAY, 4),
+            _observed_holiday(dt.date(holiday_year, 12, 25)),
+        }
+        if holiday_year >= 2022:
+            observed_holidays.add(_observed_holiday(dt.date(holiday_year, 6, 19)))
+        holidays.update(
+            observed_holidays
+        )
+    return holidays
+
+
+def _is_trade_session(day: dt.date) -> bool:
+    return day.weekday() < 5 and day not in _us_market_holidays(day.year)
+
+
+def _next_trade_session(day: dt.date) -> dt.date:
+    candidate = day + dt.timedelta(days=1)
+    while not _is_trade_session(candidate):
+        candidate += dt.timedelta(days=1)
+    return candidate
+
+
+def _is_consecutive_trade_session(previous: dt.date, current: dt.date) -> bool:
+    return _next_trade_session(previous) == current
+
+
+def _load_text_symbols(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    symbols: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        symbol = line.split("#", 1)[0].strip().split()
+        if symbol:
+            symbols.add(symbol[0].upper())
+    return symbols
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+
+
+def _provider_incident_detected(*, target_count: int, missing_count: int, failed_chunks: int) -> bool:
+    return failed_chunks > 0 or (target_count > 0 and missing_count >= max(10, math.ceil(target_count * 0.05)))
+
+
+def _select_recovery_probes(
+    state_path: Path, registry_path: Path, trade_date: dt.date, *, max_probes: int = 10
+) -> list[str]:
+    auto_excluded = _load_text_symbols(registry_path)
+    if not auto_excluded:
+        return []
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    records = state.get("tickers", {}) if isinstance(state, dict) else {}
+    rotation = (trade_date.toordinal() // 5 * max_probes) % len(auto_excluded)
+    ordered_tickers = sorted(auto_excluded)
+    ordered_tickers = ordered_tickers[rotation:] + ordered_tickers[:rotation]
+    due: list[str] = []
+    for ticker in ordered_tickers:
+        record = records.get(ticker, {}) if isinstance(records, dict) else {}
+        last_probe = record.get("last_probe_date") if isinstance(record, dict) else None
+        if not last_probe:
+            due.append(ticker)
+        else:
+            try:
+                cursor = dt.date.fromisoformat(str(last_probe))
+            except ValueError:
+                due.append(ticker)
+            else:
+                sessions_elapsed = 0
+                while cursor < trade_date and sessions_elapsed < 5:
+                    cursor = _next_trade_session(cursor)
+                    sessions_elapsed += 1
+                if sessions_elapsed >= 5:
+                    due.append(ticker)
+        if len(due) >= max_probes:
+            break
+    return due
+
+
+def _advance_no_price_observations(
+    state_path: Path,
+    registry_path: Path,
+    trade_date: dt.date,
+    missing_tickers: set[str],
+    valid_tickers: set[str],
+    *,
+    probe_tickers: set[str],
+    allow_observations: bool,
+) -> dict[str, int]:
+    if not allow_observations or not _is_trade_session(trade_date):
+        return {"observations": 0, "new_exclusions": 0, "recoveries": 0}
+    lock_path = state_path.with_suffix(state_path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state = {}
+            records = state.get("tickers", {}) if isinstance(state, dict) else {}
+            if not isinstance(records, dict):
+                records = {}
+            lines = registry_path.read_text(encoding="utf-8").splitlines() if registry_path.exists() else []
+            registered = _load_text_symbols(registry_path)
+            new_exclusions = recoveries = observations = 0
+            for ticker in sorted(valid_tickers):
+                record = records.get(ticker, {})
+                dates = record.get("missing_dates", []) if isinstance(record, dict) else []
+                newest = max((dt.date.fromisoformat(value) for value in dates), default=None)
+                if newest is None or trade_date >= newest:
+                    records.pop(ticker, None)
+                    if ticker in probe_tickers:
+                        records[ticker] = {"missing_dates": [], "last_probe_date": trade_date.isoformat()}
+                    if ticker in registered and ticker in probe_tickers:
+                        lines = [line for line in lines if line.split("#", 1)[0].strip().split()[:1] != [ticker]]
+                        registered.discard(ticker)
+                        recoveries += 1
+            for ticker in sorted(missing_tickers):
+                observations += 1
+                prior = records.get(ticker, {})
+                dates = prior.get("missing_dates", []) if isinstance(prior, dict) else []
+                parsed_dates = sorted({dt.date.fromisoformat(value) for value in dates})
+                newest = parsed_dates[-1] if parsed_dates else None
+                if newest is not None and trade_date <= newest:
+                    continue
+                parsed_dates = parsed_dates + [trade_date] if newest is not None and _is_consecutive_trade_session(newest, trade_date) else [trade_date]
+                parsed_dates = parsed_dates[-3:]
+                last_probe = trade_date.isoformat() if ticker in probe_tickers else prior.get("last_probe_date")
+                records[ticker] = {"missing_dates": [value.isoformat() for value in parsed_dates], "last_probe_date": last_probe}
+                if len(parsed_dates) >= 3 and ticker not in registered:
+                    evidence = ", ".join(value.isoformat() for value in parsed_dates)
+                    lines.append(f"{ticker} # reason=no valid Massive/Yahoo daily bar for three consecutive trade sessions: {evidence}")
+                    registered.add(ticker)
+                    new_exclusions += 1
+            for ticker in probe_tickers:
+                if ticker in records:
+                    records[ticker]["last_probe_date"] = trade_date.isoformat()
+            _atomic_write(state_path, json.dumps({"version": 1, "tickers": records}, indent=2, sort_keys=True) + "\n")
+            _atomic_write(registry_path, "\n".join(lines).rstrip() + ("\n" if lines else ""))
+            return {"observations": observations, "new_exclusions": new_exclusions, "recoveries": recoveries}
+        finally:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+
 def _rows_for_trade_date(rows: list[tuple[object, ...]], trade_date: dt.date) -> tuple[list[tuple[object, ...]], set[str]]:
     matching_rows = [row for row in rows if row[1] == trade_date]
     stale_tickers = {str(row[0]) for row in rows if row[1] != trade_date}
@@ -218,6 +426,32 @@ def _replace_trade_date_atomically(
     return deleted, len(rows)
 
 
+def _replace_and_record_no_price_observations(
+    connection,
+    trade_date: dt.date,
+    rows: list[tuple[object, ...]],
+    batch_size: int,
+    state_path: Path,
+    registry_path: Path,
+    missing_tickers: set[str],
+    valid_tickers: set[str],
+    *,
+    probe_tickers: set[str],
+    allow_observations: bool,
+) -> tuple[int, int, dict[str, int]]:
+    deleted, applied = _replace_trade_date_atomically(connection, trade_date, rows, batch_size)
+    summary = _advance_no_price_observations(
+        state_path,
+        registry_path,
+        trade_date,
+        missing_tickers,
+        valid_tickers,
+        probe_tickers=probe_tickers,
+        allow_observations=allow_observations,
+    )
+    return deleted, applied, summary
+
+
 def _download_yfinance_pass(
     tickers: list[str],
     trade_date: dt.date,
@@ -225,8 +459,9 @@ def _download_yfinance_pass(
     *,
     pass_name: str,
     starting_chunk: int,
-) -> tuple[dict[str, "pd.DataFrame"], int, list[str]]:
+) -> tuple[dict[str, "pd.DataFrame"], int, list[str], int]:
     chunk_total = 0
+    failed_chunks = 0
     unresolved: list[str] = []
     histories: dict[str, "pd.DataFrame"] = {}
 
@@ -262,9 +497,10 @@ def _download_yfinance_pass(
             flush=True,
         )
         if chunk_result.error:
+            failed_chunks += 1
             print(f"chunk_error={chunk_result.error}", flush=True)
 
-    return histories, chunk_total, unresolved
+    return histories, chunk_total, unresolved, failed_chunks
 
 
 def main() -> int:
@@ -284,7 +520,14 @@ def main() -> int:
 
         active_tickers, inactive_ticker_count = _load_active_metadata_tickers(connection)
         config = load_app_config(None)
-        tickers = _filter_reload_tickers(active_tickers, load_excluded_tickers(config))
+        registry_path = PROJECT_ROOT / "config" / "auto_exclude_tickers" / "no-price-3d.txt"
+        artifacts_dir = Path(os.getenv("TICKER_SCREENER_ARTIFACTS_DIR", str(PROJECT_ROOT / "artifacts")))
+        state_path = artifacts_dir / "status" / "no-price-3d-state.json"
+        probe_tickers = set(_select_recovery_probes(state_path, registry_path, trade_date)) if _is_trade_session(trade_date) else set()
+        excluded = load_excluded_tickers(config)
+        tickers = _filter_reload_tickers(active_tickers, excluded)
+        probe_tickers.intersection_update(active_tickers)
+        tickers = list(dict.fromkeys([*tickers, *sorted(probe_tickers)]))
         if not tickers:
             raise RuntimeError("No eligible tickers found in ticker_metadata.")
 
@@ -316,7 +559,7 @@ def main() -> int:
         yahoo_tickers = [ticker for ticker in tickers if ticker not in massive_histories]
         print(f"yfinance_target_ticker_count={len(yahoo_tickers)}", flush=True)
 
-        yfinance_histories, chunks, retry_tickers = _download_yfinance_pass(
+        yfinance_histories, chunks, retry_tickers, primary_failed_chunks = _download_yfinance_pass(
             yahoo_tickers,
             trade_date,
             args,
@@ -326,7 +569,7 @@ def main() -> int:
         total_chunks += chunks
 
         # Retry missing bars in batches once, rather than probing each ticker's full history serially.
-        retry_histories, chunks, unresolved_tickers = _download_yfinance_pass(
+        retry_histories, chunks, unresolved_tickers, retry_failed_chunks = _download_yfinance_pass(
             retry_tickers,
             trade_date,
             args,
@@ -343,7 +586,25 @@ def main() -> int:
         bar_rows, stale_tickers = _rows_for_trade_date(bar_rows, trade_date)
         minimum_row_count = _minimum_replacement_row_count(len(tickers))
         _validate_replacement_rows(bar_rows, trade_date, minimum_row_count=minimum_row_count)
-        deleted, total_rows = _replace_trade_date_atomically(connection, trade_date, bar_rows, args.batch_size)
+        reloaded_tickers = {str(row[0]).upper() for row in bar_rows}
+        missing_tickers = set(tickers) - reloaded_tickers
+        provider_incident = _provider_incident_detected(
+            target_count=len(tickers),
+            missing_count=len(missing_tickers),
+            failed_chunks=primary_failed_chunks + retry_failed_chunks,
+        )
+        deleted, total_rows, observation_summary = _replace_and_record_no_price_observations(
+            connection,
+            trade_date,
+            bar_rows,
+            args.batch_size,
+            state_path,
+            registry_path,
+            missing_tickers,
+            reloaded_tickers,
+            probe_tickers=probe_tickers,
+            allow_observations=not provider_incident,
+        )
 
         print(f"summary_trade_date={trade_date.isoformat()}", flush=True)
         print(f"summary_target_tickers={len(tickers)}", flush=True)
@@ -354,6 +615,10 @@ def main() -> int:
         print(f"summary_yfinance_retry_tickers={len(retry_tickers)}", flush=True)
         print(f"summary_source_massive_rows={len(massive_histories)}", flush=True)
         print(f"summary_source_{args.source_label}_rows={len(yfinance_histories) + len(retry_histories)}", flush=True)
+        print(f"summary_provider_incident={str(provider_incident).lower()}", flush=True)
+        print(f"summary_no_price_observations={observation_summary['observations']}", flush=True)
+        print(f"summary_new_auto_exclusions={observation_summary['new_exclusions']}", flush=True)
+        print(f"summary_auto_exclusion_recoveries={observation_summary['recoveries']}", flush=True)
 
     return 0
 
