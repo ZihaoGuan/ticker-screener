@@ -87,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           market_data_source="$(python -c 'import json, os; options = json.loads(os.environ["OPTIONS_JSON"]); print(str(options.get("market_data_source") or "").strip().lower())')"
-          if [ "$market_data_source" = "database-first" ]; then
+          if [ "$market_data_source" = "database-first" ] || [ "$ACTION_ID" = "build_technical_indicator_ratings" ]; then
             for required_variable in ORACLE_HOST ORACLE_USER DB_TUNNEL_KEY DB_TUNNEL_KNOWN_HOSTS DB_PASSWORD; do
               test -n "${!required_variable}" || { echo "Missing required GitHub secret: ${required_variable}" >&2; exit 1; }
             done
@@ -147,11 +147,13 @@ jobs:
           paths = json.loads(Path("external-artifacts.json").read_text())
           endpoint = f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
           files = {}
-          for name in ("raw", "watchlist", "summary"):
+          names = ("ratings",) if os.environ["ACTION_ID"] == "build_technical_indicator_ratings" else ("raw", "watchlist", "summary")
+          for name in names:
               path = Path(paths[name])
-              destination = f"s3://{os.environ['R2_BUCKET']}/{prefix}/{name}.json"
+              suffix = ".json.gz" if name == "ratings" else ".json"
+              destination = f"s3://{os.environ['R2_BUCKET']}/{prefix}/{name}{suffix}"
               subprocess.run(["aws", "--endpoint-url", endpoint, "s3", "cp", str(path), destination], check=True)
-              files[name] = {"url": f"{base}/{prefix}/{name}.json", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+              files[name] = {"url": f"{base}/{prefix}/{name}{suffix}", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "size": path.stat().st_size}
           manifest = {"job_run_id": int(os.environ["JOB_RUN_ID"]), "github_run_id": int(os.environ["GITHUB_RUN_ID"]), "action_id": os.environ["ACTION_ID"], "files": files}
           Path("manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
           PY

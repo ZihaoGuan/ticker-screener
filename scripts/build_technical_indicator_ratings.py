@@ -14,6 +14,7 @@ from src.config import load_app_config, today_label
 from src.market_data_access import load_many_ticker_windows
 from src.ratings.repository import RatingsRepository
 from src.ratings.technical_indicator import build_multi_timeframe_technical_indicator_ratings
+from src.ratings.technical_indicator_transfer import write_export
 from src.ticker_filters import filter_symbols, load_excluded_tickers
 from src.webapp.config import load_webapp_config
 
@@ -25,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-sectors", nargs="+", help="Only rebuild ratings for selected sectors.")
     parser.add_argument("--limit", type=int, default=None, help="Optional universe cap for faster rebuilds.")
     parser.add_argument("--database-url", default="")
+    parser.add_argument("--export-file", type=Path, help="Write a portable result without changing Postgres.")
     return parser.parse_args()
 
 
@@ -60,6 +62,8 @@ def main() -> int:
         flush=True,
     )
     if not target_tickers:
+        if args.export_file:
+            raise ValueError("Refusing to export an empty technical rating universe.")
         repository.replace_technical_indicator_rating_snapshots(as_of_date, [], tickers=[])
         print("technical_indicator_ratings=0", flush=True)
         print("technical_indicator_ratings_ok=0", flush=True)
@@ -85,11 +89,15 @@ def main() -> int:
         status_summary = ",".join(f"{item.timeframe}:{item.technical_status}" for item in per_timeframe)
         print(f"[{index}/{total}] technical_indicator_rating {ticker} statuses={status_summary}", flush=True)
 
-    count = repository.replace_technical_indicator_rating_snapshots(
-        as_of_date,
-        ratings,
-        tickers=target_tickers,
-    )
+    if args.export_file:
+        write_export(args.export_file, as_of_date=as_of_date, tickers=target_tickers, ratings=ratings)
+        count = len(ratings)
+    else:
+        count = repository.replace_technical_indicator_rating_snapshots(
+            as_of_date,
+            ratings,
+            tickers=target_tickers,
+        )
     print(f"technical_indicator_ratings={count}", flush=True)
     print(f"technical_indicator_ratings_ok={ok_count}", flush=True)
     return 0

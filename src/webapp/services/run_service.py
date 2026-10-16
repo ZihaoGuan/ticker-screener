@@ -2421,6 +2421,7 @@ class RunService:
 
     _github_additional_screener_actions = frozenset(
         {
+            "build_technical_indicator_ratings",
             "canslim",
             "earnings_trade_analyzer",
             "earnings_weekly_criteria",
@@ -2941,7 +2942,8 @@ class RunService:
                 if self.history_repository.fallback_github_job_run(job_run_id=int(row["id"]), github_run_id=run_id, message=f"GitHub infrastructure conclusion: {conclusion}."):
                     recovered += 1
             elif conclusion and conclusion != "success":
-                self.history_repository.patch_job_run_result(int(row["id"]), result_payload_patch={"github_conclusion": conclusion, "progress_label": "GitHub failed", "message": f"GitHub workflow concluded: {conclusion}."}, status="failed", finished_at=self._now_iso())
+                if self.history_repository.fallback_github_job_run(job_run_id=int(row["id"]), github_run_id=run_id, message=f"GitHub workflow concluded: {conclusion}."):
+                    recovered += 1
             elif conclusion == "success":
                 try:
                     self._recover_completed_github_job(row=row, finished_at=str(remote.get("updated_at") or ""))

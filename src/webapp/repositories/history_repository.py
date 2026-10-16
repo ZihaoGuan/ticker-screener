@@ -718,7 +718,10 @@ class HistoryRepository:
         sql = """
             UPDATE job_runs
             SET status = 'queued',
-                request_payload = jsonb_set(request_payload, '{execution_mode}', '"remote"'::jsonb, true),
+                request_payload = jsonb_set(
+                    jsonb_set(request_payload, '{execution_mode}', '"remote"'::jsonb, true),
+                    '{queue_priority}', '10'::jsonb, true
+                ),
                 result_payload = COALESCE(result_payload, '{}'::jsonb) || %s::jsonb,
                 finished_at = NULL
             WHERE id = %s

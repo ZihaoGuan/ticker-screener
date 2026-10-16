@@ -8,6 +8,8 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 from .screener_history_service import ScreenerHistoryService
+from src.ratings.repository import RatingsRepository
+from src.ratings.technical_indicator_transfer import ACTION_ID as TECHNICAL_RATINGS_ACTION, MAX_COMPRESSED_BYTES, read_export
 from src.webapp.repositories.history_repository import HistoryRepository
 
 
@@ -41,9 +43,14 @@ class ExternalJobResultService:
         existing_screen_run_id = int(result_payload.get("screen_run_id") or 0)
         if existing_screen_run_id:
             return {"status": "success", "screen_run_id": existing_screen_run_id}
+        action_id = str(request_payload.get("action_id") or "")
+        if action_id == TECHNICAL_RATINGS_ACTION and result_payload.get("technical_rating_count") is not None and row.get("status") == "success":
+            return {"status": "success", "technical_rating_count": int(result_payload["technical_rating_count"])}
         finished_at = self._completion_time(payload.get("finished_at"))
         if status == "failed":
             message = str(payload.get("message") or "GitHub workflow failed.")
+            if self.repository.fallback_github_job_run(job_run_id=job_run_id, github_run_id=expected_run_id, message=message):
+                return {"status": "queued", "execution_mode": "remote"}
             self.repository.patch_job_run_result(
                 job_run_id,
                 result_payload_patch={
@@ -68,13 +75,22 @@ class ExternalJobResultService:
         if str(row.get("status") or "") not in {"queued", "running"}:
             raise ValueError("Job is no longer eligible to publish results.")
         manifest_url = str(payload.get("manifest_url") or "").strip()
+        if action_id == TECHNICAL_RATINGS_ACTION:
+            attempt = int(result_payload.get("github_attempt") or 1)
+            expected_manifest_url = f"{self.artifact_base_url}/external-jobs/{job_run_id}/attempt-{attempt}/manifest.json"
+            if manifest_url != expected_manifest_url:
+                raise ValueError("Technical rating manifest URL does not match this job.")
         manifest = self._read_json_url(manifest_url)
-        if int(manifest.get("job_run_id") or 0) != job_run_id or int(manifest.get("github_run_id") or 0) != expected_run_id:
+        if type(manifest.get("job_run_id")) is not int or type(manifest.get("github_run_id")) is not int or manifest["job_run_id"] != job_run_id or manifest["github_run_id"] != expected_run_id:
             raise ValueError("Artifact manifest does not match this job.")
-        action_id = str(request_payload.get("action_id") or "")
         if str(manifest.get("action_id") or "") != action_id:
             raise ValueError("Artifact manifest action does not match this job.")
         files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+        if action_id == TECHNICAL_RATINGS_ACTION:
+            return self._complete_technical_ratings(
+                job_run_id=job_run_id, request_payload=request_payload, files=files,
+                manifest_url=manifest_url, finished_at=finished_at,
+            )
         saved: dict[str, Path] = {}
         for name in ("raw", "watchlist", "summary"):
             item = files.get(name) if isinstance(files.get(name), dict) else {}
@@ -114,6 +130,59 @@ class ExternalJobResultService:
         )
         return {"status": "success", "screen_run_id": screen_run_id}
 
+    def _complete_technical_ratings(
+        self, *, job_run_id: int, request_payload: dict[str, Any], files: dict[str, Any],
+        manifest_url: str, finished_at: str,
+    ) -> dict[str, Any]:
+        if set(files) != {"ratings"} or not isinstance(files["ratings"], dict):
+            raise ValueError("Technical rating manifest files are invalid.")
+        item = files["ratings"]
+        expected_url = manifest_url.removesuffix("manifest.json") + "ratings.json.gz"
+        if set(item) != {"url", "sha256", "size"} or item["url"] != expected_url:
+            raise ValueError("Technical rating artifact URL is invalid.")
+        size = item["size"]
+        digest = item["sha256"]
+        if type(size) is not int or not 0 < size <= MAX_COMPRESSED_BYTES or not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError("Technical rating artifact metadata is invalid.")
+        data = self._download(self._allowed_url(expected_url))
+        if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError("Technical rating artifact checksum mismatch.")
+        options = request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {}
+        as_of_date, tickers, ratings = read_export(data, expected_date=str(options.get("as_of_date") or ""))
+        requested_tickers = options.get("tickers")
+        if requested_tickers:
+            if not isinstance(requested_tickers, list) or not set(tickers) <= {str(ticker).upper() for ticker in requested_tickers}:
+                raise ValueError("Technical rating ticker scope exceeds job request.")
+        requested_limit = options.get("limit")
+        if requested_limit is not None and len(tickers) > int(requested_limit):
+            raise ValueError("Technical rating ticker count exceeds job limit.")
+        count = RatingsRepository(self.repository.database_url).replace_technical_indicator_rating_snapshots(
+            as_of_date, ratings, tickers=tickers,
+        )
+        if count != len(ratings):
+            raise ValueError("Technical rating persistence did not save all rows.")
+        self.repository.patch_job_run_result(
+            job_run_id,
+            result_payload_patch={
+                "progress_label": "Completed on GitHub",
+                "message": "GitHub technical ratings validated and persisted.",
+                "technical_rating_count": count,
+                "external_manifest_url": manifest_url,
+                "github_conclusion": "success",
+                "success_count": sum(item.technical_status == "ok" for item in ratings),
+            },
+            status="success",
+            artifact_path=manifest_url,
+            finished_at=finished_at,
+        )
+        self._write_scheduled_status(
+            request_payload=request_payload, status="success",
+            message=f"Persisted {count} technical indicator ratings.",
+            artifact_file=manifest_url, screen_run_id=None, finished_at=finished_at,
+            persisted_to_db=True,
+        )
+        return {"status": "success", "technical_rating_count": count}
+
     def heartbeat(self, *, job_run_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         row = self.repository.get_job_run(job_run_id)
         if row is None:
@@ -152,6 +221,7 @@ class ExternalJobResultService:
         artifact_file: str,
         screen_run_id: int | None,
         finished_at: str | None = None,
+        persisted_to_db: bool | None = None,
     ) -> None:
         options = request_payload.get("options") if isinstance(request_payload.get("options"), dict) else {}
         scheduled_job_id = str(options.get("scheduled_job_id") or "").strip()
@@ -169,12 +239,12 @@ class ExternalJobResultService:
             "log_file": "",
             "artifact_file": artifact_file or options.get("scheduled_artifact_file") or None,
             "message": message,
-            "persisted_to_db": True if screen_run_id is not None else (False if status == "failed" else None),
+            "persisted_to_db": persisted_to_db if persisted_to_db is not None else (True if screen_run_id is not None else (False if status == "failed" else None)),
             "screen_run_id": screen_run_id,
             "persistence_message": (
                 f"Persisted screen run id={screen_run_id}."
                 if screen_run_id is not None
-                else ("Job failed before DB persistence completed." if status == "failed" else "Persistence pending.")
+                else ("Ratings persisted to DB." if persisted_to_db else ("Job failed before DB persistence completed." if status == "failed" else "Persistence pending."))
             ),
         }
         status_path = status_dir / f"{scheduled_job_id}.json"

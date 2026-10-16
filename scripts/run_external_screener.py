@@ -81,12 +81,19 @@ def run(*, action_id: str, options: dict[str, Any], artifacts_file: Path) -> dic
     environment["TICKER_SCREENER_SKIP_SCREEN_RUN_PERSISTENCE"] = "1"
     if options.get("market_data_source"):
         environment["TICKER_SCREENER_MARKET_DATA_SOURCE"] = str(options["market_data_source"])
-    _validate_database_requirements(options, environment)
+    if action_id == "build_technical_indicator_ratings":
+        if not environment.get("TICKER_SCREENER_DATABASE_URL", "").strip():
+            raise ValueError("Technical ratings require the read-only Postgres tunnel.")
+    else:
+        _validate_database_requirements(options, environment)
 
     service = RunService(project_root=PROJECT_ROOT)
     if "github" not in service.execution_modes_for_action(action_id):
         raise ValueError(f"GitHub execution is not enabled for {action_id}.")
     command = service.build_command(action_id, options)
+    if action_id == "build_technical_indicator_ratings":
+        export_path = artifacts_file.with_name("technical-ratings.json.gz")
+        command.extend(["--export-file", str(export_path)])
     completed = subprocess.run(command, cwd=PROJECT_ROOT, text=True, capture_output=True, check=False, env=environment)
     if completed.stdout:
         print(completed.stdout, end="")
@@ -94,6 +101,12 @@ def run(*, action_id: str, options: dict[str, Any], artifacts_file: Path) -> dic
         print(completed.stderr, end="", file=sys.stderr)
     if completed.returncode:
         raise RuntimeError(f"Screener exited with code {completed.returncode}.")
+    if action_id == "build_technical_indicator_ratings":
+        if not export_path.is_file():
+            raise ValueError("Technical rating export was not produced.")
+        paths = {"ratings": str(export_path)}
+        artifacts_file.write_text(json.dumps(paths), encoding="utf-8")
+        return paths
     summary_markers = [
         line.removeprefix("Wrote run summary to ").strip()
         for line in completed.stdout.splitlines()
