@@ -4556,6 +4556,70 @@ dialog.modal-backdrop:not([open]) {
   vertical-align: top;
 }
 
+.ratings-ticker-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ratings-pick-button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ratings-pick-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.ratings-pick-button:hover:not(:disabled),
+.ratings-pick-button:focus-visible {
+  color: var(--color-accent, #b9dd72);
+  border-color: currentColor;
+  outline: none;
+}
+
+.ratings-pick-button.is-selected {
+  color: var(--color-accent, #b9dd72);
+}
+
+.ratings-pick-button.is-selected svg {
+  fill: currentColor;
+}
+
+.ratings-pick-button:disabled:not(.is-selected) {
+  opacity: .45;
+  cursor: wait;
+}
+
+.ratings-picks-error,
+.ratings-picks-loading,
+.ratings-picks-notice {
+  padding: 8px 0;
+  color: var(--color-muted);
+  font-size: .85rem;
+}
+
+.ratings-picks-notice {
+  color: var(--color-accent, #b9dd72);
+}
+
+.ratings-picks-error {
+  color: var(--color-danger, #f08b86);
+}
+
 .ratings-table th:first-child,
 .ratings-table td:first-child {
   background: var(--color-surface);
