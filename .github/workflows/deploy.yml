@@ -8,11 +8,6 @@ on:
         required: false
         default: main
         type: string
-      compose_command:
-        description: Compose command after git pull
-        required: false
-        default: up -d --force-recreate --no-deps web caddy
-        type: string
       allow_active_remote_jobs:
         description: Allow deploy even when queued or running remote jobs exist
         required: false
@@ -42,7 +37,6 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           GIT_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.git_ref || github.event.workflow_run.head_branch }}
-          COMPOSE_COMMAND: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.compose_command || 'up -d --force-recreate --no-deps web caddy' }}
           ALLOW_ACTIVE_REMOTE_JOBS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.allow_active_remote_jobs || 'false' }}
           APP_DIR: ${{ secrets.ORACLE_APP_DIR }}
         with:
@@ -50,7 +44,7 @@ jobs:
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           port: ${{ secrets.ORACLE_PORT }}
-          envs: GIT_REF,COMPOSE_COMMAND,ALLOW_ACTIVE_REMOTE_JOBS,APP_DIR
+          envs: GIT_REF,ALLOW_ACTIVE_REMOTE_JOBS,APP_DIR
           script_stop: true
           script: |
             set -euo pipefail
@@ -125,7 +119,11 @@ jobs:
             if [ "${MIGRATE_WORKER_IMAGE}" = "true" ]; then
               ../scripts/upgrade_compose_worker.sh "${IMAGE_TAG}"
             fi
-            TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" ../scripts/deploy_compose_services.sh ${COMPOSE_COMMAND}
+            TICKER_SCREENER_IMAGE_TAG="${IMAGE_TAG}" ../scripts/recreate_web_release.sh "${IMAGE_TAG}"
+            # Caddy's image and bind-mounted configuration do not change during
+            # an application release. Ensure it is running without entering the
+            # legacy Compose recreate path that can raise ContainerConfig.
+            docker-compose up -d --no-recreate caddy
             mkdir -p ../artifacts/status
             nohup ../scripts/upgrade_compose_worker_when_drained.sh "${IMAGE_TAG}" \
               >> "../artifacts/status/worker-upgrade-${IMAGE_TAG}.log" 2>&1 < /dev/null &
