@@ -11,8 +11,11 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from zoneinfo import ZoneInfo
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
+
+import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -103,8 +106,119 @@ def _load_active_metadata_tickers(connection) -> tuple[list[str], int]:
     return active, inactive_count
 
 
+def _load_metadata_exchanges(connection, tickers: list[str]) -> dict[str, str]:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT ticker, exchange FROM ticker_metadata WHERE ticker = ANY(%s)", (tickers,))
+        return {str(ticker).strip().upper(): str(exchange).strip().upper() for ticker, exchange in cursor.fetchall() if exchange}
+
+
 def _filter_reload_tickers(tickers: list[str], excluded: set[str]) -> list[str]:
     return filter_symbols(tickers, excluded)
+
+
+def _valid_bar(row: tuple[object, ...], trade_date: dt.date) -> bool:
+    if row[1] != trade_date:
+        return False
+    try:
+        open_price, high, low, close, adj_close, volume = (float(value) for value in row[2:8])
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return (
+        all(math.isfinite(value) and value > 0 for value in (open_price, high, low, close, adj_close))
+        and high >= max(open_price, close)
+        and low <= min(open_price, close)
+        and math.isfinite(volume)
+        and volume >= 0
+        and volume.is_integer()
+    )
+
+
+def _valid_histories(histories: dict[str, "pd.DataFrame"], trade_date: dt.date) -> dict[str, "pd.DataFrame"]:
+    valid = {}
+    for ticker, history in histories.items():
+        rows = _build_daily_bar_rows({ticker: history}, "validation", _utc_now())
+        if len(rows) == 1 and _valid_bar(rows[0], trade_date):
+            valid[ticker] = history
+    return valid
+
+
+def _tradingview_eligible(trade_date: dt.date, now: dt.datetime | None = None) -> bool:
+    eastern = (now or _utc_now()).astimezone(ZoneInfo("America/New_York"))
+    today = eastern.date()
+    if _is_trade_session(today) and dt.time(16) <= eastern.time() < dt.time(16, 15):
+        return False
+    # TradingView's scanner can lag the regular-session close; wait 15 minutes.
+    latest = today if _is_trade_session(today) and eastern.time() >= dt.time(16, 15) else today - dt.timedelta(days=1)
+    while not _is_trade_session(latest):
+        latest -= dt.timedelta(days=1)
+    # Scanner OHLC is live during the next session and has no per-row trade date.
+    market_open = _is_trade_session(today) and dt.time(9, 30) <= eastern.time() < dt.time(16)
+    return trade_date == latest and not market_open
+
+
+def _download_tradingview_histories(
+    trade_date: dt.date, tickers: list[str], exchanges: dict[str, str]
+) -> tuple[dict[str, "pd.DataFrame"], int, int, int]:
+    import pandas as pd
+
+    columns = ["name", "exchange", "open", "high", "low", "close", "volume", "update_mode"]
+    histories: dict[str, pd.DataFrame] = {}
+    invalid = ambiguous = failed_batches = 0
+    for start in range(0, len(tickers), 500):
+        batch = tickers[start : start + 500]
+        try:
+            response = requests.post(
+                "https://scanner.tradingview.com/america/scan",
+                json={
+                    "filter": [{"left": "name", "operation": "in_range", "right": batch}],
+                    "options": {"lang": "en"},
+                    "symbols": {"query": {"types": []}, "tickers": []},
+                    "columns": columns,
+                    "range": [0, 10000],
+                },
+                timeout=60,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+                raise ValueError("Invalid TradingView scanner response")
+        except (requests.RequestException, ValueError) as exc:
+            failed_batches += 1
+            print(f"tradingview=failed batch={start // 500 + 1} reason={exc}", flush=True)
+            continue
+        matches: dict[str, list[list[object]]] = {ticker: [] for ticker in batch}
+        for item in payload["data"]:
+            values = item.get("d") if isinstance(item, dict) else None
+            if isinstance(values, list) and len(values) == len(columns) and values[0] is not None:
+                ticker = str(values[0]).strip().upper()
+                if ticker in matches:
+                    matches[ticker].append(values)
+        for ticker, candidates in matches.items():
+            exchange = exchanges.get(ticker)
+            if len(candidates) > 1 and exchange:
+                preferred = [row for row in candidates if str(row[1]).upper() == exchange]
+                if len(preferred) == 1:
+                    candidates = preferred
+            if len(candidates) > 1:
+                ambiguous += 1
+                continue
+            if not candidates:
+                continue
+            _, _, open_price, high, low, close, volume, _ = candidates[0]
+            try:
+                frame = pd.DataFrame(
+                    {"Open": [float(open_price)], "High": [float(high)], "Low": [float(low)],
+                     "Close": [float(close)], "Adj Close": [float(close)], "Volume": [float(volume)],
+                     "Dividends": [0.0], "Stock Splits": [1.0]},
+                    index=pd.DatetimeIndex([pd.Timestamp(trade_date)], name="Date"),
+                )
+                if _valid_histories({ticker: frame}, trade_date):
+                    histories[ticker] = frame
+                else:
+                    invalid += 1
+            except (TypeError, ValueError, OverflowError):
+                invalid += 1
+    return histories, invalid, ambiguous, failed_batches
 
 
 def _build_massive_histories(
@@ -115,6 +229,7 @@ def _build_massive_histories(
     import pandas as pd
 
     histories: dict[str, pd.DataFrame] = {}
+    seen: set[str] = set()
     rows = payload.get("results")
     if not isinstance(rows, list):
         return histories
@@ -124,15 +239,22 @@ def _build_massive_histories(
         ticker = str(row.get("T") or "").strip().upper()
         if ticker not in requested_tickers:
             continue
+        if ticker in seen:
+            histories.pop(ticker)
+            continue
+        seen.add(ticker)
         try:
             open_price = float(row["o"])
             high = float(row["h"])
             low = float(row["l"])
             close = float(row["c"])
-            volume = int(float(row["v"]))
-        except (KeyError, TypeError, ValueError):
+            volume_value = float(row["v"])
+            if not math.isfinite(volume_value) or not volume_value.is_integer():
+                continue
+            volume = int(volume_value)
+        except (KeyError, TypeError, ValueError, OverflowError):
             continue
-        if min(open_price, high, low, close) <= 0 or volume < 0 or high < max(open_price, close) or low > min(open_price, close):
+        if not all(math.isfinite(value) and value > 0 for value in (open_price, high, low, close)) or volume < 0 or high < max(open_price, close) or low > min(open_price, close):
             continue
         histories[ticker] = pd.DataFrame(
             {
@@ -278,7 +400,10 @@ def _atomic_write(path: Path, content: str) -> None:
 
 
 def _provider_incident_detected(*, target_count: int, missing_count: int, failed_chunks: int) -> bool:
-    return failed_chunks > 0 or (target_count > 0 and missing_count >= max(10, math.ceil(target_count * 0.05)))
+    # Provider errors matter to the no-price policy only when fallback also left gaps.
+    return (failed_chunks > 0 and missing_count > 0) or (
+        target_count > 0 and missing_count >= max(10, math.ceil(target_count * 0.05))
+    )
 
 
 def _select_recovery_probes(
@@ -371,7 +496,7 @@ def _advance_no_price_observations(
                 records[ticker] = {"missing_dates": [value.isoformat() for value in parsed_dates], "last_probe_date": last_probe}
                 if len(parsed_dates) >= 3 and ticker not in registered:
                     evidence = ", ".join(value.isoformat() for value in parsed_dates)
-                    lines.append(f"{ticker} # reason=no valid Massive/Yahoo daily bar for three consecutive trade sessions: {evidence}")
+                    lines.append(f"{ticker} # reason=no valid provider daily bar for three consecutive trade sessions: {evidence}")
                     registered.add(ticker)
                     new_exclusions += 1
             for ticker in probe_tickers:
@@ -402,7 +527,7 @@ def _validate_replacement_rows(
     seen: set[str] = set()
     for row in rows:
         ticker, row_date, *_ = row
-        if not ticker or row_date != trade_date or str(ticker) in seen:
+        if not ticker or str(ticker) in seen or not _valid_bar(row, trade_date):
             raise RuntimeError(f"Invalid replacement row for ticker={ticker!r} date={row_date!r}.")
         seen.add(str(ticker))
 
@@ -479,6 +604,7 @@ def _download_yfinance_pass(
             ticker: history
             for ticker in chunk_result.tickers
             if not (history := _normalize_history_frame(chunk_result.history_by_ticker.get(ticker))).empty
+            and _valid_histories({ticker: history}, trade_date)
         }
         missing_tickers = [ticker for ticker in chunk_result.tickers if ticker not in normalized_histories]
         unresolved.extend(missing_tickers)
@@ -541,22 +667,39 @@ def main() -> int:
         updated_at = _utc_now()
         total_chunks = 0
 
+        tradingview_histories: dict[str, "pd.DataFrame"] = {}
+        tradingview_invalid = tradingview_ambiguous = tradingview_failed_batches = 0
+        if _tradingview_eligible(trade_date):
+            exchanges = _load_metadata_exchanges(connection, tickers)
+            tradingview_histories, tradingview_invalid, tradingview_ambiguous, tradingview_failed_batches = (
+                _download_tradingview_histories(trade_date, tickers, exchanges)
+            )
+            print(f"tradingview=complete matched_tickers={len(tradingview_histories)}", flush=True)
+        else:
+            print("tradingview=skipped reason=not_latest_completed_session", flush=True)
+
         massive_histories: dict[str, "pd.DataFrame"] = {}
+        massive_failed_batches = 0
         massive_api_key = os.getenv("MASSIVE_API_KEY", "").strip()
         if not massive_api_key:
             print("massive=skipped reason=missing_api_key", flush=True)
         else:
             try:
-                massive_histories = _download_massive_histories(trade_date, set(tickers), massive_api_key)
+                massive_tickers = set(tickers) - set(tradingview_histories)
+                if massive_tickers:
+                    massive_histories = _valid_histories(
+                        _download_massive_histories(trade_date, massive_tickers, massive_api_key), trade_date
+                    )
                 print(
                     f"massive=success matched_tickers={len(massive_histories)}",
                     flush=True,
                 )
             except Exception as exc:
+                massive_failed_batches = 1
                 print(f"massive=failed reason={exc}; falling_back=yfinance", flush=True)
                 massive_histories = {}
 
-        yahoo_tickers = [ticker for ticker in tickers if ticker not in massive_histories]
+        yahoo_tickers = [ticker for ticker in tickers if ticker not in tradingview_histories and ticker not in massive_histories]
         print(f"yfinance_target_ticker_count={len(yahoo_tickers)}", flush=True)
 
         yfinance_histories, chunks, retry_tickers, primary_failed_chunks = _download_yfinance_pass(
@@ -578,8 +721,9 @@ def main() -> int:
         )
         total_chunks += chunks
 
-        histories = {**massive_histories, **yfinance_histories, **retry_histories}
-        source_by_ticker = {ticker: "massive" for ticker in massive_histories}
+        histories = {**tradingview_histories, **massive_histories, **yfinance_histories, **retry_histories}
+        source_by_ticker = {ticker: "tradingview_screener" for ticker in tradingview_histories}
+        source_by_ticker.update({ticker: "massive" for ticker in massive_histories})
         source_by_ticker.update({ticker: args.source_label for ticker in yfinance_histories})
         source_by_ticker.update({ticker: args.source_label for ticker in retry_histories})
         bar_rows = _build_daily_bar_rows(histories, args.source_label, updated_at, source_by_ticker)
@@ -591,7 +735,7 @@ def main() -> int:
         provider_incident = _provider_incident_detected(
             target_count=len(tickers),
             missing_count=len(missing_tickers),
-            failed_chunks=primary_failed_chunks + retry_failed_chunks,
+            failed_chunks=tradingview_failed_batches + massive_failed_batches + primary_failed_chunks + retry_failed_chunks,
         )
         deleted, total_rows, observation_summary = _replace_and_record_no_price_observations(
             connection,
@@ -610,9 +754,12 @@ def main() -> int:
         print(f"summary_target_tickers={len(tickers)}", flush=True)
         print(f"summary_reloaded_rows={total_rows}", flush=True)
         print(f"summary_deleted_rows={deleted}", flush=True)
-        print(f"summary_missing_tickers={len(set(unresolved_tickers) | stale_tickers)}", flush=True)
+        print(f"summary_missing_tickers={len(missing_tickers)}", flush=True)
         print(f"summary_stale_provider_tickers={len(stale_tickers)}", flush=True)
         print(f"summary_yfinance_retry_tickers={len(retry_tickers)}", flush=True)
+        print(f"summary_source_tradingview_screener_rows={len(tradingview_histories)}", flush=True)
+        print(f"summary_tradingview_invalid_rows={tradingview_invalid}", flush=True)
+        print(f"summary_tradingview_ambiguous_tickers={tradingview_ambiguous}", flush=True)
         print(f"summary_source_massive_rows={len(massive_histories)}", flush=True)
         print(f"summary_source_{args.source_label}_rows={len(yfinance_histories) + len(retry_histories)}", flush=True)
         print(f"summary_provider_incident={str(provider_incident).lower()}", flush=True)

@@ -11,6 +11,8 @@ from scripts.reload_postgres_market_data_date import (
     _build_massive_histories,
     _download_massive_histories,
     _download_yfinance_pass,
+    _download_tradingview_histories,
+    _tradingview_eligible,
     _filter_reload_tickers,
     _load_active_metadata_tickers,
     _minimum_replacement_row_count,
@@ -78,6 +80,7 @@ class ReloadPostgresMarketDataDateTests(unittest.TestCase):
 
         self.assertTrue(_provider_incident_detected(target_count=100, missing_count=10, failed_chunks=0))
         self.assertTrue(_provider_incident_detected(target_count=100, missing_count=1, failed_chunks=1))
+        self.assertFalse(_provider_incident_detected(target_count=100, missing_count=0, failed_chunks=1))
         self.assertFalse(_provider_incident_detected(target_count=100, missing_count=1, failed_chunks=0))
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "state.json"
@@ -88,6 +91,76 @@ class ReloadPostgresMarketDataDateTests(unittest.TestCase):
             )
             self.assertEqual(result["observations"], 0)
             self.assertFalse(state_path.exists())
+
+    def test_tradingview_is_limited_to_latest_completed_session_after_delay_cutoff(self) -> None:
+        from zoneinfo import ZoneInfo
+
+        eastern = ZoneInfo("America/New_York")
+        friday = dt.date(2026, 10, 16)
+        thursday = dt.date(2026, 10, 15)
+        self.assertFalse(_tradingview_eligible(friday, dt.datetime(2026, 10, 16, 16, 14, tzinfo=eastern)))
+        self.assertFalse(_tradingview_eligible(thursday, dt.datetime(2026, 10, 16, 16, 14, tzinfo=eastern)))
+        self.assertTrue(_tradingview_eligible(friday, dt.datetime(2026, 10, 16, 16, 15, tzinfo=eastern)))
+        self.assertTrue(_tradingview_eligible(friday, dt.datetime(2026, 10, 19, 8, 0, tzinfo=eastern)))
+        self.assertFalse(_tradingview_eligible(dt.date(2026, 10, 19), dt.datetime(2026, 10, 19, 8, 0, tzinfo=eastern)))
+        self.assertFalse(_tradingview_eligible(friday, dt.datetime(2026, 10, 19, 10, 0, tzinfo=eastern)))
+
+    def test_tradingview_exchange_disambiguation_and_invalid_rows(self) -> None:
+        rows = [
+            {"d": ["ABC", "NYSE", 10, 11, 9, 10.5, 100, "delayed"]},
+            {"d": ["ABC", "NASDAQ", 20, 21, 19, 20.5, 200, "delayed"]},
+            {"d": ["BAD", "NYSE", 10, 9, 8, 9, 100, "delayed"]},
+            {"d": [None, "NYSE", 1, 2, 1, 2, 100, "delayed"]},
+            {"d": ["NULL", "NYSE", None, 2, 1, 2, 100, "delayed"]},
+        ]
+        response = MagicMock()
+        response.json.return_value = {"data": rows}
+        response.raise_for_status.return_value = None
+        with patch("scripts.reload_postgres_market_data_date.requests.post", return_value=response):
+            histories, invalid, ambiguous, failed = _download_tradingview_histories(
+                dt.date(2026, 10, 16), ["ABC", "BAD", "NULL", "MISSING"], {"ABC": "NASDAQ"}
+            )
+        self.assertEqual(set(histories), {"ABC"})
+        self.assertEqual(histories["ABC"].iloc[0]["Close"], 20.5)
+        self.assertEqual((invalid, ambiguous, failed), (2, 0, 0))
+
+    def test_tradingview_duplicate_without_unique_exchange_match_is_ambiguous(self) -> None:
+        response = MagicMock()
+        response.json.return_value = {"data": [
+            {"d": ["ABC", "NYSE", 10, 11, 9, 10, 100, "delayed"]},
+            {"d": ["ABC", "NASDAQ", 20, 21, 19, 20, 200, "delayed"]},
+        ]}
+        response.raise_for_status.return_value = None
+        with patch("scripts.reload_postgres_market_data_date.requests.post", return_value=response):
+            histories, invalid, ambiguous, failed = _download_tradingview_histories(
+                dt.date(2026, 10, 16), ["ABC"], {}
+            )
+        self.assertEqual(histories, {})
+        self.assertEqual((invalid, ambiguous, failed), (0, 1, 0))
+
+    def test_tradingview_unique_match_does_not_require_metadata_exchange_match(self) -> None:
+        response = MagicMock()
+        response.json.return_value = {
+            "data": [{"d": ["SPY", "AMEX", 773.24, 773.25, 760.64, 763.25, 64_382_748, "delayed"]}]
+        }
+        response.raise_for_status.return_value = None
+        with patch("scripts.reload_postgres_market_data_date.requests.post", return_value=response):
+            histories, invalid, ambiguous, failed = _download_tradingview_histories(
+                dt.date(2026, 10, 16), ["SPY"], {"SPY": "ETF"}
+            )
+        self.assertEqual(set(histories), {"SPY"})
+        self.assertEqual((invalid, ambiguous, failed), (0, 0, 0))
+
+    def test_massive_duplicate_and_malformed_rows_do_not_survive(self) -> None:
+        histories = _build_massive_histories(
+            {"results": [
+                {"T": "ABC", "o": 10, "h": 11, "l": 9, "c": 10, "v": 100},
+                {"T": "ABC", "o": 10, "h": 11, "l": 9, "c": 10, "v": 100},
+                {"T": "BAD", "o": 10, "h": 11, "l": 9, "c": 10, "v": 1.5},
+            ]},
+            dt.date(2026, 10, 16), {"ABC", "BAD"},
+        )
+        self.assertEqual(histories, {})
 
     def test_failed_atomic_replacement_does_not_advance_no_price_state(self) -> None:
         import tempfile
@@ -152,7 +225,7 @@ class ReloadPostgresMarketDataDateTests(unittest.TestCase):
         self.assertEqual(stale_tickers, {"BHAVR"})
 
     def test_validate_replacement_rows_accepts_provider_ohlcv_values(self) -> None:
-        row = ("EURKR", dt.date(2026, 10, 13), 0.4181, 0.4499, 0.4499, 0.4499, 0.4499, 361, 0.0, 1.0, "yfinance", dt.datetime.now(dt.timezone.utc))
+        row = ("EURKR", dt.date(2026, 10, 13), 0.4181, 0.4499, 0.4181, 0.4499, 0.4499, 361, 0.0, 1.0, "yfinance", dt.datetime.now(dt.timezone.utc))
 
         _validate_replacement_rows([row], dt.date(2026, 10, 13), minimum_row_count=1)
 
