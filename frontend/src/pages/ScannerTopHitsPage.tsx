@@ -1733,7 +1733,7 @@ function SectorBoard({
 function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canManageMyPicks, selectedTicker, onSelectTicker, onToggleMyPick }: { rows: ScannerTopHitRow[]; myPickTickers: Set<string>; savingMyPickTickers: Record<string, boolean>; canManageMyPicks: boolean; selectedTicker: string; onSelectTicker: (ticker: string) => void; onToggleMyPick: (ticker: string) => Promise<void> }) {
   const [showAvoided, setShowAvoided] = useState(false);
   const columns = [
-    ["leader", "Leader"], ["pullback_zone", "Pullback Zone"], ["reclaim_trigger", "Reclaim Trigger"], ["defined_risk", "Defined Risk"],
+    ["leader", "Leader / Waiting"], ["pullback_zone", "Support Zone"], ["reclaim_trigger", "Daily Trigger"], ["defined_risk", "Order Ready"],
   ] as const;
   const sorted = [...rows].sort((a, b) => (b.strike_zone?.score ?? 0) - (a.strike_zone?.score ?? 0) || (b.pullback_quality?.score ?? 0) - (a.pullback_quality?.score ?? 0) || (b.daily_rs_rating ?? 0) - (a.daily_rs_rating ?? 0) || a.ticker.localeCompare(b.ticker));
   const renderCard = (row: ScannerTopHitRow) => {
@@ -1743,11 +1743,23 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
       <button type="button" className="trade-readiness-select" aria-pressed={row.ticker === selectedTicker} onClick={() => onSelectTicker(row.ticker)}><strong>{row.ticker}</strong><span>{price}</span></button>
       <div className="guru-ticker-badges"><span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span><SectorTag sector={row.sector} /></div>
       <div className="guru-ticker-context"><span>PB {row.pullback_quality ? `${row.pullback_quality.score} · ${row.pullback_quality.state}` : "--"}</span><span>Strike {row.strike_zone?.score ?? "--"}</span></div>
-      {plan ? <div className="trade-readiness-plan"><span>{plan.support_label}: {plan.support_price?.toFixed(2) ?? "--"}</span><span>{plan.trigger_label}: {plan.trigger_price?.toFixed(2) ?? "--"}</span><span>{plan.stop_label}: {plan.stop_price?.toFixed(2) ?? "--"}</span><span>Reference risk: {plan.reference_risk_pct == null ? "--" : `${plan.reference_risk_pct.toFixed(2)}%`}</span></div> : null}
+      {plan ? <>
+        <div className="trade-readiness-plan">
+          <span>Setup: {plan.source_strategy_id} · {plan.signal_date || "date TBD"}</span>
+          <span>{plan.state === "active" ? "Active daily signal · close confirmed" : "Daily setup · waiting for trigger"}</span>
+          <span>{plan.support_label}: {plan.support_price?.toFixed(2) ?? "--"}</span>
+          <span>{plan.trigger_label}: {plan.trigger_price?.toFixed(2) ?? "--"}</span>
+          <span>{plan.stop_label}: {plan.stop_price?.toFixed(2) ?? "--"}</span>
+          <span>Planned risk: {plan.reference_risk_pct == null ? "--" : `${plan.reference_risk_pct.toFixed(2)}%`}</span>
+          <span>Max entry (5% risk): {plan.max_entry_price?.toFixed(2) ?? "--"}</span>
+        </div>
+        {plan.risk_status === "over_limit" ? <p className="panel-copy">Risk exceeds 5% at the trigger; wait for a lower entry.</p> : null}
+        {plan.risk_status === "invalid_levels" ? <p className="panel-copy">Trigger or stop is missing or invalid; order risk cannot be confirmed.</p> : null}
+      </> : null}
       <div className="guru-ticker-context"><span>{row.earnings_days == null ? "Earnings TBD" : `Earnings ${row.earnings_days}d`}</span><button className="ghost-button" type="button" disabled={!canManageMyPicks || Boolean(savingMyPickTickers[row.ticker])} onClick={() => void onToggleMyPick(row.ticker)}>{myPickTickers.has(row.ticker) ? "My Pick ✓" : "My Pick +"}</button></div>
     </article>;
   };
-  return <section className="trade-readiness-board" aria-label="Trade Readiness"><div className="guru-board-scroll">{columns.map(([state, label]) => { const bucket = sorted.filter((row) => (row.trade_readiness || "leader") === state); return <article className="guru-column is-teal" key={state}><header><strong>{bucket.length}</strong><span>{label}</span></header><div className="guru-column-cards">{bucket.map(renderCard)}</div></article>; })}</div><button className="ghost-button" type="button" aria-expanded={showAvoided} onClick={() => setShowAvoided((value) => !value)}>{showAvoided ? "Hide avoided" : `Show avoided (${sorted.filter((row) => row.trade_readiness === "avoid").length})`}</button>{showAvoided ? <div className="guru-board-scroll">{sorted.filter((row) => row.trade_readiness === "avoid").map(renderCard)}</div> : null}</section>;
+  return <section className="trade-readiness-board" aria-label="Trade Readiness"><p className="panel-copy">Daily chart signals use completed bars for next-session planning; entries require a daily close confirmation.</p><div className="guru-board-scroll">{columns.map(([state, label]) => { const bucket = sorted.filter((row) => (row.trade_readiness || "leader") === state); return <article className="guru-column is-teal" key={state}><header><strong>{bucket.length}</strong><span>{label}</span></header><div className="guru-column-cards">{bucket.map(renderCard)}</div></article>; })}</div><button className="ghost-button" type="button" aria-expanded={showAvoided} onClick={() => setShowAvoided((value) => !value)}>{showAvoided ? "Hide avoided" : `Show avoided (${sorted.filter((row) => row.trade_readiness === "avoid").length})`}</button>{showAvoided ? <div className="guru-board-scroll">{sorted.filter((row) => row.trade_readiness === "avoid").map(renderCard)}</div> : null}</section>;
 }
 
 function GuruTickerCard({

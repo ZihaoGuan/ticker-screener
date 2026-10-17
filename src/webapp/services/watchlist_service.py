@@ -96,8 +96,8 @@ _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
-_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v4"
-_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v6"
+_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v5"
+_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v7"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -6034,7 +6034,27 @@ def _build_trade_plan(artifacts: list[dict[str, Any]]) -> dict[str, Any] | None:
         risk = (trigger - stop) / trigger * 100.0
         if not math.isfinite(risk) or risk <= 0:
             risk = None
-    return {"source_strategy_id": strategy, "state": state, "support_label": str(item.get("secondary_entry_label") or "Support"), "support_price": support, "trigger_label": str(item.get("trigger_label") or "Trigger"), "trigger_price": trigger, "stop_label": str(item.get("stop_label") or "Stop"), "stop_price": stop, "reference_risk_pct": round(risk, 2) if risk is not None else None, "signal_date": str(item.get("event_date") or item.get("_source_date") or "") or None}
+    max_entry = stop / 0.95 if stop is not None else None
+    if max_entry is not None and not math.isfinite(max_entry):
+        max_entry = None
+    return {
+        "source_strategy_id": strategy,
+        "state": state,
+        "support_label": str(item.get("secondary_entry_label") or "Support"),
+        "support_price": support,
+        "trigger_label": str(item.get("trigger_label") or "Trigger"),
+        "trigger_price": trigger,
+        "stop_label": str(item.get("stop_label") or "Stop"),
+        "stop_price": stop,
+        "reference_risk_pct": round(risk, 2) if risk is not None else None,
+        "execution_timeframe": "daily",
+        "entry_policy": "close_confirmed",
+        "max_risk_pct": 5.0,
+        "max_entry_price": max_entry,
+        "risk_valid": risk is not None and risk <= 5.0,
+        "risk_status": "invalid_levels" if risk is None else "within_limit" if risk <= 5.0 else "over_limit",
+        "signal_date": str(item.get("event_date") or item.get("_source_date") or "") or None,
+    }
 
 
 def _trade_readiness(row: dict[str, Any]) -> str:
@@ -6044,7 +6064,9 @@ def _trade_readiness(row: dict[str, Any]) -> str:
     if not isinstance(plan, dict):
         return "leader"
     if plan.get("state") == "active":
-        return "defined_risk" if plan.get("reference_risk_pct") is not None else "reclaim_trigger"
+        risk = _coerce_optional_float(plan.get("reference_risk_pct"))
+        valid_risk = plan.get("risk_valid", risk is not None)
+        return "defined_risk" if valid_risk and risk is not None and math.isfinite(risk) and 0 < risk <= 5.0 else "reclaim_trigger"
     return "pullback_zone"
 
 

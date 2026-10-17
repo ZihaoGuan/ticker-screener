@@ -97,15 +97,56 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertTrue(payload["phase_avwap"])
         self.assertTrue(all(point["time"] in candle_dates for point in payload["phase_avwap"]))
 
-    def test_trade_plan_validates_risk_and_readiness_handles_old_rows(self) -> None:
-        plan = _build_trade_plan([{"_source_strategy_id": "ema21_pullback_buy", "event_date": "2026-06-12", "trigger_price": 110, "stop_price": 100, "secondary_entry_price": 103}])
-        self.assertEqual(plan["state"], "active")
-        self.assertEqual(plan["reference_risk_pct"], 9.09)
-        self.assertEqual(_trade_readiness({"strike_zone": {"state": "ready"}, "trade_plan": plan}), "defined_risk")
-        invalid = _build_trade_plan([{"_source_strategy_id": "ema21_pullback_buy", "trigger_price": 100, "stop_price": 105}])
-        self.assertIsNone(invalid["reference_risk_pct"])
-        self.assertEqual(_trade_readiness({"trade_plan": invalid}), "reclaim_trigger")
+    def test_daily_trade_readiness_caps_order_ready_risk_at_five_percent(self) -> None:
+        def plan(trigger: object, stop: object, *, strategy: str = "ema21_pullback_buy") -> dict:
+            result = _build_trade_plan([{
+                "_source_strategy_id": strategy,
+                "event_date": "2026-06-12",
+                "signal_state": "active",
+                "trigger_price": trigger,
+                "stop_price": stop,
+                "secondary_entry_price": 90,
+            }])
+            assert result is not None
+            return result
+
+        ready_setup = _build_trade_plan([{
+            "_source_strategy_id": "ma_pullback_retest",
+            "signal_state": "ready",
+            "trigger_price": 100,
+            "stop_price": 95,
+        }])
+        self.assertEqual(_trade_readiness({"trade_plan": ready_setup}), "pullback_zone")
+
+        four_percent = plan(100, 96)
+        exact_limit = plan(100, 95)
+        over_limit = plan(100, 94)
+        self.assertEqual(_trade_readiness({"trade_plan": four_percent}), "defined_risk")
+        self.assertEqual(_trade_readiness({"trade_plan": exact_limit}), "defined_risk")
+        self.assertEqual(exact_limit["reference_risk_pct"], 5.0)
+        self.assertEqual(_trade_readiness({"trade_plan": over_limit}), "reclaim_trigger")
+        self.assertEqual(over_limit["risk_status"], "over_limit")
+        self.assertFalse(over_limit["risk_valid"])
+        self.assertEqual(exact_limit["execution_timeframe"], "daily")
+        self.assertEqual(exact_limit["entry_policy"], "close_confirmed")
+        self.assertEqual(exact_limit["max_risk_pct"], 5.0)
+        self.assertEqual(exact_limit["max_entry_price"], 100.0)
+        self.assertTrue(exact_limit["risk_valid"])
+
+        for missing_or_invalid in (plan(100, None), plan(None, 95), plan(100, 105)):
+            self.assertFalse(missing_or_invalid["risk_valid"])
+            self.assertEqual(_trade_readiness({"trade_plan": missing_or_invalid}), "reclaim_trigger")
+        self.assertEqual(_trade_readiness({"trade_plan": plan(100, None)}), "reclaim_trigger")
+        self.assertEqual(_trade_readiness({"strike_zone": {"state": "avoid"}, "trade_plan": exact_limit}), "avoid")
         self.assertEqual(_trade_readiness({}), "leader")
+
+        malformed = plan(float("inf"), -1)
+        self.assertIsNone(malformed["trigger_price"])
+        self.assertIsNone(malformed["stop_price"])
+        self.assertIsNone(malformed["max_entry_price"])
+        self.assertIsNone(malformed["reference_risk_pct"])
+        self.assertFalse(malformed["risk_valid"])
+        self.assertEqual(_trade_readiness({"trade_plan": malformed}), "reclaim_trigger")
         newest_active = _build_trade_plan([
             {"_source_strategy_id": "ma_pullback_retest", "_source_date": "2026-06-11", "signal_state": "active", "trigger_price": 105, "stop_price": 95},
             {"_source_strategy_id": "ema21_pullback_buy", "_source_date": "2026-06-12", "trigger_price": float("nan"), "stop_price": 95, "support_price": -1},
