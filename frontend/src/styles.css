@@ -6443,6 +6443,78 @@ dialog.modal-backdrop:not([open]) {
   white-space: nowrap;
 }
 
+.sector-signal-summary,
+.sector-signal-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sector-signal-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.sector-signal-summary span,
+.sector-signal-card {
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.sector-signal-summary span {
+  color: #a1a1aa;
+  display: flex;
+  justify-content: space-between;
+}
+
+.sector-signal-summary strong,
+.sector-signal-card strong {
+  color: #f4f4f5;
+}
+
+.sector-signal-card {
+  color: #a1a1aa;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(120px, 1fr) repeat(4, minmax(160px, 1fr));
+  text-decoration: none;
+}
+
+.sector-signal-card:hover {
+  border-color: #34d399;
+}
+
+.sector-signal-card > span {
+  display: grid;
+  gap: 4px;
+}
+
+.sector-signal-card small {
+  color: #a1a1aa;
+  font-size: 11px;
+}
+
+.sector-signal-card .sector-signal-name small {
+  color: #34d399;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .sector-signal-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sector-signal-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 540px) {
+  .sector-signal-card {
+    grid-template-columns: 1fr;
+  }
+}
+
 .is-positive {
   color: #22c55e;
 }

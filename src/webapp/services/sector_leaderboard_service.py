@@ -12,6 +12,10 @@ from typing import Any
 import pandas as pd
 
 from ...market_data_access import load_many_ticker_windows
+from ...darvas_box_screen import find_darvas_box_breakout_hit
+from ...relative_trend_strength import build_relative_trend_strength_snapshot
+from ...universe import UniverseTicker
+from ...weinstein_stage2_early_screen import classify_weinstein_stage
 from ...ratings.repository import RatingsRepository
 from ...ssga_holdings import load_holdings_cache
 
@@ -35,6 +39,8 @@ class SectorEtf:
 
 _SSGA_BASE_URL = "https://www.ssga.com/us/en/intermediary/etfs"
 _BENCHMARK_TICKER = "SPY"
+_CORE_SECTOR_TICKERS = ("XLC", "XLY", "XLP", "XLE", "XLF", "XLV", "XLI", "XLB", "XLRE", "XLK", "XLU")
+_RECENT_DARVAS_SESSIONS = 10
 _SECTOR_LEADERBOARD_CACHE_TTL_SECONDS = 10 * 60
 # ponytail: process-local TTL cache; use a shared cache if multiple web workers need consistent warm responses.
 _sector_leaderboard_cache: dict[tuple[str, tuple[str, ...], str, str], tuple[float, dict[str, Any]]] = {}
@@ -365,6 +371,23 @@ class SectorLeaderboardService:
             )
             for item in self.etfs
         ]
+        row_by_ticker = {row["ticker"]: row for row in rows}
+        for ticker in _CORE_SECTOR_TICKERS:
+            row = row_by_ticker.get(ticker)
+            if row is None:
+                continue
+            frame = etf_frames.get(ticker)
+            stage = classify_weinstein_stage(frame, ticker=UniverseTicker(symbol=ticker, sector=None, industry=None, exchange=None)) if frame is not None else None
+            rts = build_relative_trend_strength_snapshot(frame, benchmark_frame, ticker=ticker, sector=row["description"], as_of_date=resolved_as_of) if frame is not None and benchmark_frame is not None else None
+            breakout = _find_recent_sector_breakout(frame, ticker, resolved_as_of) if frame is not None else None
+            row.update({
+                "stage": _stage_presentation(stage),
+                "rts_score": rts.rts_score if rts else None,
+                "rts_state": rts.rts_state if rts else None,
+                "rts_as_of_date": rts.as_of_date if rts else None,
+                "rts_formula": "rts-v1" if rts else None,
+                "darvas_breakout": breakout,
+            })
         rows.sort(key=lambda row: _sort_value(row.get("day_change_pct")), reverse=True)
         latest_dates = [row["latest_date"] for row in rows if row.get("latest_date")]
         latest_update = max(latest_dates) if latest_dates else None
@@ -380,6 +403,8 @@ class SectorLeaderboardService:
                 "holdings_cache_generated_at": str(cache.get("generated_at") or "") if isinstance(cache, dict) else "",
             },
             "rows": rows,
+            "core_sector_tickers": list(_CORE_SECTOR_TICKERS),
+            "signal_source": {"rts_formula": "rts-v1", "stage_classifier": "classify_weinstein_stage", "darvas_recent_sessions": _RECENT_DARVAS_SESSIONS},
         }
         _write_sector_leaderboard_cache(cache_key, payload)
         return payload
@@ -502,6 +527,41 @@ class SectorLeaderboardService:
             )
         except Exception:
             return {}
+
+
+def _stage_presentation(hit: Any) -> dict[str, str] | None:
+    if hit is None:
+        return None
+    alias = str(hit.stage_alias)
+    code = alias.replace("Stage ", "").replace(" ", "")
+    label = {
+        "1Base": "Stage 1 · Base",
+        "2A": "Stage 2A · Early advance",
+        "2B": "Stage 2B · Mature advance",
+        "2C": "Stage 2C · Late advance",
+        "3Top": "Stage 3 · Top",
+        "4Decline": "Stage 4 · Decline",
+    }.get(code, alias)
+    return {"code": code, "label": label, "current_stage": hit.current_stage, "maturity": hit.maturity, "signal_date": hit.signal_date}
+
+
+def _find_recent_sector_breakout(frame: pd.DataFrame, ticker: str, as_of_date: dt.date) -> dict[str, Any] | None:
+    if frame is None or frame.empty:
+        return None
+    bars = frame.copy().sort_index()
+    if not isinstance(bars.index, pd.DatetimeIndex):
+        bars.index = pd.to_datetime(bars.index)
+    bars = bars.loc[bars.index.date <= as_of_date]
+    if len(bars) < 253:
+        return None
+    for offset in range(min(_RECENT_DARVAS_SESSIONS, len(bars))):
+        hit = find_darvas_box_breakout_hit(
+            bars.iloc[: len(bars) - offset],
+            ticker=UniverseTicker(symbol=ticker),
+        )
+        if hit is not None:
+            return {"signal_date": hit.signal_date, "sessions_ago": offset}
+    return None
 
 
 def _compute_metrics(frame: Any) -> dict[str, Any]:

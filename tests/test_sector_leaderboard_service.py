@@ -2,6 +2,7 @@ import datetime as dt
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -33,6 +34,67 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
 
     def test_default_sector_catalog_excludes_xweb(self):
         self.assertNotIn("XWEB", {item.ticker for item in module.DEFAULT_SECTOR_ETFS})
+
+    def test_stage_presentation_keeps_classifier_alias_and_maps_substages(self):
+        hit = SimpleNamespace(stage_alias="Stage 2A", current_stage="Stage 2 - Advance", maturity="Early", signal_date="2026-07-30")
+        self.assertEqual(module._stage_presentation(hit), {
+            "code": "2A", "label": "Stage 2A · Early advance", "current_stage": "Stage 2 - Advance",
+            "maturity": "Early", "signal_date": "2026-07-30",
+        })
+        self.assertIsNone(module._stage_presentation(None))
+
+    def test_recent_darvas_breakout_window_and_missing_bars(self):
+        frame = _frame([float(100 + index) for index in range(270)])
+        wanted_date = frame.index[-6].date().isoformat()
+        as_of_date = frame.index[-1].date()
+
+        def one_hit(candidate, *, ticker):
+            if candidate.index[-1].date().isoformat() == wanted_date:
+                return SimpleNamespace(signal_date=wanted_date)
+            return None
+
+        with patch.object(module, "find_darvas_box_breakout_hit", one_hit):
+            recent = module._find_recent_sector_breakout(frame, "XLC", as_of_date)
+            missing = module._find_recent_sector_breakout(pd.DataFrame(), "XLC", as_of_date)
+        expired_date = frame.index[-11].date().isoformat()
+
+        def expired_hit(candidate, *, ticker):
+            if candidate.index[-1].date().isoformat() == expired_date:
+                return SimpleNamespace(signal_date=expired_date)
+            return None
+
+        with patch.object(module, "find_darvas_box_breakout_hit", expired_hit):
+            expired = module._find_recent_sector_breakout(frame, "XLC", as_of_date)
+
+        self.assertEqual(recent, {"signal_date": wanted_date, "sessions_ago": 5})
+        self.assertIsNone(expired)
+        self.assertIsNone(missing)
+
+    def test_signal_fields_are_additive_and_null_when_unavailable(self):
+        etfs = (
+            SectorEtf("XLC", "Comm. Services", "Test", "https://example.test/xlc", ()),
+            SectorEtf("XAR", "Aerospace", "Test", "https://example.test/xar", ()),
+        )
+        frames = {ticker: _frame([float(100 + index) for index in range(270)]) for ticker in ("XLC", "XAR", "SPY")}
+        rts_snapshot = SimpleNamespace(rts_score=72.5, rts_state="expanding", as_of_date="2026-07-30")
+        stage_hit = SimpleNamespace(stage_alias="Stage 2B", current_stage="Stage 2 - Advance", maturity="Mature", signal_date="2026-07-24")
+
+        with patch.object(module, "load_many_ticker_windows", lambda tickers, *args, **kwargs: {ticker: frames[ticker] for ticker in tickers if ticker in frames}), \
+             patch.object(SectorLeaderboardService, "_load_technical_rating_map", return_value={}), \
+             patch.object(module, "classify_weinstein_stage", side_effect=[stage_hit, None]), \
+             patch.object(module, "build_relative_trend_strength_snapshot", side_effect=[rts_snapshot, None]), \
+             patch.object(module, "_find_recent_sector_breakout", side_effect=[{"signal_date": "2026-07-29", "sessions_ago": 1}, None]):
+            payload = SectorLeaderboardService(etfs=etfs).get_payload(as_of_date=dt.date(2026, 7, 30))
+
+        self.assertEqual(payload["core_sector_tickers"], list(module._CORE_SECTOR_TICKERS))
+        by_ticker = {row["ticker"]: row for row in payload["rows"]}
+        self.assertEqual(by_ticker["XLC"]["stage"]["code"], "2B")
+        self.assertEqual(by_ticker["XLC"]["rts_score"], 72.5)
+        self.assertEqual(by_ticker["XLC"]["rts_formula"], "rts-v1")
+        self.assertEqual(by_ticker["XLC"]["darvas_breakout"]["sessions_ago"], 1)
+        self.assertNotIn("stage", by_ticker["XAR"])
+        self.assertNotIn("rts_score", by_ticker["XAR"])
+        self.assertNotIn("darvas_breakout", by_ticker["XAR"])
 
     def test_payload_is_cached_for_the_same_sector_catalog(self):
         service = SectorLeaderboardService(database_url="postgres://example", etfs=())

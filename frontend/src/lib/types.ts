@@ -547,6 +547,12 @@ export type SectorLeaderboardRow = {
   hv63: boolean | null;
   volume_confirmation: boolean | null;
   latest_date: string | null;
+  stage?: { code: string; label: string; current_stage: string; maturity: string; signal_date: string } | null;
+  rts_score?: number | null;
+  rts_state?: string | null;
+  rts_as_of_date?: string | null;
+  rts_formula?: string | null;
+  darvas_breakout?: { signal_date: string; sessions_ago: number } | null;
   top_holdings: SectorLeaderboardHolding[];
 };
 
@@ -562,6 +568,7 @@ export type SectorLeaderboardResponse = {
     holdings_cache_generated_at?: string;
   };
   rows: SectorLeaderboardRow[];
+  core_sector_tickers?: string[];
 };
 
 export type WatchlistTicker = {

@@ -10,7 +10,7 @@ import { formatLocalDate, formatLocalDateTime } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
 import type { SectorLeaderboardHolding, SectorLeaderboardResponse, SectorLeaderboardRow, WatchlistChartResponse } from "../lib/types";
 
-type ViewMode = "list" | "chart";
+type ViewMode = "signals" | "metrics" | "chart";
 type HoldingViewMode = "list" | "chart";
 type SectorSortKey =
   | "ticker"
@@ -71,7 +71,7 @@ export function SectorLeaderboardPage() {
   const [chartLoadingTickers, setChartLoadingTickers] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [viewMode, setViewMode] = useState<ViewMode>("signals");
   const [sectorSortBy, setSectorSortBy] = useState<SectorSortKey>("dayChange");
   const [sectorSortDirection, setSectorSortDirection] = useState<SortDirection>("desc");
   const [holdingViewMode, setHoldingViewMode] = useState<HoldingViewMode>("list");
@@ -91,6 +91,10 @@ export function SectorLeaderboardPage() {
   }, []);
 
   const rows = payload?.rows ?? [];
+  const signalRows = useMemo(() => {
+    const core = new Set(payload?.core_sector_tickers ?? []);
+    return rows.filter((row) => core.has(row.ticker)).sort((a, b) => (b.rts_score ?? -1) - (a.rts_score ?? -1));
+  }, [payload, rows]);
   const sortedRows = useMemo(() => [...rows].sort((left, right) => compareSectorRows(left, right, sectorSortBy, sectorSortDirection)), [rows, sectorSortBy, sectorSortDirection]);
   const detailRow = requestedTicker ? rows.find((row) => row.ticker === requestedTicker) ?? null : null;
   const chartTickers = useMemo(() => {
@@ -202,11 +206,13 @@ export function SectorLeaderboardPage() {
 
   return (
     <div className="page-grid sector-leaderboard-page">
-      <SectorHeader payload={payload} rows={rows} viewMode={viewMode} onViewModeChange={setViewMode} />
+      <SectorHeader payload={payload} rows={rows} signalRows={signalRows} viewMode={viewMode} onViewModeChange={setViewMode} />
 
       {notice ? <div className="notice-banner">{notice}</div> : null}
 
-      {viewMode === "list" ? (
+      {viewMode === "signals" ? (
+        <SectorSignals rows={signalRows} />
+      ) : viewMode === "metrics" ? (
         <SectorLeaderboardTable
           rows={sortedRows}
           sortBy={sectorSortBy}
@@ -238,11 +244,13 @@ export function SectorLeaderboardPage() {
 function SectorHeader({
   payload,
   rows,
+  signalRows,
   viewMode,
   onViewModeChange,
 }: {
   payload: SectorLeaderboardResponse | null;
   rows: SectorLeaderboardRow[];
+  signalRows: SectorLeaderboardRow[];
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
 }) {
@@ -266,6 +274,7 @@ function SectorHeader({
           default State Street ETF catalog.
         </p>
         <SectorMetricStrip payload={payload} rows={rows} />
+        {viewMode === "signals" ? <SectorSignalSummary rows={signalRows} /> : null}
       </section>
 
       <section className="scanner-result-filter-grid sector-leaderboard-controls">
@@ -273,11 +282,18 @@ function SectorHeader({
           <span className="eyebrow">Views</span>
           <div className="scanner-result-view-actions" role="tablist" aria-label="Sector leaderboard view">
             <button
-              className={`scanner-result-view-chip${viewMode === "list" ? " is-active" : ""}`}
+              className={`scanner-result-view-chip${viewMode === "signals" ? " is-active" : ""}`}
               type="button"
-              onClick={() => onViewModeChange("list")}
+              onClick={() => onViewModeChange("signals")}
             >
-              List
+              Signals
+            </button>
+            <button
+              className={`scanner-result-view-chip${viewMode === "metrics" ? " is-active" : ""}`}
+              type="button"
+              onClick={() => onViewModeChange("metrics")}
+            >
+              Metrics
             </button>
             <button
               className={`scanner-result-view-chip${viewMode === "chart" ? " is-active" : ""}`}
@@ -298,6 +314,35 @@ function SectorHeader({
         </div>
       </section>
     </>
+  );
+}
+
+function SectorSignalSummary({ rows }: { rows: SectorLeaderboardRow[] }) {
+  const count = (predicate: (row: SectorLeaderboardRow) => boolean) => rows.filter(predicate).length;
+  return (
+    <div className="sector-signal-summary" aria-label="Core sector signal summary">
+      <span>Advancing <strong>{count((row) => row.stage?.current_stage.startsWith("Stage 2") ?? false)}</strong></span>
+      <span>Transitioning <strong>{count((row) => ["Stage 1 - Base", "Stage 3 - Top"].includes(row.stage?.current_stage ?? ""))}</strong></span>
+      <span>Declining <strong>{count((row) => row.stage?.current_stage === "Stage 4 - Decline")}</strong></span>
+      <span>Recent breakouts <strong>{count((row) => Boolean(row.darvas_breakout))}</strong></span>
+    </div>
+  );
+}
+
+function SectorSignals({ rows }: { rows: SectorLeaderboardRow[] }) {
+  if (rows.length === 0) return <div className="empty-state">Core sector signals are unavailable.</div>;
+  return (
+    <section className="sector-signal-list" aria-label="Core sector signals">
+      {rows.map((row) => (
+        <Link className="sector-signal-card panel" key={row.ticker} to={`/sector-leaderboard/${encodeURIComponent(row.ticker)}`}>
+          <span className="sector-signal-name"><strong>{row.description}</strong><small>{row.ticker}</small></span>
+          <span><small>Weekly stage</small><strong>{row.stage?.label ?? "Unavailable"}</strong></span>
+          <span><small>RTS · app rts-v1</small><strong>{row.rts_score == null ? "Unavailable" : `${row.rts_score.toFixed(1)} · ${row.rts_state}`}</strong></span>
+          <span><small>SPY relative · 1M / 3M</small><strong>{formatPercent(row.rs_vs_spy_1m_pct)} / {formatPercent(row.rs_vs_spy_3m_pct)}</strong><small>{renderSectorTrendCell(row)}</small></span>
+          <span><small>Darvas</small><strong>{row.darvas_breakout ? `Breakout ${formatLocalDate(row.darvas_breakout.signal_date)} · ${row.darvas_breakout.sessions_ago} sessions ago` : "No recent breakout"}</strong></span>
+        </Link>
+      ))}
+    </section>
   );
 }
 
