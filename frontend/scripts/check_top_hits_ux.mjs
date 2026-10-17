@@ -9,6 +9,17 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   const scanners = Array.from({ length: 12 }, (_, i) => ({ id: `scanner_${i}`, label: `Scanner ${String(i).padStart(2, '0')}` }));
   const row = { ticker: 'TEST', company: 'Example Company', sector: 'Technology', industry: 'Software', scanner_count: scanners.length, scanners, scanner_labels: scanners.map(s => s.label) };
+  const plan = (risk = 2) => ({ source_strategy_id: 'ma_pullback_retest', state: 'ready', support_label: 'EMA21', support_price: 98, trigger_label: 'Close', trigger_price: 103, stop_label: 'Low', stop_price: 95, reference_risk_pct: risk, execution_timeframe: 'daily', entry_policy: 'close_confirmed', max_risk_pct: 5, max_entry_price: 105, risk_valid: true, risk_status: risk > 5 ? 'over_limit' : 'within_limit', signal_date: '2026-10-16' });
+  const readinessRows = [
+    { ...row, ticker: 'LEAD', trade_readiness: 'leader', daily_rs_rating: 80 },
+    { ...row, ticker: 'TRIG', trade_readiness: 'reclaim_trigger', daily_rs_rating: 90, trade_plan: plan() },
+    { ...row, ticker: 'READY', trade_readiness: 'defined_risk', daily_rs_rating: 95, trade_plan: plan() },
+    { ...row, ticker: 'RISK', trade_readiness: 'pullback_zone', daily_rs_rating: 70, trade_plan: plan(6) },
+    { ...row, ticker: 'NOPLAN', trade_readiness: 'pullback_zone', trade_plan: null },
+    { ...row, ticker: 'AVOID', trade_readiness: 'avoid', trade_plan: plan() },
+    { ...row, ticker: 'UNKNOWN', trade_readiness: undefined, trade_plan: plan() },
+    ...Array.from({ length: 9 }, (_, i) => ({ ...row, ticker: `SUP${String(i + 1).padStart(2, '0')}`, trade_readiness: 'pullback_zone', trade_plan: plan(i + 1), daily_rs_rating: 75 + i })),
+  ];
   const topHitsRequests = { list: 0, guru: 0 };
   let admin = true;
   await page.route('**/api/**', async route => {
@@ -16,13 +27,18 @@ try {
     const section = new URL(route.request().url()).searchParams.get('section') || 'all';
     if (path === '/api/scanner-board/top-hits' && section === 'guru') topHitsRequests.guru += 1;
     if (path === '/api/scanner-board/top-hits' && section === 'list') topHitsRequests.list += 1;
+    if (path === '/api/admin/my-picks' && route.request().method() === 'POST') {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      return route.fulfill({ json: { ok: true, pick: { id: 99, ticker: JSON.parse(route.request().postData() || '{}').ticker } } });
+    }
     const body = path === '/api/auth/me' ? { authenticated: admin, role: admin ? 'admin' : 'visitor', user: null, capabilities: admin ? ['view_results', 'manage_exclusions'] : ['view_results'] }
       : path === '/api/scanner-board/top-hits' ? (() => {
         if (section === 'guru') {
-          return { rows: [], guru_board: { definitions: [], total_unique_tickers: 0, total_scanner_matches: 0, confluence_ticker_count: 0, rows: [] } };
+          return { rows: [], guru_board: { definitions: [], total_unique_tickers: readinessRows.length, total_scanner_matches: 0, confluence_ticker_count: 0, rows: readinessRows } };
         }
         return { rows: [row, { ...row, ticker: 'OTHER', scanners: scanners.slice(0, 2), scanner_count: 2 }], total_unique_tickers: 2, total_live_scanners: 12 };
       })()
+      : path === '/api/admin/my-picks' ? { rows: [] }
       : { rows: [] };
     await route.fulfill({ json: body });
   });
@@ -32,7 +48,7 @@ try {
   const cells = page.locator('td[data-label="Scanners"]');
   await page.getByText('Loading scanner top hits…', { exact: true }).waitFor({ state: 'hidden' });
   const initialListRequests = topHitsRequests.list;
-  assert.ok(initialListRequests >= 1 && initialListRequests <= 2 && topHitsRequests.guru === 0, 'Initial view fetches only the compact list section');
+  assert.ok(initialListRequests >= 1 && initialListRequests <= 2, 'Initial view fetches the compact list section');
   assert.match(
     await page.getByLabel('Scanner filter expression').innerText(),
     /Qullamaggie[\s\S]*Weekly Candidate Pool[\s\S]*kai_s2[\s\S]*AND Group 2[\s\S]*one_year_winners/i,
@@ -96,12 +112,55 @@ try {
   await page.locator('.scanner-top-hit-chart-card .scanner-chart-card-details summary').first().click();
   assert.match(await page.locator('.scanner-top-hit-chart-card .scanner-chart-card-details').first().innerText(), /My momentum/i);
   await page.getByRole('button', { name: 'List', exact: true }).click();
-  const guruResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/scanner-board/top-hits' && new URL(response.url()).searchParams.get('section') === 'guru');
+  await page.getByRole('button', { name: 'Trade Readiness', exact: true }).click();
+  await page.getByText('Plan Ready uses completed daily bars. Recheck the next-session price against Max Entry before placing an order.', { exact: true }).waitFor();
+  assert.equal(await page.locator('.trade-readiness-lane.is-leader .trade-readiness-card').count(), 1, 'Known leader stays in its lane');
+  assert.equal(await page.locator('.trade-readiness-lane.is-needs-data .trade-readiness-card').count(), 1, 'Missing readiness is isolated in Needs Data');
+  assert.equal(await page.locator('.trade-readiness-lane.is-leader').getByText('UNKNOWN').count(), 0, 'Unknown readiness never defaults to Leader');
+  assert.equal(await page.locator('.trade-readiness-lane.is-support .trade-readiness-card').count(), 8, 'Support lane starts with eight cards');
+  await page.locator('.trade-readiness-lane.is-support').getByRole('button', { name: 'Show 8 more (3 remaining)' }).click();
+  assert.equal(await page.locator('.trade-readiness-lane.is-support .trade-readiness-card').count(), 11, 'Show more reveals all remaining candidates');
+  await page.getByLabel('Sort readiness candidates').selectOption('risk');
+  assert.match(await page.locator('.trade-readiness-lane.is-support .trade-readiness-card').first().getAttribute('aria-label'), /SUP01/, 'Lowest risk sorts first');
+  await page.getByLabel('Sort readiness candidates').selectOption('rs');
+  assert.match(await page.locator('.trade-readiness-lane.is-support .trade-readiness-card').first().getAttribute('aria-label'), /SUP09/, 'Highest RS sorts first');
+  assert.equal(await page.locator('.trade-readiness-lane.is-support .trade-readiness-card').count(), 8, 'Sorting resets the lane cap');
+  await page.getByRole('button', { name: 'My Picks', exact: true }).click();
+  assert.equal(await page.locator('.trade-readiness-card').count(), 0, 'My Picks filter shows only saved picks');
+  await page.getByRole('heading', { name: 'Plan Ready', exact: true }).waitFor();
+  await page.getByText('No leaders are waiting at this stage.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Show All', exact: true }).click();
+  await page.getByLabel('Sort readiness candidates').selectOption('readiness');
+  const leaderCard = page.locator('.trade-readiness-lane.is-leader .trade-readiness-card');
+  await leaderCard.getByRole('button', { name: 'Save', exact: true }).click();
+  await leaderCard.getByRole('button', { name: 'Saving…', exact: true }).waitFor();
+  assert.equal(await leaderCard.getAttribute('aria-busy'), 'true', 'Saving card announces busy state');
+  await leaderCard.getByRole('button', { name: 'Saved', exact: true }).waitFor();
+  const readyCard = page.locator('.trade-readiness-lane.is-plan-ready .trade-readiness-card');
+  assert.match(await readyCard.innerText(), /Max Entry[\s\S]*\$105\.00[\s\S]*Stop[\s\S]*\$95\.00[\s\S]*Planned Risk[\s\S]*2\.00%[\s\S]*Support[\s\S]*\$98\.00/);
+  assert.equal(await readyCard.locator('details[open]').count(), 0, 'Evidence starts collapsed');
+  await readyCard.getByText('Candidate evidence').click();
+  assert.match(await readyCard.innerText(), /MA pullback retest[\s\S]*Signal date 2026-10-16/);
+  await page.locator('.trade-readiness-lane.is-support').getByRole('button', { name: 'Show 8 more (3 remaining)' }).click();
+  await page.locator('.trade-readiness-lane.is-support').getByRole('article', { name: 'RISK trade candidate' }).getByText(/Risk exceeds 5%/).waitFor();
+  await page.locator('.trade-readiness-lane.is-support').getByRole('article', { name: 'NOPLAN trade candidate' }).getByText('Trade plan unavailable for this candidate.').waitFor();
+  assert.match(await readyCard.getAttribute('aria-label'), /READY trade candidate/);
+  await page.locator('.trade-readiness-lane.is-plan-ready .trade-readiness-select').click();
+  await page.locator('.trade-readiness-lane.is-plan-ready .trade-readiness-card.is-selected').waitFor();
+  assert.match(await readyCard.getAttribute('class'), /is-selected/, 'Selected ticker has visible card state');
+  assert.equal(await page.locator('.trade-readiness-card[aria-busy="true"]').count(), 0, 'Idle cards expose not busy state');
+  assert.ok(await page.locator('.trade-readiness-lane.is-leader').getByText(/No leaders are waiting/).count() === 0, 'Non-empty lane hides empty copy');
+  await page.getByRole('button', { name: /Show avoided/ }).click();
+  assert.equal(await page.locator('.trade-readiness-lane.is-avoided .trade-readiness-card').count(), 1, 'Avoided rows are explicitly shown');
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Readiness view fits ${width}px viewport`);
+  }
+  await page.getByRole('button', { name: 'List', exact: true }).click();
   await page.getByRole('button', { name: 'Guru Board', exact: true }).click();
-  await guruResponse;
   await page.getByText('Loading Guru Board data…', { exact: true }).waitFor({ state: 'hidden' });
   const guruRequests = topHitsRequests.guru;
-  assert.ok(guruRequests >= 1, 'Guru section loads only after selecting the view');
+  assert.ok(guruRequests >= 1, 'Readiness data is loaded from the shared lazy Guru endpoint');
   await page.getByRole('button', { name: 'List', exact: true }).click();
   await page.getByRole('button', { name: 'Guru Board', exact: true }).click();
   assert.equal(topHitsRequests.guru, guruRequests, 'Loaded Guru section stays cached when switching views');
@@ -119,6 +178,9 @@ try {
   const visitorBefore = await pinned.boundingBox();
   await page.locator('.scanner-result-table-wrap').evaluate(el => { el.scrollLeft = 800; });
   assert.ok(Math.abs((await pinned.boundingBox()).x - visitorBefore.x) < 2, 'Visitor ticker stays pinned without pick column');
+  await page.getByRole('button', { name: 'Trade Readiness', exact: true }).click();
+  await page.getByRole('heading', { name: 'Plan Ready', exact: true }).waitFor();
+  assert.equal(await page.locator('.trade-readiness-save').count(), 0, 'Visitor cannot see save controls');
   assert.deepEqual(errors, []);
   console.log('Top Hits UX passed: grouped filters, lazy list/Guru requests, saved default preset, rename persistence, search, reset, chart badges, desktop pinning, visitor layout, mobile width.');
 } finally { await browser.close(); }

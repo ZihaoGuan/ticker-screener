@@ -866,9 +866,9 @@ export function ScannerTopHitsPage() {
           <div className="scanner-result-filter">
             <input aria-label="Find scanners" placeholder="Find a scanner…" value={scannerSearch} onChange={(event) => setScannerSearch(event.target.value)} />
             <span className="panel-copy">A ticker may match any scanner inside a group (OR), and must match every non-empty group (AND).</span>
-            <div className="scanner-filter-group-tabs" role="tablist" aria-label="Scanner filter groups">
+            <div className="scanner-filter-group-tabs" role="group" aria-label="Scanner filter groups">
               {scannerGroups.map((group, index) => <div key={index} className="scanner-filter-group-tab">
-                <button type="button" role="tab" aria-selected={index === activeScannerGroupIndex}
+                <button type="button" aria-pressed={index === activeScannerGroupIndex}
                   className={`scanner-result-view-chip${index === activeScannerGroupIndex ? " is-active" : ""}`}
                   onClick={() => setActiveScannerGroupIndex(index)}>
                   Group {index + 1} · {group.length}
@@ -947,7 +947,7 @@ export function ScannerTopHitsPage() {
         </div>
         <div className="scanner-result-filter panel scanner-result-filter-actions">
           <span className="eyebrow">View</span>
-          <div className="scanner-result-view-actions" role="tablist" aria-label="Scanner top hits view">
+          <div className="scanner-result-view-actions" role="group" aria-label="Scanner top hits view">
             <button
               className={`scanner-result-view-chip${viewMode === "list" ? " is-active" : ""}`}
               type="button"
@@ -1732,34 +1732,67 @@ function SectorBoard({
 
 function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canManageMyPicks, selectedTicker, onSelectTicker, onToggleMyPick }: { rows: ScannerTopHitRow[]; myPickTickers: Set<string>; savingMyPickTickers: Record<string, boolean>; canManageMyPicks: boolean; selectedTicker: string; onSelectTicker: (ticker: string) => void; onToggleMyPick: (ticker: string) => Promise<void> }) {
   const [showAvoided, setShowAvoided] = useState(false);
+  const [pickFilter, setPickFilter] = useState<"all" | "mine">("all");
+  const [sortBy, setSortBy] = useState<"readiness" | "risk" | "rs">("readiness");
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
+  useEffect(() => setVisibleCounts({}), [rows, pickFilter, sortBy]);
   const columns = [
-    ["leader", "Leader / Waiting"], ["pullback_zone", "Support Zone"], ["reclaim_trigger", "Daily Trigger"], ["defined_risk", "Order Ready"],
+    { state: "leader", label: "Leader / Waiting", tone: "leader", empty: "No leaders are waiting at this stage." },
+    { state: "pullback_zone", label: "Support Zone", tone: "support", empty: "No candidates are in the support zone." },
+    { state: "reclaim_trigger", label: "Daily Trigger", tone: "trigger", empty: "No candidates have a daily trigger." },
+    { state: "defined_risk", label: "Plan Ready", tone: "plan-ready", empty: "No candidates have a defined risk plan." },
   ] as const;
-  const sorted = [...rows].sort((a, b) => (b.strike_zone?.score ?? 0) - (a.strike_zone?.score ?? 0) || (b.pullback_quality?.score ?? 0) - (a.pullback_quality?.score ?? 0) || (b.daily_rs_rating ?? 0) - (a.daily_rs_rating ?? 0) || a.ticker.localeCompare(b.ticker));
+  const filtered = rows.filter((row) => pickFilter === "all" || myPickTickers.has(row.ticker));
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "risk") return (a.trade_plan?.reference_risk_pct ?? Infinity) - (b.trade_plan?.reference_risk_pct ?? Infinity) || a.ticker.localeCompare(b.ticker);
+    if (sortBy === "rs") return (b.daily_rs_rating ?? -Infinity) - (a.daily_rs_rating ?? -Infinity) || a.ticker.localeCompare(b.ticker);
+    return (b.strike_zone?.score ?? 0) - (a.strike_zone?.score ?? 0) || (b.pullback_quality?.score ?? 0) - (a.pullback_quality?.score ?? 0) || (b.daily_rs_rating ?? 0) - (a.daily_rs_rating ?? 0) || a.ticker.localeCompare(b.ticker);
+  });
   const renderCard = (row: ScannerTopHitRow) => {
     const plan = row.trade_plan;
     const price = row.day_close == null ? "--" : `$${row.day_close.toFixed(2)}`;
-    return <article className="guru-ticker-card trade-readiness-card" key={row.ticker}>
+    const saving = Boolean(savingMyPickTickers[row.ticker]);
+    const isPick = myPickTickers.has(row.ticker);
+    return <article aria-label={`${row.ticker} trade candidate`} className={`guru-ticker-card trade-readiness-card${row.ticker === selectedTicker ? " is-selected" : ""}`} key={row.ticker} aria-busy={saving}>
       <button type="button" className="trade-readiness-select" aria-pressed={row.ticker === selectedTicker} onClick={() => onSelectTicker(row.ticker)}><strong>{row.ticker}</strong><span>{price}</span></button>
-      <div className="guru-ticker-badges"><span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span><SectorTag sector={row.sector} /></div>
-      <div className="guru-ticker-context"><span>PB {row.pullback_quality ? `${row.pullback_quality.score} · ${row.pullback_quality.state}` : "--"}</span><span>Strike {row.strike_zone?.score ?? "--"}</span></div>
       {plan ? <>
         <div className="trade-readiness-plan">
-          <span>Setup: {plan.source_strategy_id} · {plan.signal_date || "date TBD"}</span>
-          <span>{plan.state === "active" ? "Active daily signal · close confirmed" : "Daily setup · waiting for trigger"}</span>
-          <span>{plan.support_label}: {plan.support_price?.toFixed(2) ?? "--"}</span>
-          <span>{plan.trigger_label}: {plan.trigger_price?.toFixed(2) ?? "--"}</span>
-          <span>{plan.stop_label}: {plan.stop_price?.toFixed(2) ?? "--"}</span>
-          <span>Planned risk: {plan.reference_risk_pct == null ? "--" : `${plan.reference_risk_pct.toFixed(2)}%`}</span>
-          <span>Max entry (5% risk): {plan.max_entry_price?.toFixed(2) ?? "--"}</span>
+          <span><b>Max Entry</b><strong>{plan.max_entry_price == null ? "Unavailable" : `$${plan.max_entry_price.toFixed(2)}`}</strong></span>
+          <span><b>Stop</b><strong>{plan.stop_price == null ? "Unavailable" : `$${plan.stop_price.toFixed(2)}`}</strong></span>
+          <span><b>Planned Risk</b><strong>{plan.reference_risk_pct == null ? "Unavailable" : `${plan.reference_risk_pct.toFixed(2)}%`}</strong></span>
+          <span><b>Support</b><strong>{plan.support_price == null ? "Unavailable" : `$${plan.support_price.toFixed(2)}`}</strong></span>
         </div>
-        {plan.risk_status === "over_limit" ? <p className="panel-copy">Risk exceeds 5% at the trigger; wait for a lower entry.</p> : null}
-        {plan.risk_status === "invalid_levels" ? <p className="panel-copy">Trigger or stop is missing or invalid; order risk cannot be confirmed.</p> : null}
-      </> : null}
-      <div className="guru-ticker-context"><span>{row.earnings_days == null ? "Earnings TBD" : `Earnings ${row.earnings_days}d`}</span><button className="ghost-button" type="button" disabled={!canManageMyPicks || Boolean(savingMyPickTickers[row.ticker])} onClick={() => void onToggleMyPick(row.ticker)}>{myPickTickers.has(row.ticker) ? "My Pick ✓" : "My Pick +"}</button></div>
+        {plan.risk_status === "over_limit" ? <p className="panel-copy trade-readiness-warning">Risk exceeds {plan.max_risk_pct}% at the trigger; wait for a lower entry.</p> : null}
+        {plan.risk_status === "invalid_levels" ? <p className="panel-copy trade-readiness-warning">Trigger or stop is missing or invalid; order risk cannot be confirmed.</p> : null}
+      </> : <p className="panel-copy trade-readiness-warning">Trade plan unavailable for this candidate.</p>}
+      <details className="trade-readiness-evidence"><summary>Candidate evidence</summary><div className="trade-readiness-meta">
+        <span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span><SectorTag sector={row.sector} />
+        <span>Pullback {row.pullback_quality ? `${row.pullback_quality.score} · ${row.pullback_quality.state}` : "--"}</span><span>Strike {row.strike_zone?.score ?? "--"}</span>
+        <span>Setup {plan ? plan.source_strategy_id === "ma_pullback_retest" ? "MA pullback retest" : plan.source_strategy_id.split("_").join(" ") : "Unavailable"}</span><span>Signal date {plan?.signal_date || "Unavailable"}</span>
+      </div></details>
+      {canManageMyPicks ? <button className="ghost-button trade-readiness-save" type="button" disabled={saving || isPick} onClick={() => void onToggleMyPick(row.ticker)}>{saving ? "Saving…" : isPick ? "Saved" : "Save"}</button> : null}
     </article>;
   };
-  return <section className="trade-readiness-board" aria-label="Trade Readiness"><p className="panel-copy">Daily chart signals use completed bars for next-session planning; entries require a daily close confirmation.</p><div className="guru-board-scroll">{columns.map(([state, label]) => { const bucket = sorted.filter((row) => (row.trade_readiness || "leader") === state); return <article className="guru-column is-teal" key={state}><header><strong>{bucket.length}</strong><span>{label}</span></header><div className="guru-column-cards">{bucket.map(renderCard)}</div></article>; })}</div><button className="ghost-button" type="button" aria-expanded={showAvoided} onClick={() => setShowAvoided((value) => !value)}>{showAvoided ? "Hide avoided" : `Show avoided (${sorted.filter((row) => row.trade_readiness === "avoid").length})`}</button>{showAvoided ? <div className="guru-board-scroll">{sorted.filter((row) => row.trade_readiness === "avoid").map(renderCard)}</div> : null}</section>;
+  const unknown = sorted.filter((row) => !columns.some(({ state }) => row.trade_readiness === state) && row.trade_readiness !== "avoid");
+  const avoided = sorted.filter((row) => row.trade_readiness === "avoid");
+  const renderLane = (state: string, label: string, tone: string, laneRows: ScannerTopHitRow[], empty: string) => {
+    const visible = visibleCounts[state] ?? 8;
+    const remaining = Math.max(0, laneRows.length - visible);
+    const headingId = `trade-readiness-${state}-heading`;
+    return <section className={`trade-readiness-lane is-${tone}`} aria-labelledby={headingId} key={state}>
+      <header><h3 id={headingId}>{label}</h3><span>{laneRows.length}</span></header>
+      {laneRows.length ? <div className="trade-readiness-grid">{laneRows.slice(0, visible).map(renderCard)}</div> : <p className="trade-readiness-empty">{empty}</p>}
+      {remaining > 0 ? <button className="ghost-button" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [state]: visible + 8 }))}>Show 8 more ({remaining} remaining)</button> : null}
+    </section>;
+  };
+  return <section className="trade-readiness-board" aria-label="Trade Readiness">
+    <p className="panel-copy trade-readiness-safety">Plan Ready uses completed daily bars. Recheck the next-session price against Max Entry before placing an order.</p>
+    <div className="trade-readiness-controls"><div role="group" aria-label="Candidate filter"><button type="button" aria-pressed={pickFilter === "all"} onClick={() => { setPickFilter("all"); setVisibleCounts({}); }}>Show All</button><button type="button" aria-pressed={pickFilter === "mine"} onClick={() => { setPickFilter("mine"); setVisibleCounts({}); }}>My Picks</button></div><label>Sort <select aria-label="Sort readiness candidates" value={sortBy} onChange={(event) => { setSortBy(event.target.value as typeof sortBy); setVisibleCounts({}); }}><option value="readiness">Readiness ranking</option><option value="risk">Lowest risk</option><option value="rs">Highest RS</option></select></label></div>
+    <div className="trade-readiness-lanes">{columns.map(({ state, label, tone, empty }) => renderLane(state, label, tone, sorted.filter((row) => row.trade_readiness === state), empty))}</div>
+    {renderLane("needs-data", "Needs Data", "needs-data", unknown, "Every candidate has a recognized readiness stage.")}
+    <button className="ghost-button" type="button" aria-expanded={showAvoided} onClick={() => setShowAvoided((value) => !value)}>{showAvoided ? "Hide avoided" : `Show avoided (${avoided.length})`}</button>
+    {showAvoided ? renderLane("avoided", "Avoided", "avoided", avoided, "No avoided candidates.") : null}
+  </section>;
 }
 
 function GuruTickerCard({
