@@ -17,6 +17,7 @@ from scripts._screen_run_persistence import persist_screen_run_artifacts_if_conf
 
 from src.artifact_paths import build_screener_artifact_paths
 from src.config import load_app_config, today_label
+from src.candidate_universe import select_candidates
 from src.ticker_filters import filter_symbols, load_excluded_tickers
 from src.trend_template_screen import run_trend_template_screen
 from src.trend_template_watchlist_builder import build_trend_template_watchlist
@@ -54,9 +55,19 @@ def main() -> int:
     as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else None
     date_label = args.date_label or today_label(as_of_date)
     filter_criteria = build_filter_criteria_from_args(args)
-    tickers = _manual_tickers(args.tickers, excluded) if args.tickers else load_universe(config, limit=args.limit)
+    tickers = _manual_tickers(args.tickers, excluded) if args.tickers else load_universe(config)
     if not args.tickers:
         tickers = filter_universe_by_criteria(tickers, filter_criteria)
+        selection = select_candidates(
+            "trend_template",
+            as_of_date or dt.date.today(),
+            [item.symbol for item in tickers],
+            limit=args.limit,
+        )
+        selected = set(selection.tickers)
+        tickers = [item for item in tickers if item.symbol in selected]
+    else:
+        selection = None
 
     result = run_trend_template_screen(config, tickers, as_of_date=as_of_date)
     watchlist = build_trend_template_watchlist(result.hits)
@@ -78,6 +89,19 @@ def main() -> int:
             "total_tickers": result.total_tickers,
             "passed_tickers": result.passed_tickers,
             "failed_tickers": result.failed_tickers,
+            "candidate_selection": (
+                {
+                    "eligible_count": selection.eligible_count,
+                    "candidate_count": selection.candidate_count,
+                    "fallback_reason": selection.fallback_reason,
+                }
+                if selection
+                else {
+                    "eligible_count": len(tickers),
+                    "candidate_count": len(tickers),
+                    "fallback_reason": "explicit_tickers_bypass",
+                }
+            ),
             "raw_results_file": str(raw_path),
             "watchlist_file": str(watchlist_path),
         },

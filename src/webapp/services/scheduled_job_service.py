@@ -413,6 +413,8 @@ class ScheduledJobService:
         action_id = str(job.get("action_id") or "")
         if action_id == "reload_postgres_market_data_date":
             return False
+        if action_id == "build_daily_screening_features":
+            return True
         options = job.get("options") if isinstance(job.get("options"), dict) else {}
         if str(options.get("market_data_source") or "").strip().lower() == "database-first":
             return True
@@ -499,7 +501,10 @@ class ScheduledJobService:
                 "bullish_subgroup": item.get("bullish_subgroup") or "",
                 "fields": item.get("fields", []),
                 "execution_modes": item.get("execution_modes") or list(self.run_service.execution_modes_for_action(str(item["id"]))),
-                "requires_daily_bars": "daily_bars" in required_inputs_by_action.get(str(item["id"]), ()),
+                "requires_daily_bars": (
+                    str(item["id"]) == "build_daily_screening_features"
+                    or "daily_bars" in required_inputs_by_action.get(str(item["id"]), ())
+                ),
                 **_summarize_durations(
                     estimates_by_action.get(str(item["id"]), []),
                     sample_count=sample_counts_by_action.get(str(item["id"]), 0),

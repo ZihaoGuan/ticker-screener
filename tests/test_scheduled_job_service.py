@@ -190,6 +190,25 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         self.assertEqual(job["depends_on_job_ids"], [])
 
+    def test_feature_build_schedule_depends_on_price_reload(self) -> None:
+        self.service.upsert_job(
+            job_id="reload_prices",
+            job_label="Reload prices",
+            action_id="reload_postgres_market_data_date",
+            cron_expr="30 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+        job = self.service.upsert_job(
+            job_id="daily_screening_features",
+            job_label="Build daily screening features",
+            action_id="build_daily_screening_features",
+            cron_expr="40 17 * * 1-5",
+            cron_tz="America/New_York",
+            enabled=True,
+        )
+        self.assertEqual(job["depends_on_job_ids"], ["reload_prices"])
+
     def test_upsert_rejects_price_dependent_schedule_without_enabled_reload(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires an enabled Reload Postgres Market Data Date schedule"):
             self.service.upsert_job(
@@ -489,11 +508,19 @@ class ScheduledJobServiceTests(unittest.TestCase):
 
         self.assertIn("sync_postgres_market_data", actions)
         self.assertIn("reload_postgres_market_data_date", actions)
+        self.assertIn("build_daily_screening_features", actions)
         self.assertIn("refresh_split_adjusted_history", actions)
         self.assertIn("venu_scanner", actions)
         self.assertIn("fundamental_quality", actions)
         self.assertNotIn("gamma_squeeze", actions)
         self.assertNotIn("liquid_growth", actions)
+
+    def test_daily_screening_feature_action_accepts_trade_date(self) -> None:
+        command = self.run_service.build_command(
+            "build_daily_screening_features",
+            {"trade_date": "2026-10-16"},
+        )
+        self.assertEqual(command[-2:], ["--trade-date", "2026-10-16"])
 
     def test_available_actions_include_grouping_metadata(self) -> None:
         actions = {item["id"]: item for item in self.service.get_context()["available_actions"]}

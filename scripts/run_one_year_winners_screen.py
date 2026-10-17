@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts._screen_run_persistence import persist_screen_run_artifacts_if_configured
 from src.artifact_paths import build_screener_artifact_paths
 from src.config import load_app_config, today_label
+from src.candidate_universe import select_candidates
 from src.market_data_access import resolve_database_url
 from src.one_year_winners_screen import (
     ONE_YEAR_WINNERS_STRATEGY_ID,
@@ -62,12 +63,22 @@ def main() -> int:
     else:
         tickers = load_one_year_winners_universe(
             as_of_date=as_of_date,
-            limit=args.limit,
             database_url=database_url,
         )
         tickers = filter_universe_tickers(tickers, excluded)
         tickers = filter_universe_by_criteria(tickers, filter_criteria)
+        selection = select_candidates(
+            ONE_YEAR_WINNERS_STRATEGY_ID,
+            as_of_date or dt.date.today(),
+            [item.symbol for item in tickers],
+            database_url,
+            limit=args.limit,
+        )
+        selected = set(selection.tickers)
+        tickers = [item for item in tickers if item.symbol in selected]
         source = "database-universe"
+    if args.tickers:
+        selection = None
 
     print(f"prepared one-year winners universe: total={len(tickers)} source={source}", flush=True)
     result = run_one_year_winners_screen(
@@ -95,6 +106,19 @@ def main() -> int:
             "total_tickers": result.total_tickers,
             "passed_tickers": result.passed_tickers,
             "failed_tickers": result.failed_tickers,
+            "candidate_selection": (
+                {
+                    "eligible_count": selection.eligible_count,
+                    "candidate_count": selection.candidate_count,
+                    "fallback_reason": selection.fallback_reason,
+                }
+                if selection
+                else {
+                    "eligible_count": len(tickers),
+                    "candidate_count": len(tickers),
+                    "fallback_reason": "explicit_tickers_bypass",
+                }
+            ),
             "raw_results_file": str(artifact_paths.raw_results_path),
             "watchlist_file": str(artifact_paths.watchlist_path),
         },

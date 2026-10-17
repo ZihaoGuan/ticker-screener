@@ -407,6 +407,13 @@ class RunService:
                 _ensure_schema_field,
             ),
         ),
+        "build_daily_screening_features": RunAction(
+            "build_daily_screening_features",
+            "Build Daily Screening Features",
+            "scripts/build_daily_screening_features.py",
+            supports_limit=False,
+            fields=(_trade_date_field,),
+        ),
         "backfill_trendline_snapshots": RunAction(
             "backfill_trendline_snapshots",
             "Backfill Trendline Snapshots",
@@ -3110,6 +3117,8 @@ class RunService:
             if not trade_date:
                 raise ValueError("Trade Date is required.")
             command.append(trade_date)
+        if action_id == "build_daily_screening_features" and normalized_options.get("trade_date"):
+            command.extend(["--trade-date", str(normalized_options["trade_date"])])
         if normalized_options.get("date_label"):
             command.extend(["--date-label", str(normalized_options["date_label"])])
         if normalized_options.get("as_of_date"):
