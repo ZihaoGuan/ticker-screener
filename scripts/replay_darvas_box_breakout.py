@@ -55,7 +55,12 @@ def main() -> int:
         [UniverseTicker(symbol=symbol) for symbol in filter_symbols(args.tickers, excluded)]
         if args.tickers else load_universe(config, limit=args.limit)
     )
-    results = [run_darvas_box_breakout_screen(config, tickers, as_of_date=as_of).to_dict() for as_of in dates]
+    # Historical telemetry must be deterministic. Do not turn missing database
+    # history into network-dependent Yahoo requests; classify it in the run.
+    results = [
+        run_darvas_box_breakout_screen(config, tickers, as_of_date=as_of, allow_fallback=False).to_dict()
+        for as_of in dates
+    ]
     payload = {"strategy_id": "darvas_box_breakout", "as_of_dates": [value.isoformat() for value in dates],
                "results": results, "aggregate": aggregate_replay_results(results)}
     args.output.parent.mkdir(parents=True, exist_ok=True)

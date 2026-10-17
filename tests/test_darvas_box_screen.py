@@ -168,6 +168,24 @@ class DarvasBoxScreenTest(unittest.TestCase):
         )
         self.assertEqual(result.failed_tickers, [{"ticker": "TEST", "error": "fallback unavailable"}])
 
+    def test_database_only_replay_records_short_history_without_network_fallback(self) -> None:
+        frame = _darvas_breakout_frame().tail(251)
+        ticker = UniverseTicker(symbol="TEST")
+        with patch("src.darvas_box_screen.resolve_database_url", return_value="postgres://example"), patch(
+            "src.darvas_box_screen.load_many_ticker_windows", return_value={"TEST": frame}
+        ), patch("src.darvas_box_screen.load_configured_cookstock") as load_cookstock:
+            result = run_darvas_box_breakout_screen(
+                AppConfig(),
+                [ticker],
+                as_of_date=frame.index[-1].date(),
+                allow_fallback=False,
+            )
+
+        self.assertEqual(result.rejection_counts["insufficient_history"], 1)
+        self.assertEqual(result.to_dict()["accounting"]["strategy_rejected"], 1)
+        self.assertEqual(result.failed_tickers, [])
+        load_cookstock.assert_not_called()
+
     def test_recent_database_frames_without_usable_ohlcv_fall_back(self) -> None:
         complete = _darvas_breakout_frame()
         malformed_value = complete.copy()

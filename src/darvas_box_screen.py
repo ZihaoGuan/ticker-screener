@@ -207,6 +207,7 @@ def run_darvas_box_breakout_screen(
     *,
     as_of_date: dt.date | None = None,
     database_url: str | None = None,
+    allow_fallback: bool = True,
 ) -> DarvasBoxBreakoutScreenResult:
     run_date = as_of_date or dt.date.today()
     resolved_database_url = resolve_database_url(database_url)
@@ -224,12 +225,23 @@ def run_darvas_box_breakout_screen(
 
     for ticker in tickers:
         frame = frames.get(ticker.symbol.upper())
-        if (
-            frame is None
-            or not _has_required_darvas_history(frame)
-            or not db_frame_has_recent_coverage(frame, run_date)
-        ):
-            fallback.append(ticker)
+        if frame is None:
+            if allow_fallback:
+                fallback.append(ticker)
+            else:
+                failures.append({"ticker": ticker.symbol, "error": "database history unavailable"})
+            continue
+        if not _has_required_darvas_history(frame):
+            if allow_fallback:
+                fallback.append(ticker)
+            else:
+                rejections["insufficient_history"] += 1
+            continue
+        if not db_frame_has_recent_coverage(frame, run_date):
+            if allow_fallback:
+                fallback.append(ticker)
+            else:
+                failures.append({"ticker": ticker.symbol, "error": "database history is stale"})
             continue
         try:
             evaluation = evaluate_darvas_box_breakout(frame, ticker=ticker)
