@@ -23,7 +23,7 @@ import type {
 } from "../lib/types";
 import "./RunsPage.css";
 
-type RunsPageMode = "screeners" | "schedules" | "warmup" | "backtests";
+type RunsPageMode = "screeners" | "operations" | "schedules" | "warmup" | "backtests";
 
 type RunsPageProps = {
   mode?: RunsPageMode;
@@ -68,8 +68,9 @@ type ScheduledJobLogResponse = {
 
 export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   const screenersMode = mode === "screeners";
+  const operationsMode = mode === "operations";
   const schedulesMode = mode === "schedules";
-  const screenersSectionMode = screenersMode || schedulesMode;
+  const screenersSectionMode = screenersMode || operationsMode || schedulesMode;
   const auth = useAuth();
   const canManageSchedules = auth.hasCapability("manage_exclusions");
   const [payload, setPayload] = useState<JobsResponse | null>(null);
@@ -349,7 +350,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     }
     return null;
   }, [selectedChildJob, selectedJob]);
-  const liveJobStream = useJobStream(liveStreamPath, Boolean(liveStreamPath));
+  const liveJobStream = useJobStream(liveStreamPath, !screenersMode && !schedulesMode && Boolean(liveStreamPath));
   const childJobGroups = useMemo(() => groupChildJobsByDate(selectedJob?.child_jobs ?? []), [selectedJob]);
   const expandedBatchDate = useMemo(
     () => (selectedJob ? expandedBatchDateByJobId[selectedJob.job_id] ?? null : null),
@@ -961,6 +962,8 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         ? "Backtest Runner"
         : schedulesMode
           ? "Screener Automation"
+          : operationsMode
+            ? "Screener Operations"
           : "Available Screeners";
   const jobsPanelTitle =
     mode === "warmup" ? "Recent Warmup Jobs" : mode === "backtests" ? "Recent Backtest Jobs" : "Recent Screener Jobs";
@@ -1036,7 +1039,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
     <>
       <div className="page-grid">
         {screenersSectionMode ? <ScreenersSubnav activeMode={mode} /> : null}
-        {screenersMode ? (
+        {operationsMode ? (
           <ExecutionOverview
             overview={payload?.execution}
             formatDuration={formatDuration}
@@ -1046,13 +1049,14 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
             }}
           />
         ) : null}
-        {!schedulesMode ? (
+        {!schedulesMode && !operationsMode ? (
         <Panel
           title={screenersMode ? "Screener Launcher v2" : pageTitle}
           aside={screenersMode ? <span className="screeners-operator-badge">Operator Mode</span> : undefined}
           className={screenersMode ? "screeners-launcher-panel" : ""}
         >
           {isLoading && !payload ? <LoadingBlock label="Loading available screeners…" /> : null}
+          {screenersMode ? <p className="panel-copy">Live execution, job history, batch tracking, and console output are in <Link to="/screeners/operations">Operations</Link>.</p> : null}
           {batchRunNotice ? <p className="panel-copy">{batchRunNotice}</p> : null}
           {groupedVisibleActions.map((group) => (
             <div key={group.key} className="screener-group-section">
@@ -1125,13 +1129,13 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         </Panel>
         ) : null}
 
-        {!schedulesMode ? (
+        {!schedulesMode && !screenersMode ? (
         <Panel
-          title={screenersMode ? "Active Job Monitor" : "Current Progress"}
+          title={operationsMode ? "Active Job Monitor" : "Current Progress"}
           aside={visibleActiveJob ? <span className="eyebrow">{visibleActiveJob.label}</span> : <span className="eyebrow">Idle</span>}
-          className={screenersMode ? "screeners-progress-panel" : ""}
+          className={operationsMode ? "screeners-progress-panel" : ""}
         >
-          <div className={`run-progress-panel${screenersMode ? " screeners-progress-shell" : ""}`}>
+          <div className={`run-progress-panel${operationsMode ? " screeners-progress-shell" : ""}`}>
             <ProgressBar
               status={visibleActiveJob?.status ?? "cancelled"}
               label={
@@ -1362,9 +1366,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         </Panel>
         ) : null}
 
-        {!schedulesMode ? (
-        <div className={screenersMode ? "screeners-history-console-grid" : ""}>
-        <Panel title={screenersMode ? "Batch Tracking & History" : jobsPanelTitle} className={screenersMode ? "screeners-history-panel" : ""}>
+        {!schedulesMode && !screenersMode ? (
+        <div className={operationsMode ? "screeners-history-console-grid" : ""}>
+        <Panel title={operationsMode ? "Batch Tracking & History" : jobsPanelTitle} className={operationsMode ? "screeners-history-panel" : ""}>
           {isLoading && !payload ? <LoadingBlock label="Loading recent jobs…" /> : null}
           <div className="data-table-responsive">
             <table className="data-table">
@@ -1399,7 +1403,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
                   const rows = [
                     <tr
                       key={job.job_id}
-                      className={`${screenersMode ? "screeners-history-row" : ""} ${isSelected ? "is-selected-row" : ""}`.trim()}
+                      className={`${operationsMode ? "screeners-history-row" : ""} ${isSelected ? "is-selected-row" : ""}`.trim()}
                       onClick={() => setSelectedJobId(job.job_id)}
                     >
                       <td data-label="Job / Label">
@@ -1585,7 +1589,7 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
         </Panel>
 
         <Panel
-          title={screenersMode ? "Live Console" : "Console Tail"}
+          title={operationsMode ? "Live Console" : "Console Tail"}
           aside={
             <div className="runs-panel-aside">
               <span className="eyebrow">
@@ -1601,9 +1605,9 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
               {selectedChildJob ? <StatusPill status={displayedSelectedChildJob?.status ?? selectedChildJob.status} /> : displayedSelectedJob ? <StatusPill status={displayedSelectedJob.status} /> : null}
             </div>
           }
-          className={screenersMode ? "screeners-console-panel" : ""}
+          className={operationsMode ? "screeners-console-panel" : ""}
         >
-          {screenersMode ? (
+          {operationsMode ? (
             <div className="screeners-console-terminal">
               <div className="screeners-console-header">
                 <div className="screeners-console-header-title">
@@ -2719,16 +2723,19 @@ function ScheduleTaskInspector({
 
 function ScreenersSubnav({ activeMode }: { activeMode: RunsPageMode }) {
   const isSchedules = activeMode === "schedules";
+  const isOperations = activeMode === "operations";
 
   return (
     <section className="panel screeners-subnav-panel">
       <div className="screeners-subnav-copy">
         {!isSchedules ? <span className="eyebrow">Screeners Workspace</span> : null}
-        <h1>{isSchedules ? "Automation" : "Run Center"}</h1>
+        <h1>{isSchedules ? "Automation" : isOperations ? "Operations" : "Run Center"}</h1>
         <p className="panel-copy">
           {isSchedules
             ? "Scheduled screeners, cron config, and scheduler controls live here."
-            : "Launch scans, watch active jobs, inspect history, and open fresh results."}
+            : isOperations
+              ? "Watch live execution, inspect jobs, track batches, and follow console output."
+              : "Launch scans and open fresh results."}
         </p>
       </div>
       <div className="screeners-subnav-links" role="tablist" aria-label="Screeners sections">
@@ -2738,6 +2745,12 @@ function ScreenersSubnav({ activeMode }: { activeMode: RunsPageMode }) {
           className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}
         >
           Run Center
+        </NavLink>
+        <NavLink
+          to="/screeners/operations"
+          className={({ isActive }) => `screeners-subnav-link${isActive ? " is-active" : ""}`}
+        >
+          Operations
         </NavLink>
         <NavLink
           to="/screeners/schedules"

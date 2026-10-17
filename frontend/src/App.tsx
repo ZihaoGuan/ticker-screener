@@ -144,6 +144,14 @@ export default function App() {
             }
           />
           <Route
+            path="/screeners/operations"
+            element={
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <RunsPage mode="operations" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/warmup"
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
