@@ -7093,3 +7093,11 @@ dialog.modal-backdrop:not([open]) {
   .scanner-result-page .scanner-result-chart-grid.is-2-col,
   .scanner-result-page .scanner-result-chart-grid.is-3-col { grid-template-columns: 1fr; }
 }
+.trade-readiness-board { display: grid; gap: 10px; }
+.trade-readiness-board .guru-board-scroll { display: grid; grid-template-columns: repeat(4, minmax(190px, 1fr)); gap: 8px; overflow-x: auto; }
+.trade-readiness-card { min-width: 0; }
+.trade-readiness-select { width: 100%; display: flex; justify-content: space-between; border: 0; padding: 4px 0; color: inherit; background: transparent; cursor: pointer; font: inherit; }
+.trade-readiness-select:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+.trade-readiness-plan { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; color: #cbd5e1; font-size: 11px; }
+@media (max-width: 800px) { .trade-readiness-board .guru-board-scroll { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
+@media (max-width: 480px) { .trade-readiness-board .guru-board-scroll { grid-template-columns: minmax(0, 1fr); } }

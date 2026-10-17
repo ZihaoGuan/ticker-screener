@@ -375,6 +375,8 @@ export type ScannerTopHitRow = {
     };
     warnings?: string[];
   } | null;
+  trade_plan?: { source_strategy_id: string; state: "ready" | "active"; support_label: string; support_price: number | null; trigger_label: string; trigger_price: number | null; stop_label: string; stop_price: number | null; reference_risk_pct: number | null; signal_date: string | null } | null;
+  trade_readiness?: "leader" | "pullback_zone" | "reclaim_trigger" | "defined_risk" | "avoid" | string;
 };
 
 export type PullbackQuality = {
@@ -1102,6 +1104,17 @@ export type WatchlistChartResponse = {
   weekly_ema8: Array<{ time: string; value: number }>;
   ipo_vwap: Array<{ time: string; value: number }>;
   anchored_vwap_52w_low: Array<{ time: string; value: number }>;
+  phase_avwap: Array<{ time: string; value: number }>;
+  avwap_context: {
+    phase: number | null;
+    primary_kind: "low" | "high" | "ipo" | null;
+    anchor_date: string | null;
+    anchor_price: number | null;
+    latest_value: number | null;
+    price_distance_pct: number | null;
+    pending_kind: "low" | "high" | null;
+    pending_date: string | null;
+  };
   market_extension: {
     config: {
       timeframe: "weekly";

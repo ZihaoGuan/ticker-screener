@@ -48,6 +48,7 @@ const CHART_VISIBILITY: ChartVisibility = {
   weeklyEma8: true,
   ipoVwap: false,
   anchoredVwap52wLow: false,
+  phaseAvwap: false,
   marketExtension: true,
   fibOverlay: false,
   gapZones: true,

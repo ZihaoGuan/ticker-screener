@@ -15,6 +15,10 @@ from src.universe import UniverseTicker
 from src.webapp.services.watchlist_service import (
     WatchlistService,
     _build_guru_strike_zone,
+    _build_trade_plan,
+    _trade_readiness,
+    _build_phase_avwap,
+    _should_render_ipo_vwap,
     _clear_chart_payload_cache,
     _classify_position_bucket,
     _filter_scanner_top_hits_payload,
@@ -25,6 +29,125 @@ from src.webapp.services.watchlist_service import (
 
 
 class WatchlistServiceTests(unittest.TestCase):
+    def test_phase_avwap_confirms_extremes_by_five_sessions_and_chooses_by_stage(self) -> None:
+        index = pd.bdate_range("2025-01-01", periods=260)
+        frame = pd.DataFrame({"Open": 50., "High": 55., "Low": 45., "Close": 50., "Volume": 1000.}, index=index)
+        frame.iloc[100, frame.columns.get_loc("Low")] = 20
+        frame.iloc[120, frame.columns.get_loc("High")] = 80
+        frame.iloc[-1, frame.columns.get_loc("High")] = 90
+        line, ctx = _build_phase_avwap(frame, stage="2A", ipo_date=None, as_of_date=index[-1].date())
+        self.assertEqual(ctx["primary_kind"], "low")
+        self.assertEqual(ctx["anchor_date"], index[100].date().isoformat())
+        self.assertEqual((ctx["pending_kind"], ctx["pending_date"]), ("high", index[-1].date().isoformat()))
+        self.assertTrue(line)
+        self.assertEqual(_build_phase_avwap(frame, stage="3", ipo_date=None, as_of_date=index[-1].date())[1]["primary_kind"], "high")
+        self.assertEqual(_build_phase_avwap(frame, stage="1", ipo_date=None, as_of_date=index[-1].date())[1]["primary_kind"], "high")
+        self.assertEqual(_build_phase_avwap(frame, stage="4B", ipo_date=None, as_of_date=index[-1].date())[1]["primary_kind"], "high")
+        nearest_low_frame = frame.copy(); nearest_low_frame.iloc[-1, nearest_low_frame.columns.get_loc("Close")] = 23
+        self.assertEqual(_build_phase_avwap(nearest_low_frame, stage="1", ipo_date=None, as_of_date=index[-1].date())[1]["primary_kind"], "low")
+        frame.iloc[-1, frame.columns.get_loc("High")] = 55
+        confirmed = _build_phase_avwap(frame, stage="3", ipo_date=None, as_of_date=index[-1].date())[1]
+        self.assertEqual(confirmed["anchor_date"], index[120].date().isoformat())
+        prior = _build_phase_avwap(frame, stage="3", ipo_date=None, as_of_date=index[-2].date())[1]
+        self.assertEqual(prior["anchor_date"], index[120].date().isoformat())
+        low_frame = frame.copy()
+        low_frame.iloc[-1, low_frame.columns.get_loc("Low")] = 10
+        low_ctx = _build_phase_avwap(low_frame, stage="2", ipo_date=None, as_of_date=index[-1].date())[1]
+        self.assertEqual((low_ctx["pending_kind"], low_ctx["pending_date"]), ("low", index[-1].date().isoformat()))
+        confirmed_frame = frame.copy()
+        confirmed_frame.iloc[-6, confirmed_frame.columns.get_loc("High")] = 95
+        confirmed_after_five = _build_phase_avwap(confirmed_frame, stage="3", ipo_date=None, as_of_date=index[-1].date())[1]
+        self.assertEqual(confirmed_after_five["anchor_date"], index[-6].date().isoformat())
+
+    def test_phase_avwap_requires_positive_volume_and_ipo_requires_recent_complete_coverage(self) -> None:
+        index = pd.bdate_range("2025-01-01", periods=260)
+        frame = pd.DataFrame({"Open": 50., "High": 55., "Low": 45., "Close": 50., "Volume": 0.}, index=index)
+        line, context = _build_phase_avwap(frame, stage="2", ipo_date=None, as_of_date=index[-1].date())
+        self.assertEqual(line, [])
+        self.assertIsNone(context["anchor_date"])
+        recent_index = pd.bdate_range(end="2026-10-16", periods=260)
+        valid = frame.copy(); valid.index = recent_index; valid["Volume"] = 1000.
+        ipo = recent_index[0].date()
+        self.assertTrue(_should_render_ipo_vwap(frame=valid, ipo_date=ipo))
+        self.assertFalse(_should_render_ipo_vwap(frame=valid.iloc[1:], ipo_date=ipo))
+        self.assertFalse(_should_render_ipo_vwap(frame=valid, ipo_date=dt.date(2020, 1, 1)))
+        young = valid.iloc[:100]
+        young_ipo = young.index[0].date()
+        self.assertEqual(_build_phase_avwap(young, stage=None, ipo_date=young_ipo, as_of_date=young.index[-1].date())[1]["primary_kind"], "ipo")
+        partial_window = valid.iloc[:256]
+        no_ipo_line, no_ipo_context = _build_phase_avwap(partial_window, stage="2", ipo_date=None, as_of_date=partial_window.index[-1].date())
+        self.assertEqual(no_ipo_line, [])
+        self.assertIsNone(no_ipo_context["anchor_date"])
+        partial_ipo = partial_window.index[0].date()
+        self.assertEqual(_build_phase_avwap(partial_window, stage="2", ipo_date=partial_ipo, as_of_date=partial_window.index[-1].date())[1]["primary_kind"], "ipo")
+        full_window = valid.iloc[:257]
+        self.assertIsNotNone(_build_phase_avwap(full_window, stage="2", ipo_date=None, as_of_date=full_window.index[-1].date())[1]["anchor_date"])
+
+    def test_chart_payload_limits_phase_avwap_to_visible_candles(self) -> None:
+        index = pd.bdate_range(end="2026-10-16", periods=260)
+        frame = pd.DataFrame({"Open": 50., "High": 55., "Low": 45., "Close": 50., "Volume": 1000.}, index=index)
+        service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example", market_data_source="database-first")
+        with patch.object(service, "_load_chart_frames", return_value=(frame, frame, "database")), patch(
+            "src.webapp.services.watchlist_service.load_ticker_metadata_map", return_value={"NVDA": {}}
+        ), patch.object(service, "_load_latest_weinstein_stage_map", return_value={}), patch.object(
+            service, "_load_latest_position_action", return_value=None
+        ), patch.object(service, "_load_relative_trend_strength", return_value=None):
+            payload = service.get_chart_payload("NVDA", period="3mo", as_of_date=index[-1].date())
+        candle_dates = {candle["time"] for candle in payload["candles"]}
+        self.assertTrue(payload["phase_avwap"])
+        self.assertTrue(all(point["time"] in candle_dates for point in payload["phase_avwap"]))
+
+    def test_trade_plan_validates_risk_and_readiness_handles_old_rows(self) -> None:
+        plan = _build_trade_plan([{"_source_strategy_id": "ema21_pullback_buy", "event_date": "2026-06-12", "trigger_price": 110, "stop_price": 100, "secondary_entry_price": 103}])
+        self.assertEqual(plan["state"], "active")
+        self.assertEqual(plan["reference_risk_pct"], 9.09)
+        self.assertEqual(_trade_readiness({"strike_zone": {"state": "ready"}, "trade_plan": plan}), "defined_risk")
+        invalid = _build_trade_plan([{"_source_strategy_id": "ema21_pullback_buy", "trigger_price": 100, "stop_price": 105}])
+        self.assertIsNone(invalid["reference_risk_pct"])
+        self.assertEqual(_trade_readiness({"trade_plan": invalid}), "reclaim_trigger")
+        self.assertEqual(_trade_readiness({}), "leader")
+        newest_active = _build_trade_plan([
+            {"_source_strategy_id": "ma_pullback_retest", "_source_date": "2026-06-11", "signal_state": "active", "trigger_price": 105, "stop_price": 95},
+            {"_source_strategy_id": "ema21_pullback_buy", "_source_date": "2026-06-12", "trigger_price": float("nan"), "stop_price": 95, "support_price": -1},
+            {"_source_strategy_id": "ma_pullback_retest", "_source_date": "2026-06-13", "signal_state": "ready", "trigger_price": 120, "stop_price": 110},
+        ])
+        self.assertEqual(newest_active["source_strategy_id"], "ema21_pullback_buy")
+        self.assertEqual(newest_active["signal_date"], "2026-06-12")
+        self.assertIsNone(newest_active["trigger_price"])
+        self.assertIsNone(newest_active["support_price"])
+
+    def test_guru_candidate_receives_plan_from_separate_pullback_scanner_entry(self) -> None:
+        cards = [
+            {"id": "trend_template", "strategy_id": "trend_template", "label": "Trend Template", "stem": "trend", "sort_date": "2026-06-12", "timeframe": "Daily"},
+            {"id": "ema21_pullback_buy", "strategy_id": "ema21_pullback_buy", "label": "EMA21 Pullback Buy", "stem": "pullback", "sort_date": "2026-06-13", "timeframe": "Daily"},
+        ]
+        entries_by_stem = {
+            "trend": [{"ticker": "NVDA", "atr_to_sma50": 1.0}],
+            "pullback": [{"ticker": "NVDA", "event_date": "2026-06-13", "trigger_price": 110, "stop_price": 100, "secondary_entry_price": 104}],
+        }
+        with patch.object(self.service, "_select_scanner_top_hit_live_cards", return_value=cards), patch.object(
+            self.service.repository, "load_watchlist", side_effect=lambda stem: entries_by_stem[stem]
+        ), patch.object(self.service, "_prepare_scanner_top_hit_entries", side_effect=lambda entries: entries), patch.object(
+            self.service, "_filter_excluded_entries", side_effect=lambda entries: entries
+        ), patch.object(self.service, "_attach_latest_market_snapshots", side_effect=lambda rows, tickers, **kwargs: [rows[ticker].update({"atr_to_sma50": 1.0}) for ticker in tickers]), patch.object(
+            self.service, "_attach_latest_rating_snapshots"
+        ), patch.object(self.service, "_attach_relative_strength_evidence"), patch.object(
+            self.service, "_attach_latest_position_actions"
+        ), patch.object(self.service, "_attach_relative_trend_strength"), patch.object(
+            self.service, "_attach_strike_zone_scanner_evidence"
+        ), patch.object(self.service, "_attach_guru_upcoming_earnings_dates"), patch.object(
+            self.service, "_load_latest_weinstein_stage_map", return_value={}
+        ), patch.object(self.service, "_load_latest_rmv_map", return_value={}):
+            payload = self.service._build_scanner_top_hits_payload_live(
+                board_payload={"cards": [], "target_trading_date": "2026-06-13"}
+            )
+
+        guru_rows = payload["guru_board"]["rows"]
+        self.assertEqual([row["ticker"] for row in guru_rows], ["NVDA"])
+        self.assertEqual(guru_rows[0]["trade_plan"]["source_strategy_id"], "ema21_pullback_buy")
+        self.assertEqual(guru_rows[0]["trade_plan"]["reference_risk_pct"], 9.09)
+        self.assertEqual([scanner["id"] for scanner in guru_rows[0]["scanners"]], ["trend_template"])
+
     def test_rs_new_high_before_price_uses_highs_and_requires_price_to_lag(self) -> None:
         index = pd.date_range(start="2026-01-02", periods=4, freq="B")
         rs_line = pd.Series([1.0, 1.1, 1.2, 1.2], index=index)
@@ -1540,7 +1663,12 @@ class WatchlistServiceTests(unittest.TestCase):
             return_value={"NVDA": frame.copy(), "AAPL": frame.copy(), "SPY": frame.copy()},
         ) as bulk_load_mock, patch(
             "src.webapp.services.watchlist_service._download_history_frame",
-        ) as download_mock:
+        ) as download_mock, patch.object(
+            service, "_load_latest_weinstein_stage_map", return_value={}
+        ) as stage_map_mock, patch(
+            "src.webapp.services.watchlist_service.load_ticker_metadata_map",
+            return_value={"NVDA": {}, "AAPL": {}},
+        ) as metadata_mock:
             payload = service.get_chart_preview_payloads(
                 ["nvda", "aapl", "nvda"],
                 period="6mo",
@@ -1550,6 +1678,9 @@ class WatchlistServiceTests(unittest.TestCase):
         bulk_load_mock.assert_called_once()
         self.assertEqual(bulk_load_mock.call_args.args[0], ["NVDA", "AAPL", "SPY"])
         download_mock.assert_not_called()
+        stage_map_mock.assert_called_once_with(latest_date)
+        metadata_mock.assert_called_once()
+        self.assertEqual(metadata_mock.call_args.args[0], ["NVDA", "AAPL"])
         self.assertEqual(set(payload["rows"]), {"NVDA", "AAPL"})
         self.assertEqual(payload["rows"]["NVDA"]["candles"][-1]["time"], latest_date.isoformat())
         self.assertEqual(payload["rows"]["NVDA"]["volume"][-1]["value"], 1_200_000)
@@ -1559,6 +1690,8 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertTrue(payload["rows"]["NVDA"]["rs_markers"])
         self.assertEqual(payload["rows"]["NVDA"]["data_source"], "database")
         self.assertEqual(payload["resolved_as_of_date"], latest_date.isoformat())
+        candle_dates = {candle["time"] for candle in payload["rows"]["NVDA"]["candles"]}
+        self.assertTrue(all(point["time"] in candle_dates for point in payload["rows"]["NVDA"]["phase_avwap"]))
 
     def test_get_chart_preview_payloads_uses_recent_listing_database_frame(self) -> None:
         service = WatchlistService(

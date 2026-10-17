@@ -19,6 +19,7 @@ const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
   weeklyEma8: true,
   ipoVwap: true,
   anchoredVwap52wLow: false,
+  phaseAvwap: true,
   marketExtension: true,
   fibOverlay: false,
   gapZones: true,
@@ -56,6 +57,7 @@ const ADVANCED_CHART_TOGGLE_GROUPS: Array<{ label: string; toggles: ChartToggle[
     toggles: [
       { key: "ipoVwap", label: "IPO VWAP" },
       { key: "anchoredVwap52wLow", label: "AVWAP from 52W low" },
+      { key: "phaseAvwap", label: "Phase AVWAP" },
       { key: "marketExtension", label: "10W extension" },
       { key: "fibOverlay", label: "Fib overlay (exp)" },
       { key: "gapZones", label: "Gap zones" },
@@ -1175,6 +1177,8 @@ export function ChartsPage() {
             <div className="chart-annotation-strip">
               {chartPayload?.resolved_as_of_date ? <span className="chart-pill chart-pill-event">As Of {chartPayload.resolved_as_of_date}</span> : null}
               {chartPayload?.benchmark_ticker ? <span className="chart-pill chart-pill-rs">RS vs {chartPayload.benchmark_ticker}</span> : null}
+              {chartPayload?.avwap_context?.anchor_date ? <span className="chart-pill chart-pill-setup">Phase AVWAP {chartPayload.avwap_context.primary_kind} · {chartPayload.avwap_context.anchor_date}{chartPayload.avwap_context.price_distance_pct == null ? "" : ` · ${formatPercent(chartPayload.avwap_context.price_distance_pct)}`}</span> : null}
+              {chartPayload?.avwap_context?.pending_kind ? <span className="chart-pill chart-pill-event">Pending {chartPayload.avwap_context.pending_kind} · {chartPayload.avwap_context.pending_date}</span> : null}
               {latestRsMarker ? (
                 <span className="chart-pill chart-pill-rs">
                   {latestRsMarker.kind === "daily_new_high_before_price" ? "RS new high before price" : "RS new high"}
@@ -1275,7 +1279,7 @@ export function ChartsPage() {
                                 }))
                               }
                             />
-                            <span>{toggle.label}</span>
+                            <span>{toggle.key === "phaseAvwap" && chartPayload?.avwap_context?.primary_kind ? `Phase AVWAP (${chartPayload.avwap_context.primary_kind})` : toggle.label}</span>
                           </label>
                         ))}
                       </div>

@@ -12,6 +12,8 @@ def build_ma_pullback_retest_watchlist(hits: list[MaPullbackRetestHit]) -> list[
         "entry_price": round(hit.current_price, 4), "entry_label": "Current close", "entry_timeframe": "daily",
         "stop_price": round(hit.stop_price, 4), "stop_label": "Retest low / 1 ATR", "stop_timeframe": "daily",
         "current_price": round(hit.current_price, 4), "matched_profiles": hit.matched_profiles,
+        "support_price": round(hit.support_price, 4), "atr14": round(hit.atr14, 4),
+        "distance_atr": round(hit.distance_atr, 4), "pullback_quality": hit.pullback_quality,
         "active_profiles": hit.active_profiles, "ready_profiles": hit.ready_profiles, "signal_state": hit.signal_state,
         "signal_badges": [hit.signal_state.title(), *hit.matched_profiles],
     } for hit in hits]

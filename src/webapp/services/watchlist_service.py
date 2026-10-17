@@ -96,7 +96,7 @@ _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
-_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v3"
+_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v4"
 _SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v6"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
@@ -120,7 +120,6 @@ _sector_momentum_cache_lock = threading.Lock()
 _top_ratings_cache: dict[tuple[str, str, str, int, str, str], tuple[float, dict[str, Any]]] = {}
 _top_ratings_cache_lock = threading.Lock()
 _SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID = "scanner_top_hits_snapshot"
-_IPO_VWAP_MIN_SUPPORTED_DATE = dt.date(2020, 1, 1)
 _RS_EVIDENCE_LOOKBACK_DAYS = 21
 _RS_EVIDENCE_RS_DAYS_THRESHOLD_PCT = 60.0
 _RS_EVIDENCE_UP_ON_DOWN_DAYS_THRESHOLD = 3
@@ -1404,6 +1403,7 @@ class WatchlistService:
         live_cards = self._select_scanner_top_hit_live_cards(board_payload)
         aggregated: dict[str, dict[str, Any]] = {}
         guru_aggregated: dict[str, dict[str, Any]] = {}
+        pullback_artifacts_by_ticker: dict[str, list[dict[str, Any]]] = {}
         rs_phase_context: dict[str, dict[str, Any]] = {}
 
         for card in live_cards:
@@ -1462,6 +1462,8 @@ class WatchlistService:
                     scanners.append(dict(scanner_meta))
                 if scanner_meta["id"] == "rs_phase":
                     rs_phase_context[ticker] = entry
+                if scanner_meta["strategy_id"] in {"ma_pullback_retest", "ema21_pullback_buy", "sma200_pullback_buy"}:
+                    pullback_artifacts_by_ticker.setdefault(ticker, []).append({**entry, "_source_strategy_id": scanner_meta["strategy_id"], "_source_date": scanner_meta["sort_date"]})
                 if scanner_meta["id"] in _GURU_AVAILABLE_SCANNER_IDS:
                     guru_bucket = guru_aggregated.setdefault(ticker, self._new_scanner_top_hit_bucket(ticker))
                     self._merge_scanner_top_hit_entry(guru_bucket, entry)
@@ -1470,6 +1472,13 @@ class WatchlistService:
                         guru_scanners.append(dict(scanner_meta))
 
         self._append_canslim_guru_candidates(guru_aggregated, board_payload)
+        for ticker, artifacts in pullback_artifacts_by_ticker.items():
+            guru_bucket = guru_aggregated.get(ticker)
+            if guru_bucket is None:
+                continue
+            guru_bucket["_pullback_artifacts"] = artifacts
+            for artifact in artifacts:
+                self._merge_scanner_top_hit_entry(guru_bucket, artifact)
         for ticker, entry in rs_phase_context.items():
             guru_bucket = guru_aggregated.get(ticker)
             if guru_bucket is not None:
@@ -1615,6 +1624,9 @@ class WatchlistService:
             row["stage_analysis"] = copy.deepcopy(stage_map.get(ticker) or None)
             row["rmv"] = copy.deepcopy(rmv_map.get(ticker) or None)
             row["strike_zone"] = _build_guru_strike_zone(row, as_of_date=target_date)
+            row["trade_plan"] = _build_trade_plan(row.get("_pullback_artifacts") or [])
+            row["trade_readiness"] = _trade_readiness(row)
+            row.pop("_pullback_artifacts", None)
             rows.append(row)
         rows.sort(key=_guru_row_sort_key)
         return {
@@ -1862,10 +1874,14 @@ class WatchlistService:
         weekly_close = frame["Close"].resample("W-FRI").last().dropna()
         weekly_ema8 = weekly_close.ewm(span=8, adjust=False).mean()
         frame["weekly_ema8"] = weekly_ema8.reindex(frame.index, method="ffill")
-        if _should_render_ipo_vwap(frame=frame, ipo_date=ipo_date):
+        if _should_render_ipo_vwap(frame=frame, ipo_date=ipo_date, as_of_date=resolved_as_of_date):
             frame["ipo_vwap"] = _compute_anchored_vwap(frame, anchor_date=ipo_date)
         else:
             frame["ipo_vwap"] = pd.Series(pd.NA, index=frame.index, dtype="Float64")
+        stage = (self._load_latest_weinstein_stage_map(resolved_as_of_date).get(normalized_ticker) or {}).get("alias")
+        phase_avwap, avwap_context = _build_phase_avwap(frame, stage=stage, ipo_date=ipo_date, as_of_date=resolved_as_of_date)
+        visible_dates = {pd.Timestamp(index).date().isoformat() for index in visible_frame.index}
+        phase_avwap = [point for point in phase_avwap if point["time"] in visible_dates]
         anchor_52w_low_date = _resolve_anchored_vwap_52w_low_date(frame)
         if anchor_52w_low_date is not None:
             frame["anchored_vwap_52w_low"] = _compute_anchored_vwap(frame, anchor_date=anchor_52w_low_date)
@@ -1941,6 +1957,8 @@ class WatchlistService:
             "weekly_ema8": weekly_ema8_points,
             "ipo_vwap": ipo_vwap,
             "anchored_vwap_52w_low": anchored_vwap_52w_low,
+            "phase_avwap": phase_avwap,
+            "avwap_context": avwap_context,
             "market_extension": _empty_market_extension_overlay(),
             "rs_line": [],
             "daily_rs_rating": [],
@@ -1998,9 +2016,22 @@ class WatchlistService:
                 except Exception:
                     frames = {}
                 benchmark_frame = _normalize_download_frame(frames.get(self.benchmark_ticker))
+                ticker_frames = {ticker: _normalize_download_frame(frames.get(ticker)) for ticker in normalized_tickers}
+                covered_ticker_frames = {
+                    ticker: frame
+                    for ticker, frame in ticker_frames.items()
+                    if db_frame_has_recent_coverage(frame, chart_request.fetch_end_date)
+                }
+                resolved_dates = [pd.Timestamp(frame.index.max()).date() for frame in covered_ticker_frames.values() if frame is not None and not frame.empty]
+                batch_stage_map = self._load_latest_weinstein_stage_map(min(resolved_dates)) if resolved_dates else {}
+                try:
+                    metadata_map = load_ticker_metadata_map(list(covered_ticker_frames), database_url=self.database_url) if covered_ticker_frames else {}
+                except Exception:
+                    metadata_map = {}
                 for ticker in normalized_tickers:
-                    frame = _normalize_download_frame(frames.get(ticker))
+                    frame = ticker_frames[ticker]
                     if db_frame_has_recent_coverage(frame, chart_request.fetch_end_date):
+                        stage = (batch_stage_map.get(ticker) or {}).get("alias")
                         rows[ticker] = _build_chart_preview_payload(
                             ticker=ticker,
                             period=period,
@@ -2010,6 +2041,8 @@ class WatchlistService:
                             frame=frame,
                             benchmark_frame=benchmark_frame,
                             data_source="database",
+                            stage=stage,
+                            ipo_date=_coerce_optional_date((metadata_map.get(ticker) or {}).get("ipo_date")),
                         )
                     else:
                         rows[ticker] = _empty_chart_payload(
@@ -2040,6 +2073,8 @@ class WatchlistService:
                         frame=frame,
                         benchmark_frame=benchmark_frame,
                         data_source="internet",
+                        stage=None,
+                        ipo_date=None,
                     )
 
         resolved_dates = [
@@ -3553,6 +3588,8 @@ def _empty_chart_payload(
         "weekly_ema8": [],
         "ipo_vwap": [],
         "anchored_vwap_52w_low": [],
+        "phase_avwap": [],
+        "avwap_context": _empty_avwap_context(),
         "market_extension": _empty_market_extension_overlay(),
         "rs_line": [],
         "rs_ema21": [],
@@ -3596,6 +3633,8 @@ def _build_chart_preview_payload(
     frame: pd.DataFrame | None,
     benchmark_frame: pd.DataFrame | None,
     data_source: str,
+    stage: str | None = None,
+    ipo_date: dt.date | None = None,
 ) -> dict[str, Any]:
     normalized_frame = _normalize_download_frame(frame)
     if normalized_frame is None or normalized_frame.empty:
@@ -3664,6 +3703,10 @@ def _build_chart_preview_payload(
     payload["volume"] = volume
     payload["ema8"] = ema8
     payload["ema21"] = ema21
+    phase_avwap, avwap_context = _build_phase_avwap(normalized_frame, stage=stage, ipo_date=ipo_date, as_of_date=resolved_as_of_date)
+    visible_dates = {pd.Timestamp(index).date().isoformat() for index in visible_index_set}
+    payload["phase_avwap"] = [point for point in phase_avwap if point["time"] in visible_dates]
+    payload["avwap_context"] = avwap_context
     normalized_benchmark_frame = _normalize_download_frame(benchmark_frame)
     if normalized_benchmark_frame is not None and not normalized_benchmark_frame.empty:
         rs_line = _compute_rs_line(normalized_frame["Close"], normalized_benchmark_frame["Close"])
@@ -4820,6 +4863,7 @@ def _compute_ipo_vwap(frame: pd.DataFrame) -> pd.Series:
 
 def _compute_anchored_vwap(frame: pd.DataFrame, *, anchor_date: dt.date | None) -> pd.Series:
     source = frame.dropna(subset=["High", "Low", "Close", "Volume"]).copy()
+    source = source.loc[(source["High"] > 0) & (source["Low"] > 0) & (source["Close"] > 0) & (source["Volume"] > 0)]
     if anchor_date is not None:
         source = source.loc[source.index.date >= anchor_date].copy()
     if source.empty:
@@ -4843,15 +4887,74 @@ def _coerce_optional_date(value: object) -> dt.date | None:
         return None
 
 
-def _should_render_ipo_vwap(*, frame: pd.DataFrame, ipo_date: dt.date | None) -> bool:
-    if ipo_date is None or ipo_date < _IPO_VWAP_MIN_SUPPORTED_DATE:
+def _should_render_ipo_vwap(*, frame: pd.DataFrame, ipo_date: dt.date | None, as_of_date: dt.date | None = None) -> bool:
+    if ipo_date is None or frame.empty or (as_of_date is not None and not 0 <= (as_of_date - ipo_date).days <= 730):
         return False
     source = frame.dropna(subset=["High", "Low", "Close", "Volume"])
+    source = source.loc[(source["High"] > 0) & (source["Low"] > 0) & (source["Close"] > 0) & (source["Volume"] > 0)]
     if source.empty:
         return False
     first_trade_timestamp = source.index.min()
     first_trade_date = first_trade_timestamp.date() if hasattr(first_trade_timestamp, "date") else first_trade_timestamp
     return first_trade_date == ipo_date
+
+
+def _empty_avwap_context() -> dict[str, Any]:
+    return {"phase": None, "primary_kind": None, "anchor_date": None, "anchor_price": None, "latest_value": None, "price_distance_pct": None, "pending_kind": None, "pending_date": None}
+
+
+def _build_phase_avwap(frame: pd.DataFrame, *, stage: str | None, ipo_date: dt.date | None, as_of_date: dt.date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    source = frame.dropna(subset=["High", "Low", "Close", "Volume"]).copy().sort_index()
+    source = source.loc[source.index.date <= as_of_date]
+    source = source.loc[(source["High"] > 0) & (source["Low"] > 0) & (source["Close"] > 0) & (source["Volume"] > 0)]
+    if len(source) < 257:
+        if ipo_date and 0 <= (as_of_date - ipo_date).days <= 730 and not source.empty and source.index.min().date() == ipo_date:
+            avwap = _compute_anchored_vwap(source, anchor_date=ipo_date)
+            line = [{"time": idx.date().isoformat(), "value": float(value)} for idx, value in avwap.items() if pd.notna(value)]
+            latest = line[-1]["value"] if line else None
+            close = float(source["Close"].iloc[-1])
+            return line, {"phase": None, "primary_kind": "ipo", "anchor_date": ipo_date.isoformat(), "anchor_price": float(source["Low"].iloc[0]), "latest_value": latest, "price_distance_pct": round((close / latest - 1) * 100, 2) if latest else None, "pending_kind": None, "pending_date": None}
+        return [], _empty_avwap_context()
+    confirmed = source.iloc[:-5].tail(252)
+    recent = source.tail(5)
+    low_date = _resolve_confirmed_extreme(confirmed, "Low", "min")
+    high_date = _resolve_confirmed_extreme(confirmed, "High", "max")
+    pending_kind = pending_date = None
+    if not recent.empty:
+        if recent["High"].max() > confirmed["High"].max():
+            pending_kind, pending_date = "high", recent.loc[recent["High"].eq(recent["High"].max())].index.min().date().isoformat()
+        elif recent["Low"].min() < confirmed["Low"].min():
+            pending_kind, pending_date = "low", recent.loc[recent["Low"].eq(recent["Low"].min())].index.min().date().isoformat()
+    low_price = float(source.loc[pd.Timestamp(low_date), "Low"]) if low_date else None
+    high_price = float(source.loc[pd.Timestamp(high_date), "High"]) if high_date else None
+    close = float(source["Close"].iloc[-1])
+    stage_match = re.search(r"([1-4])", str(stage or ""))
+    phase = int(stage_match.group(1)) if stage_match else None
+    if phase == 2:
+        preferred, fallback = ("low", low_date), ("high", high_date)
+    elif phase in (3, 4):
+        preferred, fallback = ("high", high_date), ("low", low_date)
+    else:
+        preferred, fallback = (("low", low_date), ("high", high_date)) if low_price is not None and (high_price is None or abs(close / low_price - 1) <= abs(close / high_price - 1)) else (("high", high_date), ("low", low_date))
+    kind, anchor_date = preferred if preferred[1] else fallback
+    anchor_price = low_price if kind == "low" else high_price
+    if anchor_date is None and ipo_date and (as_of_date - ipo_date).days <= 730 and (as_of_date - ipo_date).days >= 0 and source.index.min().date() == ipo_date:
+        kind, anchor_date, anchor_price = "ipo", ipo_date, float(source.loc[source.index.min(), "Low"])
+    if anchor_date is None:
+        return [], {**_empty_avwap_context(), "phase": phase, "pending_kind": pending_kind, "pending_date": pending_date}
+    avwap = _compute_anchored_vwap(source, anchor_date=anchor_date)
+    line = [{"time": idx.date().isoformat(), "value": float(value)} for idx, value in avwap.items() if pd.notna(value)]
+    latest = line[-1]["value"] if line else None
+    context = {"phase": phase, "primary_kind": kind, "anchor_date": anchor_date.isoformat(), "anchor_price": anchor_price, "latest_value": latest, "price_distance_pct": round((close / latest - 1) * 100, 2) if latest else None, "pending_kind": pending_kind, "pending_date": pending_date}
+    return line, context
+
+
+def _resolve_confirmed_extreme(confirmed: pd.DataFrame, column: str, operation: str) -> dt.date | None:
+    value = confirmed[column].min() if operation == "min" else confirmed[column].max()
+    rows = confirmed.loc[confirmed[column].eq(value)]
+    if rows.empty:
+        return None
+    return rows.index.min().date()
 
 
 def _resolve_anchored_vwap_52w_low_date(frame: pd.DataFrame) -> dt.date | None:
@@ -5909,6 +6012,40 @@ def _classify_position_bucket(
 
 def _build_guru_strike_zone(row: dict[str, Any], *, as_of_date: dt.date | None = None) -> dict[str, Any]:
     return build_strike_zone(row, as_of_date=as_of_date)
+
+
+def _build_trade_plan(artifacts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    supported = [item for item in artifacts if item.get("_source_strategy_id") in {"ma_pullback_retest", "ema21_pullback_buy", "sma200_pullback_buy"}]
+    if not supported:
+        return None
+    supported.sort(key=lambda item: (str(item.get("signal_state") or "") == "active" or item.get("_source_strategy_id") in {"ema21_pullback_buy", "sma200_pullback_buy"}, str(item.get("_source_date") or item.get("event_date") or ""), str(item.get("_source_strategy_id") or "")), reverse=True)
+    item = supported[0]
+    strategy = str(item.get("_source_strategy_id"))
+    state = "active" if item.get("signal_state") == "active" else "active" if strategy in {"ema21_pullback_buy", "sma200_pullback_buy"} else "ready"
+    def valid_level(value: object) -> float | None:
+        price = _coerce_optional_float(value)
+        return price if price is not None and math.isfinite(price) and price > 0 else None
+
+    support = valid_level(item.get("support_price") or item.get("secondary_entry_price"))
+    trigger = valid_level(item.get("trigger_price"))
+    stop = valid_level(item.get("stop_price"))
+    risk = None
+    if trigger is not None and stop is not None and trigger > 0 and stop > 0 and trigger > stop:
+        risk = (trigger - stop) / trigger * 100.0
+        if not math.isfinite(risk) or risk <= 0:
+            risk = None
+    return {"source_strategy_id": strategy, "state": state, "support_label": str(item.get("secondary_entry_label") or "Support"), "support_price": support, "trigger_label": str(item.get("trigger_label") or "Trigger"), "trigger_price": trigger, "stop_label": str(item.get("stop_label") or "Stop"), "stop_price": stop, "reference_risk_pct": round(risk, 2) if risk is not None else None, "signal_date": str(item.get("event_date") or item.get("_source_date") or "") or None}
+
+
+def _trade_readiness(row: dict[str, Any]) -> str:
+    if (row.get("strike_zone") or {}).get("state") == "avoid" or (row.get("pullback_quality") or {}).get("state") == "failed":
+        return "avoid"
+    plan = row.get("trade_plan")
+    if not isinstance(plan, dict):
+        return "leader"
+    if plan.get("state") == "active":
+        return "defined_risk" if plan.get("reference_risk_pct") is not None else "reclaim_trigger"
+    return "pullback_zone"
 
 
 def _guru_row_sort_key(row: dict[str, Any]) -> tuple[int, int, int, float, str]:

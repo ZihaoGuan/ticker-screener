@@ -13,7 +13,7 @@ import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPickRow,
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
 type SortDirection = "asc" | "desc";
-type ViewMode = "list" | "charts" | "guru" | "sectors" | "position" | "etf-portfolios";
+type ViewMode = "list" | "charts" | "guru" | "readiness" | "sectors" | "position" | "etf-portfolios";
 type ChartGridColumns = 2 | 3 | 4;
 type ChartRange = "3m" | "6m" | "1y";
 type ChartType = "candles" | "bars" | "line";
@@ -118,6 +118,8 @@ const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
 const BUILT_IN_LEADERSHIP_PRESET_ID = "built-in:leadership-trend";
 const BUILT_IN_ENTRY_CONFLUENCE_PRESET_ID = "built-in:entry-confluence";
 const BUILT_IN_RS_NEW_HIGH_CONFLUENCE_PRESET_ID = "built-in:rs-new-high-confluence";
+const BUILT_IN_TRADE_READINESS_PRESET_ID = "built-in:trade-readiness";
+const TRADE_READINESS_TOP_HITS_FILTERS: TopHitsFilterPreset = { ...DEFAULT_TOP_HITS_FILTERS, viewMode: "readiness" };
 const ENTRY_CONFLUENCE_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   ...DEFAULT_TOP_HITS_FILTERS,
   scannerGroups: [
@@ -140,6 +142,7 @@ const BUILT_IN_TOP_HITS_PRESETS: Record<string, { label: string; filters: TopHit
   [BUILT_IN_LEADERSHIP_PRESET_ID]: { label: "Leadership + Trend", filters: DEFAULT_TOP_HITS_FILTERS },
   [BUILT_IN_ENTRY_CONFLUENCE_PRESET_ID]: { label: "Momentum + Entry Confluence", filters: ENTRY_CONFLUENCE_TOP_HITS_FILTERS },
   [BUILT_IN_RS_NEW_HIGH_CONFLUENCE_PRESET_ID]: { label: "RS New High Confluence", filters: RS_NEW_HIGH_CONFLUENCE_TOP_HITS_FILTERS },
+  [BUILT_IN_TRADE_READINESS_PRESET_ID]: { label: "Trade Readiness", filters: TRADE_READINESS_TOP_HITS_FILTERS },
 };
 
 export function ScannerTopHitsPage() {
@@ -155,7 +158,7 @@ export function ScannerTopHitsPage() {
   const [notice, setNotice] = useState("");
   const [myPicksNotice, setMyPicksNotice] = useState("");
   const [presetStore, setPresetStore] = useState<TopHitsPresetStore>(loadTopHitsPresetStore);
-  const initialPresetName = presetStore.defaultPresetName || BUILT_IN_LEADERSHIP_PRESET_ID;
+  const initialPresetName = presetStore.defaultPresetName || BUILT_IN_TRADE_READINESS_PRESET_ID;
   const initialFilters = resolveTopHitsPreset(initialPresetName, presetStore) ?? DEFAULT_TOP_HITS_FILTERS;
   const [selectedPresetName, setSelectedPresetName] = useState(initialPresetName);
   const [presetNotice, setPresetNotice] = useState("");
@@ -295,7 +298,7 @@ export function ScannerTopHitsPage() {
   }, [reloadKey]);
 
   useEffect(() => {
-    if (!(viewMode === "guru" || viewMode === "sectors" || viewMode === "position") || guruPayload || guruNotice) return;
+    if (!(viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position") || guruPayload || guruNotice) return;
     const controller = new AbortController();
     setGuruLoading(true);
     setGuruNotice("");
@@ -397,7 +400,7 @@ export function ScannerTopHitsPage() {
     if (!guruScannerGroupsOnly || nonEmptyScannerGroupCount === 0) return guruRows;
     return guruRows.filter((row) => hasScannerGroupSignals(row, scannerGroups, scannerIdsByTicker.get(row.ticker)));
   }, [guruRows, guruScannerGroupsOnly, nonEmptyScannerGroupCount, scannerGroups, scannerIdsByTicker]);
-  const isColumnView = viewMode === "guru" || viewMode === "sectors" || viewMode === "position" || viewMode === "etf-portfolios";
+  const isColumnView = viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position" || viewMode === "etf-portfolios";
   const selectedBoardSelection = useMemo(() => {
     const guruRow = visibleGuruRows.find((row) => row.ticker === selectedBoardTicker)
       ?? guruRows.find((row) => row.ticker === selectedBoardTicker)
@@ -966,6 +969,7 @@ export function ScannerTopHitsPage() {
             >
               Guru Board
             </button>
+            <button className={`scanner-result-view-chip${viewMode === "readiness" ? " is-active" : ""}`} type="button" onClick={() => setViewMode("readiness")}>Trade Readiness</button>
             <button
               className={`scanner-result-view-chip${viewMode === "sectors" ? " is-active" : ""}`}
               type="button"
@@ -1007,9 +1011,9 @@ export function ScannerTopHitsPage() {
         {isLoading && !payload ? <LoadingBlock label="Loading scanner top hits…" /> : null}
         {notice ? <p className="panel-copy">{notice} <button className="ghost-button" type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button></p> : null}
         {!notice && myPicksNotice ? <p className="panel-copy earnings-console-note">{myPicksNotice}</p> : null}
-        {!isLoading && !notice && !guruLoading && !guruNotice && !etfLoading && viewMode !== "etf-portfolios" && ((viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
-        {guruLoading && (viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? <LoadingBlock label="Loading Guru Board data…" /> : null}
-        {guruNotice && (viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? <p className="panel-copy" role="alert">{guruNotice} <button className="ghost-button" type="button" onClick={() => { setGuruNotice(""); setGuruPayload(null); setGuruReloadKey((value) => value + 1); }}>Retry</button></p> : null}
+        {!isLoading && !notice && !guruLoading && !guruNotice && !etfLoading && viewMode !== "etf-portfolios" && ((viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position") ? guruRows.length === 0 : filteredRows.length === 0) ? <p className="panel-copy">No tickers match current filters.</p> : null}
+        {guruLoading && (viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position") ? <LoadingBlock label={viewMode === "readiness" ? "Loading Trade Readiness data…" : "Loading Guru Board data…"} /> : null}
+        {guruNotice && (viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position") ? <p className="panel-copy" role="alert">{guruNotice} <button className="ghost-button" type="button" onClick={() => { setGuruNotice(""); setGuruPayload(null); setGuruReloadKey((value) => value + 1); }}>Retry</button></p> : null}
         {viewMode === "etf-portfolios" ? (
           <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
             <MomentumEtfPortfolioBoard
@@ -1036,7 +1040,7 @@ export function ScannerTopHitsPage() {
               onRetry={() => setEtfPayload(null)}
             />
           </BoardChartWorkspace>
-        ) : ((viewMode === "guru" || viewMode === "sectors" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
+        ) : ((viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
           <>
             {viewMode === "guru" ? (
               <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
@@ -1055,6 +1059,10 @@ export function ScannerTopHitsPage() {
                   onSelectTicker={selectBoardTicker}
                   onToggleMyPick={handleToggleMyPick}
                 />
+              </BoardChartWorkspace>
+            ) : viewMode === "readiness" ? (
+              <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
+                <TradeReadinessBoard rows={visibleGuruRows} myPickTickers={myPickTickers} savingMyPickTickers={savingMyPickTickers} canManageMyPicks={canManageMyPicks} selectedTicker={selectedBoardTicker} onSelectTicker={selectBoardTicker} onToggleMyPick={handleToggleMyPick} />
               </BoardChartWorkspace>
             ) : viewMode === "sectors" ? (
               <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
@@ -1462,6 +1470,7 @@ function BoardChartWorkspace({
               </Suspense>
             ) : null}
           </div>
+          {chartPayload?.avwap_context?.anchor_date ? <div className="board-chart-panel-context"><span>Phase AVWAP · {chartPayload.avwap_context.primary_kind} from {chartPayload.avwap_context.anchor_date}</span>{chartPayload.avwap_context.latest_value != null ? <span>{formatPrice(chartPayload.avwap_context.latest_value)} ({chartPayload.avwap_context.price_distance_pct == null ? "--" : `${chartPayload.avwap_context.price_distance_pct.toFixed(1)}%`})</span> : null}{chartPayload.avwap_context.pending_kind ? <span>Pending {chartPayload.avwap_context.pending_kind} · {chartPayload.avwap_context.pending_date}</span> : null}</div> : null}
           <div className="board-chart-panel-context">
             <span>{selection.sector || "Sector unavailable"}</span>
             {selection.context ? <span>{selection.context}</span> : null}
@@ -1719,6 +1728,26 @@ function SectorBoard({
       <p className="panel-copy guru-board-note">Sector columns help compare leadership breadth. Strike Zone remains chart-review guidance, not an automatic buy signal.</p>
     </section>
   );
+}
+
+function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canManageMyPicks, selectedTicker, onSelectTicker, onToggleMyPick }: { rows: ScannerTopHitRow[]; myPickTickers: Set<string>; savingMyPickTickers: Record<string, boolean>; canManageMyPicks: boolean; selectedTicker: string; onSelectTicker: (ticker: string) => void; onToggleMyPick: (ticker: string) => Promise<void> }) {
+  const [showAvoided, setShowAvoided] = useState(false);
+  const columns = [
+    ["leader", "Leader"], ["pullback_zone", "Pullback Zone"], ["reclaim_trigger", "Reclaim Trigger"], ["defined_risk", "Defined Risk"],
+  ] as const;
+  const sorted = [...rows].sort((a, b) => (b.strike_zone?.score ?? 0) - (a.strike_zone?.score ?? 0) || (b.pullback_quality?.score ?? 0) - (a.pullback_quality?.score ?? 0) || (b.daily_rs_rating ?? 0) - (a.daily_rs_rating ?? 0) || a.ticker.localeCompare(b.ticker));
+  const renderCard = (row: ScannerTopHitRow) => {
+    const plan = row.trade_plan;
+    const price = row.day_close == null ? "--" : `$${row.day_close.toFixed(2)}`;
+    return <article className="guru-ticker-card trade-readiness-card" key={row.ticker}>
+      <button type="button" className="trade-readiness-select" aria-pressed={row.ticker === selectedTicker} onClick={() => onSelectTicker(row.ticker)}><strong>{row.ticker}</strong><span>{price}</span></button>
+      <div className="guru-ticker-badges"><span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span><SectorTag sector={row.sector} /></div>
+      <div className="guru-ticker-context"><span>PB {row.pullback_quality ? `${row.pullback_quality.score} · ${row.pullback_quality.state}` : "--"}</span><span>Strike {row.strike_zone?.score ?? "--"}</span></div>
+      {plan ? <div className="trade-readiness-plan"><span>{plan.support_label}: {plan.support_price?.toFixed(2) ?? "--"}</span><span>{plan.trigger_label}: {plan.trigger_price?.toFixed(2) ?? "--"}</span><span>{plan.stop_label}: {plan.stop_price?.toFixed(2) ?? "--"}</span><span>Reference risk: {plan.reference_risk_pct == null ? "--" : `${plan.reference_risk_pct.toFixed(2)}%`}</span></div> : null}
+      <div className="guru-ticker-context"><span>{row.earnings_days == null ? "Earnings TBD" : `Earnings ${row.earnings_days}d`}</span><button className="ghost-button" type="button" disabled={!canManageMyPicks || Boolean(savingMyPickTickers[row.ticker])} onClick={() => void onToggleMyPick(row.ticker)}>{myPickTickers.has(row.ticker) ? "My Pick ✓" : "My Pick +"}</button></div>
+    </article>;
+  };
+  return <section className="trade-readiness-board" aria-label="Trade Readiness"><div className="guru-board-scroll">{columns.map(([state, label]) => { const bucket = sorted.filter((row) => (row.trade_readiness || "leader") === state); return <article className="guru-column is-teal" key={state}><header><strong>{bucket.length}</strong><span>{label}</span></header><div className="guru-column-cards">{bucket.map(renderCard)}</div></article>; })}</div><button className="ghost-button" type="button" aria-expanded={showAvoided} onClick={() => setShowAvoided((value) => !value)}>{showAvoided ? "Hide avoided" : `Show avoided (${sorted.filter((row) => row.trade_readiness === "avoid").length})`}</button>{showAvoided ? <div className="guru-board-scroll">{sorted.filter((row) => row.trade_readiness === "avoid").map(renderCard)}</div> : null}</section>;
 }
 
 function GuruTickerCard({
