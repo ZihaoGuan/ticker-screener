@@ -73,9 +73,10 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
     def test_signal_fields_are_additive_and_null_when_unavailable(self):
         etfs = (
             SectorEtf("XLC", "Comm. Services", "Test", "https://example.test/xlc", ()),
+            SectorEtf("XLY", "Consumer Disc.", "Test", "https://example.test/xly", ()),
             SectorEtf("XAR", "Aerospace", "Test", "https://example.test/xar", ()),
         )
-        frames = {ticker: _frame([float(100 + index) for index in range(270)]) for ticker in ("XLC", "XAR", "SPY")}
+        frames = {ticker: _frame([float(100 + index) for index in range(270)]) for ticker in ("XLC", "XLY", "XAR", "SPY")}
         rts_snapshot = SimpleNamespace(rts_score=72.5, rts_state="expanding", as_of_date="2026-07-30")
         stage_hit = SimpleNamespace(stage_alias="Stage 2B", current_stage="Stage 2 - Advance", maturity="Mature", signal_date="2026-07-24")
 
@@ -92,9 +93,10 @@ class SectorLeaderboardServiceTest(unittest.TestCase):
         self.assertEqual(by_ticker["XLC"]["rts_score"], 72.5)
         self.assertEqual(by_ticker["XLC"]["rts_formula"], "rts-v1")
         self.assertEqual(by_ticker["XLC"]["darvas_breakout"]["sessions_ago"], 1)
+        self.assertIsNone(by_ticker["XLY"]["stage"])
+        self.assertIsNone(by_ticker["XLY"]["rts_score"])
+        self.assertIsNone(by_ticker["XLY"]["darvas_breakout"])
         self.assertNotIn("stage", by_ticker["XAR"])
-        self.assertNotIn("rts_score", by_ticker["XAR"])
-        self.assertNotIn("darvas_breakout", by_ticker["XAR"])
 
     def test_payload_is_cached_for_the_same_sector_catalog(self):
         service = SectorLeaderboardService(database_url="postgres://example", etfs=())
