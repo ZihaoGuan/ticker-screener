@@ -21,6 +21,9 @@ COPY web ./web
 COPY config ./config
 COPY sql ./sql
 COPY vendor ./vendor
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+RUN cd frontend \
+    && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --omit=dev
 COPY frontend/scripts ./frontend/scripts
 
 CMD ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000"]

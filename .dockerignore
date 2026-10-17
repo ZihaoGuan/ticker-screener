@@ -15,5 +15,7 @@
 !vendor/
 !vendor/**
 !frontend/
+!frontend/package.json
+!frontend/package-lock.json
 !frontend/scripts/
 !frontend/scripts/**
