@@ -17,7 +17,7 @@ def _write_executable(path: Path, contents: str) -> None:
 
 
 class CleanupComposeReleasesTest(unittest.TestCase):
-    def test_removes_only_stale_application_releases_and_preserves_rollbacks(self) -> None:
+    def test_removes_only_stale_application_releases_and_preserves_one_rollback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             bin_dir = tmp_path / "bin"
@@ -61,9 +61,9 @@ class CleanupComposeReleasesTest(unittest.TestCase):
             calls = call_log.read_text(encoding="utf-8")
             self.assertIn("rm exited-web", calls)
             self.assertIn("image rm ticker-screener:older", calls)
+            self.assertIn("image rm ticker-screener:rollback-two", calls)
             self.assertNotIn("image rm ticker-screener:current", calls)
             self.assertNotIn("image rm ticker-screener:rollback-one", calls)
-            self.assertNotIn("image rm ticker-screener:rollback-two", calls)
             self.assertNotIn("volume", calls)
             self.assertIn("image prune -f", calls)
             self.assertIn("builder prune -f --filter until=24h", calls)

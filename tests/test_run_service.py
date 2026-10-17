@@ -1339,6 +1339,7 @@ class RunServiceTests(unittest.TestCase):
         service.history_repository.list_remote_workers = MagicMock(return_value=[  # type: ignore[method-assign]
             {"worker_name": "worker-a", "status": "running", "is_healthy": True, "current_job_run_id": 801, "metadata_json": {"worker_pools": ["general"], "code_version": "abc123"}},
             {"worker_name": "worker-b", "status": "idle", "is_healthy": True, "current_job_run_id": None, "metadata_json": {"worker_pools": ["finviz"]}},
+            {"worker_name": "retired-worker", "status": "idle", "is_healthy": False, "current_job_run_id": None, "metadata_json": {"worker_pools": ["general"], "code_version": "old123"}},
         ])
         remote_row = {"id": 801, "job_name": "Run RS", "status": "running", "trigger_source": "manual", "started_at": dt.datetime(2026, 10, 14, tzinfo=dt.timezone.utc), "finished_at": None, "request_payload": {"action_id": "rs", "execution_mode": "remote", "options": {}}, "result_payload": {"job_id": "remote-801", "progress_label": "25/100 screening", "progress_percent": 25}}
         github_row = {"id": 802, "job_name": "Run Cup Handle", "status": "running", "trigger_source": "scheduler", "started_at": dt.datetime(2026, 10, 14, tzinfo=dt.timezone.utc), "finished_at": None, "request_payload": {"action_id": "cup_handle", "execution_mode": "github", "options": {}}, "result_payload": {"job_id": "remote-802", "github_run_id": 123, "github_run_url": "https://github.example/runs/123"}}
@@ -1347,6 +1348,7 @@ class RunServiceTests(unittest.TestCase):
 
         overview = service.get_execution_overview()
 
+        self.assertEqual([worker["worker_name"] for worker in overview["remote_workers"]], ["worker-a", "worker-b"])
         self.assertEqual(overview["remote_workers"][0]["current_job"]["job_id"], "remote-801")
         self.assertIsNone(overview["remote_workers"][1]["current_job"])
         self.assertEqual(overview["github_jobs"][0]["job_id"], "remote-802")

@@ -359,7 +359,8 @@ Before an image build, and after a successful worker release, deployment runs
 `scripts/cleanup_compose_releases.sh`. It removes only exited ticker-screener
 web/worker containers, dangling layers, stale build cache, and unreferenced
 `ticker-screener:<sha>` images. It preserves images referenced by any
-container plus the three newest application images. It never removes
+container plus the two newest application images (the active release and one
+rollback release). It never removes
 PostgreSQL, Caddy, Docker volumes, or unrelated Docker images. The build stops
 before starting if safe cleanup still leaves less than 5 GiB free.
 

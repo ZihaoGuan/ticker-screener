@@ -2538,6 +2538,8 @@ class RunService:
         for worker in self.history_repository.list_remote_workers(
             stale_after_seconds=self.REMOTE_WORKER_STALE_SECONDS
         ):
+            if not bool(worker.get("is_healthy")):
+                continue
             metadata = worker.get("metadata_json") if isinstance(worker.get("metadata_json"), dict) else {}
             current_job_run_id = worker.get("current_job_run_id")
             current_row = self.history_repository.get_job_run(current_job_run_id) if current_job_run_id is not None else None

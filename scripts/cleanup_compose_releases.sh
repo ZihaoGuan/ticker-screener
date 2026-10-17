@@ -57,8 +57,8 @@ if [ -n "$image_tag" ]; then
   [ -n "$target_image_id" ] && protect_image_id "$target_image_id"
 fi
 
-# docker image ls is newest first. Retaining the newest three distinct images
-# gives the active release and two rollback releases even when no container references them.
+# docker image ls is newest first. Retaining the newest two distinct images
+# gives the active release and one rollback release even when no container references them.
 retained_images=0
 newest_image_ids=$'\n'
 while IFS=' ' read -r image_ref image_id; do
@@ -69,7 +69,7 @@ while IFS=' ' read -r image_ref image_id; do
       continue
       ;;
   esac
-  if [ "$retained_images" -lt 3 ]; then
+  if [ "$retained_images" -lt 2 ]; then
     protect_image_id "$image_id"
     newest_image_ids+="$image_id"$'\n'
     retained_images=$((retained_images + 1))
