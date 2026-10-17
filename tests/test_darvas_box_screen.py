@@ -14,11 +14,14 @@ from src.config import AppConfig
 from src.darvas_box_screen import (
     DARVAS_DATABASE_HISTORY_SESSIONS,
     DARVAS_FALLBACK_HISTORY_DAYS,
+    DARVAS_REJECTION_REASONS,
+    evaluate_darvas_box_breakout,
     find_darvas_box_breakout_hit,
     run_darvas_box_breakout_screen,
 )
 from src.screener_catalog import build_screener_catalog
 from src.universe import UniverseTicker
+from scripts.replay_darvas_box_breakout import aggregate_replay_results
 from src.webapp.services.run_service import RunService
 from src.webapp.services.watchlist_service import WatchlistService
 
@@ -43,6 +46,69 @@ def _darvas_breakout_frame(*, breakout_volume: float = 1_600_000.0) -> pd.DataFr
 
 
 class DarvasBoxScreenTest(unittest.TestCase):
+    def test_evaluator_reports_ordered_primary_rejections_and_preserves_pass(self) -> None:
+        base = _darvas_breakout_frame()
+        ticker = UniverseTicker(symbol="TEST")
+        cases = {}
+        cases["insufficient_history"] = base.tail(100)
+        frame = base.copy(); frame.iloc[259:279, frame.columns.get_loc("Low")] = 80.0
+        cases["width_too_large"] = frame
+        frame = base.copy(); frame.iloc[259:279, frame.columns.get_loc("High")] = 98.5
+        frame.iloc[259, frame.columns.get_loc("High")] = 100.0
+        cases["insufficient_resistance_confirmation"] = frame
+        frame = base.copy(); frame.iloc[-1, frame.columns.get_loc("Close")] = 99.0
+        cases["breakout_not_reached"] = frame
+        frame = base.copy(); frame.iloc[-1, frame.columns.get_loc("Close")] = 100.3
+        cases["breakout_buffer_not_reached"] = frame
+        frame = base.copy(); frame.iloc[100, frame.columns.get_loc("High")] = 150.0
+        cases["not_near_high"] = frame
+        cases["absolute_volume_too_low"] = _darvas_breakout_frame(breakout_volume=99_999.0)
+        cases["relative_volume_too_low"] = _darvas_breakout_frame(breakout_volume=1_400_000.0)
+        frame = base.copy(); frame.iloc[259:279, frame.columns.get_loc("High")] = 0.0
+        cases["no_qualifying_box"] = frame
+        self.assertEqual(set(cases), set(DARVAS_REJECTION_REASONS))
+        for expected, frame in cases.items():
+            with self.subTest(reason=expected):
+                result = evaluate_darvas_box_breakout(frame, ticker=ticker)
+                self.assertIsNone(result.hit)
+                self.assertEqual(result.rejection_reason, expected)
+        passing = evaluate_darvas_box_breakout(base, ticker=ticker)
+        self.assertIsNotNone(passing.hit)
+        self.assertIsNone(passing.rejection_reason)
+
+    def test_result_serialization_reconciles_pass_reject_and_data_failure(self) -> None:
+        frame = _darvas_breakout_frame()
+        tickers = [UniverseTicker(symbol="PASS"), UniverseTicker(symbol="REJECT"), UniverseTicker(symbol="FAIL")]
+        bad = frame.copy(); bad.iloc[-1, bad.columns.get_loc("Close")] = 99.0
+        with patch("src.darvas_box_screen.resolve_database_url", return_value="postgres://example"), patch(
+            "src.darvas_box_screen.load_many_ticker_windows",
+            return_value={"PASS": frame, "REJECT": bad, "FAIL": frame},
+        ), patch("src.darvas_box_screen.db_frame_has_recent_coverage", side_effect=[True, True, True]):
+            # Force one evaluation exception, classified as a data/evaluation failure.
+            with patch("src.darvas_box_screen.evaluate_darvas_box_breakout", side_effect=[
+                evaluate_darvas_box_breakout(frame, ticker=tickers[0]),
+                evaluate_darvas_box_breakout(bad, ticker=tickers[1]), RuntimeError("broken"),
+            ]):
+                result = run_darvas_box_breakout_screen(AppConfig(), tickers, as_of_date=frame.index[-1].date())
+        payload = result.to_dict()
+        self.assertEqual(
+            payload["accounting"],
+            {"total_tickers": 3, "passed_tickers": 1, "strategy_rejected": 1, "data_failures": 1},
+        )
+        self.assertEqual(payload["rejection_counts"]["breakout_not_reached"], 1)
+        self.assertEqual(sum(payload["rejection_counts"].values()), 1)
+        self.assertEqual(len(payload["failed_tickers"]), 1)
+
+    def test_replay_aggregation_sums_date_level_telemetry(self) -> None:
+        aggregate = aggregate_replay_results([
+            {"rejection_counts": {"not_near_high": 2}, "accounting": {"total_tickers": 3, "passed_tickers": 1, "strategy_rejected": 2, "data_failures": 0}},
+            {"rejection_counts": {"not_near_high": 1, "width_too_large": 1}, "accounting": {"total_tickers": 3, "passed_tickers": 0, "strategy_rejected": 2, "data_failures": 1}},
+        ])
+        self.assertEqual(aggregate["date_count"], 2)
+        self.assertEqual(aggregate["rejection_counts"], {"not_near_high": 3, "width_too_large": 1})
+        self.assertEqual(aggregate["total_tickers"], 6)
+        self.assertEqual(aggregate["data_failures"], 1)
+
     def test_identifies_a_volume_backed_close_above_a_confirmed_box_near_52_week_high(self) -> None:
         hit = find_darvas_box_breakout_hit(_darvas_breakout_frame(), ticker=UniverseTicker(symbol="TEST"))
 

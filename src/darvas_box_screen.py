@@ -25,6 +25,12 @@ DARVAS_MIN_VOLUME_RATIO = 1.5
 DARVAS_REQUIRED_BARS = max(DARVAS_BOX_HISTORY_DAYS, DARVAS_VOLUME_AVERAGE_DAYS) + 1
 DARVAS_DATABASE_HISTORY_SESSIONS = 280
 DARVAS_FALLBACK_HISTORY_DAYS = 400
+DARVAS_REJECTION_REASONS = (
+    "insufficient_history", "no_qualifying_box", "width_too_large",
+    "insufficient_resistance_confirmation", "breakout_not_reached",
+    "breakout_buffer_not_reached", "not_near_high", "absolute_volume_too_low",
+    "relative_volume_too_low",
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,7 @@ class DarvasBoxBreakoutScreenResult:
     passed_tickers: int
     failed_tickers: list[dict[str, str]]
     hits: list[DarvasBoxBreakoutHit]
+    rejection_counts: dict[str, int]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -67,7 +74,79 @@ class DarvasBoxBreakoutScreenResult:
             "passed_tickers": self.passed_tickers,
             "failed_tickers": self.failed_tickers,
             "hits": [item.to_dict() for item in self.hits],
+            "rejection_counts": self.rejection_counts,
+            "failed_ticker_count": len(self.failed_tickers),
+            "accounting": {
+                "total_tickers": self.total_tickers,
+                "passed_tickers": self.passed_tickers,
+                "strategy_rejected": sum(self.rejection_counts.values()),
+                "data_failures": len(self.failed_tickers),
+            },
         }
+
+
+@dataclass(frozen=True)
+class DarvasBoxEvaluation:
+    hit: DarvasBoxBreakoutHit | None
+    rejection_reason: str | None
+
+
+def evaluate_darvas_box_breakout(frame: pd.DataFrame, *, ticker: UniverseTicker) -> DarvasBoxEvaluation:
+    """Evaluate once, returning either the production hit or its primary rejection."""
+    bars = _normalize_bars_frame(frame)
+    if bars.empty or len(bars) < DARVAS_REQUIRED_BARS:
+        return DarvasBoxEvaluation(None, "insufficient_history")
+    box = bars.iloc[-(DARVAS_BOX_DAYS + 1) : -1]
+    if len(box) < DARVAS_MIN_BOX_DAYS:
+        return DarvasBoxEvaluation(None, "no_qualifying_box")
+    latest = bars.iloc[-1]
+    current_price, current_volume = float(latest["Close"]), float(latest["Volume"])
+    box_high, box_low = float(box["High"].max()), float(box["Low"].min())
+    if box_high <= 0.0 or box_low <= 0.0 or box_high < box_low:
+        return DarvasBoxEvaluation(None, "no_qualifying_box")
+    box_width_pct = ((box_high - box_low) / box_low) * 100.0
+    touch_floor = box_high * (1.0 - DARVAS_RESISTANCE_TOUCH_TOLERANCE_PCT / 100.0)
+    resistance_touches = int((box["High"].astype(float) >= touch_floor).sum())
+    high_52w = float(bars["High"].tail(DARVAS_BOX_HISTORY_DAYS).max())
+    distance_from_52w_high_pct = ((high_52w - current_price) / high_52w) * 100.0 if high_52w > 0.0 else 100.0
+    avg_volume_50 = float(bars["Volume"].iloc[-(DARVAS_VOLUME_AVERAGE_DAYS + 1) : -1].mean())
+    volume_ratio_50 = current_volume / avg_volume_50 if avg_volume_50 > 0.0 else 0.0
+    breakout_price = box_high * (1.0 + DARVAS_BREAKOUT_BUFFER_PCT / 100.0)
+
+    # This order is the mutually exclusive primary rejection taxonomy.
+    reason = None
+    if box_width_pct > DARVAS_MAX_BOX_WIDTH_PCT:
+        reason = "width_too_large"
+    elif resistance_touches < DARVAS_MIN_RESISTANCE_TOUCHES:
+        reason = "insufficient_resistance_confirmation"
+    elif current_price <= box_high:
+        reason = "breakout_not_reached"
+    elif current_price <= breakout_price:
+        reason = "breakout_buffer_not_reached"
+    elif current_price < high_52w * (1.0 - DARVAS_NEAR_52W_HIGH_PCT / 100.0):
+        reason = "not_near_high"
+    elif current_volume < DARVAS_MIN_VOLUME:
+        reason = "absolute_volume_too_low"
+    elif volume_ratio_50 < DARVAS_MIN_VOLUME_RATIO:
+        reason = "relative_volume_too_low"
+    if reason:
+        return DarvasBoxEvaluation(None, reason)
+    hit = DarvasBoxBreakoutHit(
+        ticker=ticker.symbol, sector=ticker.sector, industry=ticker.industry, exchange=ticker.exchange,
+        signal_date=bars.index[-1].date().isoformat(), current_price=current_price,
+        breakout_price=breakout_price, box_high=box_high, box_low=box_low, box_days=len(box),
+        box_width_pct=box_width_pct, resistance_touches=resistance_touches, high_52w=high_52w,
+        distance_from_52w_high_pct=distance_from_52w_high_pct, current_volume=current_volume,
+        avg_volume_50=avg_volume_50, volume_ratio_50=volume_ratio_50,
+        reasons=[
+            f"{len(box)}-session Darvas box: {box_low:.2f}-{box_high:.2f} ({box_width_pct:.1f}% wide)",
+            f"{resistance_touches} upper-boundary touches within {DARVAS_RESISTANCE_TOUCH_TOLERANCE_PCT:.0f}%",
+            f"close {current_price:.2f} cleared {breakout_price:.2f} resistance trigger",
+            f"volume {current_volume:,.0f} is {volume_ratio_50:.1f}x the prior 50-session average",
+            f"close is {distance_from_52w_high_pct:.1f}% below the 52-week high",
+        ],
+    )
+    return DarvasBoxEvaluation(hit, None)
 
 
 def _normalize_bars_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -119,65 +198,7 @@ def find_darvas_box_breakout_hit(
     52-week high, and the breakout must close 0.5% above resistance on at least
     1.5x its preceding 50-session average volume.
     """
-    bars = _normalize_bars_frame(frame)
-    if bars.empty or len(bars) < DARVAS_REQUIRED_BARS:
-        return None
-
-    box = bars.iloc[-(DARVAS_BOX_DAYS + 1) : -1]
-    if len(box) < DARVAS_MIN_BOX_DAYS:
-        return None
-    latest = bars.iloc[-1]
-    current_price = float(latest["Close"])
-    current_volume = float(latest["Volume"])
-    box_high = float(box["High"].max())
-    box_low = float(box["Low"].min())
-    if box_high <= 0.0 or box_low <= 0.0:
-        return None
-    box_width_pct = ((box_high - box_low) / box_low) * 100.0
-    touch_floor = box_high * (1.0 - DARVAS_RESISTANCE_TOUCH_TOLERANCE_PCT / 100.0)
-    resistance_touches = int((box["High"].astype(float) >= touch_floor).sum())
-    high_52w = float(bars["High"].tail(DARVAS_BOX_HISTORY_DAYS).max())
-    distance_from_52w_high_pct = ((high_52w - current_price) / high_52w) * 100.0 if high_52w > 0.0 else 100.0
-    avg_volume_50 = float(bars["Volume"].iloc[-(DARVAS_VOLUME_AVERAGE_DAYS + 1) : -1].mean())
-    volume_ratio_50 = current_volume / avg_volume_50 if avg_volume_50 > 0.0 else 0.0
-    breakout_price = box_high * (1.0 + DARVAS_BREAKOUT_BUFFER_PCT / 100.0)
-
-    if not (
-        box_width_pct <= DARVAS_MAX_BOX_WIDTH_PCT
-        and resistance_touches >= DARVAS_MIN_RESISTANCE_TOUCHES
-        and current_price > breakout_price
-        and current_price >= high_52w * (1.0 - DARVAS_NEAR_52W_HIGH_PCT / 100.0)
-        and current_volume >= DARVAS_MIN_VOLUME
-        and volume_ratio_50 >= DARVAS_MIN_VOLUME_RATIO
-    ):
-        return None
-
-    return DarvasBoxBreakoutHit(
-        ticker=ticker.symbol,
-        sector=ticker.sector,
-        industry=ticker.industry,
-        exchange=ticker.exchange,
-        signal_date=bars.index[-1].date().isoformat(),
-        current_price=current_price,
-        breakout_price=breakout_price,
-        box_high=box_high,
-        box_low=box_low,
-        box_days=len(box),
-        box_width_pct=box_width_pct,
-        resistance_touches=resistance_touches,
-        high_52w=high_52w,
-        distance_from_52w_high_pct=distance_from_52w_high_pct,
-        current_volume=current_volume,
-        avg_volume_50=avg_volume_50,
-        volume_ratio_50=volume_ratio_50,
-        reasons=[
-            f"{len(box)}-session Darvas box: {box_low:.2f}-{box_high:.2f} ({box_width_pct:.1f}% wide)",
-            f"{resistance_touches} upper-boundary touches within {DARVAS_RESISTANCE_TOUCH_TOLERANCE_PCT:.0f}%",
-            f"close {current_price:.2f} cleared {breakout_price:.2f} resistance trigger",
-            f"volume {current_volume:,.0f} is {volume_ratio_50:.1f}x the prior 50-session average",
-            f"close is {distance_from_52w_high_pct:.1f}% below the 52-week high",
-        ],
-    )
+    return evaluate_darvas_box_breakout(frame, ticker=ticker).hit
 
 
 def run_darvas_box_breakout_screen(
@@ -198,6 +219,7 @@ def run_darvas_box_breakout_screen(
     )
     hits: list[DarvasBoxBreakoutHit] = []
     failures: list[dict[str, str]] = []
+    rejections = {reason: 0 for reason in DARVAS_REJECTION_REASONS}
     fallback: list[UniverseTicker] = []
 
     for ticker in tickers:
@@ -210,27 +232,34 @@ def run_darvas_box_breakout_screen(
             fallback.append(ticker)
             continue
         try:
-            hit = find_darvas_box_breakout_hit(frame, ticker=ticker)
-            if hit is not None:
-                hits.append(hit)
+            evaluation = evaluate_darvas_box_breakout(frame, ticker=ticker)
+            if evaluation.hit is not None:
+                hits.append(evaluation.hit)
+            elif evaluation.rejection_reason:
+                rejections[evaluation.rejection_reason] += 1
         except Exception as exc:
             failures.append({"ticker": ticker.symbol, "error": str(exc)})
 
     if fallback:
-        cookstock = load_configured_cookstock(config)
-        with freeze_cookstock_today(cookstock, as_of_date):
-            for ticker in fallback:
-                try:
-                    financials = cookstock.cookFinancials(
-                        ticker.symbol,
-                        benchmarkTicker=config.benchmark_ticker,
-                        historyLookbackDays=DARVAS_FALLBACK_HISTORY_DAYS,
-                    )
-                    hit = find_darvas_box_breakout_hit(_build_price_frame(financials), ticker=ticker)
-                    if hit is not None:
-                        hits.append(hit)
-                except Exception as exc:
-                    failures.append({"ticker": ticker.symbol, "error": str(exc)})
+        try:
+            cookstock = load_configured_cookstock(config)
+            with freeze_cookstock_today(cookstock, as_of_date):
+                for ticker in fallback:
+                    try:
+                        financials = cookstock.cookFinancials(
+                            ticker.symbol,
+                            benchmarkTicker=config.benchmark_ticker,
+                            historyLookbackDays=DARVAS_FALLBACK_HISTORY_DAYS,
+                        )
+                        evaluation = evaluate_darvas_box_breakout(_build_price_frame(financials), ticker=ticker)
+                        if evaluation.hit is not None:
+                            hits.append(evaluation.hit)
+                        elif evaluation.rejection_reason:
+                            rejections[evaluation.rejection_reason] += 1
+                    except Exception as exc:
+                        failures.append({"ticker": ticker.symbol, "error": str(exc)})
+        except Exception as exc:
+            failures.extend({"ticker": ticker.symbol, "error": str(exc)} for ticker in fallback)
 
     hits.sort(key=lambda item: (-item.volume_ratio_50, item.box_width_pct, item.ticker))
     return DarvasBoxBreakoutScreenResult(
@@ -239,4 +268,5 @@ def run_darvas_box_breakout_screen(
         passed_tickers=len(hits),
         failed_tickers=failures,
         hits=hits,
+        rejection_counts=rejections,
     )

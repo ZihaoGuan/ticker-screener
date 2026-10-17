@@ -64,6 +64,8 @@ def main() -> int:
         "total_tickers": result.total_tickers, "passed_tickers": result.passed_tickers,
         "failed_tickers": result.failed_tickers, "raw_results_file": str(paths.raw_results_path),
         "watchlist_file": str(paths.watchlist_path),
+        "rejection_counts": result.rejection_counts,
+        "accounting": result.to_dict()["accounting"],
     })
     persisted_run_id = persist_screen_run_artifacts_if_configured(args=args, summary_path=paths.summary_path)
     if persisted_run_id is not None:
