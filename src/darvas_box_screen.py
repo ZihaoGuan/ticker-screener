@@ -22,6 +22,9 @@ DARVAS_NEAR_52W_HIGH_PCT = 10.0
 DARVAS_VOLUME_AVERAGE_DAYS = 50
 DARVAS_MIN_VOLUME = 100_000.0
 DARVAS_MIN_VOLUME_RATIO = 1.5
+DARVAS_REQUIRED_BARS = max(DARVAS_BOX_HISTORY_DAYS, DARVAS_VOLUME_AVERAGE_DAYS) + 1
+DARVAS_DATABASE_HISTORY_SESSIONS = 280
+DARVAS_FALLBACK_HISTORY_DAYS = 400
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,7 @@ def _normalize_bars_frame(frame: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     bars = frame[[available[column.lower()] for column in required]].copy()
     bars.columns = required
+    bars = bars.apply(pd.to_numeric, errors="coerce")
     bars = bars.dropna(subset=required).sort_index()
     if not isinstance(bars.index, pd.DatetimeIndex):
         bars.index = pd.to_datetime(bars.index)
@@ -96,6 +100,13 @@ def _build_price_frame(financials: object) -> pd.DataFrame:
     return frame.dropna(subset=["Date", "High", "Low", "Close", "Volume"]).set_index("Date").sort_index()
 
 
+def _has_required_darvas_history(frame: pd.DataFrame) -> bool:
+    try:
+        return len(_normalize_bars_frame(frame)) >= DARVAS_REQUIRED_BARS
+    except (TypeError, ValueError):
+        return False
+
+
 def find_darvas_box_breakout_hit(
     frame: pd.DataFrame,
     *,
@@ -109,8 +120,7 @@ def find_darvas_box_breakout_hit(
     1.5x its preceding 50-session average volume.
     """
     bars = _normalize_bars_frame(frame)
-    min_history = max(DARVAS_BOX_HISTORY_DAYS, DARVAS_VOLUME_AVERAGE_DAYS) + 1
-    if bars.empty or len(bars) < min_history:
+    if bars.empty or len(bars) < DARVAS_REQUIRED_BARS:
         return None
 
     box = bars.iloc[-(DARVAS_BOX_DAYS + 1) : -1]
@@ -183,7 +193,7 @@ def run_darvas_box_breakout_screen(
     frames = load_many_ticker_windows(
         symbols,
         run_date,
-        DARVAS_BOX_HISTORY_DAYS + 1,
+        DARVAS_DATABASE_HISTORY_SESSIONS,
         database_url=resolved_database_url,
     )
     hits: list[DarvasBoxBreakoutHit] = []
@@ -192,7 +202,11 @@ def run_darvas_box_breakout_screen(
 
     for ticker in tickers:
         frame = frames.get(ticker.symbol.upper())
-        if frame is None or not db_frame_has_recent_coverage(frame, run_date):
+        if (
+            frame is None
+            or not _has_required_darvas_history(frame)
+            or not db_frame_has_recent_coverage(frame, run_date)
+        ):
             fallback.append(ticker)
             continue
         try:
@@ -210,7 +224,7 @@ def run_darvas_box_breakout_screen(
                     financials = cookstock.cookFinancials(
                         ticker.symbol,
                         benchmarkTicker=config.benchmark_ticker,
-                        historyLookbackDays=DARVAS_BOX_HISTORY_DAYS + 1,
+                        historyLookbackDays=DARVAS_FALLBACK_HISTORY_DAYS,
                     )
                     hit = find_darvas_box_breakout_hit(_build_price_frame(financials), ticker=ticker)
                     if hit is not None:

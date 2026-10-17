@@ -5,13 +5,18 @@ import tempfile
 import datetime as dt
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 
 from src.config import AppConfig
-from src.darvas_box_screen import find_darvas_box_breakout_hit, run_darvas_box_breakout_screen
+from src.darvas_box_screen import (
+    DARVAS_DATABASE_HISTORY_SESSIONS,
+    DARVAS_FALLBACK_HISTORY_DAYS,
+    find_darvas_box_breakout_hit,
+    run_darvas_box_breakout_screen,
+)
 from src.screener_catalog import build_screener_catalog
 from src.universe import UniverseTicker
 from src.webapp.services.run_service import RunService
@@ -69,12 +74,52 @@ class DarvasBoxScreenTest(unittest.TestCase):
         ticker = UniverseTicker(symbol="TEST")
         with patch("src.darvas_box_screen.resolve_database_url", return_value="postgres://example"), patch(
             "src.darvas_box_screen.load_many_ticker_windows", return_value={"TEST": frame}
-        ), patch("src.darvas_box_screen.load_configured_cookstock") as load_cookstock:
+        ) as load_frames, patch("src.darvas_box_screen.load_configured_cookstock") as load_cookstock:
             result = run_darvas_box_breakout_screen(AppConfig(), [ticker], as_of_date=frame.index[-1].date())
 
         self.assertEqual(result.passed_tickers, 1)
         self.assertEqual(result.hits[0].ticker, "TEST")
+        load_frames.assert_called_once_with(
+            ["TEST"], frame.index[-1].date(), DARVAS_DATABASE_HISTORY_SESSIONS, database_url="postgres://example"
+        )
         load_cookstock.assert_not_called()
+
+    def test_recent_but_short_database_history_falls_back_and_captures_failure(self) -> None:
+        frame = _darvas_breakout_frame().tail(251)
+        ticker = UniverseTicker(symbol="TEST")
+        cookstock = MagicMock()
+        cookstock.cookFinancials.side_effect = RuntimeError("fallback unavailable")
+        with patch("src.darvas_box_screen.resolve_database_url", return_value="postgres://example"), patch(
+            "src.darvas_box_screen.load_many_ticker_windows", return_value={"TEST": frame}
+        ) as load_frames, patch("src.darvas_box_screen.load_configured_cookstock", return_value=cookstock):
+            result = run_darvas_box_breakout_screen(AppConfig(), [ticker], as_of_date=frame.index[-1].date())
+
+        load_frames.assert_called_once_with(
+            ["TEST"], frame.index[-1].date(), DARVAS_DATABASE_HISTORY_SESSIONS, database_url="postgres://example"
+        )
+        cookstock.cookFinancials.assert_called_once_with(
+            "TEST", benchmarkTicker=AppConfig().benchmark_ticker, historyLookbackDays=DARVAS_FALLBACK_HISTORY_DAYS
+        )
+        self.assertEqual(result.failed_tickers, [{"ticker": "TEST", "error": "fallback unavailable"}])
+
+    def test_recent_database_frames_without_usable_ohlcv_fall_back(self) -> None:
+        complete = _darvas_breakout_frame()
+        malformed_value = complete.copy()
+        malformed_value["Close"] = "bad"
+        for frame in (complete.drop(columns=["Close"]), malformed_value):
+            with self.subTest(columns=list(frame.columns)):
+                ticker = UniverseTicker(symbol="TEST")
+                cookstock = MagicMock()
+                cookstock.cookFinancials.side_effect = RuntimeError("fallback unavailable")
+                with patch("src.darvas_box_screen.resolve_database_url", return_value="postgres://example"), patch(
+                    "src.darvas_box_screen.load_many_ticker_windows", return_value={"TEST": frame}
+                ), patch("src.darvas_box_screen.load_configured_cookstock", return_value=cookstock):
+                    result = run_darvas_box_breakout_screen(
+                        AppConfig(), [ticker], as_of_date=complete.index[-1].date()
+                    )
+
+                cookstock.cookFinancials.assert_called_once()
+                self.assertEqual(result.failed_tickers, [{"ticker": "TEST", "error": "fallback unavailable"}])
 
     def test_scanner_board_has_a_darvas_card_for_persisted_results(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
