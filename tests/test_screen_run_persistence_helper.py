@@ -49,6 +49,11 @@ class ScreenRunPersistenceHelperTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            watchlist_path = root / "watchlist.json"
+            watchlist_path.write_text(
+                json.dumps([{"ticker": "NVDA", "trigger_price": 123.45, "stop_price": 120.0}]),
+                encoding="utf-8",
+            )
             summary_path.write_text(
                 json.dumps(
                     {
@@ -97,6 +102,7 @@ class ScreenRunPersistenceHelperTests(unittest.TestCase):
         self.assertEqual(payload["strategy_id"], "rs")
         self.assertEqual((payload["summary_payload"] or {})["source"], "manual-tickers")
         self.assertEqual((payload["raw_payload"] or {})["hits"][0]["ticker"], "NVDA")
+        self.assertEqual((payload["raw_payload"] or {})["hits"][0]["trigger_price"], 123.45)
         self.assertEqual((payload["options"] or {})["limit"], 25)
         self.assertEqual((payload["options"] or {})["market_data_source"], "internet")
         self.assertEqual((payload["options"] or {})["reference_date"], "2026-06-19")

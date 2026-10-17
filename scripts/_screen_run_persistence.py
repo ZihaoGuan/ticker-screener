@@ -59,6 +59,20 @@ def persist_screen_run_artifacts_if_configured(
     if not isinstance(raw_payload, dict):
         return None
 
+    # The raw scanner result is intentionally lean, while the watchlist
+    # builder adds execution fields (for example trigger/stop levels).  The
+    # history read model is sourced from ``hits``, so retain those derived
+    # fields when persisting a run instead of silently dropping them.
+    watchlist_file = str(summary_payload.get("watchlist_file") or "").strip()
+    if watchlist_file:
+        watchlist_path = Path(watchlist_file)
+        if watchlist_path.exists():
+            try:
+                watchlist_payload = json.loads(watchlist_path.read_text(encoding="utf-8"))
+            except Exception:
+                watchlist_payload = None
+            _merge_watchlist_fields(raw_payload, watchlist_payload)
+
     strategy_id = str(summary_payload.get("strategy_id") or "").strip()
     if not strategy_id:
         return None
@@ -80,6 +94,35 @@ def persist_screen_run_artifacts_if_configured(
         summary_payload=summary_payload,
         raw_payload=raw_payload,
     )
+
+
+def _merge_watchlist_fields(raw_payload: dict[str, Any], watchlist_payload: Any) -> None:
+    """Fill missing hit fields from the enriched watchlist artifact.
+
+    Do not replace raw values: the artifact is an enrichment layer and may
+    round or rename fields.  Only absent/None values are filled.
+    """
+    if not isinstance(watchlist_payload, list):
+        return
+    by_ticker = {
+        str(item.get("ticker") or item.get("symbol") or "").strip().upper(): item
+        for item in watchlist_payload
+        if isinstance(item, dict)
+        and str(item.get("ticker") or item.get("symbol") or "").strip()
+    }
+    hits = raw_payload.get("hits")
+    if not isinstance(hits, list):
+        return
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        ticker = str(hit.get("ticker") or hit.get("symbol") or "").strip().upper()
+        enriched = by_ticker.get(ticker)
+        if not enriched:
+            continue
+        for key, value in enriched.items():
+            if hit.get(key) is None and value is not None:
+                hit[key] = value
 
 
 def _build_options(*, args: argparse.Namespace, summary_payload: dict[str, Any]) -> dict[str, Any]:
