@@ -88,7 +88,7 @@ class DeployComposeServicesTest(unittest.TestCase):
         self.assertIn("docker build --build-arg CODE_VERSION", workflow)
         self.assertIn("TICKER_SCREENER_IMAGE_TAG=\"${IMAGE_TAG}\"", workflow)
         self.assertIn('../scripts/recreate_web_release.sh "${IMAGE_TAG}"', workflow)
-        self.assertIn("docker-compose up -d --no-recreate caddy", workflow)
+        self.assertIn("docker-compose up -d --no-deps --no-recreate caddy", workflow)
         self.assertNotIn("--force-recreate --no-deps web caddy", workflow)
         self.assertNotIn("deploy_compose_services.sh ${COMPOSE_COMMAND}", workflow)
         self.assertIn("MIGRATE_WORKER_IMAGE=false", workflow)

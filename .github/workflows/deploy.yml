@@ -123,7 +123,7 @@ jobs:
             # Caddy's image and bind-mounted configuration do not change during
             # an application release. Ensure it is running without entering the
             # legacy Compose recreate path that can raise ContainerConfig.
-            docker-compose up -d --no-recreate caddy
+            docker-compose up -d --no-deps --no-recreate caddy
             mkdir -p ../artifacts/status
             nohup ../scripts/upgrade_compose_worker_when_drained.sh "${IMAGE_TAG}" \
               >> "../artifacts/status/worker-upgrade-${IMAGE_TAG}.log" 2>&1 < /dev/null &
