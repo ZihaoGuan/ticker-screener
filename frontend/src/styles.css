@@ -7194,6 +7194,13 @@ dialog.modal-backdrop:not([open]) {
 .trade-readiness-plan b { color: #a1a1aa; font-size: 11px; font-weight: 500; }
 .trade-readiness-plan strong { color: #f4f4f5; font-size: 13px; overflow-wrap: anywhere; }
 .trade-readiness-warning { margin: 5px 0 0; color: #fda4af; font-size: 12px; }
+.trade-readiness-avoid { display: grid; gap: 3px; margin-top: 4px; padding: 8px; border: 1px solid rgb(244 63 94 / 45%); border-radius: 6px; color: #fecdd3; background: rgb(244 63 94 / 10%); font-size: 12px; }
+.trade-readiness-avoid strong { color: #fda4af; letter-spacing: .04em; }
+.trade-readiness-management { display: grid; gap: 5px; margin-top: 7px; padding: 8px; border-left: 3px solid #34d399; background: rgb(16 185 129 / 8%); color: #cbd5e1; font-size: 12px; }
+.trade-readiness-management > span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.trade-readiness-management b { color: #a7f3d0; font-weight: 600; }
+.trade-readiness-management strong { color: #f4f4f5; font-size: 14px; font-variant-numeric: tabular-nums; }
+.trade-readiness-management p { margin: 0; }
 .trade-readiness-evidence { margin-top: 7px; color: #a1a1aa; font-size: 12px; }
 .trade-readiness-evidence summary { min-height: 32px; display: flex; align-items: center; cursor: pointer; }
 .trade-readiness-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; padding: 3px 0; font-size: 11px; overflow-wrap: anywhere; }

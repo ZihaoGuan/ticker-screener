@@ -9,14 +9,15 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   const scanners = Array.from({ length: 12 }, (_, i) => ({ id: `scanner_${i}`, label: `Scanner ${String(i).padStart(2, '0')}` }));
   const row = { ticker: 'TEST', company: 'Example Company', sector: 'Technology', industry: 'Software', scanner_count: scanners.length, scanners, scanner_labels: scanners.map(s => s.label) };
-  const plan = (risk = 2) => ({ source_strategy_id: 'ma_pullback_retest', state: 'ready', support_label: 'EMA21', support_price: 98, trigger_label: 'Close', trigger_price: 103, stop_label: 'Low', stop_price: 95, reference_risk_pct: risk, execution_timeframe: 'daily', entry_policy: 'close_confirmed', max_risk_pct: 5, max_entry_price: 105, risk_valid: true, risk_status: risk > 5 ? 'over_limit' : 'within_limit', signal_date: '2026-10-16' });
+  const plan = (risk = 2, overrides = {}) => ({ source_strategy_id: 'ma_pullback_retest', state: 'ready', support_label: 'EMA21', support_price: 98, trigger_label: 'Close', trigger_price: 103, stop_label: 'Low', stop_price: 95, reference_risk_pct: risk, execution_timeframe: 'daily', entry_policy: 'close_confirmed', max_risk_pct: 5, max_entry_price: 105, risk_valid: true, risk_status: risk > 5 ? 'over_limit' : 'within_limit', signal_date: '2026-10-16', ...overrides });
   const readinessRows = [
     { ...row, ticker: 'LEAD', trade_readiness: 'leader', daily_rs_rating: 80 },
     { ...row, ticker: 'TRIG', trade_readiness: 'reclaim_trigger', daily_rs_rating: 90, trade_plan: plan() },
     { ...row, ticker: 'READY', trade_readiness: 'defined_risk', daily_rs_rating: 95, trade_plan: plan() },
+    { ...row, ticker: 'BAD3R', trade_readiness: 'defined_risk', daily_rs_rating: 94, trade_plan: plan(2, { trigger_price: 95, stop_price: 95, risk_valid: false, risk_status: 'invalid_levels' }) },
     { ...row, ticker: 'RISK', trade_readiness: 'pullback_zone', daily_rs_rating: 70, trade_plan: plan(6) },
     { ...row, ticker: 'NOPLAN', trade_readiness: 'pullback_zone', trade_plan: null },
-    { ...row, ticker: 'AVOID', trade_readiness: 'avoid', trade_plan: plan() },
+    { ...row, ticker: 'AVOID', trade_readiness: 'avoid', trade_plan: plan(), strike_zone: { state: 'avoid', score: 20 }, pullback_quality: { state: 'failed', score: 15 } },
     { ...row, ticker: 'UNKNOWN', trade_readiness: undefined, trade_plan: plan() },
     ...Array.from({ length: 9 }, (_, i) => ({ ...row, ticker: `SUP${String(i + 1).padStart(2, '0')}`, trade_readiness: 'pullback_zone', trade_plan: plan(i + 1), daily_rs_rating: 75 + i })),
   ];
@@ -136,8 +137,12 @@ try {
   await leaderCard.getByRole('button', { name: 'Saving…', exact: true }).waitFor();
   assert.equal(await leaderCard.getAttribute('aria-busy'), 'true', 'Saving card announces busy state');
   await leaderCard.getByRole('button', { name: 'Saved', exact: true }).waitFor();
-  const readyCard = page.locator('.trade-readiness-lane.is-plan-ready .trade-readiness-card');
+  const readyCard = page.getByRole('article', { name: 'READY trade candidate' });
   assert.match(await readyCard.innerText(), /Max Entry[\s\S]*\$105\.00[\s\S]*Stop[\s\S]*\$95\.00[\s\S]*Planned Risk[\s\S]*2\.00%[\s\S]*Support[\s\S]*\$98\.00/);
+  assert.match(await readyCard.innerText(), /3R Reference[\s\S]*\$127\.00[\s\S]*planned trigger, not an actual fill[\s\S]*trim 10–15%[\s\S]*daily EMA9[\s\S]*at or below Max Entry/);
+  assert.equal(await page.locator('.trade-readiness-lane.is-support .trade-readiness-management').count(), 0, 'Support cards do not show management guidance');
+  assert.equal(await page.locator('.trade-readiness-lane.is-trigger .trade-readiness-management').count(), 0, 'Daily Trigger cards do not show management guidance');
+  assert.equal(await page.getByRole('article', { name: 'BAD3R trade candidate' }).getByText('3R Reference').count(), 0, 'Invalid trigger and stop do not produce a 3R reference');
   assert.equal(await readyCard.locator('details[open]').count(), 0, 'Evidence starts collapsed');
   await readyCard.getByText('Candidate evidence').click();
   assert.match(await readyCard.innerText(), /MA pullback retest[\s\S]*Signal date 2026-10-16/);
@@ -145,13 +150,18 @@ try {
   await page.locator('.trade-readiness-lane.is-support').getByRole('article', { name: 'RISK trade candidate' }).getByText(/Risk exceeds 5%/).waitFor();
   await page.locator('.trade-readiness-lane.is-support').getByRole('article', { name: 'NOPLAN trade candidate' }).getByText('Trade plan unavailable for this candidate.').waitFor();
   assert.match(await readyCard.getAttribute('aria-label'), /READY trade candidate/);
-  await page.locator('.trade-readiness-lane.is-plan-ready .trade-readiness-select').click();
+  await readyCard.locator('.trade-readiness-select').click();
   await page.locator('.trade-readiness-lane.is-plan-ready .trade-readiness-card.is-selected').waitFor();
   assert.match(await readyCard.getAttribute('class'), /is-selected/, 'Selected ticker has visible card state');
   assert.equal(await page.locator('.trade-readiness-card[aria-busy="true"]').count(), 0, 'Idle cards expose not busy state');
   assert.ok(await page.locator('.trade-readiness-lane.is-leader').getByText(/No leaders are waiting/).count() === 0, 'Non-empty lane hides empty copy');
   await page.getByRole('button', { name: /Show avoided/ }).click();
   assert.equal(await page.locator('.trade-readiness-lane.is-avoided .trade-readiness-card').count(), 1, 'Avoided rows are explicitly shown');
+  const avoidedCard = page.getByRole('article', { name: 'AVOID trade candidate' });
+  assert.match(await avoidedCard.innerText(), /AVOID NEW ENTRY[\s\S]*Strike Zone says avoid; pullback quality failed/);
+  assert.equal(await avoidedCard.getByText('Max Entry').count(), 0, 'Avoided cards suppress the actionable trade ticket');
+  assert.equal(await avoidedCard.getByText('3R Reference').count(), 0, 'Avoided cards suppress management guidance');
+  assert.equal(await avoidedCard.getByRole('button', { name: /Save|Saved|Saving/ }).count(), 0, 'Avoided cards cannot be saved as actionable picks');
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Readiness view fits ${width}px viewport`);

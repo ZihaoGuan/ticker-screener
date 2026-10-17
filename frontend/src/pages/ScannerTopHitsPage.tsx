@@ -1750,12 +1750,23 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
   });
   const renderCard = (row: ScannerTopHitRow) => {
     const plan = row.trade_plan;
+    const isAvoided = row.trade_readiness === "avoid";
+    const isPlanReady = row.trade_readiness === "defined_risk";
+    const plannedTrigger = plan?.trigger_price;
+    const plannedStop = plan?.stop_price;
+    const threeRReference = isPlanReady && typeof plannedTrigger === "number" && Number.isFinite(plannedTrigger) && plannedTrigger > 0 && typeof plannedStop === "number" && Number.isFinite(plannedStop) && plannedStop > 0 && plannedTrigger > plannedStop
+      ? plannedTrigger + (plannedTrigger - plannedStop) * 3
+      : null;
+    const avoidReasons = [
+      row.strike_zone?.state === "avoid" ? "Strike Zone says avoid" : null,
+      row.pullback_quality?.state === "failed" ? "pullback quality failed" : null,
+    ].filter(Boolean);
     const price = row.day_close == null ? "--" : `$${row.day_close.toFixed(2)}`;
     const saving = Boolean(savingMyPickTickers[row.ticker]);
     const isPick = myPickTickers.has(row.ticker);
     return <article aria-label={`${row.ticker} trade candidate`} className={`guru-ticker-card trade-readiness-card${row.ticker === selectedTicker ? " is-selected" : ""}`} key={row.ticker} aria-busy={saving}>
       <button type="button" className="trade-readiness-select" aria-pressed={row.ticker === selectedTicker} onClick={() => onSelectTicker(row.ticker)}><strong>{row.ticker}</strong><span>{price}</span></button>
-      {plan ? <>
+      {isAvoided ? <div className="trade-readiness-avoid" role="alert"><strong>AVOID NEW ENTRY</strong><span>{avoidReasons.length ? avoidReasons.join("; ") : "Readiness rules rejected this setup"}.</span></div> : plan ? <>
         <div className="trade-readiness-plan">
           <span><b>Max Entry</b><strong>{plan.max_entry_price == null ? "Unavailable" : `$${plan.max_entry_price.toFixed(2)}`}</strong></span>
           <span><b>Stop</b><strong>{plan.stop_price == null ? "Unavailable" : `$${plan.stop_price.toFixed(2)}`}</strong></span>
@@ -1765,12 +1776,17 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
         {plan.risk_status === "over_limit" ? <p className="panel-copy trade-readiness-warning">Risk exceeds {plan.max_risk_pct}% at the trigger; wait for a lower entry.</p> : null}
         {plan.risk_status === "invalid_levels" ? <p className="panel-copy trade-readiness-warning">Trigger or stop is missing or invalid; order risk cannot be confirmed.</p> : null}
       </> : <p className="panel-copy trade-readiness-warning">Trade plan unavailable for this candidate.</p>}
+      {threeRReference != null ? <div className="trade-readiness-management">
+        <span><b>3R Reference</b><strong>${threeRReference.toFixed(2)}</strong></span>
+        <p>Based on the planned trigger, not an actual fill. At 3R: trim 10–15%. Trail the remainder using daily EMA9.</p>
+        <p>Enter next session only at or below Max Entry.</p>
+      </div> : null}
       <details className="trade-readiness-evidence"><summary>Candidate evidence</summary><div className="trade-readiness-meta">
         <span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span><SectorTag sector={row.sector} />
         <span>Pullback {row.pullback_quality ? `${row.pullback_quality.score} · ${row.pullback_quality.state}` : "--"}</span><span>Strike {row.strike_zone?.score ?? "--"}</span>
         <span>Setup {plan ? plan.source_strategy_id === "ma_pullback_retest" ? "MA pullback retest" : plan.source_strategy_id.split("_").join(" ") : "Unavailable"}</span><span>Signal date {plan?.signal_date || "Unavailable"}</span>
       </div></details>
-      {canManageMyPicks ? <button className="ghost-button trade-readiness-save" type="button" disabled={saving || isPick} onClick={() => void onToggleMyPick(row.ticker)}>{saving ? "Saving…" : isPick ? "Saved" : "Save"}</button> : null}
+      {canManageMyPicks && !isAvoided ? <button className="ghost-button trade-readiness-save" type="button" disabled={saving || isPick} onClick={() => void onToggleMyPick(row.ticker)}>{saving ? "Saving…" : isPick ? "Saved" : "Save"}</button> : null}
     </article>;
   };
   const unknown = sorted.filter((row) => !columns.some(({ state }) => row.trade_readiness === state) && row.trade_readiness !== "avoid");
