@@ -7226,6 +7226,7 @@ dialog.modal-backdrop:not([open]) {
 .trade-readiness-controls button[aria-pressed="true"] { border-color: #38bdf8; color: #e0f2fe; }
 .trade-readiness-controls label { display: flex; align-items: center; gap: 8px; color: #a1a1aa; font-size: 12px; }
 .trade-readiness-controls select { min-height: 40px; max-width: 100%; }
+.trade-readiness-controls label:has(select[aria-label="Management style"]) { min-width: min(100%, 220px); }
 .trade-readiness-lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; min-width: 0; }
 .trade-readiness-lane { min-width: 0; overflow: hidden; border: 1px solid #30323a; border-radius: 10px; background: #101218; }
 .trade-readiness-lane > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-bottom: 1px solid #30323a; color: #e4e4e7; }

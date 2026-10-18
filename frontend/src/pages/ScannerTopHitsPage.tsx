@@ -10,6 +10,7 @@ import { fetchJson } from "../lib/api";
 import { aggregateCandlesWeekly, buildChartCandles, buildExponentialMovingAverage, buildSimpleMovingAverage } from "../lib/chartData";
 import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
+import { calculateTradeManagement, type TradeManagementPreset } from "../lib/tradeManagement";
 import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPickRow, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
@@ -68,6 +69,7 @@ type TopHitsPresetStore = { presets: Record<string, TopHitsFilterPreset>; defaul
 const LIST_PAGE_SIZE = 50;
 const VelaScannerChart = lazy(() => import("../components/VelaScannerChart").then((module) => ({ default: module.VelaScannerChart })));
 const CHART_WORKSPACE_STORAGE_KEY = "top-hits-chart-workspace";
+const TRADE_MANAGEMENT_STORAGE_KEY = "top-hits-trade-management-style";
 const DEFAULT_CHART_WORKSPACE: ChartWorkspace = {
   gridColumns: 2,
   range: "6m",
@@ -1739,6 +1741,10 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
   const [pickFilter, setPickFilter] = useState<"all" | "mine">("all");
   const [sortBy, setSortBy] = useState<"readiness" | "risk" | "rs">("readiness");
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
+  const [managementPreset, setManagementPreset] = useState<TradeManagementPreset>(() => {
+    try { return window.localStorage.getItem(TRADE_MANAGEMENT_STORAGE_KEY) === "balanced_daily" ? "balanced_daily" : "martin"; } catch { return "martin"; }
+  });
+  useEffect(() => { try { window.localStorage.setItem(TRADE_MANAGEMENT_STORAGE_KEY, managementPreset); } catch { /* Storage may be unavailable. */ } }, [managementPreset]);
   useEffect(() => setVisibleCounts({}), [rows, pickFilter, sortBy]);
   const columns = [
     { state: "leader", label: "Leader / Waiting", tone: "leader", empty: "No leaders are waiting at this stage." },
@@ -1756,11 +1762,7 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
     const plan = row.trade_plan;
     const isAvoided = row.trade_readiness === "avoid";
     const isPlanReady = row.trade_readiness === "defined_risk";
-    const plannedTrigger = plan?.trigger_price;
-    const plannedStop = plan?.stop_price;
-    const threeRReference = isPlanReady && typeof plannedTrigger === "number" && Number.isFinite(plannedTrigger) && plannedTrigger > 0 && typeof plannedStop === "number" && Number.isFinite(plannedStop) && plannedStop > 0 && plannedTrigger > plannedStop
-      ? plannedTrigger + (plannedTrigger - plannedStop) * 3
-      : null;
+    const management = isPlanReady && plan ? calculateTradeManagement(plan.trigger_price, plan.stop_price, managementPreset) : null;
     const avoidReasons = [
       row.strike_zone?.state === "avoid" ? "Strike Zone says avoid" : null,
       row.pullback_quality?.state === "failed" ? "pullback quality failed" : null,
@@ -1780,10 +1782,10 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
         {plan.risk_status === "over_limit" ? <p className="panel-copy trade-readiness-warning">Risk exceeds {plan.max_risk_pct}% at the trigger; wait for a lower entry.</p> : null}
         {plan.risk_status === "invalid_levels" ? <p className="panel-copy trade-readiness-warning">Trigger or stop is missing or invalid; order risk cannot be confirmed.</p> : null}
       </> : <p className="panel-copy trade-readiness-warning">Trade plan unavailable for this candidate.</p>}
-      {threeRReference != null ? <div className="trade-readiness-management">
-        <span><b>3R Reference</b><strong>${threeRReference.toFixed(2)}</strong></span>
-        <p>Based on the planned trigger, not an actual fill. At 3R: trim 10–15%. Trail the remainder using daily EMA9.</p>
-        <p>Enter next session only at or below Max Entry.</p>
+      {management ? <div className="trade-readiness-management">
+        {management.targets.map((target) => <span key={target.label}><b>{target.label} · {target.rMultiple}R · sell {typeof target.sellPercent === "number" ? `${target.sellPercent}%` : target.sellPercent}</b><strong>${target.price.toFixed(2)}</strong></span>)}
+        <p>{management.preset === "martin" ? "Trim 10–15% at T1; trail the remainder using daily EMA9." : "Sell 33% at T1 and 33% at T2; trail the 34% runner using daily EMA9."}</p>
+        <p>Hypothetical targets from the planned trigger and stop. Recalculate from your actual fill; enter next session only at or below Max Entry.</p>
       </div> : null}
       <details className="trade-readiness-evidence"><summary>Candidate evidence</summary><div className="trade-readiness-meta">
         <span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span><SectorTag sector={row.sector} />
@@ -1807,7 +1809,7 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
   };
   return <section className="trade-readiness-board" aria-label="Trade Readiness">
     <p className="panel-copy trade-readiness-safety">Plan Ready uses completed daily bars. Recheck the next-session price against Max Entry before placing an order.</p>
-    <div className="trade-readiness-controls"><div role="group" aria-label="Candidate filter"><button type="button" aria-pressed={pickFilter === "all"} onClick={() => { setPickFilter("all"); setVisibleCounts({}); }}>Show All</button><button type="button" aria-pressed={pickFilter === "mine"} onClick={() => { setPickFilter("mine"); setVisibleCounts({}); }}>My Picks</button></div><label>Sort <select aria-label="Sort readiness candidates" value={sortBy} onChange={(event) => { setSortBy(event.target.value as typeof sortBy); setVisibleCounts({}); }}><option value="readiness">Readiness ranking</option><option value="risk">Lowest risk</option><option value="rs">Highest RS</option></select></label></div>
+    <div className="trade-readiness-controls"><div role="group" aria-label="Candidate filter"><button type="button" aria-pressed={pickFilter === "all"} onClick={() => { setPickFilter("all"); setVisibleCounts({}); }}>Show All</button><button type="button" aria-pressed={pickFilter === "mine"} onClick={() => { setPickFilter("mine"); setVisibleCounts({}); }}>My Picks</button></div><label>Sort <select aria-label="Sort readiness candidates" value={sortBy} onChange={(event) => { setSortBy(event.target.value as typeof sortBy); setVisibleCounts({}); }}><option value="readiness">Readiness ranking</option><option value="risk">Lowest risk</option><option value="rs">Highest RS</option></select></label><label>Management style <select aria-label="Management style" value={managementPreset} onChange={(event) => setManagementPreset(event.target.value as TradeManagementPreset)}><option value="martin">Martin-like (default)</option><option value="balanced_daily">Balanced Daily</option></select></label></div>
     <div className="trade-readiness-lanes">{columns.map(({ state, label, tone, empty }) => renderLane(state, label, tone, sorted.filter((row) => row.trade_readiness === state), empty))}</div>
     {renderLane("needs-data", "Needs Data", "needs-data", unknown, "Every candidate has a recognized readiness stage.")}
     <button className="ghost-button" type="button" aria-expanded={showAvoided} onClick={() => setShowAvoided((value) => !value)}>{showAvoided ? "Hide avoided" : `Show avoided (${avoided.length})`}</button>

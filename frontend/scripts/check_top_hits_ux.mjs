@@ -5,6 +5,12 @@ import { chromium } from 'playwright';
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem('top-hits-management-check-initialized')) {
+      localStorage.removeItem('top-hits-trade-management-style');
+      sessionStorage.setItem('top-hits-management-check-initialized', 'true');
+    }
+  });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const scanners = Array.from({ length: 12 }, (_, i) => ({ id: `scanner_${i}`, label: `Scanner ${String(i).padStart(2, '0')}` }));
@@ -139,20 +145,31 @@ try {
   await leaderCard.getByRole('button', { name: 'Saved', exact: true }).waitFor();
   const readyCard = page.getByRole('article', { name: 'READY trade candidate' });
   assert.match(await readyCard.innerText(), /Max Entry[\s\S]*\$105\.00[\s\S]*Stop[\s\S]*\$95\.00[\s\S]*Planned Risk[\s\S]*2\.00%[\s\S]*Support[\s\S]*\$98\.00/);
-  assert.match(await readyCard.innerText(), /3R Reference[\s\S]*\$127\.00[\s\S]*planned trigger, not an actual fill[\s\S]*trim 10–15%[\s\S]*daily EMA9[\s\S]*at or below Max Entry/);
+  const managementStyle = page.getByLabel('Management style');
+  assert.equal(await managementStyle.inputValue(), 'martin', 'Martin-like management is the default');
+  assert.match(await readyCard.innerText(), /T1 · 3R · sell 10–15%[\s\S]*\$127\.00[\s\S]*trim 10–15% at T1[\s\S]*remainder using daily EMA9[\s\S]*Hypothetical targets[\s\S]*actual fill/i);
+  await managementStyle.selectOption('balanced_daily');
+  assert.match(await readyCard.innerText(), /T1 · 3R · sell 33%[\s\S]*\$127\.00[\s\S]*T2 · 6R · sell 33%[\s\S]*\$151\.00[\s\S]*34% runner using daily EMA9[\s\S]*Hypothetical targets[\s\S]*actual fill/);
+  await page.reload();
+  await page.getByRole('button', { name: 'Trade Readiness', exact: true }).click();
+  await page.getByRole('article', { name: 'READY trade candidate' }).waitFor();
+  assert.equal(await page.getByLabel('Management style').inputValue(), 'balanced_daily', 'Preset persists after reload');
+  assert.match(await page.getByRole('article', { name: 'READY trade candidate' }).innerText(), /T2 · 6R · sell 33%[\s\S]*\$151\.00/);
+  const readyCardAfterReload = page.getByRole('article', { name: 'READY trade candidate' });
   assert.equal(await page.locator('.trade-readiness-lane.is-support .trade-readiness-management').count(), 0, 'Support cards do not show management guidance');
   assert.equal(await page.locator('.trade-readiness-lane.is-trigger .trade-readiness-management').count(), 0, 'Daily Trigger cards do not show management guidance');
-  assert.equal(await page.getByRole('article', { name: 'BAD3R trade candidate' }).getByText('3R Reference').count(), 0, 'Invalid trigger and stop do not produce a 3R reference');
-  assert.equal(await readyCard.locator('details[open]').count(), 0, 'Evidence starts collapsed');
-  await readyCard.getByText('Candidate evidence').click();
-  assert.match(await readyCard.innerText(), /MA pullback retest[\s\S]*Signal date 2026-10-16/);
+  assert.equal(await page.getByRole('article', { name: 'BAD3R trade candidate' }).locator('.trade-readiness-management').count(), 0, 'Invalid trigger and stop do not produce targets');
+  assert.equal(await page.locator('.trade-readiness-lane.is-needs-data .trade-readiness-management').count(), 0, 'Needs Data cards do not show management guidance');
+  assert.equal(await readyCardAfterReload.locator('details[open]').count(), 0, 'Evidence starts collapsed');
+  await readyCardAfterReload.getByText('Candidate evidence').click();
+  assert.match(await readyCardAfterReload.innerText(), /MA pullback retest[\s\S]*Signal date 2026-10-16/);
   await page.locator('.trade-readiness-lane.is-support').getByRole('button', { name: 'Show 8 more (3 remaining)' }).click();
   await page.locator('.trade-readiness-lane.is-support').getByRole('article', { name: 'RISK trade candidate' }).getByText(/Risk exceeds 5%/).waitFor();
   await page.locator('.trade-readiness-lane.is-support').getByRole('article', { name: 'NOPLAN trade candidate' }).getByText('Trade plan unavailable for this candidate.').waitFor();
-  assert.match(await readyCard.getAttribute('aria-label'), /READY trade candidate/);
-  await readyCard.locator('.trade-readiness-select').click();
+  assert.match(await readyCardAfterReload.getAttribute('aria-label'), /READY trade candidate/);
+  await readyCardAfterReload.locator('.trade-readiness-select').click();
   await page.locator('.trade-readiness-lane.is-plan-ready .trade-readiness-card.is-selected').waitFor();
-  assert.match(await readyCard.getAttribute('class'), /is-selected/, 'Selected ticker has visible card state');
+  assert.match(await readyCardAfterReload.getAttribute('class'), /is-selected/, 'Selected ticker has visible card state');
   assert.equal(await page.locator('.trade-readiness-card[aria-busy="true"]').count(), 0, 'Idle cards expose not busy state');
   assert.ok(await page.locator('.trade-readiness-lane.is-leader').getByText(/No leaders are waiting/).count() === 0, 'Non-empty lane hides empty copy');
   await page.getByRole('button', { name: /Show avoided/ }).click();
@@ -160,7 +177,7 @@ try {
   const avoidedCard = page.getByRole('article', { name: 'AVOID trade candidate' });
   assert.match(await avoidedCard.innerText(), /AVOID NEW ENTRY[\s\S]*Strike Zone says avoid; pullback quality failed/);
   assert.equal(await avoidedCard.getByText('Max Entry').count(), 0, 'Avoided cards suppress the actionable trade ticket');
-  assert.equal(await avoidedCard.getByText('3R Reference').count(), 0, 'Avoided cards suppress management guidance');
+  assert.equal(await avoidedCard.locator('.trade-readiness-management').count(), 0, 'Avoided cards suppress management guidance');
   assert.equal(await avoidedCard.getByRole('button', { name: /Save|Saved|Saving/ }).count(), 0, 'Avoided cards cannot be saved as actionable picks');
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -192,5 +209,5 @@ try {
   await page.getByRole('heading', { name: 'Plan Ready', exact: true }).waitFor();
   assert.equal(await page.locator('.trade-readiness-save').count(), 0, 'Visitor cannot see save controls');
   assert.deepEqual(errors, []);
-  console.log('Top Hits UX passed: grouped filters, lazy list/Guru requests, saved default preset, rename persistence, search, reset, chart badges, desktop pinning, visitor layout, mobile width.');
+  console.log('Top Hits UX passed: grouped filters, lazy list/Guru requests, saved default preset, management preset switching/persistence, rename persistence, search, reset, chart badges, desktop pinning, visitor layout, mobile width.');
 } finally { await browser.close(); }
