@@ -17,6 +17,7 @@ from src.webapp.services.watchlist_service import (
     _build_guru_strike_zone,
     _build_trade_plan,
     _trade_readiness,
+    _guru_row_sort_key,
     _build_phase_avwap,
     _should_render_ipo_vwap,
     _clear_chart_payload_cache,
@@ -156,6 +157,46 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(newest_active["signal_date"], "2026-06-12")
         self.assertIsNone(newest_active["trigger_price"])
         self.assertIsNone(newest_active["support_price"])
+
+    def test_trade_readiness_adr14_rejects_wide_stop_against_low_adr(self) -> None:
+        index = pd.bdate_range(end="2026-06-12", periods=14)
+        frame = pd.DataFrame({"Open": 100.0, "High": 101.5, "Low": 98.5, "Close": 100.0, "Volume": 1000}, index=index)
+        rows = {"NVDA": {"trade_plan": {"reference_risk_pct": 4.0}}}
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame}):
+            WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")._attach_trade_readiness_adr(
+                rows, as_of_date=index[-1].date()
+            )
+        self.assertEqual(rows["NVDA"]["adr14_pct"], 3.0)
+        self.assertEqual(rows["NVDA"]["stop_to_adr"], 1.33)
+        self.assertEqual(rows["NVDA"]["adr_suitability"], "risk_failure")
+        self.assertIn("exceeds 1.50%", rows["NVDA"]["adr_reason"])
+        self.assertEqual(_trade_readiness(rows["NVDA"]), "avoid")
+
+    def test_trade_readiness_adr14_caution_requires_half_adr_stop(self) -> None:
+        index = pd.bdate_range(end="2026-06-12", periods=14)
+        frame = pd.DataFrame({"Open": 100.0, "High": 102.0, "Low": 98.0, "Close": 100.0, "Volume": 1000}, index=index)
+        rows = {"NVDA": {"trade_plan": {"reference_risk_pct": 1.5}}}
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame}):
+            WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")._attach_trade_readiness_adr(
+                rows, as_of_date=index[-1].date()
+            )
+        self.assertEqual(rows["NVDA"]["adr14_pct"], 4.0)
+        self.assertEqual(rows["NVDA"]["adr_suitability"], "caution")
+        self.assertEqual(_trade_readiness(rows["NVDA"]), "pullback_zone")
+        rows["NVDA"]["trade_plan"]["reference_risk_pct"] = 2.1
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame}):
+            WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")._attach_trade_readiness_adr(
+                rows, as_of_date=index[-1].date()
+            )
+        self.assertEqual(_trade_readiness(rows["NVDA"]), "avoid")
+
+    def test_guru_readiness_ranking_uses_adr_class_and_stop_to_adr_without_rewarding_highest_adr(self) -> None:
+        rows = [
+            {"ticker": "LOW", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "caution", "stop_to_adr": 0.5, "daily_rs_rating": 99},
+            {"ticker": "HIGH", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "suitable", "adr14_pct": 18.0, "stop_to_adr": 0.9, "daily_rs_rating": 99},
+            {"ticker": "MODERATE", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "suitable", "adr14_pct": 6.0, "stop_to_adr": 0.5, "daily_rs_rating": 99},
+        ]
+        self.assertEqual([row["ticker"] for row in sorted(rows, key=_guru_row_sort_key)], ["MODERATE", "HIGH", "LOW"])
 
     def test_guru_candidate_receives_plan_from_separate_pullback_scanner_entry(self) -> None:
         cards = [

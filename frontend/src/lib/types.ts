@@ -377,6 +377,10 @@ export type ScannerTopHitRow = {
   } | null;
   trade_plan?: { source_strategy_id: string; state: "ready" | "active"; support_label: string; support_price: number | null; trigger_label: string; trigger_price: number | null; stop_label: string; stop_price: number | null; reference_risk_pct: number | null; execution_timeframe: "daily"; entry_policy: "close_confirmed"; max_risk_pct: number; max_entry_price: number | null; risk_valid: boolean; risk_status: "invalid_levels" | "within_limit" | "over_limit"; signal_date: string | null } | null;
   trade_readiness?: "leader" | "pullback_zone" | "reclaim_trigger" | "defined_risk" | "avoid" | string;
+  adr14_pct?: number | null;
+  stop_to_adr?: number | null;
+  adr_suitability?: "suitable" | "caution" | "low" | "risk_failure" | string;
+  adr_reason?: string | null;
 };
 
 export type PullbackQuality = {

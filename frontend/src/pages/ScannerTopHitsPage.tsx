@@ -1756,7 +1756,9 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
   const sorted = [...filtered].sort((a, b) => {
     if (sortBy === "risk") return (a.trade_plan?.reference_risk_pct ?? Infinity) - (b.trade_plan?.reference_risk_pct ?? Infinity) || a.ticker.localeCompare(b.ticker);
     if (sortBy === "rs") return (b.daily_rs_rating ?? -Infinity) - (a.daily_rs_rating ?? -Infinity) || a.ticker.localeCompare(b.ticker);
-    return (b.strike_zone?.score ?? 0) - (a.strike_zone?.score ?? 0) || (b.pullback_quality?.score ?? 0) - (a.pullback_quality?.score ?? 0) || (b.daily_rs_rating ?? 0) - (a.daily_rs_rating ?? 0) || a.ticker.localeCompare(b.ticker);
+    const adrRank = (row: ScannerTopHitRow) => ({ suitable: 0, caution: 1, risk_failure: 2, low: 3 }[row.adr_suitability || ""] ?? 4);
+    const stopAdrDistance = (row: ScannerTopHitRow) => row.stop_to_adr == null ? Infinity : Math.abs(row.stop_to_adr - 0.5);
+    return adrRank(a) - adrRank(b) || stopAdrDistance(a) - stopAdrDistance(b) || (b.strike_zone?.score ?? 0) - (a.strike_zone?.score ?? 0) || (b.pullback_quality?.score ?? 0) - (a.pullback_quality?.score ?? 0) || (b.daily_rs_rating ?? 0) - (a.daily_rs_rating ?? 0) || a.ticker.localeCompare(b.ticker);
   });
   const renderCard = (row: ScannerTopHitRow) => {
     const plan = row.trade_plan;
@@ -1769,6 +1771,7 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
     const avoidReasons = [
       row.strike_zone?.state === "avoid" ? "Strike Zone says avoid" : null,
       row.pullback_quality?.state === "failed" ? "pullback quality failed" : null,
+      row.adr_suitability === "low" || row.adr_suitability === "risk_failure" ? row.adr_reason : null,
     ].filter(Boolean);
     const price = row.day_close == null ? "--" : `$${row.day_close.toFixed(2)}`;
     const saving = Boolean(savingMyPickTickers[row.ticker]);
@@ -1785,6 +1788,12 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
         {plan.risk_status === "over_limit" ? <p className="panel-copy trade-readiness-warning">Risk exceeds {plan.max_risk_pct}% at the trigger; wait for a lower entry.</p> : null}
         {plan.risk_status === "invalid_levels" ? <p className="panel-copy trade-readiness-warning">Trigger or stop is missing or invalid; order risk cannot be confirmed.</p> : null}
       </> : <p className="panel-copy trade-readiness-warning">Trade plan unavailable for this candidate.</p>}
+      <div className="trade-readiness-adr" aria-label="ADR suitability">
+        <span>ADR14 <strong>{row.adr14_pct == null ? "Unavailable" : `${row.adr14_pct.toFixed(2)}%`}</strong></span>
+        <span>Stop / ADR <strong>{row.stop_to_adr == null ? "Unavailable" : `${row.stop_to_adr.toFixed(2)}×`}</strong></span>
+        <span>Martin-like suitability <strong>{row.adr_suitability || "Needs data"}</strong></span>
+        {row.adr_reason ? <p>{row.adr_reason}</p> : null}
+      </div>
       {management ? <div className="trade-readiness-management">
         {management.targets.map((target) => <span key={target.label}><b>{target.label} · {target.rMultiple}R · sell {typeof target.sellPercent === "number" ? `${target.sellPercent}%` : target.sellPercent}</b><strong>${target.price.toFixed(2)}</strong></span>)}
         <p>{management.preset === "martin" ? "Trim 10–15% at T1; trail the remainder using daily EMA9." : "Sell 33% at T1 and 33% at T2; trail the 34% runner using daily EMA9."}</p>

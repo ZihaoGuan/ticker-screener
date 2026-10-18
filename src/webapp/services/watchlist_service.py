@@ -97,8 +97,8 @@ _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
-_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v5"
-_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v7"
+_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v6"
+_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v8"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -1626,9 +1626,12 @@ class WatchlistService:
             row["rmv"] = copy.deepcopy(rmv_map.get(ticker) or None)
             row["strike_zone"] = _build_guru_strike_zone(row, as_of_date=target_date)
             row["trade_plan"] = _build_trade_plan(row.get("_pullback_artifacts") or [])
+            rows.append(row)
+        rows_by_candidate = {str(row["ticker"]): row for row in rows}
+        self._attach_trade_readiness_adr(rows_by_candidate, as_of_date=target_date)
+        for row in rows:
             row["trade_readiness"] = _trade_readiness(row)
             row.pop("_pullback_artifacts", None)
-            rows.append(row)
         rows.sort(key=_guru_row_sort_key)
         return {
             "definitions": copy.deepcopy(_GURU_SCANNER_DEFINITIONS),
@@ -1637,6 +1640,48 @@ class WatchlistService:
             "confluence_ticker_count": sum(1 for row in rows if int(row.get("scanner_count") or 0) >= 2),
             "rows": rows,
         }
+
+    def _attach_trade_readiness_adr(self, rows_by_ticker: dict[str, dict[str, Any]], *, as_of_date: dt.date | None) -> None:
+        """Attach completed-bar ADR14 context for the trade plan review."""
+        if not rows_by_ticker or not self.database_url:
+            return
+        end_date = as_of_date or dt.date.today()
+        try:
+            frames = load_many_ticker_windows_for_range(
+                rows_by_ticker,
+                start_date=end_date - dt.timedelta(days=45),
+                end_date=end_date,
+                trading_days_needed=14,
+                database_url=self.database_url,
+            )
+        except Exception as exc:
+            logger.warning("Trade readiness ADR14 enrichment unavailable: %s", exc)
+            return
+        for ticker, row in rows_by_ticker.items():
+            frame = _normalize_download_frame(frames.get(ticker))
+            if frame is None or frame.empty or not {"High", "Low", "Close"}.issubset(frame.columns):
+                continue
+            frame = frame.loc[frame.index.date <= end_date].tail(14)
+            ranges = ((frame["High"] - frame["Low"]) / frame["Close"] * 100).replace([np.inf, -np.inf], np.nan).dropna()
+            if len(ranges) < 14 or (ranges <= 0).any():
+                continue
+            adr = float(ranges.mean())
+            plan = row.get("trade_plan") if isinstance(row.get("trade_plan"), dict) else {}
+            risk = _coerce_optional_float(plan.get("reference_risk_pct"))
+            risk_cap = min(5.0, 0.5 * adr)
+            stop_to_adr = risk / adr if risk is not None and adr > 0 else None
+            if adr < 3.0:
+                status, reason = "low", f"ADR14 {adr:.2f}% is below the 3% Martin-like minimum"
+            elif risk is not None and risk > risk_cap:
+                status, reason = "risk_failure", f"planned stop {risk:.2f}% exceeds {risk_cap:.2f}% (min of 5% and half ADR14)"
+            elif adr < 5.0:
+                status, reason = "caution", f"ADR14 {adr:.2f}% is 3–5%; suitable only with a very tight stop (at most {risk_cap:.2f}%)"
+            else:
+                status, reason = "suitable", f"ADR14 {adr:.2f}% meets the preferred 5%+ range; stop is within the volatility risk cap" if risk is not None else "ADR14 meets the preferred 5%+ range; define a stop"
+            row["adr14_pct"] = round(adr, 2)
+            row["stop_to_adr"] = round(stop_to_adr, 2) if stop_to_adr is not None else None
+            row["adr_suitability"] = status
+            row["adr_reason"] = reason
 
     def _attach_guru_upcoming_earnings_dates(
         self,
@@ -6052,6 +6097,9 @@ def _build_trade_plan(artifacts: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 
 def _trade_readiness(row: dict[str, Any]) -> str:
+    adr_suitability = str(row.get("adr_suitability") or "")
+    if adr_suitability in {"low", "risk_failure"}:
+        return "avoid"
     if (row.get("strike_zone") or {}).get("state") == "avoid" or (row.get("pullback_quality") or {}).get("state") == "failed":
         return "avoid"
     plan = row.get("trade_plan")
@@ -6064,11 +6112,14 @@ def _trade_readiness(row: dict[str, Any]) -> str:
     return "pullback_zone"
 
 
-def _guru_row_sort_key(row: dict[str, Any]) -> tuple[int, int, int, float, str]:
+def _guru_row_sort_key(row: dict[str, Any]) -> tuple[int, int, float, int, int, float, str]:
     strike = row.get("strike_zone") if isinstance(row.get("strike_zone"), dict) else {}
     state_rank = {"active": 0, "ready": 1, "context": 2, "avoid": 3}.get(str(strike.get("state") or ""), 4)
+    adr_rank = {"suitable": 0, "caution": 1, "risk_failure": 2, "low": 3}.get(str(row.get("adr_suitability") or ""), 4)
+    ratio = _coerce_optional_float(row.get("stop_to_adr"))
+    ratio_distance = abs(ratio - 0.5) if ratio is not None else 1.0
     daily_rs = _coerce_optional_float(row.get("daily_rs_rating")) or 0.0
-    return (state_rank, -int(strike.get("score") or 0), -int(row.get("scanner_count") or 0), -daily_rs, str(row.get("ticker") or ""))
+    return (state_rank, adr_rank, ratio_distance, -int(strike.get("score") or 0), -int(row.get("scanner_count") or 0), -daily_rs, str(row.get("ticker") or ""))
 
 
 def _resolve_entry_display_price(entry: dict[str, Any]) -> float | None:
