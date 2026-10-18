@@ -14,14 +14,14 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const scanners = Array.from({ length: 12 }, (_, i) => ({ id: `scanner_${i}`, label: `Scanner ${String(i).padStart(2, '0')}` }));
-  const row = { ticker: 'TEST', company: 'Example Company', sector: 'Technology', industry: 'Software', scanner_count: scanners.length, scanners, scanner_labels: scanners.map(s => s.label) };
+  const row = { ticker: 'TEST', company: 'Example Company', sector: 'Technology', industry: 'Software', day_close: 104, scanner_count: scanners.length, scanners, scanner_labels: scanners.map(s => s.label) };
   const plan = (risk = 2, overrides = {}) => ({ source_strategy_id: 'ma_pullback_retest', state: 'ready', support_label: 'EMA21', support_price: 98, trigger_label: 'Close', trigger_price: 103, stop_label: 'Low', stop_price: 95, reference_risk_pct: risk, execution_timeframe: 'daily', entry_policy: 'close_confirmed', max_risk_pct: 5, max_entry_price: 105, risk_valid: true, risk_status: risk > 5 ? 'over_limit' : 'within_limit', signal_date: '2026-10-16', ...overrides });
   const readinessRows = [
     { ...row, ticker: 'LEAD', trade_readiness: 'leader', daily_rs_rating: 80 },
     { ...row, ticker: 'TRIG', trade_readiness: 'reclaim_trigger', daily_rs_rating: 90, trade_plan: plan() },
     { ...row, ticker: 'READY', trade_readiness: 'defined_risk', daily_rs_rating: 95, trade_plan: plan(2, { state: 'active' }) },
     { ...row, ticker: 'BAD3R', trade_readiness: 'defined_risk', daily_rs_rating: 94, trade_plan: plan(2, { state: 'active', trigger_price: 95, stop_price: 95, risk_valid: false, risk_status: 'invalid_levels' }) },
-    { ...row, ticker: 'OVER', trade_readiness: 'defined_risk', trade_plan: plan(6, { state: 'active' }) },
+    { ...row, ticker: 'OVER', day_close: 106, trade_readiness: 'defined_risk', trade_plan: plan(6, { state: 'active' }) },
     { ...row, ticker: 'RISK', trade_readiness: 'pullback_zone', daily_rs_rating: 70, trade_plan: plan(6) },
     { ...row, ticker: 'NOPLAN', trade_readiness: 'pullback_zone', trade_plan: null },
     { ...row, ticker: 'AVOID', trade_readiness: 'avoid', trade_plan: plan(), strike_zone: { state: 'avoid', score: 20 }, pullback_quality: { state: 'failed', score: 15 } },
@@ -145,6 +145,15 @@ try {
   assert.equal(await leaderCard.getAttribute('aria-busy'), 'true', 'Saving card announces busy state');
   await leaderCard.getByRole('button', { name: 'Saved', exact: true }).waitFor();
   const readyCard = page.getByRole('article', { name: 'READY trade candidate' });
+  assert.match(await readyCard.locator('.trade-readiness-eligibility').innerText(), /Within max entry · daily trigger confirmed/, 'Eligible label requires active daily confirmation as well as acceptable price');
+  assert.match(await page.getByRole('article', { name: 'TRIG trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /Waiting for daily trigger/, 'Acceptable price alone does not imply entry');
+  assert.match(await page.getByRole('article', { name: 'OVER trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /Extended · do not chase/);
+  assert.match(await page.getByRole('article', { name: 'NOPLAN trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /No entry limit \/ plan unavailable/);
+  const withinMaxFilter = page.getByLabel('Within max entry only');
+  assert.equal(await withinMaxFilter.isChecked(), false, 'Within max filter is off by default');
+  await withinMaxFilter.check();
+  assert.equal(await page.locator('.trade-readiness-card').count(), 1, 'Within max filter keeps only price eligible candidates with confirmed daily triggers');
+  await withinMaxFilter.uncheck();
   assert.match(await readyCard.innerText(), /Max Entry[\s\S]*\$105\.00[\s\S]*Stop[\s\S]*\$95\.00[\s\S]*Planned Risk[\s\S]*2\.00%[\s\S]*Support[\s\S]*\$98\.00/);
   const managementStyle = page.getByLabel('Management style');
   assert.equal(await managementStyle.inputValue(), 'martin', 'Martin-like management is the default');

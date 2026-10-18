@@ -7248,6 +7248,12 @@ dialog.modal-backdrop:not([open]) {
 .trade-readiness-lane.is-needs-data > header, .trade-readiness-lane.is-avoided > header { border-top: 3px solid #f43f5e; color: #fecdd3; background: rgb(244 63 94 / 7%); }
 .trade-readiness-grid { display: grid; gap: 7px; padding: 7px; min-width: 0; }
 .trade-readiness-card { min-width: 0; border-left-color: #71717a; }
+.trade-readiness-eligibility { display: inline-flex; max-width: 100%; margin: 0 0 7px; padding: 4px 7px; border: 1px solid #52525b; border-radius: 999px; color: #d4d4d8; background: rgb(113 113 122 / 12%); font-size: 10px; font-weight: 700; line-height: 1.3; }
+.trade-readiness-eligibility.is-within_max { border-color: rgb(52 211 153 / 55%); color: #a7f3d0; background: rgb(16 185 129 / 10%); }
+.trade-readiness-eligibility.is-extended { border-color: rgb(251 191 36 / 55%); color: #fde68a; background: rgb(245 158 11 / 10%); }
+.trade-readiness-eligibility.is-waiting_trigger { border-color: rgb(96 165 250 / 45%); color: #bfdbfe; background: rgb(96 165 250 / 8%); }
+.trade-readiness-eligibility.is-unavailable { color: #a1a1aa; }
+.trade-readiness-eligibility-filter input { min-width: 18px; min-height: 18px; accent-color: #38bdf8; }
 .trade-readiness-select { width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; padding: 3px 0; color: inherit; background: transparent; cursor: pointer; font: inherit; }
 .trade-readiness-select strong { font-size: 16px; letter-spacing: .02em; }
 .trade-readiness-select span, .trade-readiness-plan strong { font-variant-numeric: tabular-nums; }
