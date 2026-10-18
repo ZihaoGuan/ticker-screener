@@ -19,8 +19,9 @@ try {
   const readinessRows = [
     { ...row, ticker: 'LEAD', trade_readiness: 'leader', daily_rs_rating: 80 },
     { ...row, ticker: 'TRIG', trade_readiness: 'reclaim_trigger', daily_rs_rating: 90, trade_plan: plan() },
-    { ...row, ticker: 'READY', trade_readiness: 'defined_risk', daily_rs_rating: 95, trade_plan: plan() },
-    { ...row, ticker: 'BAD3R', trade_readiness: 'defined_risk', daily_rs_rating: 94, trade_plan: plan(2, { trigger_price: 95, stop_price: 95, risk_valid: false, risk_status: 'invalid_levels' }) },
+    { ...row, ticker: 'READY', trade_readiness: 'defined_risk', daily_rs_rating: 95, trade_plan: plan(2, { state: 'active' }) },
+    { ...row, ticker: 'BAD3R', trade_readiness: 'defined_risk', daily_rs_rating: 94, trade_plan: plan(2, { state: 'active', trigger_price: 95, stop_price: 95, risk_valid: false, risk_status: 'invalid_levels' }) },
+    { ...row, ticker: 'OVER', trade_readiness: 'defined_risk', trade_plan: plan(6, { state: 'active' }) },
     { ...row, ticker: 'RISK', trade_readiness: 'pullback_zone', daily_rs_rating: 70, trade_plan: plan(6) },
     { ...row, ticker: 'NOPLAN', trade_readiness: 'pullback_zone', trade_plan: null },
     { ...row, ticker: 'AVOID', trade_readiness: 'avoid', trade_plan: plan(), strike_zone: { state: 'avoid', score: 20 }, pullback_quality: { state: 'failed', score: 15 } },
@@ -151,15 +152,47 @@ try {
   await managementStyle.selectOption('balanced_daily');
   assert.match(await readyCard.innerText(), /T1 · 3R · sell 33%[\s\S]*\$127\.00[\s\S]*T2 · 6R · sell 33%[\s\S]*\$151\.00[\s\S]*34% runner using daily EMA9[\s\S]*Hypothetical targets[\s\S]*actual fill/);
   await page.reload();
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
   await page.getByRole('button', { name: 'Trade Readiness', exact: true }).click();
   await page.getByRole('article', { name: 'READY trade candidate' }).waitFor();
   assert.equal(await page.getByLabel('Management style').inputValue(), 'balanced_daily', 'Preset persists after reload');
   assert.match(await page.getByRole('article', { name: 'READY trade candidate' }).innerText(), /T2 · 6R · sell 33%[\s\S]*\$151\.00/);
   const readyCardAfterReload = page.getByRole('article', { name: 'READY trade candidate' });
+  const sizeLink = readyCardAfterReload.getByRole('link', { name: 'Size READY position', exact: true });
+  const handoff = new URL(await sizeLink.getAttribute('href'), 'http://localhost');
+  assert.equal(handoff.pathname, '/position-calculator');
+  assert.deepEqual(Object.fromEntries(handoff.searchParams), { ticker: 'READY', entry: '103', stop: '95', maxEntry: '105', signalDate: '2026-10-16', management: 'balanced_daily', source: 'top-hits' });
+  await sizeLink.click();
+  await page.locator('.risk-context').waitFor();
+  assert.equal(await page.getByLabel('Entry price').inputValue(), '103');
+  assert.equal(await page.getByLabel('Stop price').inputValue(), '95');
+  assert.match(await page.locator('.risk-context').innerText(), /READY[\s\S]*\$103\.00[\s\S]*\$95\.00[\s\S]*\$105\.00[\s\S]*2026-10-16[\s\S]*Balanced Daily/);
+  assert.match(await page.locator('.risk-result-lead').innerText(), /Buy up to[\s\S]*62 shares[\s\S]*\$6,386\.00/);
+  assert.match(await page.locator('.risk-management').innerText(), /T1 · 3R · sell 33%[\s\S]*\$127\.00 · 20 shares[\s\S]*T2 · 6R · sell 33%[\s\S]*\$151\.00 · 20 shares[\s\S]*Runner · daily EMA9[\s\S]*22 shares/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Prefilled calculator fits mobile viewport');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByLabel('Entry price').fill('106');
+  await page.getByText('WAIT — ABOVE MAX ENTRY', { exact: true }).waitFor();
+  assert.match(await page.locator('.risk-result-lead').innerText(), /Calculated size · plan invalid/);
+  assert.match(await page.locator('.risk-result-list').innerText(), /Planned cash loss at stop[\s\S]*Account risk actually used[\s\S]*Limiting factor/);
+  await page.getByRole('checkbox', { name: /Remember on this device/ }).check();
+  const rememberedDefaults = JSON.parse(await page.evaluate(() => localStorage.getItem('ticker-screener:position-calculator-defaults') || '{}'));
+  assert.deepEqual(Object.keys(rememberedDefaults).sort(), ['accountValue', 'maxAllocationPercent', 'riskPercent']);
+  const topHitsBase = new URL(process.env.TOP_HITS_URL || 'http://127.0.0.1:5173/scanner/top-hits');
+  await page.goto(new URL('/scanner/top-hits', topHitsBase).toString());
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await page.getByRole('button', { name: 'Trade Readiness', exact: true }).click();
+  await readyCardAfterReload.waitFor();
   assert.equal(await page.locator('.trade-readiness-lane.is-support .trade-readiness-management').count(), 0, 'Support cards do not show management guidance');
+  assert.equal(await page.locator('.trade-readiness-lane.is-support .trade-readiness-size').count(), 0, 'Support cards do not show sizing handoff');
   assert.equal(await page.locator('.trade-readiness-lane.is-trigger .trade-readiness-management').count(), 0, 'Daily Trigger cards do not show management guidance');
+  assert.equal(await page.locator('.trade-readiness-lane.is-trigger .trade-readiness-size').count(), 0, 'Daily Trigger cards do not show sizing handoff');
   assert.equal(await page.getByRole('article', { name: 'BAD3R trade candidate' }).locator('.trade-readiness-management').count(), 0, 'Invalid trigger and stop do not produce targets');
+  assert.equal(await page.getByRole('article', { name: 'BAD3R trade candidate' }).locator('.trade-readiness-size').count(), 0, 'Invalid plan has no sizing handoff');
+  assert.equal(await page.getByRole('article', { name: 'OVER trade candidate' }).locator('.trade-readiness-size').count(), 0, 'Over-limit plan has no sizing handoff');
   assert.equal(await page.locator('.trade-readiness-lane.is-needs-data .trade-readiness-management').count(), 0, 'Needs Data cards do not show management guidance');
+  assert.equal(await page.locator('.trade-readiness-lane.is-needs-data .trade-readiness-size').count(), 0, 'Needs Data cards do not show sizing handoff');
   assert.equal(await readyCardAfterReload.locator('details[open]').count(), 0, 'Evidence starts collapsed');
   await readyCardAfterReload.getByText('Candidate evidence').click();
   assert.match(await readyCardAfterReload.innerText(), /MA pullback retest[\s\S]*Signal date 2026-10-16/);

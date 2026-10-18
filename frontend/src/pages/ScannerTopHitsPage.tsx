@@ -1763,6 +1763,9 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
     const isAvoided = row.trade_readiness === "avoid";
     const isPlanReady = row.trade_readiness === "defined_risk";
     const management = isPlanReady && plan ? calculateTradeManagement(plan.trigger_price, plan.stop_price, managementPreset) : null;
+    const validPlanLevels = Boolean(plan && plan.risk_valid && plan.risk_status === "within_limit"
+      && typeof plan.trigger_price === "number" && Number.isFinite(plan.trigger_price) && plan.trigger_price > 0
+      && typeof plan.stop_price === "number" && Number.isFinite(plan.stop_price) && plan.stop_price > 0 && plan.trigger_price > plan.stop_price);
     const avoidReasons = [
       row.strike_zone?.state === "avoid" ? "Strike Zone says avoid" : null,
       row.pullback_quality?.state === "failed" ? "pullback quality failed" : null,
@@ -1787,6 +1790,7 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
         <p>{management.preset === "martin" ? "Trim 10–15% at T1; trail the remainder using daily EMA9." : "Sell 33% at T1 and 33% at T2; trail the 34% runner using daily EMA9."}</p>
         <p>Hypothetical targets from the planned trigger and stop. Recalculate from your actual fill; enter next session only at or below Max Entry.</p>
       </div> : null}
+      {isPlanReady && validPlanLevels && management && plan ? <Link className="ghost-button trade-readiness-size" aria-label={`Size ${row.ticker} position`} to={`/position-calculator?${new URLSearchParams({ ticker: row.ticker, entry: String(plan.trigger_price), stop: String(plan.stop_price), ...(typeof plan.max_entry_price === "number" && Number.isFinite(plan.max_entry_price) && plan.max_entry_price > 0 ? { maxEntry: String(plan.max_entry_price) } : {}), ...(plan.signal_date ? { signalDate: plan.signal_date } : {}), management: managementPreset, source: "top-hits" }).toString()}`}>Size position</Link> : null}
       <details className="trade-readiness-evidence"><summary>Candidate evidence</summary><div className="trade-readiness-meta">
         <span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span><SectorTag sector={row.sector} />
         <span>Pullback {row.pullback_quality ? `${row.pullback_quality.score} · ${row.pullback_quality.state}` : "--"}</span><span>Strike {row.strike_zone?.score ?? "--"}</span>

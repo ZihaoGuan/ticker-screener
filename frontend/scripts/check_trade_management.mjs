@@ -19,6 +19,21 @@ assert.deepEqual(balanced.targets.map(({ price, rMultiple, sellPercent }) => ({ 
 ]);
 assert.equal(balanced.runnerPercent, 34);
 assert.equal(balanced.runnerTrail, "daily EMA9");
+const balancedSmall = calculateTradeManagement(103, 95, "balanced_daily", 5);
+assert.equal(balancedSmall.targets[0].shares + balancedSmall.targets[1].shares + balancedSmall.runnerShares, 5, "whole-share guidance sums exactly to the position");
+assert.deepEqual([balancedSmall.targets[0].shares, balancedSmall.targets[1].shares, balancedSmall.runnerShares], [1, 1, 3]);
+const balancedTiny = calculateTradeManagement(103, 95, "balanced_daily", 1);
+assert.equal(balancedTiny.targets[0].shares + balancedTiny.targets[1].shares + balancedTiny.runnerShares, 1);
+const martinSized = calculateTradeManagement(103, 95, "martin", 20);
+assert.deepEqual(martinSized.targets[0].shares, { min: 2, max: 3 });
+assert.deepEqual(martinSized.runnerShares, { min: 17, max: 18 });
+const martinTooSmall = calculateTradeManagement(103, 95, "martin", 6);
+assert.equal(martinTooSmall.trimUnavailable, true);
+assert.deepEqual(martinTooSmall.targets[0].shares, { min: 0, max: 0 });
+assert.equal(martinTooSmall.runnerShares, 6);
+const shortPlan = calculateTradeManagement(95, 103, "martin", undefined, "short");
+assert.equal(shortPlan.riskPerShare, 8);
+assert.equal(shortPlan.targets[0].price, 71);
 for (const [trigger, stop] of [[null, 95], [NaN, 95], [Infinity, 95], [0, -1], [95, 95], [94, 95]]) {
   assert.equal(calculateTradeManagement(trigger, stop, "martin"), null, `Reject invalid levels ${trigger}/${stop}`);
 }

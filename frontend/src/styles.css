@@ -711,12 +711,21 @@ a {
 .risk-result-list dt { color: #a1a1aa; font-size: 12px; }
 .risk-result-list dd { font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 600; margin: 0; text-align: right; }
 .risk-result-list dd span { color: #a1a1aa; font-weight: 400; }
-.risk-targets { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; padding-top: 16px; }
+.risk-targets { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); padding-top: 16px; }
 .risk-targets > div { display: grid; gap: 5px; }
 .risk-targets strong { font-variant-numeric: tabular-nums; font-size: 17px; }
 .risk-cap-note { background: #332712; border: 1px solid rgba(251, 191, 36, 0.5); border-radius: 4px; color: #fde68a; font-size: 12px; line-height: 1.5; margin: 12px 0; padding: 9px 11px; }
 .risk-empty { color: #d4d4d8; font-size: 13px; line-height: 1.5; margin: 0; padding: 10px 0 14px; }
 .risk-disclaimer { border-top: 1px solid #27272a; color: #d4d4d8; font-size: 12px; line-height: 1.5; margin: 18px 0 0; padding-top: 13px; }
+.risk-context, .risk-management { background: #111827; border: 1px solid #374151; border-radius: 6px; color: #d1d5db; display: grid; gap: 6px; padding: 12px 14px; }
+.risk-context strong, .risk-management > strong { color: #f3f4f6; }
+.risk-context small, .risk-management small, .risk-management p { color: #a1a1aa; font-size: 12px; line-height: 1.45; margin: 0; }
+.risk-management { margin-top: 16px; }
+.risk-management > div { align-items: baseline; border-top: 1px solid #27272a; display: flex; gap: 12px; justify-content: space-between; padding-top: 8px; }
+.risk-management b { color: #f4f4f5; text-align: right; }
+.risk-max-entry-warning { background: #4c1010; border: 2px solid #ef4444; border-radius: 6px; color: #fecaca; display: grid; gap: 5px; line-height: 1.45; margin: 0 0 14px; padding: 12px; }
+.risk-max-entry-warning strong { color: #fff; font-size: 16px; }
+.trade-readiness-size { align-items: center; display: inline-flex; justify-content: center; margin-top: 8px; min-height: 40px; text-decoration: none; }
 
 @media (max-width: 760px) {
   .risk-layout { grid-template-columns: 1fr; }

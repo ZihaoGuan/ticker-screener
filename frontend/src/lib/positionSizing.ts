@@ -19,6 +19,7 @@ export type PositionSizingResult = {
   shares: number;
   positionValue: number;
   plannedLoss: number;
+  cashRiskPerShare: number;
   oneRTarget: number;
   allocationPercent: number;
   allocationCapHit: boolean;
@@ -48,8 +49,7 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
   const shares = wholeShares ? Math.floor(allowedShares) : allowedShares;
   const positionValue = shares * entryPrice;
   const plannedLoss = shares * riskPerShare;
-  const targetDistance = riskPerShare;
-  const target = (multiple: number) => entryPrice + (direction === "long" ? 1 : -1) * targetDistance * multiple;
+  const target = (multiple: number) => entryPrice + (direction === "long" ? 1 : -1) * stopDistance * multiple;
 
   return {
     stopDistance,
@@ -60,6 +60,7 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
     shares,
     positionValue,
     plannedLoss,
+    cashRiskPerShare: riskPerShare,
     oneRTarget: target(1),
     allocationPercent: (positionValue / accountValue) * 100,
     allocationCapHit: theoreticalShares > allocationShares,

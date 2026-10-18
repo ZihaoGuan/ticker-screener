@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
 import { calculatePositionSize } from "../lib/positionSizing";
+import { calculateTradeManagement, type TradeManagementPreset } from "../lib/tradeManagement";
+import { useSearchParams } from "react-router-dom";
 
 const STORAGE_KEY = "ticker-screener:position-calculator-defaults";
 type Fields = { accountValue: string; riskPercent: string; maxAllocationPercent: string; direction: "long" | "short"; entryPrice: string; stopPrice: string; slippagePerShare: string };
@@ -8,20 +10,40 @@ const INITIAL: Fields = { accountValue: "100000", riskPercent: "0.5", maxAllocat
 const RISK_PRESETS = [0.3, 0.5, 0.7, 1];
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
 const sharesFormat = (value: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(value);
+const validPrice = (value: string | null) => value && /^\d+(?:\.\d+)?$/.test(value) && Number.isFinite(Number(value)) && Number(value) > 0 ? value : "";
+const validTicker = (value: string | null) => value && /^[A-Z0-9][A-Z0-9.-]{0,9}$/.test(value) ? value : "";
+const validDate = (value: string | null) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? value : "";
+};
+const formatShares = (value: number | { min: number; max: number } | undefined) => value === undefined ? "" : typeof value === "number" ? `${value} shares` : value.min === value.max ? `${value.min} shares` : `${value.min}–${value.max} shares`;
 
 export function PositionCalculatorPage() {
-  const [fields, setFields] = useState(INITIAL);
+  const [searchParams] = useSearchParams();
+  const context = useMemo(() => {
+    const ticker = validTicker(searchParams.get("ticker")?.toUpperCase() ?? null);
+    const entry = validPrice(searchParams.get("entry"));
+    const stop = validPrice(searchParams.get("stop"));
+    const maxEntry = validPrice(searchParams.get("maxEntry"));
+    const signalDate = validDate(searchParams.get("signalDate"));
+    const management = searchParams.get("management");
+    return { source: searchParams.get("source") === "top-hits" ? "top-hits" : "", ticker, entry, stop, maxEntry, signalDate, management: management === "balanced_daily" || management === "martin" ? management as TradeManagementPreset : "martin" as TradeManagementPreset };
+  }, [searchParams]);
+  const [fields, setFields] = useState(() => ({ ...INITIAL, direction: "long" as const, entryPrice: context.entry, stopPrice: context.stop }));
   const [remember, setRemember] = useState(false);
   const [sizeMultiplier, setSizeMultiplier] = useState(1);
   const [wholeShares, setWholeShares] = useState(true);
+  const [managementPreset, setManagementPreset] = useState<TradeManagementPreset>(context.management);
 
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
       if (!saved) return;
-      const defaults = JSON.parse(saved) as Pick<Fields, "accountValue" | "riskPercent" | "maxAllocationPercent">;
+      const defaults = JSON.parse(saved) as Partial<Pick<Fields, "accountValue" | "riskPercent" | "maxAllocationPercent">>;
       if ([defaults.accountValue, defaults.riskPercent, defaults.maxAllocationPercent].every((value) => typeof value === "string")) {
-        setFields((current) => ({ ...current, ...defaults }));
+        setFields((current) => ({ ...current, accountValue: defaults.accountValue!, riskPercent: defaults.riskPercent!, maxAllocationPercent: defaults.maxAllocationPercent! }));
         setRemember(true);
       }
     } catch {
@@ -54,6 +76,9 @@ export function PositionCalculatorPage() {
     } catch (error) { return error instanceof Error ? error.message : "Check the entered values."; }
   }, [fields, sizeMultiplier, wholeShares]);
 
+  const overMaxEntry = Boolean(context.maxEntry && Number(fields.entryPrice) > Number(context.maxEntry));
+  const management = result ? calculateTradeManagement(Number(fields.entryPrice), Number(fields.stopPrice), managementPreset, wholeShares ? result.shares : undefined, fields.direction) : null;
+
   const update = (key: keyof Fields, value: string) => {
     setFields((current) => ({ ...current, [key]: value }));
     if (remember && ["accountValue", "riskPercent", "maxAllocationPercent"].includes(key)) {
@@ -77,6 +102,7 @@ export function PositionCalculatorPage() {
 
   return <div className="position-calculator-page">
     <header className="risk-page-heading"><h1>Position calculator</h1><p>Size a trade from your account risk, stop distance, and allocation limit.</p></header>
+    {context.source ? <section className="risk-context" aria-label="Top Hits trade plan"><strong>{context.ticker || "Top Hits"} · Planned trade context</strong><span>Trigger {context.entry ? money(Number(context.entry)) : "Unavailable"} · Stop {context.stop ? money(Number(context.stop)) : "Unavailable"}</span><span>Max entry {context.maxEntry ? money(Number(context.maxEntry)) : "Unavailable"}{context.signalDate ? ` · Signal ${context.signalDate}` : ""} · {context.management === "martin" ? "Martin-like" : "Balanced Daily"} management</span><small>These are editable planning values. Recalculate and check against your actual intended fill.</small></section> : null}
     <div className="risk-layout">
       <Panel title="Trade inputs" className="risk-input-panel">
         <div className="risk-input-grid">
@@ -99,17 +125,20 @@ export function PositionCalculatorPage() {
       </Panel>
       <Panel title="Planned position" className="risk-result-panel">
         {result ? <>
-          <div className="risk-result-lead"><span>Position value</span><strong>{money(result.positionValue)}</strong><small>{sharesFormat(result.shares)} shares at {money(Number(fields.entryPrice))}</small></div>
+          {overMaxEntry ? <p className="risk-max-entry-warning" role="alert"><strong>WAIT — ABOVE MAX ENTRY</strong><span>Position math is still shown for review, but this fill is above the original Top Hits plan and that readiness plan is invalid. Do not use this as a buy recommendation.</span></p> : null}
+          <div className="risk-result-lead"><span>{overMaxEntry ? "Calculated size · plan invalid" : "Buy up to"}</span><strong>{sharesFormat(result.shares)} shares</strong><small>Position value {money(result.positionValue)} at {money(Number(fields.entryPrice))}</small></div>
           {result.allocationCapHit ? <p className="risk-cap-note" role="status">Allocation cap applied. The position is limited to {fields.maxAllocationPercent}% of account value.</p> : null}
           <dl className="risk-result-list">
-            <div><dt>Planned loss at stop (1R)</dt><dd>{money(result.plannedLoss)}</dd></div>
-            <div><dt>Risk budget</dt><dd>{money(result.riskBudget)}</dd></div>
+            <div><dt>Planned cash loss at stop (includes slippage)</dt><dd>{money(result.plannedLoss)}</dd></div>
+            <div><dt>Account risk actually used</dt><dd>{money(result.plannedLoss)} <span>({((result.plannedLoss / Number(fields.accountValue)) * 100).toFixed(2)}% · {money(result.riskBudget)} budget)</span></dd></div>
+            <div><dt>Limiting factor</dt><dd>{result.allocationCapHit ? "Allocation limit" : "Risk budget"}</dd></div>
             <div><dt>Unused risk after rounding</dt><dd>{money(result.unusedRisk)}</dd></div>
             <div><dt>Theoretical position</dt><dd>{money(result.theoreticalPositionValue)} <span>({sharesFormat(result.theoreticalShares)} shares)</span></dd></div>
             <div><dt>Stop distance</dt><dd>{money(result.stopDistance)} <span>({result.stopDistancePercent.toFixed(2)}%)</span></dd></div>
             <div><dt>Account allocation</dt><dd>{result.allocationPercent.toFixed(2)}%</dd></div>
           </dl>
-          <div className="risk-targets"><div><span>2R target</span><strong>{money(result.target2R)}</strong></div><div><span>3R target</span><strong>{money(result.target3R)}</strong></div></div>
+          <div className="risk-targets"><div><span>1R target price</span><strong>{money(result.oneRTarget)}</strong></div><div><span>2R target price</span><strong>{money(result.target2R)}</strong></div><div><span>3R target price</span><strong>{money(result.target3R)}</strong></div></div>
+          {management ? <section className="risk-management"><strong>{management.preset === "martin" ? "Martin-like" : "Balanced Daily"} management planning</strong>{management.targets.map((target) => <div key={target.label}><span>{target.label} · {target.rMultiple}R · {target.sellPercent === 33 ? "sell 33%" : "trim 10–15%"}</span><b>{money(target.price)}{wholeShares ? ` · ${formatShares(target.shares)}` : ""}</b></div>)}<div><span>Runner · daily EMA9</span><b>{wholeShares ? formatShares(management.runnerShares) : "remainder"}</b></div>{management.trimUnavailable ? <p>A {sharesFormat(result.shares)}-share position is too small for a meaningful 10–15% whole-share trim; no trim shares are suggested.</p> : null}<small>Planning guidance only; no orders are placed. Recalculate targets from your actual fill.</small></section> : null}
         </> : <p className="risk-empty" role="status">{inputError}</p>}
         <p className="risk-disclaimer">This is planned risk based on the entered stop and slippage estimate. Gaps and execution slippage can exceed it.</p>
       </Panel>
