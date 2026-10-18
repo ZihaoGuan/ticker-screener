@@ -9,6 +9,7 @@ import pandas as pd
 from .config import AppConfig, override_config
 from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
 from .rs_rating_screen import approximate_rs_rating, compute_latest_weighted_rs_score
+from .rs_new_high import compute_rs_new_high_flags
 from .universe import UniverseTicker
 
 
@@ -211,22 +212,7 @@ def _compute_latest_rs_rating(
     return float(latest_score), float(latest_rating)
 
 
-def _compute_rs_new_high_flags(
-    rs_line: pd.Series,
-    price_reference: pd.Series,
-    *,
-    lookback: int,
-) -> tuple[pd.Series, pd.Series]:
-    aligned = pd.concat([rs_line, price_reference], axis=1, join="inner").dropna()
-    if aligned.empty:
-        empty = pd.Series(dtype=bool)
-        return empty, empty
-    aligned.columns = ["rs_line", "price_reference"]
-    rolling_rs_high = aligned["rs_line"].rolling(window=max(1, int(lookback)), min_periods=1).max().shift(1)
-    rolling_price_high = aligned["price_reference"].rolling(window=max(1, int(lookback)), min_periods=1).max().shift(1)
-    new_high = aligned["rs_line"] >= rolling_rs_high
-    new_high_before_price = new_high & (aligned["price_reference"] <= rolling_price_high)
-    return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
+_compute_rs_new_high_flags = compute_rs_new_high_flags
 
 
 def _compute_weekly_rs_context(
@@ -246,7 +232,7 @@ def _compute_weekly_rs_context(
     if aligned.empty:
         return None
 
-    weekly_stock = aligned[["Close"]].resample("W-FRI").last().dropna()
+    weekly_stock = aligned[["Close", "High"]].resample("W-FRI").agg({"Close": "last", "High": "max"}).dropna()
     weekly_benchmark = aligned[["benchmark_close"]].resample("W-FRI").agg({"benchmark_close": "last"}).dropna()
     weekly_aligned = weekly_stock.join(weekly_benchmark, how="inner").dropna()
     if weekly_aligned.empty:
@@ -255,7 +241,7 @@ def _compute_weekly_rs_context(
     weekly_rs_line = weekly_aligned["Close"] / weekly_aligned["benchmark_close"]
     weekly_new_high, weekly_before_price = _compute_rs_new_high_flags(
         weekly_rs_line,
-        weekly_aligned["Close"],
+        weekly_aligned["High"],
         lookback=max(1, int(weekly_lookback_weeks)),
     )
 

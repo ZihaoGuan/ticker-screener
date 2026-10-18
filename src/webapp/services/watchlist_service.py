@@ -44,6 +44,7 @@ from ...market_data_access import (
 from ...ratings.finviz_insider import load_finviz_insider_signal_map
 from ...ratings.repository import RatingsRepository
 from ...rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
+from ...rs_new_high import RS_NEW_HIGH_LOOKBACK, compute_rs_new_high_flags
 from ...relative_trend_strength import build_leadership_health
 from ...rs_phase_screen import classify_rs_phase_lifecycle
 from ...sepa_vcp_screen import build_sepa_dashboard_snapshot
@@ -2310,10 +2311,10 @@ class WatchlistService:
         rs_phase_markers: list[dict[str, Any]] = []
         visible_index_set = set(visible_frame.index)
         if rs_line is not None and benchmark_frame is not None and not benchmark_frame.empty:
-            rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
+            rs_new_high, rs_new_high_before_price = compute_rs_new_high_flags(
                 rs_line=rs_line,
                 price_reference=frame["High"].reindex(rs_line.index),
-                lookback=250,
+                lookback=RS_NEW_HIGH_LOOKBACK,
             )
         for index, row in frame.iterrows():
             if index not in visible_index_set:
@@ -3711,10 +3712,10 @@ def _build_chart_preview_payload(
     if normalized_benchmark_frame is not None and not normalized_benchmark_frame.empty:
         rs_line = _compute_rs_line(normalized_frame["Close"], normalized_benchmark_frame["Close"])
         daily_rs_rating = _compute_rs_rating_series(normalized_frame["Close"], normalized_benchmark_frame["Close"])
-        rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
+        rs_new_high, rs_new_high_before_price = compute_rs_new_high_flags(
             rs_line=rs_line,
             price_reference=normalized_frame["High"].reindex(rs_line.index),
-            lookback=250,
+            lookback=RS_NEW_HIGH_LOOKBACK,
         )
         for index in visible_frame.index:
             time_value = pd.Timestamp(index).date().isoformat()
@@ -5065,14 +5066,7 @@ def _compute_rs_rating_series(stock: pd.Series, benchmark: pd.Series) -> pd.Seri
     return rating_series.astype(float)
 
 
-def _compute_rs_new_high_flags(rs_line: pd.Series, price_reference: pd.Series, lookback: int) -> tuple[pd.Series, pd.Series]:
-    aligned = pd.concat([rs_line, price_reference], axis=1, join="inner").dropna()
-    aligned.columns = ["rs_line", "price_reference"]
-    rolling_rs_high = aligned["rs_line"].rolling(window=lookback, min_periods=1).max().shift(1)
-    rolling_price_high = aligned["price_reference"].rolling(window=lookback, min_periods=1).max().shift(1)
-    new_high = aligned["rs_line"] >= rolling_rs_high
-    new_high_before_price = new_high & (aligned["price_reference"] < rolling_price_high)
-    return new_high.reindex(rs_line.index, fill_value=False), new_high_before_price.reindex(rs_line.index, fill_value=False)
+_compute_rs_new_high_flags = compute_rs_new_high_flags
 
 
 def _compute_relative_strength_days_metrics(stock_frame: pd.DataFrame, benchmark_frame: pd.DataFrame, *, lookback: int) -> dict[str, int | float | None]:

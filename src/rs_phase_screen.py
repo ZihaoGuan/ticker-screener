@@ -7,14 +7,15 @@ import pandas as pd
 
 from .config import AppConfig
 from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
-from .rs_screen import _compute_latest_rs_rating, _compute_rs_new_high_flags
+from .rs_new_high import RS_NEW_HIGH_LOOKBACK, compute_rs_new_high_flags
+from .rs_screen import _compute_latest_rs_rating
 from .universe import UniverseTicker
 
 
 RS_PHASE_HISTORY_DAYS = 320
 RS_PHASE_EMA_PERIOD = 21
 RS_PHASE_MIN_ACTIVE_DAYS = 3
-RS_PHASE_NEW_HIGH_LOOKBACK = 50
+RS_PHASE_NEW_HIGH_LOOKBACK = RS_NEW_HIGH_LOOKBACK
 RS_PHASE_NEW_MAX_DAYS = 3
 RS_PHASE_ESTABLISHED_MAX_DAYS = 20
 RS_PHASE_QUICK_RECLAIM_MAX_BELOW_DAYS = 3
@@ -215,14 +216,14 @@ def compute_rs_phase_context(
     phase_active = rs_line > rs_ema
     lifecycle = classify_rs_phase_lifecycle(phase_active)
 
-    rs_new_high, rs_new_high_before_price = _compute_rs_new_high_flags(
+    rs_new_high, rs_new_high_before_price = compute_rs_new_high_flags(
         rs_line,
-        aligned["Close"],
+        aligned["High"],
         lookback=max(1, int(new_high_lookback)),
     )
     latest_index = aligned.index[-1]
-    rolling_rs_high = rs_line.rolling(window=max(1, int(new_high_lookback)), min_periods=1).max().shift(1)
-    rolling_price_high = aligned["Close"].rolling(window=max(1, int(new_high_lookback)), min_periods=1).max().shift(1)
+    rolling_rs_high = rs_line.rolling(window=max(1, int(new_high_lookback)), min_periods=1).max()
+    rolling_price_high = aligned["High"].rolling(window=max(1, int(new_high_lookback)), min_periods=1).max()
 
     return {
         "signal_date": pd.Timestamp(latest_index).date().isoformat(),

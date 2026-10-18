@@ -107,16 +107,16 @@ class RsScreenTests(unittest.TestCase):
     def test_compute_rs_new_high_flags_matches_pine_equality_and_prior_window(self) -> None:
         index = pd.date_range("2026-01-05", periods=7, freq="B")
         rs_line = pd.Series([9.0, 1.00, 1.05, 1.08, 1.12, 1.15, 1.15], index=index)
-        closes = pd.Series([99.0, 10.0, 10.4, 10.8, 11.5, 11.1, 11.5], index=index)
+        highs = pd.Series([99.0, 10.0, 10.4, 10.8, 11.5, 11.1, 11.5], index=index)
 
-        new_high, before_price = _compute_rs_new_high_flags(rs_line, closes, lookback=5)
+        new_high, before_price = _compute_rs_new_high_flags(rs_line, highs, lookback=5)
 
         self.assertTrue(bool(new_high.iloc[-1]))
-        self.assertTrue(bool(before_price.iloc[-1]))
+        self.assertFalse(bool(before_price.iloc[-1]))
 
-        higher_close = closes.copy()
-        higher_close.iloc[-1] = 11.6
-        _, before_price = _compute_rs_new_high_flags(rs_line, higher_close, lookback=5)
+        higher_high = highs.copy()
+        higher_high.iloc[-1] = 11.6
+        _, before_price = _compute_rs_new_high_flags(rs_line, higher_high, lookback=5)
         self.assertFalse(bool(before_price.iloc[-1]))
 
     def test_run_rs_screen_uses_clean_stock_rows_for_rs_rating(self) -> None:

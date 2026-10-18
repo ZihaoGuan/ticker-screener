@@ -11,6 +11,7 @@ from types import ModuleType
 from typing import Iterable
 
 from .config import AppConfig, project_root
+from .rs_new_high import RS_NEW_HIGH_LOOKBACK
 from .market_data_access import (
     build_cookstock_payload_from_frame,
     build_cookstock_price_list_from_frame,
@@ -48,7 +49,7 @@ def apply_config_to_cookstock(module: ModuleType, config: AppConfig) -> None:
     algo.ENGINE_VERSION = str(config.engine_version).strip().lower()
     algo.SCREEN_PROFILE = str(config.screen_profile).strip().lower()
     algo.RS_LOOKBACK_DAYS = int(config.rs_lookback_days)
-    algo.RS_NEW_HIGH_DAILY_LOOKBACK_DAYS = int(config.rs_new_high_daily_lookback_days)
+    algo.RS_NEW_HIGH_DAILY_LOOKBACK_DAYS = RS_NEW_HIGH_LOOKBACK
     algo.RS_NEW_HIGH_WEEKLY_LOOKBACK_WEEKS = int(config.rs_new_high_weekly_lookback_weeks)
     algo.RS_NEW_HIGH_HISTORY_DAYS = int(config.rs_new_high_history_days)
     algo.RS_NEW_HIGH_REQUIRE_BEFORE_PRICE = bool(config.rs_new_high_require_before_price)

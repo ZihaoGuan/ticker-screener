@@ -11,7 +11,8 @@ latestRating = __TICKER_SCREENER_RS_RATING__
 rsLine = benchmarkClose > 0 ? close / benchmarkClose : na
 rsDisplay = not na(rsLine) and not na(benchmarkAnchor) ? rsLine * benchmarkAnchor * 0.8 : na
 
-lookback = math.min(250, bar_index + 1)
+rsNewHighLookback = 250
+lookback = math.min(rsNewHighLookback, bar_index + 1)
 rsNewHigh = rsLine == ta.highest(rsLine, lookback)
 priceNewHigh = high == ta.highest(high, lookback)
 rsNewHighBeforePrice = rsNewHigh and not priceNewHigh
