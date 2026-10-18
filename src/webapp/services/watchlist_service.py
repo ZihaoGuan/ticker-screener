@@ -6098,8 +6098,6 @@ def _build_trade_plan(artifacts: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 def _trade_readiness(row: dict[str, Any]) -> str:
     adr_suitability = str(row.get("adr_suitability") or "")
-    if adr_suitability in {"low", "risk_failure"}:
-        return "avoid"
     if (row.get("strike_zone") or {}).get("state") == "avoid" or (row.get("pullback_quality") or {}).get("state") == "failed":
         return "avoid"
     plan = row.get("trade_plan")
@@ -6108,7 +6106,8 @@ def _trade_readiness(row: dict[str, Any]) -> str:
     if plan.get("state") == "active":
         risk = _coerce_optional_float(plan.get("reference_risk_pct"))
         valid_risk = plan.get("risk_valid", risk is not None)
-        return "defined_risk" if valid_risk and risk is not None and math.isfinite(risk) and 0 < risk <= 5.0 else "reclaim_trigger"
+        adr_allows_entry = adr_suitability not in {"low", "risk_failure"}
+        return "defined_risk" if adr_allows_entry and valid_risk and risk is not None and math.isfinite(risk) and 0 < risk <= 5.0 else "reclaim_trigger"
     return "pullback_zone"
 
 

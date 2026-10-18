@@ -1771,7 +1771,6 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
     const avoidReasons = [
       row.strike_zone?.state === "avoid" ? "Strike Zone says avoid" : null,
       row.pullback_quality?.state === "failed" ? "pullback quality failed" : null,
-      row.adr_suitability === "low" || row.adr_suitability === "risk_failure" ? row.adr_reason : null,
     ].filter(Boolean);
     const price = row.day_close == null ? "--" : `$${row.day_close.toFixed(2)}`;
     const saving = Boolean(savingMyPickTickers[row.ticker]);

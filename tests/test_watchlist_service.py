@@ -161,7 +161,7 @@ class WatchlistServiceTests(unittest.TestCase):
     def test_trade_readiness_adr14_rejects_wide_stop_against_low_adr(self) -> None:
         index = pd.bdate_range(end="2026-06-12", periods=14)
         frame = pd.DataFrame({"Open": 100.0, "High": 101.5, "Low": 98.5, "Close": 100.0, "Volume": 1000}, index=index)
-        rows = {"NVDA": {"trade_plan": {"reference_risk_pct": 4.0}}}
+        rows = {"NVDA": {"trade_plan": {"state": "active", "reference_risk_pct": 4.0, "risk_valid": True}}}
         with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame}):
             WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")._attach_trade_readiness_adr(
                 rows, as_of_date=index[-1].date()
@@ -170,25 +170,36 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(rows["NVDA"]["stop_to_adr"], 1.33)
         self.assertEqual(rows["NVDA"]["adr_suitability"], "risk_failure")
         self.assertIn("exceeds 1.50%", rows["NVDA"]["adr_reason"])
-        self.assertEqual(_trade_readiness(rows["NVDA"]), "avoid")
+        self.assertEqual(_trade_readiness(rows["NVDA"]), "reclaim_trigger")
 
     def test_trade_readiness_adr14_caution_requires_half_adr_stop(self) -> None:
         index = pd.bdate_range(end="2026-06-12", periods=14)
         frame = pd.DataFrame({"Open": 100.0, "High": 102.0, "Low": 98.0, "Close": 100.0, "Volume": 1000}, index=index)
-        rows = {"NVDA": {"trade_plan": {"reference_risk_pct": 1.5}}}
+        rows = {"NVDA": {"trade_plan": {"state": "active", "reference_risk_pct": 1.5, "risk_valid": True}}}
         with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame}):
             WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")._attach_trade_readiness_adr(
                 rows, as_of_date=index[-1].date()
             )
         self.assertEqual(rows["NVDA"]["adr14_pct"], 4.0)
         self.assertEqual(rows["NVDA"]["adr_suitability"], "caution")
-        self.assertEqual(_trade_readiness(rows["NVDA"]), "pullback_zone")
+        self.assertEqual(_trade_readiness(rows["NVDA"]), "defined_risk")
         rows["NVDA"]["trade_plan"]["reference_risk_pct"] = 2.1
         with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame}):
             WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")._attach_trade_readiness_adr(
                 rows, as_of_date=index[-1].date()
             )
-        self.assertEqual(_trade_readiness(rows["NVDA"]), "avoid")
+        self.assertEqual(_trade_readiness(rows["NVDA"]), "reclaim_trigger")
+
+    def test_trade_readiness_low_adr_keeps_unplanned_leader_on_watchlist(self) -> None:
+        index = pd.bdate_range(end="2026-06-12", periods=14)
+        frame = pd.DataFrame({"Open": 100.0, "High": 101.0, "Low": 99.0, "Close": 100.0, "Volume": 1000}, index=index)
+        rows = {"NVDA": {}}
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame}):
+            WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")._attach_trade_readiness_adr(
+                rows, as_of_date=index[-1].date()
+            )
+        self.assertEqual(rows["NVDA"]["adr_suitability"], "low")
+        self.assertEqual(_trade_readiness(rows["NVDA"]), "leader")
 
     def test_guru_readiness_ranking_uses_adr_class_and_stop_to_adr_without_rewarding_highest_adr(self) -> None:
         rows = [
