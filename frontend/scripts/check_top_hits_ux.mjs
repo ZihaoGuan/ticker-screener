@@ -18,14 +18,14 @@ try {
   const plan = (risk = 2, overrides = {}) => ({ source_strategy_id: 'ma_pullback_retest', state: 'ready', support_label: 'EMA21', support_price: 98, trigger_label: 'Close', trigger_price: 103, stop_label: 'Low', stop_price: 95, reference_risk_pct: risk, execution_timeframe: 'daily', entry_policy: 'close_confirmed', max_risk_pct: 5, max_entry_price: 105, risk_valid: true, risk_status: risk > 5 ? 'over_limit' : 'within_limit', signal_date: '2026-10-16', ...overrides });
   const readinessRows = [
     { ...row, ticker: 'LEAD', trade_readiness: 'leader', daily_rs_rating: 80 },
-    { ...row, ticker: 'TRIG', trade_readiness: 'reclaim_trigger', daily_rs_rating: 90, trade_plan: plan() },
+    { ...row, ticker: 'TRIG', sector: 'Industrials', trade_readiness: 'reclaim_trigger', daily_rs_rating: 90, trade_plan: plan() },
     { ...row, ticker: 'READY', trade_readiness: 'defined_risk', daily_rs_rating: 95, trade_plan: plan(2, { state: 'active' }) },
     { ...row, ticker: 'BAD3R', trade_readiness: 'defined_risk', daily_rs_rating: 94, trade_plan: plan(2, { state: 'active', trigger_price: 95, stop_price: 95, risk_valid: false, risk_status: 'invalid_levels' }) },
-    { ...row, ticker: 'OVER', day_close: 106, trade_readiness: 'defined_risk', trade_plan: plan(6, { state: 'active' }) },
+    { ...row, ticker: 'OVER', sector: 'Health Care', day_close: 106, trade_readiness: 'defined_risk', trade_plan: plan(6, { state: 'active' }) },
     { ...row, ticker: 'RISK', trade_readiness: 'pullback_zone', daily_rs_rating: 70, trade_plan: plan(6) },
-    { ...row, ticker: 'NOPLAN', trade_readiness: 'pullback_zone', trade_plan: null },
-    { ...row, ticker: 'AVOID', trade_readiness: 'avoid', trade_plan: plan(), strike_zone: { state: 'avoid', score: 20 }, pullback_quality: { state: 'failed', score: 15 } },
-    { ...row, ticker: 'UNKNOWN', trade_readiness: undefined, trade_plan: plan() },
+    { ...row, ticker: 'NOPLAN', sector: null, trade_readiness: 'pullback_zone', trade_plan: null },
+    { ...row, ticker: 'AVOID', sector: 'Financials', trade_readiness: 'avoid', trade_plan: plan(), strike_zone: { state: 'avoid', score: 20 }, pullback_quality: { state: 'failed', score: 15 } },
+    { ...row, ticker: 'UNKNOWN', sector: null, trade_readiness: undefined, trade_plan: plan() },
     ...Array.from({ length: 9 }, (_, i) => ({ ...row, ticker: `SUP${String(i + 1).padStart(2, '0')}`, trade_readiness: 'pullback_zone', trade_plan: plan(i + 1), daily_rs_rating: 75 + i })),
   ];
   const topHitsRequests = { list: 0, guru: 0 };
@@ -152,16 +152,48 @@ try {
   await leaderCard.getByRole('button', { name: 'Saving…', exact: true }).waitFor();
   assert.equal(await leaderCard.getAttribute('aria-busy'), 'true', 'Saving card announces busy state');
   await leaderCard.getByRole('button', { name: 'Saved', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'My Picks', exact: true }).click();
+  await page.getByLabel('Filter by entry status').selectOption('unavailable');
+  assert.equal(await page.locator('.trade-readiness-card').count(), 1, 'My Picks and entry status filters compose');
+  assert.match(await page.locator('.trade-readiness-card').first().getAttribute('aria-label'), /LEAD/);
+  await page.getByRole('button', { name: 'Show All', exact: true }).click();
+  await page.getByLabel('Filter by entry status').selectOption('all');
   const readyCard = page.getByRole('article', { name: 'READY trade candidate' });
+  assert.equal(await readyCard.locator('.trade-readiness-card-badges .guru-sector-tag').innerText(), 'Technology', 'Sector is visible without expanding candidate evidence');
   assert.match(await readyCard.locator('.trade-readiness-eligibility').innerText(), /Within max entry · daily trigger confirmed/, 'Eligible label requires active daily confirmation as well as acceptable price');
   assert.match(await page.getByRole('article', { name: 'TRIG trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /Waiting for daily trigger/, 'Acceptable price alone does not imply entry');
   assert.match(await page.getByRole('article', { name: 'OVER trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /Extended · do not chase/);
+  const entryStatusFilter = page.getByLabel('Filter by entry status');
+  assert.equal(await entryStatusFilter.inputValue(), 'all', 'Entry status defaults to all candidates');
+  await entryStatusFilter.selectOption('within_max');
+  assert.equal(await page.locator('.trade-readiness-card').count(), 1, 'Within max status keeps only price eligible candidates with confirmed daily triggers');
+  await entryStatusFilter.selectOption('extended');
+  assert.deepEqual(await page.locator('.trade-readiness-card').allTextContents().then(values => values.map(value => value.match(/^[A-Z0-9]+/)?.[0])), ['OVER'], 'Extended status isolates do-not-chase candidates');
+  await entryStatusFilter.selectOption('waiting_trigger');
+  assert.ok(await page.locator('.trade-readiness-card').count() > 1, 'Waiting status includes candidates that still need a daily trigger');
+  await entryStatusFilter.selectOption('unavailable');
+  assert.equal(await page.locator('.trade-readiness-card').count(), 2, 'Unavailable status isolates missing entry plans');
   assert.match(await page.getByRole('article', { name: 'NOPLAN trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /No entry limit \/ plan unavailable/);
-  const withinMaxFilter = page.getByLabel('Within max entry only');
-  assert.equal(await withinMaxFilter.isChecked(), false, 'Within max filter is off by default');
-  await withinMaxFilter.check();
-  assert.equal(await page.locator('.trade-readiness-card').count(), 1, 'Within max filter keeps only price eligible candidates with confirmed daily triggers');
-  await withinMaxFilter.uncheck();
+  await entryStatusFilter.selectOption('all');
+  const readinessFilter = page.getByLabel('Filter by readiness stage');
+  await readinessFilter.selectOption('defined_risk');
+  assert.equal(await page.locator('.trade-readiness-card').count(), 3, 'Readiness filter isolates Plan Ready candidates');
+  await readinessFilter.selectOption('needs-data');
+  assert.equal(await page.locator('.trade-readiness-card').count(), 1, 'Readiness filter isolates unrecognized stages as Needs Data');
+  await readinessFilter.selectOption('all');
+  await page.getByLabel('Group readiness candidates').selectOption('sector');
+  const sectorGroups = page.locator('.trade-readiness-sector-group');
+  assert.equal(await sectorGroups.count(), 4, 'Each available sector renders once');
+  const sectorCandidateCount = await sectorGroups.locator(':scope > header > span').allTextContents().then(values => values.reduce((sum, value) => sum + Number(value), 0));
+  assert.equal(sectorCandidateCount, readinessRows.length - 1, 'Every non-avoided candidate belongs to exactly one sector group');
+  assert.deepEqual(await sectorGroups.getByRole('heading').allTextContents(), ['Technology', 'Health Care', 'Industrials', 'Unknown sector'], 'Sectors sort by count, then name, with unknown last');
+  assert.equal(await page.locator('.trade-readiness-sector-group').getByRole('article', { name: 'AVOID trade candidate' }).count(), 0, 'Avoid stays hidden in sector grouping');
+  assert.equal(await readyCard.locator('.trade-readiness-stage').innerText(), 'Plan Ready', 'Sector grouping keeps readiness visible on each card');
+  await readinessFilter.selectOption('reclaim_trigger');
+  assert.equal(await page.locator('.trade-readiness-card').count(), 1, 'Readiness filter composes with sector grouping');
+  assert.equal(await page.locator('.trade-readiness-sector-group').getByRole('heading').innerText(), 'Industrials');
+  await readinessFilter.selectOption('all');
+  await page.getByLabel('Group readiness candidates').selectOption('stage');
   assert.match(await readyCard.innerText(), /Max Entry[\s\S]*\$105\.00[\s\S]*Stop[\s\S]*\$95\.00[\s\S]*Planned Risk[\s\S]*2\.00%[\s\S]*Support[\s\S]*\$98\.00/);
   const managementStyle = page.getByLabel('Management style');
   assert.equal(await managementStyle.inputValue(), 'martin', 'Martin-like management is the default');
@@ -213,6 +245,7 @@ try {
   assert.equal(await readyCardAfterReload.locator('details[open]').count(), 0, 'Evidence starts collapsed');
   await readyCardAfterReload.getByText('Candidate evidence').click();
   assert.match(await readyCardAfterReload.innerText(), /MA pullback retest[\s\S]*Signal date 2026-10-16/);
+  assert.equal(await readyCardAfterReload.getByText('Technology', { exact: true }).count(), 1, 'Sector is not duplicated inside candidate evidence');
   await page.locator('.trade-readiness-lane.is-support').getByRole('button', { name: 'Show 8 more (3 remaining)' }).click();
   await page.locator('.trade-readiness-lane.is-support').getByRole('article', { name: 'RISK trade candidate' }).getByText(/Risk exceeds 5%/).waitFor();
   await page.locator('.trade-readiness-lane.is-support').getByRole('article', { name: 'NOPLAN trade candidate' }).getByText('Trade plan unavailable for this candidate.').waitFor();
@@ -229,9 +262,12 @@ try {
   assert.equal(await avoidedCard.getByText('Max Entry').count(), 0, 'Avoided cards suppress the actionable trade ticket');
   assert.equal(await avoidedCard.locator('.trade-readiness-management').count(), 0, 'Avoided cards suppress management guidance');
   assert.equal(await avoidedCard.getByRole('button', { name: /Save|Saved|Saving/ }).count(), 0, 'Avoided cards cannot be saved as actionable picks');
+  await page.getByLabel('Group readiness candidates').selectOption('sector');
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Readiness view fits ${width}px viewport`);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const viewportWidth = await page.evaluate(() => ({ inner: innerWidth, scroll: document.documentElement.scrollWidth }));
+    assert.ok(viewportWidth.scroll <= viewportWidth.inner, `Sector-grouped readiness view fits ${width}px viewport (${viewportWidth.scroll}/${viewportWidth.inner})`);
   }
   await page.getByRole('button', { name: 'List', exact: true }).click();
   await page.getByRole('button', { name: 'Guru Board', exact: true }).click();

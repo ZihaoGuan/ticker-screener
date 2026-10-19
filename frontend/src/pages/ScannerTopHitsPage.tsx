@@ -1749,6 +1749,8 @@ function SectorBoard({
 }
 
 type EntryEligibility = "within_max" | "extended" | "waiting_trigger" | "unavailable";
+type ReadinessGroupBy = "stage" | "sector";
+type ReadinessStageFilter = "all" | "leader" | "pullback_zone" | "reclaim_trigger" | "defined_risk" | "needs-data";
 
 function getEntryEligibility(row: ScannerTopHitRow): EntryEligibility {
   const plan = row.trade_plan;
@@ -1766,21 +1768,32 @@ function getEntryEligibility(row: ScannerTopHitRow): EntryEligibility {
 function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canManageMyPicks, selectedTicker, onSelectTicker, onToggleMyPick }: { rows: ScannerTopHitRow[]; myPickTickers: Set<string>; savingMyPickTickers: Record<string, boolean>; canManageMyPicks: boolean; selectedTicker: string; onSelectTicker: (ticker: string) => void; onToggleMyPick: (ticker: string) => Promise<void> }) {
   const [showAvoided, setShowAvoided] = useState(false);
   const [pickFilter, setPickFilter] = useState<"all" | "mine">("all");
+  const [groupBy, setGroupBy] = useState<ReadinessGroupBy>("stage");
+  const [stageFilter, setStageFilter] = useState<ReadinessStageFilter>("all");
   const [sortBy, setSortBy] = useState<"readiness" | "risk" | "rs" | "entryEligibility">("readiness");
-  const [withinMaxOnly, setWithinMaxOnly] = useState(false);
+  const [entryFilter, setEntryFilter] = useState<"all" | EntryEligibility>("all");
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const [managementPreset, setManagementPreset] = useState<TradeManagementPreset>(() => {
     try { return window.localStorage.getItem(TRADE_MANAGEMENT_STORAGE_KEY) === "balanced_daily" ? "balanced_daily" : "martin"; } catch { return "martin"; }
   });
   useEffect(() => { try { window.localStorage.setItem(TRADE_MANAGEMENT_STORAGE_KEY, managementPreset); } catch { /* Storage may be unavailable. */ } }, [managementPreset]);
-  useEffect(() => setVisibleCounts({}), [rows, pickFilter, sortBy, withinMaxOnly]);
+  useEffect(() => setVisibleCounts({}), [rows, pickFilter, groupBy, stageFilter, sortBy, entryFilter]);
   const columns = [
     { state: "leader", label: "Leader / Waiting", tone: "leader", empty: "No leaders are waiting at this stage." },
     { state: "pullback_zone", label: "Support Zone", tone: "support", empty: "No candidates are in the support zone." },
     { state: "reclaim_trigger", label: "Daily Trigger", tone: "trigger", empty: "No candidates have a daily trigger." },
     { state: "defined_risk", label: "Plan Ready", tone: "plan-ready", empty: "No candidates have a defined risk plan." },
   ] as const;
-  const filtered = rows.filter((row) => (pickFilter === "all" || myPickTickers.has(row.ticker)) && (!withinMaxOnly || getEntryEligibility(row) === "within_max"));
+  const readinessStage = (row: ScannerTopHitRow): Exclude<ReadinessStageFilter, "all"> | "avoid" => {
+    if (row.trade_readiness === "avoid") return "avoid";
+    return columns.some(({ state }) => row.trade_readiness === state) ? row.trade_readiness as Exclude<ReadinessStageFilter, "all" | "needs-data"> : "needs-data";
+  };
+  const filtered = rows.filter((row) => {
+    if (pickFilter === "mine" && !myPickTickers.has(row.ticker)) return false;
+    if (entryFilter !== "all" && getEntryEligibility(row) !== entryFilter) return false;
+    const stage = readinessStage(row);
+    return stage === "avoid" || stageFilter === "all" || stage === stageFilter;
+  });
   const sorted = [...filtered].sort((a, b) => {
     if (sortBy === "risk") return (a.trade_plan?.reference_risk_pct ?? Infinity) - (b.trade_plan?.reference_risk_pct ?? Infinity) || a.ticker.localeCompare(b.ticker);
     if (sortBy === "rs") return (b.daily_rs_rating ?? -Infinity) - (a.daily_rs_rating ?? -Infinity) || a.ticker.localeCompare(b.ticker);
@@ -1792,7 +1805,8 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
     const stopAdrDistance = (row: ScannerTopHitRow) => row.stop_to_adr == null ? Infinity : Math.abs(row.stop_to_adr - 0.5);
     return adrRank(a) - adrRank(b) || stopAdrDistance(a) - stopAdrDistance(b) || (b.strike_zone?.score ?? 0) - (a.strike_zone?.score ?? 0) || (b.pullback_quality?.score ?? 0) - (a.pullback_quality?.score ?? 0) || (b.daily_rs_rating ?? 0) - (a.daily_rs_rating ?? 0) || a.ticker.localeCompare(b.ticker);
   });
-  const renderCard = (row: ScannerTopHitRow) => {
+  const stageLabels: Record<ReturnType<typeof readinessStage>, string> = { leader: "Leader / Waiting", pullback_zone: "Support Zone", reclaim_trigger: "Daily Trigger", defined_risk: "Plan Ready", "needs-data": "Needs Data", avoid: "Avoided" };
+  const renderCard = (row: ScannerTopHitRow, showStage = false) => {
     const plan = row.trade_plan;
     const isAvoided = row.trade_readiness === "avoid";
     const isPlanReady = row.trade_readiness === "defined_risk";
@@ -1809,6 +1823,7 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
     const isPick = myPickTickers.has(row.ticker);
     return <article aria-label={`${row.ticker} trade candidate`} className={`guru-ticker-card trade-readiness-card${row.ticker === selectedTicker ? " is-selected" : ""}`} key={row.ticker} aria-busy={saving}>
       <button type="button" className="trade-readiness-select" aria-pressed={row.ticker === selectedTicker} onClick={() => onSelectTicker(row.ticker)}><strong>{row.ticker}</strong><span>{price}</span></button>
+      <div className="trade-readiness-card-badges"><SectorTag sector={row.sector} />{showStage ? <span className={`trade-readiness-stage is-${readinessStage(row)}`}>{stageLabels[readinessStage(row)]}</span> : null}</div>
       <span className={`trade-readiness-eligibility is-${getEntryEligibility(row)}`} aria-label={`Entry eligibility: ${{ within_max: "Within max entry", extended: "Extended, do not chase", waiting_trigger: "Waiting for trigger", unavailable: "No entry limit or plan unavailable" }[getEntryEligibility(row)]}`}>
         ${{ within_max: "Within max entry · daily trigger confirmed", extended: "Extended · do not chase", waiting_trigger: "Waiting for daily trigger", unavailable: "No entry limit / plan unavailable" }[getEntryEligibility(row)]}
       </span>
@@ -1835,14 +1850,14 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
       </div> : null}
       {isPlanReady && validPlanLevels && management && plan ? <Link className="ghost-button trade-readiness-size" aria-label={`Size ${row.ticker} position`} to={`/position-calculator?${new URLSearchParams({ ticker: row.ticker, entry: String(plan.trigger_price), stop: String(plan.stop_price), ...(typeof plan.max_entry_price === "number" && Number.isFinite(plan.max_entry_price) && plan.max_entry_price > 0 ? { maxEntry: String(plan.max_entry_price) } : {}), ...(plan.signal_date ? { signalDate: plan.signal_date } : {}), management: managementPreset, source: "top-hits" }).toString()}`}>Size position</Link> : null}
       <details className="trade-readiness-evidence"><summary>Candidate evidence</summary><div className="trade-readiness-meta">
-        <span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span><SectorTag sector={row.sector} />
+        <span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span>
         <span>Pullback {row.pullback_quality ? `${row.pullback_quality.score} · ${row.pullback_quality.state}` : "--"}</span><span>Strike {row.strike_zone?.score ?? "--"}</span>
         <span>Setup {plan ? plan.source_strategy_id === "ma_pullback_retest" ? "MA pullback retest" : plan.source_strategy_id.split("_").join(" ") : "Unavailable"}</span><span>Signal date {plan?.signal_date || "Unavailable"}</span>
       </div></details>
       {canManageMyPicks && !isAvoided ? <button className="ghost-button trade-readiness-save" type="button" disabled={saving || isPick} onClick={() => void onToggleMyPick(row.ticker)}>{saving ? "Saving…" : isPick ? "Saved" : "Save"}</button> : null}
     </article>;
   };
-  const unknown = sorted.filter((row) => !columns.some(({ state }) => row.trade_readiness === state) && row.trade_readiness !== "avoid");
+  const unknown = sorted.filter((row) => readinessStage(row) === "needs-data");
   const avoided = sorted.filter((row) => row.trade_readiness === "avoid");
   const renderLane = (state: string, label: string, tone: string, laneRows: ScannerTopHitRow[], empty: string) => {
     const visible = visibleCounts[state] ?? 8;
@@ -1850,17 +1865,35 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
     const headingId = `trade-readiness-${state}-heading`;
     return <section className={`trade-readiness-lane is-${tone}`} aria-labelledby={headingId} key={state}>
       <header><h3 id={headingId}>{label}</h3><span>{laneRows.length}</span></header>
-      {laneRows.length ? <div className="trade-readiness-grid">{laneRows.slice(0, visible).map(renderCard)}</div> : <p className="trade-readiness-empty">{empty}</p>}
+      {laneRows.length ? <div className="trade-readiness-grid">{laneRows.slice(0, visible).map((row) => renderCard(row))}</div> : <p className="trade-readiness-empty">{empty}</p>}
       {remaining > 0 ? <button className="ghost-button" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [state]: visible + 8 }))}>Show 8 more ({remaining} remaining)</button> : null}
+    </section>;
+  };
+  const sectorGroups = [...sorted.filter((row) => showAvoided || row.trade_readiness !== "avoid").reduce((groups, row) => {
+    const sector = String(row.sector || "").trim() || "Unknown sector";
+    const key = sector === "Unknown sector" ? "Unknown sector" : sector;
+    groups.set(key, [...(groups.get(key) || []), row]);
+    return groups;
+  }, new Map<string, ScannerTopHitRow[]>()).entries()]
+    .map(([sector, sectorRows]) => ({ sector, rows: sectorRows }))
+    .sort((a, b) => a.sector === "Unknown sector" ? b.sector === "Unknown sector" ? 0 : 1 : b.sector === "Unknown sector" ? -1 : b.rows.length - a.rows.length || a.sector.localeCompare(b.sector));
+  const renderSectorGroup = ({ sector, rows: sectorRows }: { sector: string; rows: ScannerTopHitRow[] }) => {
+    const key = `sector:${sector}`;
+    const visible = visibleCounts[key] ?? 8;
+    const remaining = Math.max(0, sectorRows.length - visible);
+    const headingId = `trade-readiness-sector-${sector.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-heading`;
+    return <section className="trade-readiness-sector-group" aria-labelledby={headingId} key={sector}>
+      <header><h3 id={headingId}>{sector}</h3><span>{sectorRows.length}</span></header>
+      <div className="trade-readiness-sector-grid">{sectorRows.slice(0, visible).map((row) => renderCard(row, true))}</div>
+      {remaining > 0 ? <button className="ghost-button" type="button" onClick={() => setVisibleCounts((current) => ({ ...current, [key]: visible + 8 }))}>Show 8 more ({remaining} remaining)</button> : null}
     </section>;
   };
   return <section className="trade-readiness-board" aria-label="Trade Readiness">
     <p className="panel-copy trade-readiness-safety">Plan Ready uses completed daily bars. Recheck the next-session price against Max Entry before placing an order.</p>
-    <div className="trade-readiness-controls"><div role="group" aria-label="Candidate filter"><button type="button" aria-pressed={pickFilter === "all"} onClick={() => { setPickFilter("all"); setVisibleCounts({}); }}>Show All</button><button type="button" aria-pressed={pickFilter === "mine"} onClick={() => { setPickFilter("mine"); setVisibleCounts({}); }}>My Picks</button></div><label>Sort <select aria-label="Sort readiness candidates" value={sortBy} onChange={(event) => { setSortBy(event.target.value as typeof sortBy); setVisibleCounts({}); }}><option value="readiness">Readiness ranking</option><option value="entryEligibility">Entry eligibility</option><option value="risk">Lowest risk</option><option value="rs">Highest RS</option></select></label><label className="trade-readiness-eligibility-filter"><input type="checkbox" checked={withinMaxOnly} onChange={(event) => setWithinMaxOnly(event.target.checked)} /> Within max entry only</label><label>Management style <select aria-label="Management style" value={managementPreset} onChange={(event) => setManagementPreset(event.target.value as TradeManagementPreset)}><option value="martin">Martin-like (default)</option><option value="balanced_daily">Balanced Daily</option></select></label></div>
-    <div className="trade-readiness-lanes">{columns.map(({ state, label, tone, empty }) => renderLane(state, label, tone, sorted.filter((row) => row.trade_readiness === state), empty))}</div>
-    {renderLane("needs-data", "Needs Data", "needs-data", unknown, "Every candidate has a recognized readiness stage.")}
+    <div className="trade-readiness-controls"><div role="group" aria-label="Candidate filter"><button type="button" aria-pressed={pickFilter === "all"} onClick={() => { setPickFilter("all"); setVisibleCounts({}); }}>Show All</button><button type="button" aria-pressed={pickFilter === "mine"} onClick={() => { setPickFilter("mine"); setVisibleCounts({}); }}>My Picks</button></div><label>Group by <select aria-label="Group readiness candidates" value={groupBy} onChange={(event) => setGroupBy(event.target.value as ReadinessGroupBy)}><option value="stage">Readiness stage</option><option value="sector">Sector</option></select></label><label>Readiness <select aria-label="Filter by readiness stage" value={stageFilter} onChange={(event) => setStageFilter(event.target.value as ReadinessStageFilter)}><option value="all">All</option><option value="leader">Leader / Waiting</option><option value="pullback_zone">Support Zone</option><option value="reclaim_trigger">Daily Trigger</option><option value="defined_risk">Plan Ready</option><option value="needs-data">Needs Data</option></select></label><label>Entry status <select aria-label="Filter by entry status" value={entryFilter} onChange={(event) => setEntryFilter(event.target.value as "all" | EntryEligibility)}><option value="all">All</option><option value="within_max">Within max entry · confirmed</option><option value="waiting_trigger">Waiting for daily trigger</option><option value="extended">Extended · do not chase</option><option value="unavailable">Plan unavailable</option></select></label><label>Sort <select aria-label="Sort readiness candidates" value={sortBy} onChange={(event) => { setSortBy(event.target.value as typeof sortBy); setVisibleCounts({}); }}><option value="readiness">Readiness ranking</option><option value="entryEligibility">Entry eligibility</option><option value="risk">Lowest risk</option><option value="rs">Highest RS</option></select></label><label>Management style <select aria-label="Management style" value={managementPreset} onChange={(event) => setManagementPreset(event.target.value as TradeManagementPreset)}><option value="martin">Martin-like (default)</option><option value="balanced_daily">Balanced Daily</option></select></label></div>
+    {groupBy === "stage" ? <><div className="trade-readiness-lanes">{columns.map(({ state, label, tone, empty }) => renderLane(state, label, tone, sorted.filter((row) => row.trade_readiness === state), empty))}</div>{renderLane("needs-data", "Needs Data", "needs-data", unknown, "Every candidate has a recognized readiness stage.")}</> : sectorGroups.length ? <div className="trade-readiness-sector-groups">{sectorGroups.map(renderSectorGroup)}</div> : <p className="trade-readiness-empty">No candidates match these filters.</p>}
     <button className="ghost-button" type="button" aria-expanded={showAvoided} onClick={() => setShowAvoided((value) => !value)}>{showAvoided ? "Hide avoided" : `Show avoided (${avoided.length})`}</button>
-    {showAvoided ? renderLane("avoided", "Avoided", "avoided", avoided, "No avoided candidates.") : null}
+    {groupBy === "stage" && showAvoided ? renderLane("avoided", "Avoided", "avoided", avoided, "No avoided candidates.") : null}
   </section>;
 }
 
