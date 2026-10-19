@@ -417,6 +417,14 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("qullamaggie_{date_label}.json",),
         "legacy_summary_templates": ("qullamaggie_run_summary_{date_label}.json",),
     },
+    "qullamaggie_ep": {
+        "stem_template": "qullamaggie_ep_{date_label}", "legacy_watchlist_templates": ("qullamaggie_ep_{date_label}.json",),
+        "legacy_raw_templates": ("qullamaggie_ep_{date_label}.json",), "legacy_summary_templates": ("qullamaggie_ep_run_summary_{date_label}.json",),
+    },
+    "qullamaggie_parabolic_short": {
+        "stem_template": "qullamaggie_parabolic_short_{date_label}", "legacy_watchlist_templates": ("qullamaggie_parabolic_short_{date_label}.json",),
+        "legacy_raw_templates": ("qullamaggie_parabolic_short_{date_label}.json",), "legacy_summary_templates": ("qullamaggie_parabolic_short_run_summary_{date_label}.json",),
+    },
     "darvas_box_breakout": {
         "stem_template": "darvas_box_breakout_{date_label}",
         "legacy_watchlist_templates": ("darvas_box_breakout_{date_label}.json",),
@@ -625,6 +633,8 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("kai_s1", "kai_s1"),
     ("kai_s2", "kai_s2"),
     ("one_year_winners", "one_year_winners"),
+    ("qullamaggie_parabolic_short", "qullamaggie_parabolic_short"),
+    ("qullamaggie_ep", "qullamaggie_ep"),
     ("qullamaggie", "qullamaggie"),
     ("darvas_box_breakout", "darvas_box_breakout"),
     ("market_correction_resilience", "market_correction_resilience"),

@@ -35,6 +35,7 @@ MAX_DISTANCE_FROM_RECENT_HIGH_PCT = 5.0
 MAX_DISTANCE_FROM_52W_HIGH_PCT = 15.0
 MAX_TIGHT_FLAG_RANGE_PCT = 15.0
 MAX_FAST_MA_DISTANCE_PCT = 5.0
+MAX_BASE_RANGE_PCT = 25.0
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class QullamaggieSnapshot:
     adr_pct_20: float
     daily_rs_rating: float | None
     return_3m_pct: float
+    return_1m_pct: float
     return_6m_pct: float
     recent_return_pct: float
     sma10: float
@@ -65,6 +67,15 @@ class QullamaggieSnapshot:
     criteria_total: int
     criteria: dict[str, bool]
     reasons: list[str]
+    setup_state: str
+    pivot: float
+    breakout_day_low: float | None
+    impulse_return_pct: float
+    consolidation_sessions: int
+    higher_low: bool
+    range_contracting: bool
+    volume_contracting: bool
+    rising_fast_mas: bool
 
 
 @dataclass(frozen=True)
@@ -80,6 +91,7 @@ class QullamaggieHit:
     adr_pct_20: float
     daily_rs_rating: float
     return_3m_pct: float
+    return_1m_pct: float
     return_6m_pct: float
     recent_return_pct: float
     sma10: float
@@ -95,6 +107,15 @@ class QullamaggieHit:
     criteria_passed: int
     criteria_total: int
     reasons: list[str]
+    setup_state: str
+    pivot: float
+    breakout_day_low: float | None
+    impulse_return_pct: float
+    consolidation_sessions: int
+    higher_low: bool
+    range_contracting: bool
+    volume_contracting: bool
+    rising_fast_mas: bool
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -125,6 +146,8 @@ def _normalize_price_frame(frame: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     normalized = frame[[available[column.lower()] for column in required]].copy()
     normalized.columns = required
+    if "open" in available:
+        normalized["Open"] = frame[available["open"]]
     normalized = normalized.dropna(subset=required).sort_index()
     if not isinstance(normalized.index, pd.DatetimeIndex):
         normalized.index = pd.to_datetime(normalized.index)
@@ -152,6 +175,45 @@ def _return_pct(close: pd.Series, sessions: int) -> float:
     return ((float(close.iloc[-1]) / prior) - 1.0) * 100.0 if prior > 0.0 else 0.0
 
 
+def evaluate_qullamaggie_ep(frame: pd.DataFrame) -> dict[str, object] | None:
+    """Daily EP candidate only; daily bars cannot establish opening-range confirmation."""
+    bars = _normalize_price_frame(frame)
+    if bars.empty or "Open" not in bars or len(bars) < 61:
+        return None
+    prior_close = float(bars["Close"].iloc[-2])
+    gap_pct = (float(bars["Open"].iloc[-1]) / prior_close - 1.0) * 100.0
+    volume_avg = float(bars["Volume"].iloc[-21:-1].mean())
+    relative_volume = float(bars["Volume"].iloc[-1]) / volume_avg if volume_avg > 0 else 0.0
+    prior = bars.iloc[-61:-1]
+    prior_range_pct = (float(prior["High"].max()) / float(prior["Low"].min()) - 1.0) * 100.0
+    if gap_pct < 10.0 or relative_volume < 2.0 or prior_range_pct > 60.0:
+        return None
+    return {"gap_pct": gap_pct, "relative_volume": relative_volume, "prior_range_pct": prior_range_pct, "state": "gap_candidate"}
+
+
+def evaluate_qullamaggie_parabolic_short(frame: pd.DataFrame) -> dict[str, object] | None:
+    """Daily extension candidate; exhaustion and entry confirmation require intraday bars."""
+    bars = _normalize_price_frame(frame)
+    if bars.empty or len(bars) < 30:
+        return None
+    close, volume = bars["Close"].astype(float), bars["Volume"].astype(float)
+    current = float(close.iloc[-1])
+    sma10, sma20 = float(close.rolling(10).mean().iloc[-1]), float(close.rolling(20).mean().iloc[-1])
+    advance = (current / float(close.iloc[-21]) - 1.0) * 100.0
+    consecutive_up_days = 0
+    for change in close.diff().tail(5).iloc[::-1]:
+        if change <= 0:
+            break
+        consecutive_up_days += 1
+    extension10 = (current / sma10 - 1.0) * 100.0
+    extension20 = (current / sma20 - 1.0) * 100.0
+    relative_volume = float(volume.iloc[-1] / volume.iloc[-21:-1].mean()) if volume.iloc[-21:-1].mean() > 0 else 0.0
+    if advance < 80.0 or consecutive_up_days < 4 or max(extension10, extension20) < 20.0 or relative_volume < 1.5:
+        return None
+    state = "exhaustion_watch" if consecutive_up_days == 5 and relative_volume >= 2.0 else "extended"
+    return {"advance_1m_pct": advance, "consecutive_up_days_5": consecutive_up_days, "extension_10sma_pct": extension10, "extension_20sma_pct": extension20, "relative_volume": relative_volume, "state": state}
+
+
 def evaluate_qullamaggie(
     frame: pd.DataFrame,
     *,
@@ -172,10 +234,11 @@ def evaluate_qullamaggie(
     sma50 = float(close.rolling(50).mean().iloc[-1])
     sma200 = float(close.rolling(200).mean().iloc[-1])
     avg_volume_20 = float(volume.tail(AVERAGE_VOLUME_DAYS).mean())
-    adr_pct_20 = float((((high - low) / close) * 100.0).tail(ADR_PERIOD_DAYS).mean())
+    adr_pct_20 = float(((high / low - 1.0) * 100.0).tail(ADR_PERIOD_DAYS).mean())
+    return_1m_pct = _return_pct(close, 21)
     return_3m_pct = _return_pct(close, THREE_MONTH_SESSIONS)
     return_6m_pct = _return_pct(close, SIX_MONTH_SESSIONS)
-    recent_return_pct = max(return_3m_pct, return_6m_pct)
+    recent_return_pct = max(return_1m_pct, return_3m_pct, return_6m_pct)
     high_3m = float(high.tail(THREE_MONTH_SESSIONS).max())
     high_6m = float(high.tail(SIX_MONTH_SESSIONS).max())
     high_52w = float(high.tail(ONE_YEAR_SESSIONS).max())
@@ -191,8 +254,56 @@ def evaluate_qullamaggie(
     pullback_near_fast_ma = fast_ma_distance_pct <= MAX_FAST_MA_DISTANCE_PCT
     normalized_rs = float(daily_rs_rating) if daily_rs_rating is not None else None
 
+    # Candidate bases must follow a chronological low-to-high impulse and contract structurally.
+    setups: list[tuple[tuple[float, ...], pd.DataFrame, int, float, bool, bool, bool]] = []
+    for base_days in range(10, 41):
+        base_start = len(bars) - base_days
+        base = bars.iloc[base_start:]
+        prior = bars.iloc[max(0, base_start - 63):base_start]
+        if len(prior) < 20:
+            continue
+        low_position = int(prior["Low"].values.argmin())
+        anchor = float(prior["Low"].iloc[low_position])
+        later_high = float(prior["High"].iloc[low_position + 1:].max()) if low_position + 1 < len(prior) else 0.0
+        impulse = ((later_high / anchor) - 1.0) * 100.0 if anchor > 0 else 0.0
+        if impulse < 30.0:
+            continue
+        base_low, base_high = float(base["Low"].min()), float(base["High"].max())
+        if base_low <= 0.0 or (base_high / base_low - 1.0) * 100.0 > MAX_BASE_RANGE_PCT:
+            continue
+        if later_high <= 0.0 or (base_high / later_high - 1.0) * 100.0 > 15.0:
+            continue
+        first, second = base.iloc[: base_days // 2], base.iloc[base_days // 2:]
+        first_low, second_low = float(first["Low"].min()), float(second["Low"].min())
+        higher_low = second_low > first_low
+        first_range = float(first["High"].max()) / first_low - 1.0 if first_low > 0.0 else float("inf")
+        second_range = float(second["High"].max()) / second_low - 1.0 if second_low > 0.0 else float("inf")
+        range_contracting = first_range > 0.0 and second_range < first_range * 0.8
+        first_volume, second_volume = float(first["Volume"].mean()), float(second["Volume"].mean())
+        volume_contracting = first_volume > 0.0 and second_volume < first_volume * 0.8
+        if not higher_low or not (range_contracting or volume_contracting):
+            continue
+        higher_low_pct = (second_low / first_low - 1.0) * 100.0
+        contraction = min(second_range / first_range if first_range else 1.0, second_volume / first_volume if first_volume else 1.0)
+        score = (float(range_contracting + volume_contracting), higher_low_pct, -contraction, impulse, float(base_days))
+        setups.append((score, base, base_days, impulse, higher_low, range_contracting, volume_contracting))
+    setup = max(setups, key=lambda candidate: candidate[0]) if setups else None
+    if setup is None:
+        base, consolidation_sessions, impulse_return_pct = bars.tail(10), 0, 0.0
+        higher_low = range_contracting = volume_contracting = False
+    else:
+        _, base, consolidation_sessions, impulse_return_pct, higher_low, range_contracting, volume_contracting = setup
+    pivot_bars = base.iloc[:-1] if len(base) > 1 else base
+    pivot = float(pivot_bars["High"].max())
+    rising_fast_mas = sma10 > float(close.rolling(10).mean().iloc[-6]) and sma20 > float(close.rolling(20).mean().iloc[-6])
+    crossed_pivot = setup is not None and len(close) > 1 and float(close.iloc[-2]) <= pivot and current_price > pivot
+    setup_structure = setup is not None
+    setup_state = "triggered" if crossed_pivot else ("ready" if setup_structure and current_price >= pivot * 0.95 else "forming")
     criteria = {
-        "recent_return_gt_30pct": recent_return_pct >= MIN_RECENT_RETURN_PCT,
+        "prior_impulse_gt_30pct": impulse_return_pct >= 30.0,
+        "post_impulse_base_10_40_sessions": 10 <= consolidation_sessions <= 40,
+        "higher_low_plus_range_or_volume_contraction": higher_low and (range_contracting or volume_contracting),
+        "rising_10_20_sma": rising_fast_mas,
         "near_3m_or_6m_high": distance_from_recent_high_pct <= MAX_DISTANCE_FROM_RECENT_HIGH_PCT,
         "near_52w_high": distance_from_52w_high_pct <= MAX_DISTANCE_FROM_52W_HIGH_PCT,
         "price_above_10_20_50_200_sma": current_price > max(sma10, sma20, sma50, sma200),
@@ -200,7 +311,6 @@ def evaluate_qullamaggie(
         "market_cap_gt_100m": market_cap is not None and float(market_cap) > MIN_MARKET_CAP,
         "adr20_gt_4pct": adr_pct_20 >= MIN_ADR_PCT,
         "daily_rs_gt_80": normalized_rs is not None and normalized_rs >= MIN_DAILY_RS_RATING,
-        "tight_flag_or_fast_ma_pullback": tight_flag or pullback_near_fast_ma,
     }
     setup_reason = (
         f"10-day range {tight_flag_range_pct:.1f}% is tight"
@@ -208,13 +318,13 @@ def evaluate_qullamaggie(
         else f"close is {fast_ma_distance_pct:.1f}% from the nearer 10/20 SMA"
     )
     reasons = [
-        f"best 3M/6M return {recent_return_pct:.1f}% (3M {return_3m_pct:.1f}%, 6M {return_6m_pct:.1f}%)",
+        f"1M return {return_1m_pct:.1f}%, 3M {return_3m_pct:.1f}%, 6M {return_6m_pct:.1f}%",
         f"close is {distance_from_recent_high_pct:.1f}% below the 3M/6M high and {distance_from_52w_high_pct:.1f}% below the 52-week high",
         f"close {current_price:.2f} above 10/20/50/200 SMA",
         f"20-day average volume {avg_volume_20:,.0f} shares and market cap ${(market_cap or 0.0) / 1_000_000:.0f}M",
         f"ADR20 {adr_pct_20:.1f}% and Daily RS {normalized_rs:.1f}" if normalized_rs is not None else f"ADR20 {adr_pct_20:.1f}% and Daily RS unavailable",
         setup_reason,
-        "Candidate setup: confirm an orderly flag, high handle, or multi-week base on the chart before acting.",
+        f"prior impulse {impulse_return_pct:.1f}%; {consolidation_sessions}-session base; {setup_state} at pivot {pivot:.2f}",
     ]
     return QullamaggieSnapshot(
         matched=all(criteria.values()),
@@ -224,6 +334,7 @@ def evaluate_qullamaggie(
         adr_pct_20=adr_pct_20,
         daily_rs_rating=normalized_rs,
         return_3m_pct=return_3m_pct,
+        return_1m_pct=return_1m_pct,
         return_6m_pct=return_6m_pct,
         recent_return_pct=recent_return_pct,
         sma10=sma10,
@@ -243,6 +354,15 @@ def evaluate_qullamaggie(
         criteria_total=len(criteria),
         criteria=criteria,
         reasons=reasons,
+        setup_state=setup_state,
+        pivot=pivot,
+        breakout_day_low=float(low.iloc[-1]) if setup_state == "triggered" else None,
+        impulse_return_pct=impulse_return_pct,
+        consolidation_sessions=consolidation_sessions,
+        higher_low=higher_low,
+        range_contracting=range_contracting,
+        volume_contracting=volume_contracting,
+        rising_fast_mas=rising_fast_mas,
     )
 
 
@@ -269,6 +389,7 @@ def find_qullamaggie_hit(
         adr_pct_20=snapshot.adr_pct_20,
         daily_rs_rating=snapshot.daily_rs_rating,
         return_3m_pct=snapshot.return_3m_pct,
+        return_1m_pct=snapshot.return_1m_pct,
         return_6m_pct=snapshot.return_6m_pct,
         recent_return_pct=snapshot.recent_return_pct,
         sma10=snapshot.sma10,
@@ -284,6 +405,15 @@ def find_qullamaggie_hit(
         criteria_passed=snapshot.criteria_passed,
         criteria_total=snapshot.criteria_total,
         reasons=snapshot.reasons,
+        setup_state=snapshot.setup_state,
+        pivot=snapshot.pivot,
+        breakout_day_low=snapshot.breakout_day_low,
+        impulse_return_pct=snapshot.impulse_return_pct,
+        consolidation_sessions=snapshot.consolidation_sessions,
+        higher_low=snapshot.higher_low,
+        range_contracting=snapshot.range_contracting,
+        volume_contracting=snapshot.volume_contracting,
+        rising_fast_mas=snapshot.rising_fast_mas,
     )
 
 

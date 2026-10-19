@@ -374,6 +374,8 @@ def _group_for_stem(stem: str) -> tuple[str, str]:
         ("kai_s1", "kai_s1", "Kai S1"),
         ("kai_s2", "kai_s2", "Kai S2"),
         ("one_year_winners", "one_year_winners", "1Y Winners > $10B"),
+        ("qullamaggie_parabolic_short", "qullamaggie_parabolic_short", "Qullamaggie Parabolic Short"),
+        ("qullamaggie_ep", "qullamaggie_ep", "Qullamaggie Episodic Pivot"),
         ("qullamaggie", "qullamaggie", "Qullamaggie"),
         ("darvas_box_breakout", "darvas_box_breakout", "Darvas Box Breakout"),
         ("stockbee_9m_movers", "stockbee_9m_movers", "Stockbee 9 Million Movers"),

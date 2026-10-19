@@ -25,11 +25,15 @@ from src.webapp.services.watchlist_service import (
     _filter_scanner_top_hits_payload,
     _compute_rs_new_high_flags,
     _scanner_freshness,
+    _scanner_family,
     _scanner_top_hits_source_fingerprint,
 )
 
 
 class WatchlistServiceTests(unittest.TestCase):
+    def test_qullamaggie_ep_board_family_is_earnings_and_gaps(self) -> None:
+        self.assertEqual(_scanner_family("qullamaggie_ep"), "Earnings & gaps")
+
     def test_phase_avwap_confirms_extremes_by_five_sessions_and_chooses_by_stage(self) -> None:
         index = pd.bdate_range("2025-01-01", periods=260)
         frame = pd.DataFrame({"Open": 50., "High": 55., "Low": 45., "Close": 50., "Volume": 1000.}, index=index)

@@ -100,9 +100,11 @@ PIPELINES = (
     },
     {
         "id": "qullamaggie",
-        "label": "Qullamaggie",
+        "label": "Qullamaggie Breakout",
         "filename": "qullamaggie_{date}.json",
     },
+    {"id": "qullamaggie_ep", "label": "Qullamaggie EP", "filename": "qullamaggie_ep_{date}.json"},
+    {"id": "qullamaggie_parabolic_short", "label": "Qullamaggie Parabolic Short", "filename": "qullamaggie_parabolic_short_{date}.json"},
     {
         "id": "stockbee_9m_movers",
         "label": "Stockbee 9 Million Movers",
@@ -339,6 +341,8 @@ PIPELINE_GROUPS: dict[str, dict[str, str]] = {
     "one_year_winners": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "best_winners": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "qullamaggie": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "qullamaggie_ep": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
+    "qullamaggie_parabolic_short": {"bias_group": "bearish"},
     "stockbee_9m_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "stockbee_20pct_weekly_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "stockbee_4pct_daily_movers": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

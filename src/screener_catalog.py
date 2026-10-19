@@ -38,7 +38,7 @@ from .near_52wk_high_screen import PRICE_HISTORY_DAYS as NEAR_52WK_HIGH_HISTORY_
 from .near_200ma_screen import run_near_200ma_screen
 from .one_year_winners_screen import ONE_YEAR_WINNERS_HISTORY_DAYS, find_one_year_winners_hit
 from .minervini_vcp_detector_screen import MINERVINI_VCP_HISTORY_DAYS, find_minervini_vcp_detector_hit
-from .qullamaggie_screen import QULLAMAGGIE_HISTORY_DAYS, find_qullamaggie_hit
+from .qullamaggie_screen import QULLAMAGGIE_HISTORY_DAYS, evaluate_qullamaggie_ep, evaluate_qullamaggie_parabolic_short, find_qullamaggie_hit
 from .rti_screen import find_recent_rti_hit
 from .rmv_screen import RMV_HISTORY_DAYS, find_rmv_hit
 from .sean_breakout_screen import find_recent_sean_breakout_hit
@@ -1410,16 +1410,20 @@ def _run_qullamaggie(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     payload = hit.to_dict()
     return ScreenerEvaluationResult(
         passed=True,
-        metrics={
-            "ticker": bundle.ticker,
-            "signal_date": payload["signal_date"],
-            "recent_return_pct": payload["recent_return_pct"],
-            "adr_pct_20": payload["adr_pct_20"],
-            "daily_rs_rating": payload["daily_rs_rating"],
-        },
+        metrics={"ticker": bundle.ticker, "signal_date": payload["signal_date"], "setup_state": payload["setup_state"], "pivot": payload["pivot"]},
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
     )
+
+
+def _run_qullamaggie_ep(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = evaluate_qullamaggie_ep(bundle.bars)
+    return ScreenerEvaluationResult(passed=hit is not None, metrics={"ticker": bundle.ticker, **(hit or {})}, hit=hit)
+
+
+def _run_qullamaggie_parabolic_short(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    hit = evaluate_qullamaggie_parabolic_short(bundle.bars)
+    return ScreenerEvaluationResult(passed=hit is not None, metrics={"ticker": bundle.ticker, **(hit or {})}, hit=hit)
 
 
 def _run_vcp_spec(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
@@ -1973,6 +1977,14 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=QULLAMAGGIE_HISTORY_DAYS,
             warmup_trading_days=20,
             evaluator=_run_qullamaggie,
+        ),
+        "qullamaggie_ep": ScreenerSpec(
+            id="qullamaggie_ep", required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=QULLAMAGGIE_HISTORY_DAYS, warmup_trading_days=60, evaluator=_run_qullamaggie_ep,
+        ),
+        "qullamaggie_parabolic_short": ScreenerSpec(
+            id="qullamaggie_parabolic_short", required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=QULLAMAGGIE_HISTORY_DAYS, warmup_trading_days=30, evaluator=_run_qullamaggie_parabolic_short,
         ),
         "vcs_setup_stage": ScreenerSpec(
             id="vcs_setup_stage",

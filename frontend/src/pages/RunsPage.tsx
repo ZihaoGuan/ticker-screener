@@ -3054,7 +3054,9 @@ function describeScreenerAction(actionId: string, hasConfig: boolean): string {
     one_year_winners:
       "Rolling 1-year winners above 30% with market cap above $10B, positive TTM revenue growth, beta above 1, monthly dollar liquidity above $900M, price above $20 and 100 EMA, and 21 EMA above 50 SMA.",
     qullamaggie:
-      "Momentum candidates up at least 30% over 3 or 6 months, near recent and 52-week highs, above 10/20/50/200 SMA, with 1M+ average volume, $100M+ market cap, ADR20 of 4%+, strong Daily RS, and a tight flag or pullback near the 10/20 SMA.",
+      "Breakout candidates with a recent 30%+ impulse followed by a 10-40 session base, a higher low plus range or volume contraction, and rising 10/20 SMAs. Product heuristics also favor liquidity, relative strength, and ADR. Daily bars identify the pivot; they do not confirm an opening-range entry.",
+    qullamaggie_ep: "Daily candidates with a 10%+ opening gap, at least 2x recent volume, and a prior sideways context. Intraday confirmation is unavailable.",
+    qullamaggie_parabolic_short: "Daily candidates with an extreme one-month advance, consecutive up days, extension from 10/20 SMA, and volume evidence. Intraday exhaustion and entry are not confirmed.",
     gap_fill: "Post-earnings gap reversal candidates with reclaim or fill behavior.",
     macd_golden_cross: "Fresh bullish MACD crossovers where the MACD line has recently moved above the signal line.",
     inside_dryup_v2: "Latest inside day plus extreme price-volume dry-up, without requiring breakout follow-through.",

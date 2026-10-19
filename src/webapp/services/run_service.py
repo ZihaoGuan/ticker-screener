@@ -2133,6 +2133,16 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="leaders",
         ),
+        "qullamaggie_ep": RunAction(
+            "qullamaggie_ep", "Run Qullamaggie EP", "scripts/run_qullamaggie_ep_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field, _filter_precedence_field, _include_sectors_field, _exclude_sectors_field, _include_industries_field, _exclude_industries_field, _include_themes_field, _exclude_themes_field),
+            bias_group="bullish", bullish_subgroup="leaders",
+        ),
+        "qullamaggie_parabolic_short": RunAction(
+            "qullamaggie_parabolic_short", "Run Qullamaggie Parabolic Short", "scripts/run_qullamaggie_parabolic_short_screen.py",
+            fields=(_limit_field, _tickers_field, _date_label_field, _as_of_date_field, _filter_precedence_field, _include_sectors_field, _exclude_sectors_field, _include_industries_field, _exclude_industries_field, _include_themes_field, _exclude_themes_field),
+            bias_group="bearish",
+        ),
         "darvas_box_breakout": RunAction(
             "darvas_box_breakout",
             "Run Darvas Box Breakout",

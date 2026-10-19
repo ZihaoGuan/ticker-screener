@@ -127,7 +127,7 @@ _RS_EVIDENCE_UP_ON_DOWN_DAYS_THRESHOLD = 3
 _RS_EVIDENCE_DAILY_RS_THRESHOLD = 90.0
 _GURU_MAX_ATR_TO_SMA50_EXTENSION = 5.0
 _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
-    {"id": "qullamaggie", "label": "Qullamaggie", "accent": "amber", "available": True},
+    {"id": "qullamaggie", "label": "Qullamaggie Breakout", "accent": "amber", "available": True},
     {"id": "trend_template", "label": "Minervini", "accent": "yellow", "available": True},
     {"id": "stockbee_9m_movers", "label": "SB 9M Movers", "accent": "teal", "available": True},
     {"id": "stockbee_4pct_daily_movers", "label": "SB 4% Daily", "accent": "teal", "available": True},
@@ -733,12 +733,14 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
         "id": "qullamaggie",
         "strategy_id": "qullamaggie",
-        "label": "Qullamaggie",
-        "description": "Momentum candidates up at least 30% over 3 or 6 months, near recent and 52-week highs, above 10/20/50/200 SMA, with 1M+ average volume, $100M+ market cap, ADR20 of 4%+, strong Daily RS, and a tight flag or pullback near the 10/20 SMA. Confirm the chart structure before acting.",
+        "label": "Qullamaggie Breakout",
+        "description": "Breakout candidates with a recent 30%+ impulse followed by a 10-40 session base, a higher low plus range or volume contraction, and rising 10/20 SMAs. Product heuristics also favor liquidity, relative strength, and ADR. Daily bars identify the pivot; they do not confirm an opening-range entry.",
         "timeframe": "Daily",
         "accent": "amber",
         "bias_group": "bullish",
     },
+    {"id": "qullamaggie_ep", "strategy_id": "qullamaggie_ep", "label": "Qullamaggie Episodic Pivot", "description": "Daily candidates with a 10%+ opening gap, at least 2x recent volume, and a prior sideways context. No intraday confirmation is available.", "timeframe": "Daily", "accent": "amber", "bias_group": "bullish"},
+    {"id": "qullamaggie_parabolic_short", "strategy_id": "qullamaggie_parabolic_short", "label": "Qullamaggie Parabolic Short", "description": "Daily candidates with an extreme one-month advance, consecutive up days, extension from 10/20 SMA, and volume evidence. Intraday exhaustion and entry are not confirmed.", "timeframe": "Daily", "accent": "red", "bias_group": "bearish"},
     {
         "id": "darvas_box_breakout",
         "strategy_id": "darvas_box_breakout",
@@ -800,6 +802,8 @@ _SCANNER_FEATURED_IDS = {
 def _scanner_family(strategy_id: str) -> str:
     """Keep board discovery labels deterministic without a second scanner registry."""
     value = strategy_id.lower()
+    if value == "qullamaggie_ep":
+        return "Earnings & gaps"
     if "rs" in value or value in {"weekly_rs", "rs", "rs_phase"}:
         return "Relative strength"
     if any(token in value for token in ("vcp", "tight", "inside", "cup", "double", "darvas", "wedg", "channel", "horizontal", "tlsupport")):
