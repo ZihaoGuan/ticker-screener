@@ -121,8 +121,19 @@ const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
 const BUILT_IN_LEADERSHIP_PRESET_ID = "built-in:leadership-trend";
 const BUILT_IN_ENTRY_CONFLUENCE_PRESET_ID = "built-in:entry-confluence";
 const BUILT_IN_RS_NEW_HIGH_CONFLUENCE_PRESET_ID = "built-in:rs-new-high-confluence";
+const BUILT_IN_MARTIN_FOCUS_PRESET_ID = "built-in:martin-focus-list";
 const BUILT_IN_TRADE_READINESS_PRESET_ID = "built-in:trade-readiness";
 const TRADE_READINESS_TOP_HITS_FILTERS: TopHitsFilterPreset = { ...DEFAULT_TOP_HITS_FILTERS, viewMode: "readiness" };
+const MARTIN_FOCUS_TOP_HITS_FILTERS: TopHitsFilterPreset = {
+  ...EMPTY_TOP_HITS_FILTERS,
+  sizePriceFloorOnly: true,
+  leaderRsOnly: true,
+  leaderRsMin: "90",
+  scannerGroups: [[
+    "weekly_candidate_pool", "best_winners", "qullamaggie", "one_year_winners", "trend_template", "daily_rs_new_high", "rs",
+  ]],
+  viewMode: "readiness",
+};
 const ENTRY_CONFLUENCE_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   ...DEFAULT_TOP_HITS_FILTERS,
   scannerGroups: [
@@ -145,6 +156,7 @@ const BUILT_IN_TOP_HITS_PRESETS: Record<string, { label: string; filters: TopHit
   [BUILT_IN_LEADERSHIP_PRESET_ID]: { label: "Leadership + Trend", filters: DEFAULT_TOP_HITS_FILTERS },
   [BUILT_IN_ENTRY_CONFLUENCE_PRESET_ID]: { label: "Momentum + Entry Confluence", filters: ENTRY_CONFLUENCE_TOP_HITS_FILTERS },
   [BUILT_IN_RS_NEW_HIGH_CONFLUENCE_PRESET_ID]: { label: "RS New High Confluence", filters: RS_NEW_HIGH_CONFLUENCE_TOP_HITS_FILTERS },
+  [BUILT_IN_MARTIN_FOCUS_PRESET_ID]: { label: "Martin Focus List", filters: MARTIN_FOCUS_TOP_HITS_FILTERS },
   [BUILT_IN_TRADE_READINESS_PRESET_ID]: { label: "Trade Readiness", filters: TRADE_READINESS_TOP_HITS_FILTERS },
 };
 

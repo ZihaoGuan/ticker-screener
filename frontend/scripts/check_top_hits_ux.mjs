@@ -62,6 +62,14 @@ try {
     /Qullamaggie[\s\S]*Weekly Candidate Pool[\s\S]*kai_s2[\s\S]*AND Group 2[\s\S]*one_year_winners/i,
     'Built-in scanner groups load by default',
   );
+  await page.getByLabel('Saved filter preset').selectOption('built-in:martin-focus-list');
+  assert.equal(await page.getByLabel('Saved filter preset').inputValue(), 'built-in:martin-focus-list');
+  assert.equal(await page.getByLabel('Minimum daily RS').inputValue(), '90');
+  assert.match(
+    await page.getByLabel('Scanner filter expression').innerText(),
+    /Group 1[\s\S]*Weekly Candidate Pool[\s\S]*Best Winners[\s\S]*Qullamaggie[\s\S]*one_year_winners[\s\S]*daily_rs_new_high[\s\S]*rs/i,
+    'Martin Focus List keeps one OR leadership group and does not require a pullback signal',
+  );
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
   await cells.first().waitFor();
   assert.equal(await cells.first().locator('a').count(), 3);
