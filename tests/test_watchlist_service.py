@@ -203,15 +203,38 @@ class WatchlistServiceTests(unittest.TestCase):
                 rows, as_of_date=index[-1].date()
             )
         self.assertEqual(rows["NVDA"]["adr_suitability"], "low")
+        self.assertIn("define a valid stop", rows["NVDA"]["adr_reason"])
         self.assertEqual(_trade_readiness(rows["NVDA"]), "leader")
+
+    def test_trade_readiness_low_adr_allows_tight_stop_but_rejects_stop_over_half_adr(self) -> None:
+        index = pd.bdate_range(end="2026-06-12", periods=14)
+        frame = pd.DataFrame({"Open": 100.0, "High": 101.48, "Low": 98.52, "Close": 100.0, "Volume": 1000}, index=index)
+        service = WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")
+        rows = {"TIGHT": {"trade_plan": {"state": "active", "reference_risk_pct": 1.4, "risk_valid": True}}}
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"TIGHT": frame}):
+            service._attach_trade_readiness_adr(rows, as_of_date=index[-1].date())
+        self.assertEqual(rows["TIGHT"]["adr14_pct"], 2.96)
+        self.assertEqual(rows["TIGHT"]["adr_suitability"], "low")
+        self.assertIn("Low ADR caution", rows["TIGHT"]["adr_reason"])
+        self.assertEqual(_trade_readiness(rows["TIGHT"]), "defined_risk")
+
+        rows = {"KNTK": {"trade_plan": {"state": "active", "reference_risk_pct": 2.91, "risk_valid": True}}}
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"KNTK": frame}):
+            service._attach_trade_readiness_adr(rows, as_of_date=index[-1].date())
+        self.assertEqual(rows["KNTK"]["adr14_pct"], 2.96)
+        self.assertEqual(rows["KNTK"]["adr_suitability"], "risk_failure")
+        self.assertIn("exceeds 1.48%", rows["KNTK"]["adr_reason"])
+        self.assertEqual(_trade_readiness(rows["KNTK"]), "reclaim_trigger")
 
     def test_guru_readiness_ranking_uses_adr_class_and_stop_to_adr_without_rewarding_highest_adr(self) -> None:
         rows = [
             {"ticker": "LOW", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "caution", "stop_to_adr": 0.5, "daily_rs_rating": 99},
+            {"ticker": "RISK FAILURE", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "risk_failure", "stop_to_adr": 0.5, "daily_rs_rating": 99},
+            {"ticker": "LOW ADR", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "low", "stop_to_adr": 0.5, "daily_rs_rating": 99},
             {"ticker": "HIGH", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "suitable", "adr14_pct": 18.0, "stop_to_adr": 0.9, "daily_rs_rating": 99},
             {"ticker": "MODERATE", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "suitable", "adr14_pct": 6.0, "stop_to_adr": 0.5, "daily_rs_rating": 99},
         ]
-        self.assertEqual([row["ticker"] for row in sorted(rows, key=_guru_row_sort_key)], ["MODERATE", "HIGH", "LOW"])
+        self.assertEqual([row["ticker"] for row in sorted(rows, key=_guru_row_sort_key)], ["MODERATE", "HIGH", "LOW", "LOW ADR", "RISK FAILURE"])
 
     def test_guru_candidate_receives_plan_from_separate_pullback_scanner_entry(self) -> None:
         cards = [

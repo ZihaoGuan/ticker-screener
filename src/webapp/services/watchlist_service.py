@@ -1674,10 +1674,12 @@ class WatchlistService:
             risk = _coerce_optional_float(plan.get("reference_risk_pct"))
             risk_cap = min(5.0, 0.5 * adr)
             stop_to_adr = risk / adr if risk is not None and adr > 0 else None
-            if adr < 3.0:
-                status, reason = "low", f"ADR14 {adr:.2f}% is below the 3% Martin-like minimum"
-            elif risk is not None and risk > risk_cap:
+            if risk is not None and risk > risk_cap:
                 status, reason = "risk_failure", f"planned stop {risk:.2f}% exceeds {risk_cap:.2f}% (min of 5% and half ADR14)"
+            elif adr < 3.0:
+                status = "low"
+                reason = f"Low ADR caution: ADR14 {adr:.2f}% is below the preferred 3% range; rank lower"
+                reason += f"; planned stop is within the {risk_cap:.2f}% half-ADR risk cap" if risk is not None else "; define a valid stop before entry"
             elif adr < 5.0:
                 status, reason = "caution", f"ADR14 {adr:.2f}% is 3–5%; suitable only with a very tight stop (at most {risk_cap:.2f}%)"
             else:
@@ -6110,7 +6112,7 @@ def _trade_readiness(row: dict[str, Any]) -> str:
     if plan.get("state") == "active":
         risk = _coerce_optional_float(plan.get("reference_risk_pct"))
         valid_risk = plan.get("risk_valid", risk is not None)
-        adr_allows_entry = adr_suitability not in {"low", "risk_failure"}
+        adr_allows_entry = adr_suitability != "risk_failure"
         return "defined_risk" if adr_allows_entry and valid_risk and risk is not None and math.isfinite(risk) and 0 < risk <= 5.0 else "reclaim_trigger"
     return "pullback_zone"
 
@@ -6118,7 +6120,7 @@ def _trade_readiness(row: dict[str, Any]) -> str:
 def _guru_row_sort_key(row: dict[str, Any]) -> tuple[int, int, float, int, int, float, str]:
     strike = row.get("strike_zone") if isinstance(row.get("strike_zone"), dict) else {}
     state_rank = {"active": 0, "ready": 1, "context": 2, "avoid": 3}.get(str(strike.get("state") or ""), 4)
-    adr_rank = {"suitable": 0, "caution": 1, "risk_failure": 2, "low": 3}.get(str(row.get("adr_suitability") or ""), 4)
+    adr_rank = {"suitable": 0, "caution": 1, "low": 2, "risk_failure": 3}.get(str(row.get("adr_suitability") or ""), 4)
     ratio = _coerce_optional_float(row.get("stop_to_adr"))
     ratio_distance = abs(ratio - 0.5) if ratio is not None else 1.0
     daily_rs = _coerce_optional_float(row.get("daily_rs_rating")) or 0.0

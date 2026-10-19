@@ -129,7 +129,7 @@ try {
   assert.match(await page.locator('.scanner-top-hit-chart-card .scanner-chart-card-details').first().innerText(), /My momentum/i);
   await page.getByRole('button', { name: 'List', exact: true }).click();
   await page.getByRole('button', { name: 'Trade Readiness', exact: true }).click();
-  await page.getByText('Plan Ready uses completed daily bars. Recheck the next-session price against Max Entry before placing an order.', { exact: true }).waitFor();
+  await page.getByText('Plan Ready uses completed daily bars. ADR14 below 3% ranks lower, but can qualify with a valid stop within half ADR and the 5% risk cap. Recheck the next-session price against Max Entry before placing an order.', { exact: true }).waitFor();
   assert.equal(await page.locator('.trade-readiness-lane.is-leader .trade-readiness-card').count(), 1, 'Known leader stays in its lane');
   assert.equal(await page.locator('.trade-readiness-lane.is-needs-data .trade-readiness-card').count(), 1, 'Missing readiness is isolated in Needs Data');
   assert.equal(await page.locator('.trade-readiness-lane.is-leader').getByText('UNKNOWN').count(), 0, 'Unknown readiness never defaults to Leader');
