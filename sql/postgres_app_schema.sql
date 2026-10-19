@@ -28,6 +28,30 @@ CREATE TABLE IF NOT EXISTS daily_bars (
   PRIMARY KEY (ticker, trade_date)
 );
 
+-- Isolated paper forward test state; never shares real portfolio or fixed-hold backtest rows.
+CREATE TABLE IF NOT EXISTS martin_forward_runs (
+  id BIGSERIAL PRIMARY KEY, strategy_id TEXT NOT NULL, session_date DATE NOT NULL,
+  source_run_id BIGINT NOT NULL, source_fingerprint TEXT NOT NULL, summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(strategy_id, session_date, source_fingerprint)
+);
+CREATE TABLE IF NOT EXISTS martin_forward_candidates (
+  id BIGSERIAL PRIMARY KEY, run_id BIGINT NOT NULL REFERENCES martin_forward_runs(id) ON DELETE CASCADE,
+  ticker TEXT NOT NULL, rank INTEGER NOT NULL, status TEXT NOT NULL, reasons_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb, UNIQUE(run_id, ticker)
+);
+CREATE TABLE IF NOT EXISTS martin_forward_positions (
+  id BIGSERIAL PRIMARY KEY, ticker TEXT NOT NULL, status TEXT NOT NULL, opened_on DATE,
+  closed_on DATE, payload_json JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_martin_forward_open_ticker ON martin_forward_positions(ticker) WHERE status = 'open';
+CREATE TABLE IF NOT EXISTS martin_forward_events (
+  id BIGSERIAL PRIMARY KEY, run_id BIGINT REFERENCES martin_forward_runs(id), position_id BIGINT REFERENCES martin_forward_positions(id),
+  ticker TEXT NOT NULL, event_type TEXT NOT NULL, event_date DATE NOT NULL, payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_martin_forward_event_idempotency
+  ON martin_forward_events(ticker, event_type, event_date, COALESCE(position_id, 0));
+
 ALTER TABLE daily_bars ALTER COLUMN open TYPE NUMERIC(24,6);
 ALTER TABLE daily_bars ALTER COLUMN high TYPE NUMERIC(24,6);
 ALTER TABLE daily_bars ALTER COLUMN low TYPE NUMERIC(24,6);

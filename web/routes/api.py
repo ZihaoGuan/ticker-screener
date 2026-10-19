@@ -34,6 +34,7 @@ from src.webapp.services.screener_history_service import ScreenerHistoryService
 from src.webapp.services.sector_leaderboard_service import SectorLeaderboardService
 from src.webapp.services.tiger_positions_service import TigerPositionsService
 from src.webapp.services.watchlist_service import WatchlistService
+from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from web.dependencies import (
     get_ad_hoc_screen_service,
     get_admin_service,
@@ -49,6 +50,7 @@ from web.dependencies import (
     get_earnings_calendar_service,
     get_my_picks_service,
     get_momentum_etf_portfolio_service,
+    get_martin_forward_repository,
     get_overlap_backtest_service,
     get_overlap_service,
     get_pair_trade_service,
@@ -972,6 +974,14 @@ def backtest_v1_detail(
     if payload is None:
         raise HTTPException(status_code=404, detail=f"Unknown backtest run: {run_id}")
     return JSONResponse(jsonable_encoder(payload))
+
+
+@router.get("/admin/martin-forward-test", response_class=JSONResponse)
+def martin_forward_test_context(
+    repository: MartinForwardTestRepository = Depends(get_martin_forward_repository),
+    _: Principal = Depends(require_manage_exclusions),
+) -> JSONResponse:
+    return JSONResponse(jsonable_encoder(repository.context()))
 
 
 @router.get("/rts-validation/latest", response_class=JSONResponse)

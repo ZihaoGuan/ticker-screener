@@ -363,6 +363,14 @@ class RunService:
                 _hold_periods_json_field,
             ),
         ),
+        "run_martin_forward_test": RunAction(
+            "run_martin_forward_test",
+            "Run Martin Focus Forward Test",
+            "scripts/run_martin_forward_test.py",
+            supports_limit=False,
+            fields=(_as_of_date_field,),
+            visible_in_runs=False,
+        ),
         "rts_validation": RunAction(
             "rts_validation",
             "Validate Relative Trend Strength",
@@ -3916,7 +3924,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1", "rts_validation"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "refresh_split_adjusted_history", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "sync_tiger_positions", "refresh_sector_etf_holdings", "refresh_momentum_etf_holdings", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach", "build_scanner_top_hits_snapshot", "build_dashboard_market_health_snapshot", "build_relative_trend_strength"}:
+        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "refresh_split_adjusted_history", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "sync_tiger_positions", "refresh_sector_etf_holdings", "refresh_momentum_etf_holdings", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach", "build_scanner_top_hits_snapshot", "run_martin_forward_test", "build_dashboard_market_health_snapshot", "build_relative_trend_strength"}:
             return "admin_sync"
         return "screen_run"
 
@@ -3950,7 +3958,7 @@ class RunService:
             self._notify_completed_job(job)
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "refresh_split_adjusted_history", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "sync_tiger_positions", "refresh_sector_etf_holdings", "refresh_momentum_etf_holdings", "overlap_backtest_v1", "rts_validation", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach", "build_scanner_top_hits_snapshot", "build_dashboard_market_health_snapshot", "build_relative_trend_strength"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "refresh_split_adjusted_history", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "sync_tiger_positions", "refresh_sector_etf_holdings", "refresh_momentum_etf_holdings", "overlap_backtest_v1", "rts_validation", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach", "build_scanner_top_hits_snapshot", "run_martin_forward_test", "build_dashboard_market_health_snapshot", "build_relative_trend_strength"}:
             self._notify_completed_job(job)
             return
         summary_file = str(job.get("summary_file") or "").strip()

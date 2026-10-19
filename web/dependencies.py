@@ -15,6 +15,7 @@ from src.webapp.access_control import (
 )
 from src.webapp.config import PROJECT_ROOT, load_webapp_config
 from src.webapp.repositories.auth_repository import AuthRepository
+from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.repositories.audit_repository import AuditRepository
 from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.admin_service import AdminService
@@ -100,6 +101,10 @@ def get_overlap_service() -> OverlapService:
 
 def get_overlap_backtest_service() -> OverlapBacktestService:
     return OverlapBacktestService(database_url=config.database_url, artifacts_dir=config.artifacts_dir)
+
+
+def get_martin_forward_repository() -> MartinForwardTestRepository:
+    return MartinForwardTestRepository(database_url=config.database_url)
 
 
 def get_pair_trade_service() -> PairTradeService:

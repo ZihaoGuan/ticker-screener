@@ -61,6 +61,7 @@ const RatingsPage = lazyPage(() => import("./pages/RatingsPage"), "RatingsPage")
 const RunsPage = lazyPage(() => import("./pages/RunsPage"), "RunsPage");
 const WarmupPage = lazyPage(() => import("./pages/WarmupPage"), "WarmupPage");
 const BacktestsPage = lazyPage(() => import("./pages/BacktestsPage"), "BacktestsPage");
+const MartinForwardTestPage = lazyPage(() => import("./pages/MartinForwardTestPage"), "default");
 const WeeklyWatchlistPage = lazyPage(() => import("./pages/WeeklyWatchlistPage"), "WeeklyWatchlistPage");
 const WatchlistsPage = lazyPage(() => import("./pages/WatchlistsPage"), "WatchlistsPage");
 const PairTradesPage = lazyPage(() => import("./pages/PairTradesPage"), "PairTradesPage");
@@ -167,6 +168,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/backtests/martin-forward" element={<ProtectedRoute allowedRoles={["admin"]}><MartinForwardTestPage /></ProtectedRoute>} />
           <Route path="/runs" element={<Navigate to="/screeners" replace />} />
           <Route
             path="/watchlists/weekly"

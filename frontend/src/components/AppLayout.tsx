@@ -21,6 +21,7 @@ const navItems = [
   { to: "/screeners", label: "Screeners", icon: "N", roles: ["admin"] as RoleName[], capability: "run_screeners" as CapabilityName },
   { to: "/warmup", label: "Warmup", icon: "U", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
   { to: "/backtests", label: "Backtests", icon: "B", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
+  { to: "/backtests/martin-forward", label: "Martin Forward Test", icon: "M", roles: ["admin"] as RoleName[], expo: true, capability: "run_screeners" as CapabilityName },
   { to: "/portfolio", label: "Portfolio", icon: "F", roles: ["admin"] as RoleName[], expo: true, capability: "manage_exclusions" as CapabilityName },
   { to: "/tiger-positions", label: "Tiger", icon: "I", roles: ["premium", "admin"] as RoleName[] },
   { to: "/admin", label: "Admin", icon: "A", capability: "manage_exclusions" as CapabilityName },
