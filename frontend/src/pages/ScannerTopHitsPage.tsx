@@ -1809,11 +1809,12 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
   const renderCard = (row: ScannerTopHitRow, showStage = false) => {
     const plan = row.trade_plan;
     const isAvoided = row.trade_readiness === "avoid";
-    const isPlanReady = row.trade_readiness === "defined_risk";
-    const management = isPlanReady && plan ? calculateTradeManagement(plan.trigger_price, plan.stop_price, managementPreset) : null;
-    const validPlanLevels = Boolean(plan && plan.risk_valid && plan.risk_status === "within_limit"
-      && typeof plan.trigger_price === "number" && Number.isFinite(plan.trigger_price) && plan.trigger_price > 0
-      && typeof plan.stop_price === "number" && Number.isFinite(plan.stop_price) && plan.stop_price > 0 && plan.trigger_price > plan.stop_price);
+    const management = !isAvoided && plan ? calculateTradeManagement(plan.trigger_price, plan.stop_price, managementPreset) : null;
+    const sizeParams = new URLSearchParams({ ticker: row.ticker, management: managementPreset, source: "top-hits" });
+    if (typeof plan?.trigger_price === "number" && Number.isFinite(plan.trigger_price) && plan.trigger_price > 0) sizeParams.set("entry", String(plan.trigger_price));
+    if (typeof plan?.stop_price === "number" && Number.isFinite(plan.stop_price) && plan.stop_price > 0) sizeParams.set("stop", String(plan.stop_price));
+    if (typeof plan?.max_entry_price === "number" && Number.isFinite(plan.max_entry_price) && plan.max_entry_price > 0) sizeParams.set("maxEntry", String(plan.max_entry_price));
+    if (plan?.signal_date) sizeParams.set("signalDate", plan.signal_date);
     const avoidReasons = [
       row.strike_zone?.state === "avoid" ? "Strike Zone says avoid" : null,
       row.pullback_quality?.state === "failed" ? "pullback quality failed" : null,
@@ -1843,12 +1844,14 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
         <span>Martin-like suitability <strong>{row.adr_suitability || "Needs data"}</strong></span>
         {row.adr_reason ? <p>{row.adr_reason}</p> : null}
       </div>
-      {management ? <div className="trade-readiness-management">
-        {management.targets.map((target) => <span key={target.label}><b>{target.label} · {target.rMultiple}R · sell {typeof target.sellPercent === "number" ? `${target.sellPercent}%` : target.sellPercent}</b><strong>${target.price.toFixed(2)}</strong></span>)}
-        <p>{management.preset === "martin" ? "Trim 10–15% at T1; trail the remainder using daily EMA9." : "Sell 33% at T1 and 33% at T2; trail the 34% runner using daily EMA9."}</p>
-        <p>Hypothetical targets from the planned trigger and stop. Recalculate from your actual fill; enter next session only at or below Max Entry.</p>
+      {!isAvoided ? <div className={`trade-readiness-management${management ? "" : " is-unavailable"}`}>
+        {management ? <>
+          {management.targets.map((target) => <span key={target.label}><b>{target.label} · {target.rMultiple}R · sell {typeof target.sellPercent === "number" ? `${target.sellPercent}%` : target.sellPercent}</b><strong>${target.price.toFixed(2)}</strong></span>)}
+          <p>{management.preset === "martin" ? "Trim 10–15% at T1; trail the remainder using daily EMA9." : "Sell 33% at T1 and 33% at T2; trail the 34% runner using daily EMA9."}</p>
+          <p>Hypothetical targets from the planned trigger and stop. Recalculate from your actual fill; enter next session only at or below Max Entry.</p>
+        </> : <><span><b>Management targets</b><strong>Needs valid entry + stop</strong></span><p>Use the Position Calculator to complete or correct the planning levels.</p></>}
       </div> : null}
-      {isPlanReady && validPlanLevels && management && plan ? <Link className="ghost-button trade-readiness-size" aria-label={`Size ${row.ticker} position`} to={`/position-calculator?${new URLSearchParams({ ticker: row.ticker, entry: String(plan.trigger_price), stop: String(plan.stop_price), ...(typeof plan.max_entry_price === "number" && Number.isFinite(plan.max_entry_price) && plan.max_entry_price > 0 ? { maxEntry: String(plan.max_entry_price) } : {}), ...(plan.signal_date ? { signalDate: plan.signal_date } : {}), management: managementPreset, source: "top-hits" }).toString()}`}>Size position</Link> : null}
+      {!isAvoided ? <Link className="ghost-button trade-readiness-size" aria-label={`Size ${row.ticker} position`} to={`/position-calculator?${sizeParams.toString()}`}>Size position</Link> : null}
       <details className="trade-readiness-evidence"><summary>Candidate evidence</summary><div className="trade-readiness-meta">
         <span>RS {row.daily_rs_rating == null ? "--" : Math.round(row.daily_rs_rating)}</span><span>{row.stage_analysis?.alias || "Stage --"}</span>
         <span>Pullback {row.pullback_quality ? `${row.pullback_quality.score} · ${row.pullback_quality.state}` : "--"}</span><span>Strike {row.strike_zone?.score ?? "--"}</span>
