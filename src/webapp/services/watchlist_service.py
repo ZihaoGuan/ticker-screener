@@ -1672,18 +1672,19 @@ class WatchlistService:
             adr = float(ranges.mean())
             plan = row.get("trade_plan") if isinstance(row.get("trade_plan"), dict) else {}
             risk = _coerce_optional_float(plan.get("reference_risk_pct"))
-            risk_cap = min(5.0, 0.5 * adr)
             stop_to_adr = risk / adr if risk is not None and adr > 0 else None
-            if risk is not None and risk > risk_cap:
-                status, reason = "risk_failure", f"planned stop {risk:.2f}% exceeds {risk_cap:.2f}% (min of 5% and half ADR14)"
+            if risk is not None and risk > 5.0:
+                status, reason = "risk_failure", f"planned stop {risk:.2f}% exceeds the 5.00% maximum risk limit"
             elif adr < 3.0:
                 status = "low"
                 reason = f"Low ADR caution: ADR14 {adr:.2f}% is below the preferred 3% range; rank lower"
-                reason += f"; planned stop is within the {risk_cap:.2f}% half-ADR risk cap" if risk is not None else "; define a valid stop before entry"
+                reason += f"; stop is {stop_to_adr:.2f}× ADR14 (preferred at or below 0.50×)" if stop_to_adr is not None else "; define a valid stop before entry"
             elif adr < 5.0:
-                status, reason = "caution", f"ADR14 {adr:.2f}% is 3–5%; suitable only with a very tight stop (at most {risk_cap:.2f}%)"
+                status = "wide_stop" if stop_to_adr is not None and stop_to_adr > 0.5 else "caution"
+                reason = f"Wide stop caution: planned stop is {stop_to_adr:.2f}× ADR14; half ADR is preferred" if status == "wide_stop" else f"ADR14 {adr:.2f}% is 3–5%; half ADR or tighter is preferred"
             else:
-                status, reason = "suitable", f"ADR14 {adr:.2f}% meets the preferred 5%+ range; stop is within the volatility risk cap" if risk is not None else "ADR14 meets the preferred 5%+ range; define a stop"
+                status = "wide_stop" if stop_to_adr is not None and stop_to_adr > 0.5 else "suitable"
+                reason = f"Wide stop caution: planned stop is {stop_to_adr:.2f}× ADR14; half ADR is preferred" if status == "wide_stop" else f"ADR14 {adr:.2f}% meets the preferred 5%+ range; stop is at or below half ADR" if risk is not None else "ADR14 meets the preferred 5%+ range; define a stop"
             row["adr14_pct"] = round(adr, 2)
             row["stop_to_adr"] = round(stop_to_adr, 2) if stop_to_adr is not None else None
             row["adr_suitability"] = status
@@ -6120,7 +6121,7 @@ def _trade_readiness(row: dict[str, Any]) -> str:
 def _guru_row_sort_key(row: dict[str, Any]) -> tuple[int, int, float, int, int, float, str]:
     strike = row.get("strike_zone") if isinstance(row.get("strike_zone"), dict) else {}
     state_rank = {"active": 0, "ready": 1, "context": 2, "avoid": 3}.get(str(strike.get("state") or ""), 4)
-    adr_rank = {"suitable": 0, "caution": 1, "low": 2, "risk_failure": 3}.get(str(row.get("adr_suitability") or ""), 4)
+    adr_rank = {"suitable": 0, "caution": 1, "low": 2, "wide_stop": 3, "risk_failure": 4}.get(str(row.get("adr_suitability") or ""), 5)
     ratio = _coerce_optional_float(row.get("stop_to_adr"))
     ratio_distance = abs(ratio - 0.5) if ratio is not None else 1.0
     daily_rs = _coerce_optional_float(row.get("daily_rs_rating")) or 0.0

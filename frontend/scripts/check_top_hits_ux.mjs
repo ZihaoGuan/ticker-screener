@@ -20,6 +20,7 @@ try {
     { ...row, ticker: 'LEAD', trade_readiness: 'leader', daily_rs_rating: 80 },
     { ...row, ticker: 'TRIG', sector: 'Industrials', trade_readiness: 'reclaim_trigger', daily_rs_rating: 90, trade_plan: plan() },
     { ...row, ticker: 'READY', trade_readiness: 'defined_risk', daily_rs_rating: 95, trade_plan: plan(2, { state: 'active' }) },
+    { ...row, ticker: 'WIDE', day_close: 106, trade_readiness: 'defined_risk', daily_rs_rating: 93, adr14_pct: 4, stop_to_adr: 0.8, adr_suitability: 'wide_stop', adr_reason: 'Wide stop caution: planned stop is 0.80× ADR14; half ADR is preferred', trade_plan: plan(3.2, { state: 'active' }) },
     { ...row, ticker: 'BAD3R', trade_readiness: 'defined_risk', daily_rs_rating: 94, trade_plan: plan(2, { state: 'active', trigger_price: 95, stop_price: 95, risk_valid: false, risk_status: 'invalid_levels' }) },
     { ...row, ticker: 'OVER', sector: 'Health Care', day_close: 106, trade_readiness: 'defined_risk', trade_plan: plan(6, { state: 'active' }) },
     { ...row, ticker: 'RISK', trade_readiness: 'pullback_zone', daily_rs_rating: 70, trade_plan: plan(6) },
@@ -129,9 +130,10 @@ try {
   assert.match(await page.locator('.scanner-top-hit-chart-card .scanner-chart-card-details').first().innerText(), /My momentum/i);
   await page.getByRole('button', { name: 'List', exact: true }).click();
   await page.getByRole('button', { name: 'Trade Readiness', exact: true }).click();
-  await page.getByText('Plan Ready uses completed daily bars. ADR14 below 3% ranks lower, but can qualify with a valid stop within half ADR and the 5% risk cap. Recheck the next-session price against Max Entry before placing an order.', { exact: true }).waitFor();
+  await page.getByText('Plan Ready means daily levels define risk within 5%; it is not a buy recommendation. A stop at or below half ADR is preferred, while a wider stop needs caution. ADR14 below 3% ranks lower. Check actual fill, position size, and next-session price against Max Entry before placing an order.', { exact: true }).waitFor();
   assert.equal(await page.locator('.trade-readiness-lane.is-leader .trade-readiness-card').count(), 1, 'Known leader stays in its lane');
   assert.equal(await page.locator('.trade-readiness-lane.is-needs-data .trade-readiness-card').count(), 1, 'Missing readiness is isolated in Needs Data');
+  assert.match(await page.getByRole('article', { name: 'UNKNOWN trade candidate' }).locator('.trade-readiness-adr').innerText(), /Martin-like volatility fit\s+Unverified/, 'Missing ADR is visibly unverified rather than passed');
   assert.equal(await page.locator('.trade-readiness-lane.is-leader').getByText('UNKNOWN').count(), 0, 'Unknown readiness never defaults to Leader');
   assert.equal(await page.locator('.trade-readiness-lane.is-support .trade-readiness-card').count(), 8, 'Support lane starts with eight cards');
   await page.locator('.trade-readiness-lane.is-support').getByRole('button', { name: 'Show 8 more (3 remaining)' }).click();
@@ -160,7 +162,10 @@ try {
   await page.getByLabel('Filter by entry status').selectOption('all');
   const readyCard = page.getByRole('article', { name: 'READY trade candidate' });
   assert.equal(await readyCard.locator('.trade-readiness-card-badges .guru-sector-tag').innerText(), 'Technology', 'Sector is visible without expanding candidate evidence');
-  assert.match(await readyCard.locator('.trade-readiness-eligibility').innerText(), /Within max entry · daily trigger confirmed/, 'Eligible label requires active daily confirmation as well as acceptable price');
+  assert.match(await readyCard.locator('.trade-readiness-eligibility').innerText(), /Within max entry · plan valid, not a buy signal/, 'Price eligibility does not present the plan as an automatic buy');
+  const wideCard = page.getByRole('article', { name: 'WIDE trade candidate' });
+  assert.equal(await page.locator('.trade-readiness-lane.is-plan-ready').getByRole('article', { name: 'WIDE trade candidate' }).count(), 1, 'Wide stop stays in Plan Ready');
+  assert.match(await wideCard.locator('.trade-readiness-adr').innerText(), /Wide stop caution[\s\S]*half ADR is preferred/, 'Wide stop stays plan ready with an explicit ADR caution');
   assert.match(await page.getByRole('article', { name: 'TRIG trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /Waiting for daily trigger/, 'Acceptable price alone does not imply entry');
   assert.match(await page.getByRole('article', { name: 'OVER trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /Extended · do not chase/);
   const entryStatusFilter = page.getByLabel('Filter by entry status');
@@ -168,7 +173,7 @@ try {
   await entryStatusFilter.selectOption('within_max');
   assert.equal(await page.locator('.trade-readiness-card').count(), 1, 'Within max status keeps only price eligible candidates with confirmed daily triggers');
   await entryStatusFilter.selectOption('extended');
-  assert.deepEqual(await page.locator('.trade-readiness-card').allTextContents().then(values => values.map(value => value.match(/^[A-Z0-9]+/)?.[0])), ['OVER'], 'Extended status isolates do-not-chase candidates');
+  assert.deepEqual(await page.locator('.trade-readiness-card').allTextContents().then(values => values.map(value => value.match(/^[A-Z0-9]+/)?.[0])), ['WIDE', 'OVER'], 'Extended status isolates do-not-chase candidates');
   await entryStatusFilter.selectOption('waiting_trigger');
   assert.ok(await page.locator('.trade-readiness-card').count() > 1, 'Waiting status includes candidates that still need a daily trigger');
   await entryStatusFilter.selectOption('unavailable');
@@ -177,7 +182,7 @@ try {
   await entryStatusFilter.selectOption('all');
   const readinessFilter = page.getByLabel('Filter by readiness stage');
   await readinessFilter.selectOption('defined_risk');
-  assert.equal(await page.locator('.trade-readiness-card').count(), 3, 'Readiness filter isolates Plan Ready candidates');
+  assert.equal(await page.locator('.trade-readiness-card').count(), 4, 'Readiness filter isolates Plan Ready candidates');
   await readinessFilter.selectOption('needs-data');
   assert.equal(await page.locator('.trade-readiness-card').count(), 1, 'Readiness filter isolates unrecognized stages as Needs Data');
   await readinessFilter.selectOption('all');

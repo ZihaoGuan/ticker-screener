@@ -379,7 +379,7 @@ export type ScannerTopHitRow = {
   trade_readiness?: "leader" | "pullback_zone" | "reclaim_trigger" | "defined_risk" | "avoid" | string;
   adr14_pct?: number | null;
   stop_to_adr?: number | null;
-  adr_suitability?: "suitable" | "caution" | "low" | "risk_failure" | string;
+  adr_suitability?: "suitable" | "caution" | "low" | "wide_stop" | "risk_failure" | string;
   adr_reason?: string | null;
 };
 

@@ -162,7 +162,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertIsNone(newest_active["trigger_price"])
         self.assertIsNone(newest_active["support_price"])
 
-    def test_trade_readiness_adr14_rejects_wide_stop_against_low_adr(self) -> None:
+    def test_trade_readiness_adr14_keeps_five_percent_plan_ready_with_wide_stop_caution(self) -> None:
         index = pd.bdate_range(end="2026-06-12", periods=14)
         frame = pd.DataFrame({"Open": 100.0, "High": 101.5, "Low": 98.5, "Close": 100.0, "Volume": 1000}, index=index)
         rows = {"NVDA": {"trade_plan": {"state": "active", "reference_risk_pct": 4.0, "risk_valid": True}}}
@@ -172,11 +172,21 @@ class WatchlistServiceTests(unittest.TestCase):
             )
         self.assertEqual(rows["NVDA"]["adr14_pct"], 3.0)
         self.assertEqual(rows["NVDA"]["stop_to_adr"], 1.33)
+        self.assertEqual(rows["NVDA"]["adr_suitability"], "wide_stop")
+        self.assertIn("half ADR is preferred", rows["NVDA"]["adr_reason"])
+        self.assertEqual(_trade_readiness(rows["NVDA"]), "defined_risk")
+
+        rows["NVDA"]["trade_plan"]["reference_risk_pct"] = 5.1
+        rows["NVDA"]["trade_plan"]["risk_valid"] = False
+        with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"NVDA": frame}):
+            WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")._attach_trade_readiness_adr(
+                rows, as_of_date=index[-1].date()
+            )
         self.assertEqual(rows["NVDA"]["adr_suitability"], "risk_failure")
-        self.assertIn("exceeds 1.50%", rows["NVDA"]["adr_reason"])
+        self.assertIn("exceeds the 5.00%", rows["NVDA"]["adr_reason"])
         self.assertEqual(_trade_readiness(rows["NVDA"]), "reclaim_trigger")
 
-    def test_trade_readiness_adr14_caution_requires_half_adr_stop(self) -> None:
+    def test_trade_readiness_adr14_wide_stop_is_caution_but_plan_ready(self) -> None:
         index = pd.bdate_range(end="2026-06-12", periods=14)
         frame = pd.DataFrame({"Open": 100.0, "High": 102.0, "Low": 98.0, "Close": 100.0, "Volume": 1000}, index=index)
         rows = {"NVDA": {"trade_plan": {"state": "active", "reference_risk_pct": 1.5, "risk_valid": True}}}
@@ -192,7 +202,9 @@ class WatchlistServiceTests(unittest.TestCase):
             WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")._attach_trade_readiness_adr(
                 rows, as_of_date=index[-1].date()
             )
-        self.assertEqual(_trade_readiness(rows["NVDA"]), "reclaim_trigger")
+        self.assertEqual(rows["NVDA"]["adr_suitability"], "wide_stop")
+        self.assertIn("half ADR is preferred", rows["NVDA"]["adr_reason"])
+        self.assertEqual(_trade_readiness(rows["NVDA"]), "defined_risk")
 
     def test_trade_readiness_low_adr_keeps_unplanned_leader_on_watchlist(self) -> None:
         index = pd.bdate_range(end="2026-06-12", periods=14)
@@ -206,7 +218,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertIn("define a valid stop", rows["NVDA"]["adr_reason"])
         self.assertEqual(_trade_readiness(rows["NVDA"]), "leader")
 
-    def test_trade_readiness_low_adr_allows_tight_stop_but_rejects_stop_over_half_adr(self) -> None:
+    def test_trade_readiness_low_adr_allows_valid_stops_over_half_adr_with_caution(self) -> None:
         index = pd.bdate_range(end="2026-06-12", periods=14)
         frame = pd.DataFrame({"Open": 100.0, "High": 101.48, "Low": 98.52, "Close": 100.0, "Volume": 1000}, index=index)
         service = WatchlistService(artifacts_dir=Path(tempfile.gettempdir()), database_url="postgres://example")
@@ -222,19 +234,20 @@ class WatchlistServiceTests(unittest.TestCase):
         with patch("src.webapp.services.watchlist_service.load_many_ticker_windows_for_range", return_value={"KNTK": frame}):
             service._attach_trade_readiness_adr(rows, as_of_date=index[-1].date())
         self.assertEqual(rows["KNTK"]["adr14_pct"], 2.96)
-        self.assertEqual(rows["KNTK"]["adr_suitability"], "risk_failure")
-        self.assertIn("exceeds 1.48%", rows["KNTK"]["adr_reason"])
-        self.assertEqual(_trade_readiness(rows["KNTK"]), "reclaim_trigger")
+        self.assertEqual(rows["KNTK"]["adr_suitability"], "low")
+        self.assertIn("preferred at or below 0.50×", rows["KNTK"]["adr_reason"])
+        self.assertEqual(_trade_readiness(rows["KNTK"]), "defined_risk")
 
     def test_guru_readiness_ranking_uses_adr_class_and_stop_to_adr_without_rewarding_highest_adr(self) -> None:
         rows = [
             {"ticker": "LOW", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "caution", "stop_to_adr": 0.5, "daily_rs_rating": 99},
             {"ticker": "RISK FAILURE", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "risk_failure", "stop_to_adr": 0.5, "daily_rs_rating": 99},
+            {"ticker": "WIDE STOP", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "wide_stop", "stop_to_adr": 1.0, "daily_rs_rating": 99},
             {"ticker": "LOW ADR", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "low", "stop_to_adr": 0.5, "daily_rs_rating": 99},
             {"ticker": "HIGH", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "suitable", "adr14_pct": 18.0, "stop_to_adr": 0.9, "daily_rs_rating": 99},
             {"ticker": "MODERATE", "strike_zone": {"state": "ready", "score": 10}, "adr_suitability": "suitable", "adr14_pct": 6.0, "stop_to_adr": 0.5, "daily_rs_rating": 99},
         ]
-        self.assertEqual([row["ticker"] for row in sorted(rows, key=_guru_row_sort_key)], ["MODERATE", "HIGH", "LOW", "LOW ADR", "RISK FAILURE"])
+        self.assertEqual([row["ticker"] for row in sorted(rows, key=_guru_row_sort_key)], ["MODERATE", "HIGH", "LOW", "LOW ADR", "WIDE STOP", "RISK FAILURE"])
 
     def test_guru_candidate_receives_plan_from_separate_pullback_scanner_entry(self) -> None:
         cards = [
