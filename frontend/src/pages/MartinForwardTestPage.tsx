@@ -63,7 +63,7 @@ export default function MartinForwardTestPage() {
             }}>{item === "today" ? "Today" : item === "positions" ? "Positions" : "Performance"}</button>)}
         </nav>
         {summary.partial ? <p className="martin-inline-state" role="status">Partial session: market bars were unavailable for {format(object(summary.action_counts).missing_bars)} pending orders or open positions.</p> : null}
-        {view === "today" ? <Today book={book!} candidates={candidateRows} attention={attention} pending={pending} /> : null}
+        {view === "today" ? <Today key={bookKey} book={book!} bookLabel={bookKey === "account" ? "Account book" : "Sector opportunity"} candidates={candidateRows} attention={attention} /> : null}
         {view === "positions" ? <Positions positions={positionRows} filter={filter} setFilter={setFilter} expanded={expanded} setExpanded={setExpanded} /> : null}
         {view === "performance" ? <Performance book={book!} books={data.books} /> : null}
         <details className="martin-audit"><summary>Data &amp; audit</summary>
@@ -77,20 +77,33 @@ export default function MartinForwardTestPage() {
   </main>;
 }
 
-function Today({ book, candidates, attention, pending }: { book: MartinForwardBook; candidates: MartinForwardRow[]; attention: MartinForwardRow[]; pending: number }) {
+function Today({ book, bookLabel, candidates, attention }: { book: MartinForwardBook; bookLabel: string; candidates: MartinForwardRow[]; attention: MartinForwardRow[] }) {
+  type LifecycleGroup = "selected" | "pending" | "open" | "closed" | "all";
+  const selected = candidates.filter(isSelected);
+  const pendingRows = candidates.filter((row) => row.status === "pending");
+  const openRows = book.positions.filter((row) => row.status === "open");
+  const closedRows = book.positions.filter((row) => row.status === "closed");
+  const defaultGroup: LifecycleGroup = pendingRows.length ? "pending" : selected.length ? "selected" : openRows.length ? "open" : "closed";
+  const [activeGroup, setActiveGroup] = useState<LifecycleGroup>(defaultGroup);
   const [detailTicker, setDetailTicker] = useState<string | null>(null);
-  const open = book.positions.filter((row) => row.status === "open").length;
+  const rows = activeGroup === "all" ? candidates : activeGroup === "selected" ? selected : activeGroup === "pending" ? pendingRows : [];
+  const groupLabel = activeGroup === "all" ? "All candidates" : activeGroup[0].toUpperCase() + activeGroup.slice(1);
   return <div className="martin-view">
     <section className="martin-lifecycle" aria-label="Session lifecycle">
-      {[{ label: "Selected", value: candidates.filter(isSelected).length }, { label: "Pending", value: pending }, { label: "Open", value: open }, { label: "Closed", value: book.metrics.closed_count ?? 0 }].map((item) => <div key={item.label}><span>{item.label}</span><strong>{String(item.value)}</strong></div>)}
+      {[{ group: "selected" as const, label: "Selected", value: selected.length }, { group: "pending" as const, label: "Pending", value: pendingRows.length }, { group: "open" as const, label: "Open", value: openRows.length }, { group: "closed" as const, label: "Closed", value: closedRows.length }].map((item) => <button type="button" className="martin-lifecycle-card" key={item.label} aria-pressed={activeGroup === item.group} onClick={() => { setActiveGroup(item.group); setDetailTicker(null); }}><span>{item.label}</span><strong>{String(item.value)}</strong></button>)}
     </section>
+    <p className="martin-lifecycle-note">Selected is the session selection; Pending is its order status and may be a subset of Selected.</p>
     <section className="martin-panel"><div className="martin-panel-heading"><div><h2>Needs attention</h2><p>Blocked candidates and order failures that need review</p></div><strong>{attention.length}</strong></div>
       {attention.length ? <SimpleTable rows={attention} columns={["ticker", "status", "reasons", "sector", "sector_quadrant"]} /> : <p className="martin-empty">No candidate exceptions in this snapshot.</p>}
     </section>
-    <section className="martin-panel"><div className="martin-panel-heading"><div><h2>Candidate funnel</h2><p>Snapshot rank and persisted sector evidence</p></div></div>
-      {candidates.length ? <div className="martin-table-wrap"><table><thead><tr>{["ticker", "tier", "sector", "quadrant", "status", "trigger", "max entry", "stop", "risk / ADR", "size", "next action", "details"].map((label) => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>{candidates.map((row, index) => { const key = String(row.ticker ?? index); return <><tr key={key}><th scope="row">{String(row.ticker ?? "—")}</th><td>{format(row.selection_tier ?? (isSelected(row) ? "Selected" : null))}</td><td>{format(row.sector)}</td><td>{format(row.sector_quadrant)}</td><td>{format(row.status)}</td><td>{formatPrice(row.entry)}</td><td>{formatPrice(row.max_entry)}</td><td>{formatPrice(row.stop)}</td><td>{riskAdr(row)}</td><td>{format(row.shares)}</td><td>{candidateAction(row)}</td><td><button type="button" aria-expanded={detailTicker === key} onClick={() => setDetailTicker(detailTicker === key ? null : key)}>{detailTicker === key ? "Hide" : "View"}</button></td></tr>{detailTicker === key ? <tr key={`${key}-details`}><td colSpan={12}><dl className="martin-details">{["reasons", "limit_price", "risk_dollars", "allocation_dollars", "adr14_pct", "adr_suitability", "stop_to_adr", "strike_score", "scanner_count", "selection_metadata"].map((field) => <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{format(row[field])}</dd></div>)}</dl></td></tr> : null}</>; })}</tbody></table></div> : <p className="martin-empty">No candidates in the latest snapshot.</p>}
+    <section className="martin-panel"><div className="martin-panel-heading"><div><h2>{bookLabel} · {activeGroup === "open" || activeGroup === "closed" ? `${groupLabel} positions` : `${groupLabel} candidates`}</h2><p>{activeGroup === "selected" || activeGroup === "pending" ? "Snapshot rank and persisted sector evidence" : activeGroup === "all" ? "Full candidate audit list" : "Position outcomes and exposure"}</p></div>{activeGroup !== "all" ? <button type="button" onClick={() => { setActiveGroup("all"); setDetailTicker(null); }}>All candidates</button> : null}</div>
+      {activeGroup === "open" || activeGroup === "closed" ? <TodayPositions rows={activeGroup === "open" ? openRows : closedRows} group={activeGroup} /> : rows.length ? <div className="martin-table-wrap"><table><thead><tr>{["ticker", "tier", "sector", "quadrant", "status", "trigger", "max entry", "stop", "risk / ADR", "size", "next action", "details"].map((label) => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>{rows.map((row, index) => { const key = String(row.ticker ?? index); return <><tr key={key}><th scope="row">{String(row.ticker ?? "—")}</th><td>{format(row.selection_tier ?? (isSelected(row) ? "Selected" : null))}</td><td>{format(row.sector)}</td><td>{format(row.sector_quadrant)}</td><td>{format(row.status)}</td><td>{formatPrice(row.entry)}</td><td>{formatPrice(row.max_entry)}</td><td>{formatPrice(row.stop)}</td><td>{riskAdr(row)}</td><td>{format(row.shares)}</td><td>{candidateAction(row)}</td><td><button type="button" aria-expanded={detailTicker === key} onClick={() => setDetailTicker(detailTicker === key ? null : key)}>{detailTicker === key ? "Hide" : "View"}</button></td></tr>{detailTicker === key ? <tr key={`${key}-details`}><td colSpan={12}><dl className="martin-details">{["reasons", "limit_price", "risk_dollars", "allocation_dollars", "adr14_pct", "adr_suitability", "stop_to_adr", "strike_score", "scanner_count", "selection_metadata"].map((field) => <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{format(row[field])}</dd></div>)}</dl></td></tr> : null}</>; })}</tbody></table></div> : <p className="martin-empty">{activeGroup === "all" ? "No candidates in the latest snapshot." : activeGroup === "selected" ? "No candidates are selected for this session." : "No candidate orders are pending in this book."}</p>}
     </section>
   </div>;
+}
+
+function TodayPositions({ rows, group }: { rows: MartinForwardRow[]; group: "open" | "closed" }) {
+  return rows.length ? <div className="martin-position-list">{rows.map((raw, index) => { const row = unpack(raw); return <article className="martin-position" key={String(raw.id ?? raw.ticker ?? index)}><strong>{String(raw.ticker ?? "—")}</strong><span> · {String(raw.status ?? "—")}</span><dl className="martin-details">{["opened_on", "entry_price", "stop", "remaining_shares", "exit_price", "exit_type", "realized_r", "realized_pnl"].map((field) => <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{format(row[field])}</dd></div>)}</dl></article>; })}</div> : <p className="martin-empty">{group === "open" ? "No simulated entries have filled yet. Pending orders are evaluated against the next completed session." : "No simulated positions have closed yet."}</p>;
 }
 
 function Positions({ positions, filter, setFilter, expanded, setExpanded }: { positions: MartinForwardRow[]; filter: string; setFilter: (value: string) => void; expanded: string | null; setExpanded: (value: string | null) => void }) {
@@ -152,7 +165,7 @@ function SimpleTable({ rows, columns }: { rows: MartinForwardRow[]; columns: str
 function StatePanel({ title, detail }: { title: string; detail: string }) { return <section className="martin-state" role="status"><h2>{title}</h2><p>{detail}</p></section>; }
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" ? value as Record<string, unknown> : {}; }
 function unpack(row: MartinForwardRow): MartinForwardRow { return { ...object(row.payload_json), ...row, ...object(row.payload_json), reasons: row.reasons_json ?? object(row.payload_json).reasons, status: row.status ?? object(row.payload_json).status, rank: row.rank ?? object(row.payload_json).rank }; }
-function isSelected(row: MartinForwardRow): boolean { return row.selected_for_book === true || Boolean(row.selection_tier) || ["eligible", "pending", "filled"].includes(String(row.status)); }
+function isSelected(row: MartinForwardRow): boolean { return row.selected_for_book === true || Boolean(row.selection_tier); }
 function formatPrice(value: unknown): string { return typeof value === "number" ? `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—"; }
 function riskAdr(row: MartinForwardRow): string {
   const ratio = typeof row.stop_to_adr === "number" ? `Stop/ADR ${format(row.stop_to_adr)}×` : null;
