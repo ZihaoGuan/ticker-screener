@@ -7299,3 +7299,50 @@ dialog.modal-backdrop:not([open]) {
 .trade-readiness-sector-group > .ghost-button { width: calc(100% - 14px); margin: 0 7px 7px; min-height: 40px; }
 @media (max-width: 900px) { .trade-readiness-lanes, .trade-readiness-sector-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .trade-readiness-lanes, .trade-readiness-sector-grid { grid-template-columns: minmax(0, 1fr); } .trade-readiness-controls { align-items: stretch; flex-direction: column; } }
+.martin-page { --muted: var(--color-text-muted); --border: var(--color-line); --surface: var(--color-surface); --accent: var(--color-accent); display: grid; gap: 1.25rem; }
+.martin-header, .martin-toolbar, .martin-panel-heading, .martin-position-summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.martin-header h1 { margin: .2rem 0; }
+.martin-header p, .martin-panel-heading p { margin: .25rem 0 0; color: var(--muted); }
+.martin-eyebrow { color: var(--accent); font-size: .72rem; font-weight: 700; letter-spacing: .12em; }
+.martin-simulation-badge { border: 1px solid #9b6b28; border-radius: 999px; padding: .55rem .8rem; color: #efc27d; font-size: .75rem; font-weight: 700; white-space: nowrap; }
+.martin-toolbar { flex-wrap: wrap; padding: .8rem 1rem; border: 1px solid var(--border); border-radius: .8rem; background: var(--surface); }
+.martin-book-switch, .martin-tabs { display: flex; flex-wrap: wrap; gap: .4rem; }
+.martin-book-switch button, .martin-tabs button { border: 1px solid var(--border); border-radius: .55rem; padding: .55rem .8rem; background: transparent; color: inherit; cursor: pointer; }
+.martin-book-switch button[aria-pressed="true"], .martin-tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #101820; font-weight: 700; }
+.martin-freshness { display: flex; align-items: center; gap: .45rem; color: var(--muted); font-size: .88rem; }
+.martin-dot { width: .55rem; height: .55rem; border-radius: 50%; background: #43bd89; }
+.martin-dot.stale { background: #e6a844; }
+.martin-inline-state, .martin-state { border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; background: var(--surface); }
+.martin-state h2, .martin-state p { margin: 0; } .martin-state p { margin-top: .35rem; color: var(--muted); }
+.martin-view { display: grid; gap: 1rem; }
+.martin-lifecycle, .martin-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }
+.martin-lifecycle > div, .martin-metric { border: 1px solid var(--border); border-radius: .75rem; background: var(--surface); padding: .9rem 1rem; }
+.martin-lifecycle span, .martin-metric span { display: block; color: var(--muted); font-size: .82rem; }
+.martin-lifecycle strong, .martin-metric strong { display: block; margin-top: .25rem; font-size: 1.35rem; }
+.martin-panel { min-width: 0; border: 1px solid var(--border); border-radius: .8rem; padding: 1rem; background: var(--surface); }
+.martin-panel h2 { margin: 0 0 .65rem; font-size: 1.05rem; } .martin-panel h3 { margin: 1rem 0 .5rem; text-transform: capitalize; }
+.martin-panel-heading { margin-bottom: .8rem; } .martin-panel-heading strong { font-size: 1.25rem; }
+.martin-empty { color: var(--muted); }
+.martin-table-wrap { max-width: 100%; overflow-x: auto; }
+.martin-page .martin-table-wrap table { min-width: 62rem; }
+.martin-table-wrap table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+.martin-table-wrap th, .martin-table-wrap td { padding: .65rem .75rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.martin-table-wrap th { color: var(--muted); font-size: .73rem; text-transform: uppercase; letter-spacing: .04em; }
+.martin-table-wrap td { max-width: 20rem; overflow-wrap: anywhere; }
+.martin-position { border-top: 1px solid var(--border); }
+.martin-position-summary { width: 100%; padding: .85rem 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.martin-position-summary span { color: var(--muted); }
+.martin-details { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem 1rem; margin: 0 0 1rem; }
+.martin-details div { min-width: 0; } .martin-details dt { color: var(--muted); font-size: .78rem; text-transform: capitalize; } .martin-details dd { margin: .15rem 0 0; overflow-wrap: anywhere; }
+.martin-panel-heading select { margin-left: .4rem; }
+.martin-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.martin-chart { height: 12rem; margin: .6rem 0; }
+.martin-chart svg { width: 100%; height: calc(100% - 1.4rem); overflow: visible; }
+.martin-chart path { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.martin-chart path.sector-series { stroke: #d99b56; } .martin-chart path.account-series { stroke: var(--accent); }
+.martin-comparison-chart .sector-legend::before, .martin-comparison-chart .account-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #d99b56; content: ""; }
+.martin-comparison-chart .account-legend::before { background: var(--accent); }
+.martin-chart > div { display: flex; justify-content: space-between; color: var(--muted); font-size: .75rem; }
+.martin-audit { border: 1px solid var(--border); border-radius: .75rem; padding: .9rem 1rem; background: var(--surface); }
+.martin-audit summary { cursor: pointer; font-weight: 700; } .martin-audit pre { max-height: 28rem; overflow: auto; }
+@media (max-width: 760px) { .martin-header { align-items: flex-start; flex-direction: column; } .martin-lifecycle, .martin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .martin-position-summary { align-items: flex-start; flex-wrap: wrap; } .martin-details { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

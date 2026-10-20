@@ -2629,3 +2629,20 @@ export type EarningsCalendarResponse = {
     matched_count: number;
   };
 };
+
+export type MartinForwardRow = Record<string, unknown>;
+export type MartinForwardBook = {
+  strategy_id: string;
+  runs: MartinForwardRow[];
+  candidates: MartinForwardRow[];
+  positions: MartinForwardRow[];
+  events: MartinForwardRow[];
+  history: Array<{ date: string; cumulative_r: number; account_equity: number | null; equity_drawdown_pct: number | null; r_drawdown: number }>;
+  attribution: Record<string, Record<string, { count: number; realized_r: number; realized_pnl: number }>>;
+  metrics: Record<string, number | null>;
+};
+export type MartinForwardResponse = {
+  configured: boolean;
+  books: { account?: MartinForwardBook; sector_opportunity?: MartinForwardBook };
+  comparison: Record<string, unknown>;
+};

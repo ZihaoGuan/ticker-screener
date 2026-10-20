@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.webapp.config import load_webapp_config
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
-from src.webapp.services.martin_forward_test_service import MartinForwardTestService
+from src.webapp.services.martin_forward_test_service import MartinForwardTestService, SECTOR_STRATEGY_ID
 from src.webapp.services.watchlist_service import WatchlistService
 
 
@@ -29,8 +29,10 @@ def main() -> int:
     if not date_text:
         print("No as-of date or persisted scanner_top_hits_snapshot; no session processed.")
         return 0
-    result = MartinForwardTestService(MartinForwardTestRepository(database_url=config.database_url), database_url=config.database_url).run_session(
-        as_of_date=dt.date.fromisoformat(date_text), snapshot=snapshot)
+    service = MartinForwardTestService(MartinForwardTestRepository(database_url=config.database_url), database_url=config.database_url)
+    day = dt.date.fromisoformat(date_text)
+    result = {"account": service.run_session(as_of_date=day, snapshot=snapshot),
+              "sector_opportunity": service.run_session(as_of_date=day, snapshot=snapshot, strategy_id=SECTOR_STRATEGY_ID)}
     print(json.dumps(result, sort_keys=True))
     return 0
 

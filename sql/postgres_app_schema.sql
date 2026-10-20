@@ -40,17 +40,29 @@ CREATE TABLE IF NOT EXISTS martin_forward_candidates (
   payload_json JSONB NOT NULL DEFAULT '{}'::jsonb, UNIQUE(run_id, ticker)
 );
 CREATE TABLE IF NOT EXISTS martin_forward_positions (
-  id BIGSERIAL PRIMARY KEY, ticker TEXT NOT NULL, status TEXT NOT NULL, opened_on DATE,
+  id BIGSERIAL PRIMARY KEY, strategy_id TEXT NOT NULL DEFAULT 'martin_daily_v1', ticker TEXT NOT NULL, status TEXT NOT NULL, opened_on DATE,
   closed_on DATE, payload_json JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_martin_forward_open_ticker ON martin_forward_positions(ticker) WHERE status = 'open';
+ALTER TABLE martin_forward_positions ADD COLUMN IF NOT EXISTS strategy_id TEXT NOT NULL DEFAULT 'martin_daily_v1';
+DO $$ BEGIN
+  IF to_regclass('uq_martin_forward_open_ticker_by_strategy') IS NULL THEN
+    DROP INDEX IF EXISTS uq_martin_forward_open_ticker;
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_martin_forward_open_ticker_by_strategy ON martin_forward_positions(strategy_id,ticker) WHERE status = 'open';
 CREATE TABLE IF NOT EXISTS martin_forward_events (
-  id BIGSERIAL PRIMARY KEY, run_id BIGINT REFERENCES martin_forward_runs(id), position_id BIGINT REFERENCES martin_forward_positions(id),
+  id BIGSERIAL PRIMARY KEY, strategy_id TEXT NOT NULL DEFAULT 'martin_daily_v1', run_id BIGINT REFERENCES martin_forward_runs(id), position_id BIGINT REFERENCES martin_forward_positions(id),
   ticker TEXT NOT NULL, event_type TEXT NOT NULL, event_date DATE NOT NULL, payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_martin_forward_event_idempotency
-  ON martin_forward_events(ticker, event_type, event_date, COALESCE(position_id, 0));
+ALTER TABLE martin_forward_events ADD COLUMN IF NOT EXISTS strategy_id TEXT NOT NULL DEFAULT 'martin_daily_v1';
+DO $$ BEGIN
+  IF to_regclass('uq_martin_forward_event_idempotency_by_strategy') IS NULL THEN
+    DROP INDEX IF EXISTS uq_martin_forward_event_idempotency;
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_martin_forward_event_idempotency_by_strategy
+  ON martin_forward_events(strategy_id,ticker, event_type, event_date, COALESCE(position_id, 0));
 
 ALTER TABLE daily_bars ALTER COLUMN open TYPE NUMERIC(24,6);
 ALTER TABLE daily_bars ALTER COLUMN high TYPE NUMERIC(24,6);
