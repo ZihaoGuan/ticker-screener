@@ -27,7 +27,7 @@ try {
     { ...row, ticker: 'NOPLAN', sector: null, trade_readiness: 'pullback_zone', trade_plan: null },
     { ...row, ticker: 'AVOID', sector: 'Financials', trade_readiness: 'avoid', trade_plan: plan(), strike_zone: { state: 'avoid', score: 20 }, pullback_quality: { state: 'failed', score: 15 } },
     { ...row, ticker: 'UNKNOWN', sector: null, trade_readiness: undefined, trade_plan: plan() },
-    ...Array.from({ length: 9 }, (_, i) => ({ ...row, ticker: `SUP${String(i + 1).padStart(2, '0')}`, trade_readiness: 'pullback_zone', trade_plan: plan(i + 1), daily_rs_rating: 75 + i })),
+    ...Array.from({ length: 9 }, (_, i) => ({ ...row, ticker: `SUP${String(i + 1).padStart(2, '0')}`, trade_readiness: 'pullback_zone', trade_plan: plan(i + 1), daily_rs_rating: 75 + i, adr14_pct: 12 - i })),
   ];
   const topHitsRequests = { list: 0, guru: 0 };
   let admin = true;
@@ -143,6 +143,18 @@ try {
   await page.getByLabel('Sort readiness candidates').selectOption('rs');
   assert.match(await page.locator('.trade-readiness-lane.is-support .trade-readiness-card').first().getAttribute('aria-label'), /SUP09/, 'Highest RS sorts first');
   assert.equal(await page.locator('.trade-readiness-lane.is-support .trade-readiness-card').count(), 8, 'Sorting resets the lane cap');
+  await page.getByLabel('Sort readiness candidates').selectOption('adr');
+  const supportLane = page.locator('.trade-readiness-lane.is-support');
+  assert.match(await supportLane.locator('.trade-readiness-card').first().getAttribute('aria-label'), /SUP01/, 'Highest ADR sorts first');
+  await supportLane.getByRole('button', { name: 'Show 8 more (3 remaining)' }).click();
+  assert.deepEqual(
+    await supportLane.locator('.trade-readiness-card').evaluateAll(cards => cards.map(card => card.getAttribute('aria-label')?.replace(' trade candidate', ''))),
+    ['SUP01', 'SUP02', 'SUP03', 'SUP04', 'SUP05', 'SUP06', 'SUP07', 'SUP08', 'SUP09', 'NOPLAN', 'RISK'],
+    'High ADR sorts numerically descending with missing ADR last and ticker tie order',
+  );
+  await page.getByRole('button', { name: 'List', exact: true }).click();
+  await page.getByRole('button', { name: 'Trade Readiness', exact: true }).click();
+  assert.equal(await page.getByLabel('Sort readiness candidates').inputValue(), 'readiness', 'Leaving Trade Readiness resets its local sort selection');
   await page.getByRole('button', { name: 'My Picks', exact: true }).click();
   assert.equal(await page.locator('.trade-readiness-card').count(), 0, 'My Picks filter shows only saved picks');
   await page.getByRole('heading', { name: 'Plan Ready', exact: true }).waitFor();
