@@ -7318,6 +7318,7 @@ dialog.modal-backdrop:not([open]) {
 .martin-state h2, .martin-state p { margin: 0; } .martin-state p { margin-top: .35rem; color: var(--muted); }
 .martin-view { display: grid; gap: 1rem; }
 .martin-lifecycle, .martin-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }
+.martin-lifecycle[aria-label="Session lifecycle"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .martin-lifecycle-card, .martin-metric { border: 1px solid var(--border); border-radius: .6rem; background: var(--surface); padding: .9rem 1rem; }
 .martin-lifecycle-card { color: inherit; text-align: left; cursor: pointer; }
 .martin-lifecycle-card[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -7358,9 +7359,10 @@ dialog.modal-backdrop:not([open]) {
 .martin-chart svg { width: 100%; height: calc(100% - 1.4rem); overflow: visible; }
 .martin-chart > svg { grid-column: 2; grid-row: 1; height: 100%; border-bottom: 1px solid #3f3f46; }
 .martin-chart path { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-.martin-chart path.sector-series { stroke: #d99b56; } .martin-chart path.account-series { stroke: var(--accent); }
-.martin-comparison-chart .sector-legend::before, .martin-comparison-chart .account-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #d99b56; content: ""; }
+.martin-chart path.sector-series { stroke: #d99b56; } .martin-chart path.account-series { stroke: var(--accent); } .martin-chart path.daily-top5-series { stroke: #82b9e8; }
+.martin-comparison-chart .sector-legend::before, .martin-comparison-chart .account-legend::before, .martin-comparison-chart .daily-top5-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #d99b56; content: ""; }
 .martin-comparison-chart .account-legend::before { background: var(--accent); }
+.martin-comparison-chart .daily-top5-legend::before { background: #82b9e8; }
 .martin-chart > div:last-child { grid-column: 2; grid-row: 2; display: flex; justify-content: space-between; color: #d4d4d8; font-size: .72rem; }
 .martin-exclusions { border: 1px solid var(--border); border-radius: .6rem; padding: .85rem 1rem; background: var(--surface); }
 .martin-exclusions > summary { display: flex; justify-content: space-between; gap: 1rem; cursor: pointer; font-weight: 700; }
@@ -7370,5 +7372,5 @@ dialog.modal-backdrop:not([open]) {
 .martin-code-detail code, .martin-raw-code { display: block; margin-top: .2rem; color: #d4d4d8; overflow-wrap: anywhere; }
 .martin-audit { border: 1px solid var(--border); border-radius: .75rem; padding: .9rem 1rem; background: var(--surface); }
 .martin-audit summary { cursor: pointer; font-weight: 700; } .martin-audit pre { max-height: 28rem; overflow: auto; }
-@media (max-width: 760px) { .martin-header { align-items: flex-start; flex-direction: column; } .martin-lifecycle, .martin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .martin-position-summary { align-items: flex-start; flex-wrap: wrap; } .martin-details { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .martin-toolbar, .martin-panel { padding: .75rem; } .martin-freshness { align-items: flex-start; flex-wrap: wrap; } .martin-lifecycle-card { padding: .75rem; } .martin-lifecycle span { font-size: .75rem; } .martin-chart { grid-template-columns: 4.75rem minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 2.4rem; } .martin-comparison-chart > div:last-child { flex-wrap: wrap; justify-content: flex-start; gap: .3rem 1rem; } .martin-comparison-chart > div:last-child > span:first-child { flex-basis: 100%; } .martin-position-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .martin-header { align-items: flex-start; flex-direction: column; } .martin-lifecycle, .martin-lifecycle[aria-label="Session lifecycle"], .martin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .martin-position-summary { align-items: flex-start; flex-wrap: wrap; } .martin-details { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .martin-toolbar, .martin-panel { padding: .75rem; } .martin-freshness { align-items: flex-start; flex-wrap: wrap; } .martin-lifecycle-card { padding: .75rem; } .martin-lifecycle span { font-size: .75rem; } .martin-chart { grid-template-columns: 4.75rem minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; } .martin-comparison-chart > div:last-child { flex-wrap: wrap; justify-content: flex-start; gap: .3rem 1rem; } .martin-comparison-chart > div:last-child > span:first-child { flex-basis: 100%; } .martin-position-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }

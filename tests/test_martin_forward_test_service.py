@@ -5,7 +5,7 @@ import datetime as dt
 
 import pandas as pd
 
-from src.webapp.services.martin_forward_test_service import MartinForwardTestService, SECTOR_STRATEGY_ID, classify_candidate, order_outcome, position_exit, select_sector_candidates
+from src.webapp.services.martin_forward_test_service import DAILY_TOP5_STRATEGY_ID, MartinForwardTestService, SECTOR_STRATEGY_ID, classify_candidate, order_outcome, position_exit, select_sector_candidates
 from src.webapp.repositories.martin_forward_test_repository import _closed_trade_metrics, _performance_context
 
 
@@ -15,15 +15,32 @@ class MartinForwardTestRulesTest(unittest.TestCase):
                     "daily_rs_rating": 95, "trade_readiness": "defined_risk", "adr14_pct": 4,
                     "trade_plan": {"trigger_price": 20, "stop_price": 19, "max_entry_price": 21}}
 
-    def test_filters_and_adr_adjusted_max_entry(self) -> None:
+    def test_filters_and_top_hits_max_entry(self) -> None:
         item = classify_candidate(self.row, 1)
         self.assertEqual(item["status"], "pending")
-        self.assertAlmostEqual(item["limit_price"], 19 / 0.98)
+        self.assertAlmostEqual(item["limit_price"], 19 / 0.95)
+        self.assertEqual(item["risk_cap_pct"], 0.05)
+        for adr in (2, 4, 12):
+            self.assertAlmostEqual(classify_candidate({**self.row, "adr14_pct": adr}, 1)["limit_price"], item["limit_price"])
+        lower_limit = {**self.row, "trade_plan": {**self.row["trade_plan"], "max_entry_price": 19.8}}
+        self.assertEqual(classify_candidate(lower_limit, 1)["limit_price"], 19.8)
         self.assertEqual(classify_candidate({**self.row, "daily_rs_rating": 80}, 1)["status"], "blocked")
         self.assertEqual(classify_candidate({**self.row, "trade_readiness": "leader"}, 1)["status"], "watch")
         self.assertEqual(classify_candidate({**self.row, "trade_readiness": "avoid"}, 1)["status"], "avoid")
         self.assertEqual(classify_candidate({**self.row, "adr14_pct": None}, 1)["status"], "blocked_data")
         self.assertEqual(classify_candidate({**self.row, "scanner_ids": ["unrelated"], "scanners": []}, 1)["status"], "blocked")
+
+    def test_aligned_limit_fills_persisted_joyy_and_gtlb_examples(self) -> None:
+        for ticker, stop, maximum, opening in (
+            ("JOYY", 80.300003, 84.52631894736842, 83.57),
+            ("GTLB", 50.65978335808365, 53.32608774535122, 53.03),
+        ):
+            with self.subTest(ticker=ticker):
+                row = {**self.row, "ticker": ticker, "adr14_pct": 2.02 if ticker == "JOYY" else 5.17,
+                       "trade_plan": {"trigger_price": maximum, "stop_price": stop, "max_entry_price": maximum}}
+                order = classify_candidate(row, 1)
+                self.assertAlmostEqual(order["limit_price"], maximum)
+                self.assertEqual(order_outcome(order, {"open": opening, "low": opening}), ("filled", opening, None))
 
     def test_sector_selector_prioritizes_quadrants_and_limits_alternates(self) -> None:
         rows = [
@@ -91,6 +108,12 @@ class _ForwardRepo:
         _ = strategy_id
         return [dict(ticker=row["ticker"], payload_json=row["payload_json"]) for row in self.candidates if row["strategy_id"] == strategy_id and row["status"] == "pending"]
 
+    def submitted_order_count(self, *, session_date, strategy_id):
+        return sum(row["strategy_id"] == strategy_id and row["session_date"] == session_date and "order_date" in row["payload_json"] for row in self.candidates)
+
+    def daily_top5_selected_tickers(self, *, session_date):
+        return [row["ticker"] for row in self.candidates if row["strategy_id"] == DAILY_TOP5_STRATEGY_ID and row["session_date"] == session_date and row["payload_json"].get("selected_for_book")]
+
     def open_positions(self, *, strategy_id="martin_daily_v1"):
         _ = strategy_id
         return [dict(row) for row in self.positions if row["strategy_id"] == strategy_id and row["status"] == "open"]
@@ -156,6 +179,68 @@ class _ForwardRepo:
 
 
 class MartinForwardTestLifecycleTest(unittest.TestCase):
+    def test_daily_top5_is_five_orders_per_session_across_fingerprints(self) -> None:
+        repo = _ForwardRepo()
+        day = dt.date(2026, 1, 2)
+        rows = [{**self._candidate_row(), "ticker": f"T{i:02}", "rank": i} for i in range(1, 8)]
+        def snapshot(fingerprint, source_id, candidates):
+            return {"target_trading_date": day.isoformat(), "_snapshot_run_id": source_id, "source_fingerprint": fingerprint, "guru_board": {"rows": candidates}}
+        service = MartinForwardTestService(repo, bar_loader=lambda *_args, **_kwargs: {})
+        service.run_session(as_of_date=day, snapshot=snapshot("fp1", 51, rows), strategy_id=DAILY_TOP5_STRATEGY_ID)
+        for item in repo.candidates:
+            if item["strategy_id"] == DAILY_TOP5_STRATEGY_ID and item["payload_json"].get("order_date"):
+                item["status"] = "expired"
+        service.run_session(as_of_date=day, snapshot=snapshot("fp2", 52, rows), strategy_id=DAILY_TOP5_STRATEGY_ID)
+        submitted = [row for row in repo.candidates if row["strategy_id"] == DAILY_TOP5_STRATEGY_ID and row["payload_json"].get("order_date")]
+        self.assertEqual(len(submitted), 5)
+        self.assertTrue(all(row["payload_json"]["shares"] == 100 for row in submitted))
+        self.assertEqual({row["ticker"] for row in submitted}, {"T01", "T02", "T03", "T04", "T05"})
+        self.assertEqual(sum(row["status"] == "expired" for row in submitted), 5)
+        self.assertTrue(all(row["payload_json"]["entry_policy_version"] for row in submitted))
+        self.assertTrue(all(row["payload_json"]["selection_date"] == day.isoformat() for row in submitted))
+
+    def test_daily_top5_selects_after_excluding_existing_holding_tickers(self) -> None:
+        repo = _ForwardRepo()
+        day = dt.date(2026, 1, 2)
+        for ticker in ("T01", "T02", "T03", "T04", "T05"):
+            repo.positions.append({"id": repo.next_id, "strategy_id": DAILY_TOP5_STRATEGY_ID, "ticker": ticker,
+                                   "status": "open", "opened_on": day, "payload_json": {"entry_price": 20, "remaining_shares": 100}})
+            repo.next_id += 1
+        rows = [{**self._candidate_row(), "ticker": f"T{i:02}", "rank": i} for i in range(1, 8)]
+        snapshot = {"target_trading_date": day.isoformat(), "_snapshot_run_id": 61, "source_fingerprint": "holdings",
+                    "guru_board": {"rows": rows}}
+        service = MartinForwardTestService(repo, bar_loader=lambda *_args, **_kwargs: {})
+        service.run_session(as_of_date=day, snapshot=snapshot, strategy_id=DAILY_TOP5_STRATEGY_ID)
+        submitted = [row["ticker"] for row in repo.candidates if row["strategy_id"] == DAILY_TOP5_STRATEGY_ID and row["payload_json"].get("order_date")]
+        self.assertEqual(submitted, ["T06", "T07"])
+        self.assertEqual(next(row for row in repo.candidates if row["ticker"] == "T01")["status"], "blocked_open_position")
+
+    def test_daily_top5_allows_more_than_five_concurrent_holdings(self) -> None:
+        repo = _ForwardRepo()
+        day1, day2, day3 = dt.date(2026, 1, 2), dt.date(2026, 1, 5), dt.date(2026, 1, 6)
+        dates = pd.to_datetime([day1, day2, day3])
+        frames = {f"T{i:02}": pd.DataFrame({"Open": [20, 20, 20], "High": [20.5, 20.5, 20.5],
+                  "Low": [19.5, 19.5, 19.5], "Close": [20, 20, 20]}, index=dates) for i in range(1, 7)}
+        def load(tickers, as_of, *_args, **_kwargs):
+            return {ticker: frames[ticker].loc[frames[ticker].index.date <= as_of] for ticker in tickers}
+        def snapshot(day, source, tickers):
+            rows = [{**self._candidate_row(), "ticker": ticker} for ticker in tickers]
+            return {"target_trading_date": day.isoformat(), "_snapshot_run_id": source,
+                    "source_fingerprint": f"fp{source}", "guru_board": {"rows": rows}}
+        service = MartinForwardTestService(repo, bar_loader=load)
+        service.run_session(as_of_date=day1, snapshot=snapshot(day1, 91, [f"T{i:02}" for i in range(1, 6)]), strategy_id=DAILY_TOP5_STRATEGY_ID)
+        service.run_session(as_of_date=day2, snapshot=snapshot(day2, 92, ["T06"]), strategy_id=DAILY_TOP5_STRATEGY_ID)
+        service.run_session(as_of_date=day3, snapshot=None, strategy_id=DAILY_TOP5_STRATEGY_ID)
+        self.assertEqual(sum(row["status"] == "open" for row in repo.positions), 6)
+        self.assertEqual(sum(row["strategy_id"] == DAILY_TOP5_STRATEGY_ID and row["payload_json"].get("order_date") == day1.isoformat() for row in repo.candidates), 5)
+        self.assertEqual(sum(row["strategy_id"] == DAILY_TOP5_STRATEGY_ID and row["payload_json"].get("order_date") == day2.isoformat() for row in repo.candidates), 1)
+
+    @staticmethod
+    def _candidate_row():
+        return {"scanner_ids": ["rs"], "market_cap": 2e9, "close": 20, "daily_rs_rating": 95,
+                "adr14_pct": 4, "trade_readiness": "defined_risk",
+                "trade_plan": {"trigger_price": 20, "stop_price": 19, "max_entry_price": 21}}
+
     def test_session_reserves_then_fills_same_day_stops_and_retries_idempotently(self) -> None:
         repo = _ForwardRepo()
         date1, date2 = dt.date(2026, 1, 2), dt.date(2026, 1, 5)
@@ -178,11 +263,72 @@ class MartinForwardTestLifecycleTest(unittest.TestCase):
         service.run_session(as_of_date=date2, snapshot=snap2)
         self.assertEqual(repo.candidates[0]["status"], "filled")
         self.assertEqual(repo.positions[0]["status"], "closed")
+        self.assertEqual(repo.positions[0]["payload_json"]["entry_policy_version"], "top_hits_max_entry_5pct_v1")
         self.assertIn(("ABC", "stop", date2, repo.positions[0]["id"]), repo.events)
         event_count, position_count = len(repo.events), len(repo.positions)
         service.run_session(as_of_date=date2, snapshot=snap2)
         self.assertEqual(len(repo.events), event_count)
         self.assertEqual(len(repo.positions), position_count)
+
+    def test_account_capacity_waits_and_exit_releases_slot_for_next_session_order(self) -> None:
+        day = dt.date(2026, 1, 2)
+        row = {"ticker": "CAND", **self._candidate_row()}
+        snapshot = {"target_trading_date": day.isoformat(), "_snapshot_run_id": 71,
+                    "source_fingerprint": "capacity", "guru_board": {"rows": [row]}}
+        full_repo = _ForwardRepo()
+        for index in range(5):
+            full_repo.positions.append({"id": index + 1, "strategy_id": "martin_daily_v1", "ticker": f"OPEN{index}",
+                "status": "open", "opened_on": day, "payload_json": {"entry_price": 20, "stop": 19,
+                "initial_r": 1, "shares": 100, "remaining_shares": 100}})
+        service = MartinForwardTestService(full_repo, bar_loader=lambda *_args, **_kwargs: {})
+        service.run_session(as_of_date=day, snapshot=snapshot)
+        waiting = next(item for item in full_repo.candidates if item["ticker"] == "CAND")
+        self.assertEqual(waiting["status"], "waiting_capacity")
+        self.assertEqual(waiting["payload_json"]["queue_rank"], 1)
+        self.assertTrue(waiting["payload_json"]["selected_for_book"])
+
+        releasing_repo = _ForwardRepo()
+        dates = pd.to_datetime([day])
+        frames = {f"OPEN{index}": pd.DataFrame({"Open": [20], "High": [20.5], "Low": [18 if index == 0 else 19.5],
+                    "Close": [19]}, index=dates) for index in range(5)}
+        for index in range(5):
+            releasing_repo.positions.append({"id": index + 1, "strategy_id": "martin_daily_v1", "ticker": f"OPEN{index}",
+                "status": "open", "opened_on": day, "payload_json": {"entry_price": 20, "stop": 19,
+                "initial_r": 1, "shares": 100, "remaining_shares": 100}})
+        def load(tickers, *_args, **_kwargs):
+            return {ticker: frames[ticker] for ticker in tickers if ticker in frames}
+        service = MartinForwardTestService(releasing_repo, bar_loader=load)
+        service.run_session(as_of_date=day, snapshot=snapshot)
+        candidate = next(item for item in releasing_repo.candidates if item["ticker"] == "CAND")
+        self.assertEqual(candidate["status"], "pending")
+        self.assertTrue(candidate["payload_json"]["selected_for_book"])
+        self.assertEqual(sum(item["status"] == "open" for item in releasing_repo.positions), 4)
+
+    def test_missing_exact_bar_marks_pending_order_and_preserves_policy_levels(self) -> None:
+        repo = _ForwardRepo()
+        day1, day2 = dt.date(2026, 1, 2), dt.date(2026, 1, 5)
+        row = {"ticker": "ABC", **self._candidate_row()}
+        def snapshot(day, source):
+            return {"target_trading_date": day.isoformat(), "_snapshot_run_id": source,
+                    "source_fingerprint": f"fp{source}", "guru_board": {"rows": [row]}}
+        service = MartinForwardTestService(repo, bar_loader=lambda *_args, **_kwargs: {})
+        service.run_session(as_of_date=day1, snapshot=snapshot(day1, 81))
+        order = repo.candidates[0]["payload_json"]
+        limit, stop = order["limit_price"], order["stop"]
+        service.run_session(as_of_date=day2, snapshot=None)
+        self.assertEqual(repo.candidates[0]["status"], "pending")
+        self.assertEqual(repo.candidates[0]["payload_json"]["market_data_state"], "awaiting_data")
+        self.assertEqual(repo.candidates[0]["payload_json"]["limit_price"], limit)
+        self.assertEqual(repo.candidates[0]["payload_json"]["stop"], stop)
+        self.assertEqual(repo.candidates[0]["payload_json"]["entry_policy_version"], "top_hits_max_entry_5pct_v1")
+
+        later_day = dt.date(2026, 1, 6)
+        later_frame = pd.DataFrame({"Open": [19.5], "High": [20], "Low": [19.2], "Close": [19.8]}, index=pd.to_datetime([later_day]))
+        service.bar_loader = lambda *_args, **_kwargs: {"ABC": later_frame}
+        service.run_session(as_of_date=later_day, snapshot=None)
+        self.assertEqual(repo.candidates[0]["status"], "pending")
+        self.assertEqual(repo.candidates[0]["payload_json"]["awaiting_session_date"], day2.isoformat())
+        self.assertEqual(repo.positions, [])
 
     def test_sector_book_isolated_and_uses_normalized_r_sizing(self) -> None:
         repo = _ForwardRepo()
@@ -200,6 +346,7 @@ class MartinForwardTestLifecycleTest(unittest.TestCase):
         self.assertTrue(account_candidates[0]["payload_json"]["selected_for_book"])
         self.assertEqual(sector["payload_json"]["shares"], 100)
         self.assertEqual(sector["payload_json"]["sizing_mode"], "normalized_r")
+        self.assertTrue(sector["payload_json"]["selected_for_book"])
         self.assertEqual(sector["payload_json"]["selection_tier"], "Primary")
 
     def test_position_trim_ema9_schedule_and_next_open_exit(self) -> None:
@@ -257,7 +404,7 @@ class MartinForwardTestLifecycleTest(unittest.TestCase):
         dates = pd.to_datetime([date1, date2])
         frames = {
             "AAA": pd.DataFrame({"Open": [20, 18], "High": [20.5, 19], "Low": [19.5, 17], "Close": [20, 18]}, index=dates),
-            "BBB": pd.DataFrame({"Open": [20, 22], "High": [20.5, 23], "Low": [19.5, 20], "Close": [20, 22]}, index=dates),
+            "BBB": pd.DataFrame({"Open": [20, 22], "High": [20.5, 23], "Low": [19.5, 20.1], "Close": [20, 22]}, index=dates),
         }
         def load_bars(tickers, as_of, days, **kwargs):
             _ = days, kwargs

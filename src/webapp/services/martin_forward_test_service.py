@@ -10,6 +10,8 @@ from src.market_data_access import load_many_ticker_windows
 
 STRATEGY_ID = "martin_daily_v1"
 SECTOR_STRATEGY_ID = "martin_sector_book_v1"
+DAILY_TOP5_STRATEGY_ID = "martin_daily_top5_v1"
+ENTRY_POLICY_VERSION = "top_hits_max_entry_5pct_v1"
 SECTOR_ORDER = {"leading": 0, "improving": 1, "weakening": 2, "lagging": 3, "unknown": 4}
 FOCUS_SCANNERS = {"weekly_candidate_pool", "best_winners", "qullamaggie", "one_year_winners", "trend_template", "daily_rs_new_high", "rs"}
 
@@ -64,7 +66,8 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
     entry = _number(plan.get("trigger_price"))
     scanner_count = _number(row.get("scanner_count"))
     result = {
-        "ticker": ticker, "rank": rank, "status": status, "reasons": reasons,
+        "ticker": ticker, "rank": rank, "source_snapshot_rank": row.get("rank", rank),
+        "entry_policy_version": ENTRY_POLICY_VERSION, "status": status, "reasons": reasons,
         "scanner_labels": sorted(labels), "trade_readiness": readiness,
         "close": close, "market_cap": market_cap, "rs_rating": rs,
         "entry": entry, "stop": stop, "max_entry": max_entry, "adr14_pct": adr,
@@ -79,7 +82,7 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
         if adr is None or adr <= 0 or stop is None or stop <= 0:
             result.update(status="blocked_data", reasons=["missing_adr_or_stop"])
         else:
-            cap = min(0.05, adr * 0.005)
+            cap = 0.05
             adjusted = stop / (1 - cap)
             limit = min(max_entry, adjusted) if max_entry is not None and max_entry > 0 else adjusted
             if limit <= stop:
@@ -201,15 +204,21 @@ class MartinForwardTestService:
         # Pending orders are one-session orders, so the target session's exact bar settles them.
         filled_positions: list[dict[str, Any]] = []
         for order in pending:
+            awaited_session = (order.get("payload_json") or {}).get("awaiting_session_date")
+            if awaited_session and as_of_date.isoformat() > str(awaited_session):
+                counts["missing_bars"] += 1
+                continue
             order_date = order.get("session_date")
             frame = frames.get(str(order["ticker"]).upper())
             next_bar_date, bar = _bar_after_date(frame, order_date, as_of_date)
             if bar is None or next_bar_date is None:
                 counts["missing_bars"] += 1
+                self._mark_order_awaiting_data(order, "awaiting_session_bar", as_of_date)
                 continue
             if next_bar_date != as_of_date:
                 # The order's first bar was missed; do not apply a later bar out of sequence.
                 counts["missing_bars"] += 1
+                self._mark_order_awaiting_data(order, "first_session_bar_missed", next_bar_date)
                 continue
             event_date = next_bar_date
             payload = order.get("payload_json") or {}
@@ -289,8 +298,17 @@ class MartinForwardTestService:
             return None
         candidates = select_sector_candidates(rows) if strategy_id == SECTOR_STRATEGY_ID else [classify_candidate(row, rank) for rank, row in enumerate(rows, start=1)]
         for item in candidates:
+            item["selection_date"] = as_of_date.isoformat()
             if item["status"] == "pending":
-                item["selected_for_book"] = True
+                item["queue_rank"] = item["rank"]
+                item["selection_reason"] = "snapshot_rank"
+        if strategy_id == DAILY_TOP5_STRATEGY_ID:
+            for item in candidates:
+                item["selected_for_book"] = False
+                item["queue_rank"] = item["rank"]
+        for item in candidates:
+            if item["status"] == "pending":
+                item["selected_for_book"] = strategy_id != DAILY_TOP5_STRATEGY_ID
                 item["status"] = "eligible"
             else:
                 item["selected_for_book"] = bool(item.get("selection_tier"))
@@ -304,12 +322,29 @@ class MartinForwardTestService:
         open_positions = self.repository.open_positions(strategy_id=strategy_id)
         pending_orders = self.repository.pending_orders(strategy_id=strategy_id)
         open_tickers = {str(row["ticker"]).upper() for row in open_positions}
+        pending_tickers = {str(row["ticker"]).upper() for row in pending_orders}
         equity = 100_000.0
         risk_budget = equity * 0.005
         per_position_allocation = equity * 0.20
         allocated = sum(float((row.get("payload_json") or {}).get("entry_price") or 0) * int((row.get("payload_json") or {}).get("remaining_shares") or 0) for row in open_positions)
         allocated += sum(float((row.get("payload_json") or {}).get("limit_price") or 0) * int((row.get("payload_json") or {}).get("shares") or 0) for row in pending_orders)
-        slots = 10 if strategy_id == SECTOR_STRATEGY_ID else max(0, 5 - len(open_positions) - len(pending_orders))
+        slots = (10 if strategy_id == SECTOR_STRATEGY_ID else
+                 5 if strategy_id == DAILY_TOP5_STRATEGY_ID else max(0, 5 - len(open_positions) - len(pending_orders)))
+        submitted_today = self.repository.submitted_order_count(session_date=as_of_date, strategy_id=strategy_id) if strategy_id == DAILY_TOP5_STRATEGY_ID else 0
+        daily_orders_remaining = max(0, 5 - submitted_today) if strategy_id == DAILY_TOP5_STRATEGY_ID else None
+        prior_selection = set(self.repository.daily_top5_selected_tickers(session_date=as_of_date)) if strategy_id == DAILY_TOP5_STRATEGY_ID else set()
+        daily_pool: set[str] = set()
+        if strategy_id == DAILY_TOP5_STRATEGY_ID:
+            if prior_selection:
+                daily_pool = prior_selection
+            else:
+                actionable = []
+                for rank, row in enumerate(rows, start=1):
+                    item = classify_candidate(row, rank)
+                    ticker = item["ticker"]
+                    if item["status"] == "pending" and ticker and ticker not in open_tickers and ticker not in pending_tickers:
+                        actionable.append(ticker)
+                daily_pool = set(actionable[:5])
         for rank, row in enumerate(rows, start=1):
             candidate = classify_candidate(row, rank)
             if candidate["status"] != "pending":
@@ -319,30 +354,55 @@ class MartinForwardTestService:
             if existing_status != "eligible":
                 continue
             candidate.update({key: value for key, value in self.repository.candidate_payload(run_id, ticker).items()
-                              if key in {"selected_for_book", "selection_tier", "sector_quadrant", "sector_rs_ratio", "sector_momentum_value", "sector_as_of_date"}})
+                              if key in {"selected_for_book", "selection_date", "selection_tier", "sector_quadrant", "sector_rs_ratio", "sector_momentum_value", "sector_as_of_date", "queue_rank"}})
             if not ticker or ticker in open_tickers:
-                candidate.update(status="blocked_open_position", reasons=["open_position_exists"])
+                candidate.update(status="blocked_open_position", selected_for_book=False, reasons=["open_position_exists"])
                 self.repository.update_candidate(run_id, ticker, candidate)
                 self.repository.apply_event(run_id=run_id, position_id=None, ticker=ticker, event_type="candidate_blocked_open_position",
                     event_date=as_of_date, payload={"reason": "open_position_exists"}, candidate_id=None, strategy_id=strategy_id)
                 continue
             if self.repository.has_pending_order(ticker, strategy_id=strategy_id):
-                candidate.update(status="blocked_existing_order", reasons=["pending_order_exists"])
+                candidate.update(status="blocked_existing_order", selected_for_book=False, reasons=["pending_order_exists"])
+                self.repository.update_candidate(run_id, ticker, candidate)
+                continue
+            if strategy_id == DAILY_TOP5_STRATEGY_ID and ticker not in daily_pool:
+                candidate.update(status="not_selected", reasons=["daily_top5_order_limit"])
+                self.repository.update_candidate(run_id, ticker, candidate)
+                continue
+            if strategy_id == DAILY_TOP5_STRATEGY_ID:
+                candidate["selected_for_book"] = True
+            if strategy_id == DAILY_TOP5_STRATEGY_ID and daily_orders_remaining <= 0:
+                candidate.update(status="not_selected", reasons=["daily_order_limit_reached"])
                 self.repository.update_candidate(run_id, ticker, candidate)
                 continue
             limit, stop = float(candidate["limit_price"]), float(candidate["stop"])
             normalized = strategy_id == SECTOR_STRATEGY_ID
-            shares = (100 if normalized else min(int(risk_budget / (limit - stop)), int(per_position_allocation / limit), int((equity - allocated) / limit)))
+            daily_top5 = strategy_id == DAILY_TOP5_STRATEGY_ID
+            shares = (100 if normalized or daily_top5 else min(int(risk_budget / (limit - stop)), int(per_position_allocation / limit), int((equity - allocated) / limit)))
             if (slots <= 0 and strategy_id != SECTOR_STRATEGY_ID) or shares <= 0:
-                candidate.update(status="blocked_capacity", reasons=["position_or_allocation_capacity"])
+                candidate.update(status="waiting_capacity", reasons=["position_or_allocation_capacity"])
+                candidate["queue_rank"] = rank
                 self.repository.update_candidate(run_id, ticker, candidate)
                 continue
-            candidate.update(shares=shares, equity=None if normalized else equity, sizing_mode="normalized_r" if normalized else "account_risk",
+            candidate.update(shares=shares, equity=None if normalized or daily_top5 else equity,
+                             sizing_mode="normalized_r" if normalized else "fixed_100_shares" if daily_top5 else "account_risk",
                              risk_dollars=shares * (limit - stop), allocation_dollars=shares * limit, status="pending", order_date=as_of_date.isoformat())
+            candidate["queue_rank"] = rank
+            candidate["selection_reason"] = candidate.get("selection_reason") or "snapshot_rank"
             self.repository.update_candidate(run_id, ticker, candidate)
             allocated += shares * limit
-            if strategy_id != SECTOR_STRATEGY_ID:
+            if strategy_id == DAILY_TOP5_STRATEGY_ID:
+                daily_orders_remaining -= 1
+            if strategy_id not in {SECTOR_STRATEGY_ID, DAILY_TOP5_STRATEGY_ID}:
                 slots -= 1
+
+    def _mark_order_awaiting_data(self, order: dict[str, Any], reason: str, session_date: date) -> None:
+        payload = dict(order.get("payload_json") or {})
+        payload["market_data_state"] = "awaiting_data"
+        payload["market_data_reason"] = reason
+        payload["awaiting_session_date"] = session_date.isoformat()
+        payload["reasons"] = [reason]
+        self.repository.update_candidate(order["run_id"], order["ticker"], payload)
 
     def _manage_position(self, row: dict[str, Any], bar: dict[str, Any], frame: Any, as_of_date: date,
                          run_id: int | None, counts: dict[str, int], strategy_id: str) -> None:

@@ -2635,6 +2635,7 @@ export type MartinForwardBook = {
   strategy_id: string;
   runs: MartinForwardRow[];
   candidates: MartinForwardRow[];
+  outstanding_orders?: MartinForwardRow[];
   positions: MartinForwardRow[];
   events: MartinForwardRow[];
   history: Array<{ date: string; cumulative_r: number; account_equity: number | null; equity_drawdown_pct: number | null; r_drawdown: number }>;
@@ -2643,6 +2644,6 @@ export type MartinForwardBook = {
 };
 export type MartinForwardResponse = {
   configured: boolean;
-  books: { account?: MartinForwardBook; sector_opportunity?: MartinForwardBook };
+  books: { account?: MartinForwardBook; sector_opportunity?: MartinForwardBook; daily_top5?: MartinForwardBook };
   comparison: Record<string, unknown>;
 };

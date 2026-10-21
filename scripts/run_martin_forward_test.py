@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.webapp.config import load_webapp_config
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
-from src.webapp.services.martin_forward_test_service import MartinForwardTestService, SECTOR_STRATEGY_ID
+from src.webapp.services.martin_forward_test_service import DAILY_TOP5_STRATEGY_ID, MartinForwardTestService, SECTOR_STRATEGY_ID
 from src.webapp.services.watchlist_service import WatchlistService
 
 
@@ -32,7 +32,8 @@ def main() -> int:
     service = MartinForwardTestService(MartinForwardTestRepository(database_url=config.database_url), database_url=config.database_url)
     day = dt.date.fromisoformat(date_text)
     result = {"account": service.run_session(as_of_date=day, snapshot=snapshot),
-              "sector_opportunity": service.run_session(as_of_date=day, snapshot=snapshot, strategy_id=SECTOR_STRATEGY_ID)}
+              "sector_opportunity": service.run_session(as_of_date=day, snapshot=snapshot, strategy_id=SECTOR_STRATEGY_ID),
+              "daily_top5": service.run_session(as_of_date=day, snapshot=snapshot, strategy_id=DAILY_TOP5_STRATEGY_ID)}
     print(json.dumps(result, sort_keys=True))
     return 0
 

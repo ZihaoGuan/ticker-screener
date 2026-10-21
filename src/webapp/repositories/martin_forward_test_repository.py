@@ -52,6 +52,19 @@ class MartinForwardTestRepository:
         return self._rows("""SELECT c.ticker,c.payload_json FROM martin_forward_candidates c
             JOIN martin_forward_runs r ON r.id=c.run_id WHERE c.status='pending' AND r.strategy_id=%s ORDER BY c.rank,c.id""", (strategy_id,))
 
+    def submitted_order_count(self, *, session_date: Any, strategy_id: str) -> int:
+        rows = self._rows("""SELECT COUNT(*) AS count FROM martin_forward_candidates c
+            JOIN martin_forward_runs r ON r.id=c.run_id
+            WHERE r.strategy_id=%s AND r.session_date=%s AND c.payload_json ? 'order_date'""", (strategy_id, session_date))
+        return int(rows[0]["count"]) if rows else 0
+
+    def daily_top5_selected_tickers(self, *, session_date: Any) -> list[str]:
+        rows = self._rows("""SELECT DISTINCT c.ticker FROM martin_forward_candidates c
+            JOIN martin_forward_runs r ON r.id=c.run_id
+            WHERE r.strategy_id='martin_daily_top5_v1' AND r.session_date=%s
+              AND c.payload_json->>'selected_for_book'='true' ORDER BY c.ticker""", (session_date,))
+        return [str(row["ticker"]).upper() for row in rows]
+
     def open_positions(self, *, strategy_id: str = "martin_daily_v1") -> list[dict[str, Any]]:
         return self._rows("SELECT id,ticker,payload_json,opened_on FROM martin_forward_positions WHERE status='open' AND strategy_id=%s ORDER BY opened_on,id", (strategy_id,))
 
@@ -121,6 +134,7 @@ class MartinForwardTestRepository:
                     "partial": action_counts.get("missing_bars", 0) > 0,
                     "selected_count": sum(bool(item["payload_json"].get("selected_for_book", item["payload_json"].get("selection_tier") or item["status"] in {"eligible", "pending", "filled"})) for item in candidates),
                     "pending_count": sum(item["status"] == "pending" for item in candidates),
+                    "waiting_capacity_count": sum(item["status"] == "waiting_capacity" for item in candidates),
                     "open_count": len(opened), "closed_count": len(closed), "sector_counts": sectors,
                     "realized_r": realized_r, "unrealized_r": unrealized_r, "cumulative_r": cumulative_r,
                     "realized_pnl": realized_pnl, "unrealized_pnl": unrealized_pnl,
@@ -225,13 +239,18 @@ class MartinForwardTestRepository:
         with connection:
             with connection.cursor() as cursor:
                 books = {}
-                for strategy_id, key in (("martin_daily_v1", "account"), ("martin_sector_book_v1", "sector_opportunity")):
+                for strategy_id, key in (("martin_daily_v1", "account"), ("martin_sector_book_v1", "sector_opportunity"),
+                                         ("martin_daily_top5_v1", "daily_top5")):
                     runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
                     latest_id = runs[0]["id"] if runs else None
                     candidates = self._fetch(cursor, "SELECT * FROM martin_forward_candidates WHERE run_id=%s ORDER BY rank", (latest_id,)) if latest_id else []
+                    outstanding_orders = self._fetch(cursor, """SELECT c.id,c.run_id,c.ticker,c.rank,c.status,c.reasons_json,c.payload_json,r.session_date
+                        FROM martin_forward_candidates c JOIN martin_forward_runs r ON r.id=c.run_id
+                        WHERE c.status='pending' AND r.strategy_id=%s ORDER BY r.session_date,c.rank,c.id""", (strategy_id,))
                     positions = self._fetch(cursor, "SELECT * FROM martin_forward_positions WHERE strategy_id=%s ORDER BY opened_on DESC,id DESC", (strategy_id,))
                     events = self._fetch(cursor, "SELECT * FROM martin_forward_events WHERE strategy_id=%s ORDER BY event_date DESC,id DESC LIMIT 200", (strategy_id,))
-                    books[key] = _performance_context(strategy_id, runs, candidates, positions, events)
+                    books[key] = {**_performance_context(strategy_id, runs, candidates, positions, events),
+                                  "outstanding_orders": outstanding_orders}
         return {"configured": True, "books": books, "comparison": _comparison_series(books)}
 
     def _rows(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
