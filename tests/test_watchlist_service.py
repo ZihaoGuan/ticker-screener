@@ -815,7 +815,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(cards["weekly_rs_new_high"]["stem"], "weekly_rs_new_high_all_2026-06-06")
         self.assertEqual(cards["weekly_rs_new_high"]["preview_tickers"], ["MSFT", "NVDA"])
 
-    def test_force_scanner_board_refresh_bypasses_cutoff_for_admin_override(self) -> None:
+    def test_force_scanner_board_refresh_does_not_publish_intraday_override(self) -> None:
         self._write_watchlist(
             "rs_new_high_before_price_2026-06-11",
             tickers=["CRWD"],
@@ -840,12 +840,12 @@ class WatchlistServiceTests(unittest.TestCase):
         refreshed_cards = {item["id"]: item for item in refreshed_payload["cards"]}
         self.assertEqual(default_payload["target_trading_date"], "2026-06-11")
         self.assertEqual(default_cards["rs"]["stem"], "rs_new_high_before_price_2026-06-11")
-        self.assertEqual(refreshed_payload["target_trading_date"], "2026-06-12")
-        self.assertTrue(refreshed_payload["manual_override_active"])
-        self.assertEqual(refreshed_payload["manual_override_target_date"], "2026-06-12")
-        self.assertEqual(refreshed_cards["rs"]["stem"], "rs_new_high_before_price_2026-06-12")
+        self.assertEqual(refreshed_payload["target_trading_date"], "2026-06-11")
+        self.assertFalse(refreshed_payload["manual_override_active"])
+        self.assertEqual(refreshed_payload["snapshot_refresh"]["status"], "waiting")
+        self.assertEqual(refreshed_cards["rs"]["stem"], "rs_new_high_before_price_2026-06-11")
 
-    def test_force_scanner_board_refresh_promotes_weekly_weekend_runs(self) -> None:
+    def test_force_scanner_board_refresh_does_not_publish_weekend_daily_snapshot(self) -> None:
         self._write_watchlist(
             "weekly_rs_new_high_all_2026-07-03",
             tickers=["MSFT"],
@@ -870,11 +870,11 @@ class WatchlistServiceTests(unittest.TestCase):
         refreshed_cards = {item["id"]: item for item in refreshed_payload["cards"]}
         self.assertEqual(default_payload["target_trading_date"], "2026-07-03")
         self.assertEqual(default_cards["weekly_rs_new_high"]["stem"], "weekly_rs_new_high_all_2026-07-03")
-        self.assertEqual(refreshed_payload["target_trading_date"], "2026-07-04")
-        self.assertTrue(refreshed_payload["manual_override_active"])
-        self.assertEqual(refreshed_payload["manual_override_target_date"], "2026-07-04")
-        self.assertEqual(refreshed_cards["weekly_rs_new_high"]["stem"], "weekly_rs_new_high_all_2026-07-04")
-        self.assertEqual(refreshed_cards["weekly_rs_new_high"]["preview_tickers"], ["NVDA", "PLTR"])
+        self.assertEqual(refreshed_payload["target_trading_date"], "2026-07-03")
+        self.assertFalse(refreshed_payload["manual_override_active"])
+        self.assertEqual(refreshed_payload["snapshot_refresh"]["status"], "waiting")
+        self.assertEqual(refreshed_cards["weekly_rs_new_high"]["stem"], "weekly_rs_new_high_all_2026-07-03")
+        self.assertEqual(refreshed_cards["weekly_rs_new_high"]["preview_tickers"], ["MSFT"])
 
     def test_get_scanner_top_hits_payload_aggregates_overlap_and_sector_momentum(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
@@ -1542,11 +1542,11 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["rs_phase_active_days"], 8)
         self.assertEqual(payload["rows"][0]["relative_strength_evidence"]["rs_phase_active_days"], 8)
         self.assertIn("RS Phase active", payload["rows"][0]["relative_strength_evidence"]["reasons"])
-        list_runs_mock.assert_called_once()
+        self.assertEqual(list_runs_mock.call_count, 2)
         get_run_mock.assert_called_once_with(901, include_hits=True, hit_limit=5000)
         live_cards_mock.assert_not_called()
 
-    def test_force_scanner_board_refresh_persists_top_hit_snapshot(self) -> None:
+    def test_force_scanner_board_refresh_does_not_persist_without_prerequisites(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")
         with patch.object(
             service,
@@ -1559,7 +1559,8 @@ class WatchlistServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["target_trading_date"], "2026-06-12")
-        persist_mock.assert_called_once()
+        persist_mock.assert_not_called()
+        self.assertEqual(payload["snapshot_refresh"]["status"], "waiting")
 
     def test_top_hits_snapshot_read_does_not_reenrich_rows(self) -> None:
         service = WatchlistService(artifacts_dir=Path(self.temp_dir.name), database_url="postgres://example")

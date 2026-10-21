@@ -273,6 +273,7 @@ export type ScannerBoardResponse = {
   manual_override_active?: boolean;
   manual_override_target_date?: string;
   manual_override_requested_at?: string;
+  snapshot_refresh?: { status: string; target_date: string; message: string };
   cards: ScannerBoardCard[];
 };
 

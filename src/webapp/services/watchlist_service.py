@@ -862,22 +862,19 @@ class WatchlistService:
     def list_recent(self, *, include_deprecated: bool = True) -> list[dict[str, Any]]:
         return self.repository.list_recent_watchlists(limit=50, include_deprecated=include_deprecated)
 
-    def get_scanner_board(self, *, now: dt.datetime | None = None) -> dict[str, Any]:
+    def get_scanner_board(self, *, now: dt.datetime | None = None, target_date: dt.date | None = None) -> dict[str, Any]:
         reference_now = _normalize_scanner_now(now)
         default_target_trading_date = _latest_completed_trading_day(reference_now)
-        latest_manual_refresh_day = _latest_manual_refresh_day(reference_now)
-        override_payload = self._load_scanner_board_override()
-        override_target_date_text = _coerce_iso_date(override_payload.get("target_trading_date"))
-        override_target_date = dt.date.fromisoformat(override_target_date_text) if override_target_date_text else None
-        target_trading_date = default_target_trading_date
+        override_payload: dict[str, Any] = {}
+        override_target_date = None
+        target_trading_date = target_date or default_target_trading_date
         manual_override_active = False
-        if (
-            override_target_date is not None
-            and override_target_date >= default_target_trading_date
-            and override_target_date <= latest_manual_refresh_day
-        ):
-            target_trading_date = override_target_date
-            manual_override_active = override_target_date != default_target_trading_date
+        # A successfully published post-close snapshot may precede the legacy 20:30 cutoff.
+        if target_date is None and self.screener_history_service.is_configured():
+            latest = self.screener_history_service.list_runs(strategy_id=_SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID, limit=1)
+            published_date = _coerce_optional_date(latest[0].get("run_date")) if latest else None
+            if published_date and target_trading_date < published_date <= reference_now.astimezone(_NEW_YORK_TZ).date():
+                target_trading_date = published_date
 
         database_payload = self._get_scanner_board_from_database(
             reference_now=reference_now,
@@ -1043,22 +1040,11 @@ class WatchlistService:
         requested_by: str = "",
     ) -> dict[str, Any]:
         reference_now = _normalize_scanner_now(now)
-        recent_watchlists = self.repository.list_recent_watchlists(limit=400)
-        default_target_trading_date = _latest_completed_trading_day(reference_now)
-        latest_available_watchlist_date = _latest_watchlist_sort_date(recent_watchlists) or default_target_trading_date
-        target_trading_date = max(default_target_trading_date, min(latest_available_watchlist_date, _latest_manual_refresh_day(reference_now)))
-        payload = {
-            "target_trading_date": target_trading_date.isoformat(),
-            "requested_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-            "requested_by": str(requested_by or "").strip(),
-        }
-        self._scanner_board_override_path.parent.mkdir(parents=True, exist_ok=True)
-        self._scanner_board_override_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        from .scanner_top_hits_refresh import refresh_scanner_top_hits
+
+        result = refresh_scanner_top_hits(self, project_root=Path(__file__).resolve().parents[3], now=reference_now)
         board_payload = self.get_scanner_board(now=reference_now)
-        try:
-            self.persist_scanner_top_hits_snapshot(now=reference_now, board_payload=board_payload)
-        except Exception as exc:
-            logger.warning("Scanner top hits snapshot persistence failed during manual refresh: %s", exc)
+        board_payload["snapshot_refresh"] = result
         return board_payload
 
     def _load_scanner_board_override(self) -> dict[str, Any]:
@@ -1115,6 +1101,7 @@ class WatchlistService:
         reference_now = _normalize_scanner_now(now)
         target_date = _latest_completed_trading_day(reference_now)
         persisted = self._load_latest_persisted_scanner_top_hits_payload()
+        refresh_state = _load_scanner_top_hits_refresh_state(self.repository.artifacts_dir / "status")
         if persisted is None:
             persisted = {
                 "generated_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -1137,13 +1124,14 @@ class WatchlistService:
                     "source_data_as_of": None,
                     "age_seconds": None,
                     "freshness": "missing",
-                    "refresh_status": "idle",
+                    **refresh_state,
                 },
             }
         else:
             snapshot_date = _coerce_optional_date(persisted.get("target_trading_date"))
-            age_seconds = _snapshot_age_seconds(persisted.get("snapshot_generated_at"), reference_now)
-            refresh_state = _load_scanner_top_hits_refresh_state(self.repository.artifacts_dir / "status")
+            if snapshot_date and target_date < snapshot_date <= reference_now.astimezone(_NEW_YORK_TZ).date():
+                target_date = snapshot_date
+            age_seconds = _snapshot_age_seconds(persisted.get("_snapshot_generated_at") or persisted.get("generated_at"), reference_now)
             persisted["snapshot"] = {
                 "snapshot_run_id": persisted.pop("_snapshot_run_id", None),
                 "snapshot_generated_at": persisted.pop("_snapshot_generated_at", persisted.get("generated_at") or None),
@@ -4067,20 +4055,34 @@ def _scanner_top_hits_source_fingerprint(board_payload: dict[str, Any]) -> tuple
 
 def _load_scanner_top_hits_refresh_state(status_dir: Path) -> dict[str, str]:
     """Expose scheduler progress without adding work to the request path."""
-    defaults = {"refresh_status": "idle", "refresh_message": ""}
     try:
         payload = json.loads((status_dir / "build_scanner_top_hits_snapshot.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return defaults
+        payload = {}
     if not isinstance(payload, dict):
-        return defaults
+        payload = {}
     status = str(payload.get("status") or "").lower()
-    if status not in {"queued", "running", "waiting", "failed"}:
-        return defaults
-    return {
+    worker_state = {
         "refresh_status": status,
         "refresh_message": str(payload.get("message") or "").strip(),
     }
+    if status in {"queued", "running"}:
+        return worker_state
+    try:
+        decision = json.loads((status_dir / "scanner_top_hits_refresh.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        decision = {}
+    if not isinstance(decision, dict):
+        decision = {}
+    if status in {"waiting", "failed"}:
+        from .scanner_top_hits_refresh import _timestamp
+
+        worker_at = _timestamp(str(payload.get("last_finished_at") or payload.get("last_started_at") or ""))
+        decision_at = _timestamp(str(decision.get("checked_at") or ""))
+        if decision_at is None or (worker_at is not None and decision_at <= worker_at):
+            return worker_state
+    return {"refresh_status": str(decision.get("status") or "idle"),
+            "refresh_message": str(decision.get("message") or "")}
 
 
 def _read_sector_momentum_cache(key: tuple[str, str, str, str]) -> dict[str, dict[str, Any]] | None:

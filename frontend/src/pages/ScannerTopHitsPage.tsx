@@ -165,6 +165,7 @@ export function ScannerTopHitsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [payload, setPayload] = useState<ScannerTopHitsResponse | null>(null);
   const [guruPayload, setGuruPayload] = useState<ScannerTopHitsResponse | null>(null);
+  const guruSnapshotVersion = useRef<string | null>(null);
   const [guruLoading, setGuruLoading] = useState(false);
   const [guruNotice, setGuruNotice] = useState("");
   const [guruReloadKey, setGuruReloadKey] = useState(0);
@@ -312,13 +313,46 @@ export function ScannerTopHitsPage() {
     return () => controller.abort();
   }, [reloadKey]);
 
+  const snapshotVersion = payload ? `${payload.snapshot?.snapshot_run_id ?? ""}:${payload.snapshot?.snapshot_generated_at ?? payload.generated_at ?? ""}` : null;
   useEffect(() => {
-    if (!(viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position") || guruPayload || guruNotice) return;
+    if (snapshotVersion === null) return;
+    const controller = new AbortController();
+    let inFlight = false;
+    const refresh = async () => {
+      if (document.visibilityState !== "visible" || inFlight) return;
+      inFlight = true;
+      try {
+        const next = await fetchJson<ScannerTopHitsResponse>("/api/scanner-board/top-hits?section=list", { signal: controller.signal, cache: "no-store" });
+        if (controller.signal.aborted) return;
+        const nextVersion = `${next.snapshot?.snapshot_run_id ?? ""}:${next.snapshot?.snapshot_generated_at ?? next.generated_at ?? ""}`;
+        setPayload(next);
+        setNotice("");
+        if (nextVersion !== snapshotVersion) {
+          setGuruNotice("");
+        }
+      } catch {
+        if (!controller.signal.aborted) setNotice("Automatic refresh failed. Showing the last loaded snapshot; retrying when this page next checks for updates.");
+      } finally {
+        inFlight = false;
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 5 * 60 * 1000);
+    const onVisibilityChange = () => { void refresh(); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [snapshotVersion]);
+
+  useEffect(() => {
+    if (snapshotVersion === null || !(viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position") || (guruPayload && guruSnapshotVersion.current === snapshotVersion) || guruNotice) return;
     const controller = new AbortController();
     setGuruLoading(true);
     setGuruNotice("");
     void fetchJson<ScannerTopHitsResponse>("/api/scanner-board/top-hits?section=guru", { signal: controller.signal })
-      .then(setGuruPayload)
+      .then((next) => { if (!controller.signal.aborted) { guruSnapshotVersion.current = snapshotVersion; setGuruPayload(next); } })
       .catch((error) => {
         if (!controller.signal.aborted) setGuruNotice(error instanceof Error ? error.message : "Failed to load Guru Board data.");
       })
@@ -326,7 +360,7 @@ export function ScannerTopHitsPage() {
         if (!controller.signal.aborted) setGuruLoading(false);
       });
     return () => controller.abort();
-  }, [guruNotice, guruPayload, guruReloadKey, viewMode]);
+  }, [guruNotice, guruPayload, guruReloadKey, viewMode, snapshotVersion]);
 
   useEffect(() => {
     if (viewMode !== "etf-portfolios" || etfPayload || etfLoading) return;
@@ -957,6 +991,7 @@ export function ScannerTopHitsPage() {
               </Link>
             </div>
             <span className="panel-copy">Updated {formatLocalDateTime(payload?.latest_update_at)}.</span>
+            <span className="panel-copy">Checks for updates every 5 minutes while visible and when you return to this tab.</span>
             {snapshot?.freshness === "stale" ? <span className="panel-copy earnings-console-note">Showing the latest completed snapshot while a newer market day is pending.</span> : null}
             {snapshot?.freshness === "missing" ? <span className="panel-copy earnings-console-note">No completed Top Hits snapshot is available yet. Run “Build Top Hits Snapshot” after the scanner batch.</span> : null}
             {snapshot?.refresh_status && snapshot.refresh_status !== "idle" ? <span className="panel-copy earnings-console-note">Refresh {snapshot.refresh_status}: {snapshot.refresh_message || "checking scanner inputs"}</span> : null}

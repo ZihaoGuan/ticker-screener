@@ -67,10 +67,11 @@ export function ScannerBoardPage() {
   const handleManualRefresh = async () => {
     setIsRefreshingBoard(true);
     setNotice("");
+    setError("");
     try {
       const refreshed = await fetchJson<ScannerBoardResponse>("/api/scanner-board/refresh", { method: "POST" });
       setPayload(refreshed);
-      setNotice("Scanner board manually refreshed to latest visible New York trading day.");
+      setNotice(refreshed.snapshot_refresh?.message || "Scanner board reloaded from saved results.");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to manually refresh scanner board.");
     } finally {
