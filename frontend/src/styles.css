@@ -7364,7 +7364,7 @@ dialog.modal-backdrop:not([open]) {
 .martin-comparison-chart .account-legend::before { background: var(--accent); }
 .martin-comparison-chart .daily-top5-legend::before { background: #82b9e8; }
 .martin-chart > div:last-child { grid-column: 2; grid-row: 2; display: flex; justify-content: space-between; color: #d4d4d8; font-size: .72rem; }
-.martin-exclusions { border: 1px solid var(--border); border-radius: .6rem; padding: .85rem 1rem; background: var(--surface); }
+.martin-exclusions { min-width: 0; border: 1px solid var(--border); border-radius: .6rem; padding: .85rem 1rem; background: var(--surface); }
 .martin-exclusions > summary { display: flex; justify-content: space-between; gap: 1rem; cursor: pointer; font-weight: 700; }
 .martin-exclusions > p { color: var(--muted); }
 .martin-code-detail { margin-top: .35rem; color: var(--muted); font-size: .75rem; }

@@ -98,7 +98,7 @@ _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
 _SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v6"
-_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v8"
+_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v9"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -6068,12 +6068,22 @@ def _build_trade_plan(artifacts: list[dict[str, Any]]) -> dict[str, Any] | None:
         return None
     supported.sort(key=lambda item: (str(item.get("signal_state") or "") == "active" or item.get("_source_strategy_id") in {"ema21_pullback_buy", "sma200_pullback_buy"}, str(item.get("_source_date") or item.get("event_date") or ""), str(item.get("_source_strategy_id") or "")), reverse=True)
     item = supported[0]
-    strategy = str(item.get("_source_strategy_id"))
-    state = "active" if item.get("signal_state") == "active" else "active" if strategy in {"ema21_pullback_buy", "sma200_pullback_buy"} else "ready"
     def valid_level(value: object) -> float | None:
         price = _coerce_optional_float(value)
         return price if price is not None and math.isfinite(price) and price > 0 else None
 
+    def complete_levels(source: dict[str, Any]) -> bool:
+        trigger, stop = valid_level(source.get("trigger_price")), valid_level(source.get("stop_price"))
+        return trigger is not None and stop is not None and trigger > stop
+
+    source_date = _coerce_iso_date(item.get("_source_date") or item.get("event_date"))
+    if source_date and not complete_levels(item):
+        # Fall back only within the same session; never borrow levels from an older or undated plan.
+        item = next((candidate for candidate in supported
+                     if _coerce_iso_date(candidate.get("_source_date") or candidate.get("event_date")) == source_date
+                     and complete_levels(candidate)), item)
+    strategy = str(item.get("_source_strategy_id"))
+    state = "active" if item.get("signal_state") == "active" else "active" if strategy in {"ema21_pullback_buy", "sma200_pullback_buy"} else "ready"
     support = valid_level(item.get("support_price") or item.get("secondary_entry_price"))
     trigger = valid_level(item.get("trigger_price"))
     stop = valid_level(item.get("stop_price"))

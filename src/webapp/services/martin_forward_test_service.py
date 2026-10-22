@@ -58,12 +58,25 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
     readiness = str(row.get("trade_readiness") or "")
     orderable = readiness == "defined_risk" and not reasons
     status = "blocked" if reasons else ("pending" if orderable else ("avoid" if readiness == "avoid" else "watch"))
-    if not orderable and not reasons:
-        reasons.append("marked_avoid" if readiness == "avoid" else "trade_readiness_not_defined_risk")
     adr = _number(row.get("adr14_pct"))
     stop = _number(plan.get("stop_price"))
     max_entry = _number(plan.get("max_entry_price"))
     entry = _number(plan.get("trigger_price"))
+    if not orderable and not reasons:
+        if readiness == "avoid":
+            reasons.append("marked_avoid")
+        elif not plan:
+            reasons.append("no_supported_plan")
+        elif entry is None or stop is None or stop <= 0 or entry <= stop:
+            reasons.append("plan_levels_missing")
+        else:
+            if plan.get("state") != "active":
+                reasons.append("awaiting_confirmation")
+            risk = (entry - stop) / entry * 100
+            if risk > 5:
+                reasons.append("risk_exceeds_5pct")
+            if not reasons:
+                reasons.append("awaiting_confirmation")
     scanner_count = _number(row.get("scanner_count"))
     result = {
         "ticker": ticker, "rank": rank, "source_snapshot_rank": row.get("rank", rank),
@@ -71,6 +84,9 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
         "scanner_labels": sorted(labels), "trade_readiness": readiness,
         "close": close, "market_cap": market_cap, "rs_rating": rs,
         "entry": entry, "stop": stop, "max_entry": max_entry, "adr14_pct": adr,
+        "plan_state": plan.get("state"), "risk_status": plan.get("risk_status"),
+        "reference_risk_pct": _number(plan.get("reference_risk_pct")),
+        "source_strategy_id": plan.get("source_strategy_id"), "signal_date": plan.get("signal_date"),
         "sector": row.get("sector") or row.get("sector_name"),
         "sector_momentum": row.get("sector_momentum") if isinstance(row.get("sector_momentum"), dict) else {},
         "adr_suitability": row.get("adr_suitability"), "stop_to_adr": row.get("stop_to_adr"),

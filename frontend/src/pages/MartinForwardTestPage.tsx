@@ -28,7 +28,7 @@ export default function MartinForwardTestPage() {
   const latest = book?.runs?.[0];
   const candidateRows = useMemo(() => (book?.candidates ?? []).map(unpack), [book]);
   const positionRows = useMemo(() => (book?.positions ?? []).map(unpack), [book]);
-  const attention = candidateRows.filter((row) => row.status === "blocked_data" || ["error", "cancelled", "expired"].includes(String(row.status)) || hasMissingReason(row.reasons_json ?? row.reasons ?? object(row.payload_json).reasons));
+  const attention = candidateRows.filter((row) => row.status === "blocked_data" || ["error", "cancelled", "expired"].includes(String(row.status)) || hasMissingReason(row.reasons_json ?? row.reasons ?? object(row.payload_json).reasons, row));
   const summary = object(latest?.summary_json);
   const sessionDate = String(latest?.session_date ?? "");
   const stale = sessionDate ? (Date.now() - new Date(`${sessionDate}T00:00:00`).getTime()) > 3 * 86400000 : false;
@@ -112,11 +112,11 @@ function Today({ book, bookLabel, candidates, outstandingOrders, attention }: { 
 }
 
 function FragmentRow({ row, expanded, onToggle }: { row: MartinForwardRow; expanded: boolean; onToggle: () => void }) {
-  const details = ["selection_date", "order_date", "queue_rank", "source_snapshot_rank", "selection_reason", "entry_policy_version", "market_data_state", "market_data_reason", "entry", "max_entry", "sector", "sector_quadrant", "selection_tier", "adr14_pct", "adr_suitability", "stop_to_adr", "strike_score", "scanner_count", "risk_dollars", "allocation_dollars", "selection_metadata", "reasons"];
+  const details = ["selection_date", "order_date", "queue_rank", "source_snapshot_rank", "selection_reason", "entry_policy_version", "source_strategy_id", "signal_date", "plan_state", "risk_status", "reference_risk_pct", "market_data_state", "market_data_reason", "entry", "max_entry", "sector", "sector_quadrant", "selection_tier", "adr14_pct", "adr_suitability", "stop_to_adr", "strike_score", "scanner_count", "risk_dollars", "allocation_dollars", "selection_metadata", "reasons"];
   const nextEvent = row.market_data_state === "awaiting_data" ? "Awaiting exact session bar; order remains reserved" : row.status === "pending" ? "Check next completed session for limit fill" : row.status === "filled" ? "Manage open position at stop" : candidateAction(row);
   return <>
     <tr><th scope="row">{String(row.ticker ?? "—")}</th><td>{statusLabel(String(row.status ?? "Unknown"))}</td><td>{formatPrice(row.limit_price)}</td><td>{formatPrice(row.stop)}</td><td>{format(row.shares ?? row.position_size)}</td><td>{nextEvent}</td><td><button type="button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "Hide details" : "Details"}</button></td></tr>
-    {expanded ? <tr><td colSpan={7}><dl className="martin-details">{details.filter((field) => row[field] != null).map((field) => <div key={field}><dt>{field === "reasons" ? "Reason details" : field.replace(/_/g, " ")}</dt><dd>{field === "reasons" ? humanReasons(row[field]) : format(row[field])}{field === "reasons" ? <small className="martin-raw-code">Stored value: {format(row[field])}</small> : null}</dd></div>)}</dl></td></tr> : null}
+    {expanded ? <tr><td colSpan={7}><dl className="martin-details">{details.filter((field) => row[field] != null).map((field) => <div key={field}><dt>{field === "reasons" ? "Reason details" : field.replace(/_/g, " ")}</dt><dd>{field === "reasons" ? humanReasons(row[field], row) : format(row[field])}{field === "reasons" ? <small className="martin-raw-code">Stored value: {format(row[field])}</small> : null}</dd></div>)}</dl></td></tr> : null}
   </>;
 }
 
@@ -180,7 +180,7 @@ function ComparisonChart({ books, field }: { books: MartinForwardResponse["books
 }
 
 function SimpleTable({ rows, columns }: { rows: MartinForwardRow[]; columns: string[] }) {
-  return <div className={`martin-table-wrap ${columns.includes("cumulative_r") ? "martin-comparison-table" : ""}`}><table><thead><tr>{columns.map((column) => <th key={column} scope="col">{columnLabel(column)}</th>)}</tr></thead><tbody>{rows.map((raw, index) => { const row = unpack(raw); return <tr key={String(raw.id ?? index)}>{columns.map((column) => <td key={column}>{column === "reason_summary" ? <><span>{humanReasons(row.reasons)}</span><details className="martin-code-detail"><summary>Stored reason code</summary><code>{format(row.reasons)}</code></details></> : column === "status" ? statusLabel(String(row[column] ?? raw[column] ?? "Unknown")) : format(row[column] ?? raw[column])}</td>)}</tr>; })}</tbody></table></div>;
+  return <div className={`martin-table-wrap ${columns.includes("cumulative_r") ? "martin-comparison-table" : ""}`}><table><thead><tr>{columns.map((column) => <th key={column} scope="col">{columnLabel(column)}</th>)}</tr></thead><tbody>{rows.map((raw, index) => { const row = unpack(raw); return <tr key={String(raw.id ?? index)}>{columns.map((column) => <td key={column}>{column === "reason_summary" ? <><span>{humanReasons(row.reasons, row)}</span><details className="martin-code-detail"><summary>Stored reason code</summary><code>{format(row.reasons)}</code></details></> : column === "status" ? statusLabel(String(row[column] ?? raw[column] ?? "Unknown")) : format(row[column] ?? raw[column])}</td>)}</tr>; })}</tbody></table></div>;
 }
 
 function StatePanel({ title, detail }: { title: string; detail: string }) { return <section className="martin-state" role="status"><h2>{title}</h2><p>{detail}</p></section>; }
@@ -198,7 +198,7 @@ function candidateAction(row: MartinForwardRow): string {
   if (status.startsWith("blocked")) return `Resolve block${reasons ? `: ${reasons}` : ""}`;
   if (status === "expired" || status === "cancelled") return `Review ${status} order${reasons ? `: ${reasons}` : ""}`;
   if (status === "not_selected") return `Not selected${reasons ? `: ${reasons}` : ""}`;
-  if (status === "watch" || status === "avoid") return `No order: ${status}`;
+  if (status === "watch" || status === "avoid") return `No order: ${humanReasons(row.reasons, row)}`;
   return reasons || "Review snapshot levels";
 }
 function format(value: unknown): string { if (value == null) return "—"; if (typeof value === "number") return value.toLocaleString(undefined, { maximumFractionDigits: 2 }); if (typeof value === "object") return JSON.stringify(value); return String(value); }
@@ -206,9 +206,22 @@ function chartLabel(field: "cumulative_r" | "account_equity" | "equity_drawdown_
 function chartValue(field: "cumulative_r" | "account_equity" | "equity_drawdown_pct", value: number): string { return field === "account_equity" ? `$${format(value)}` : field === "equity_drawdown_pct" ? `${format(value)}%` : `${format(value)} R`; }
 function columnLabel(value: string): string { return ({ source_run_id: "Source run", created_at: "Created", session_date: "Session date", event_date: "Event date", event_type: "Event", ticker: "Ticker", status: "Status", realized_r: "Realized R", realized_pnl: "Realized P&L (USD)", cumulative_r: "Cumulative R", unrealized_r: "Unrealized R", expectancy_r: "Expectancy R", profit_factor_r: "Profit factor", account_equity: "Account equity (USD)", equity_drawdown_pct: "Equity drawdown %", max_r_drawdown: "Max drawdown R", win_rate_pct: "Win rate %", name: "Book", count: "Trades", reason_summary: "Reason summary" } as Record<string, string>)[value] ?? value.replace(/_/g, " "); }
 function statusLabel(status: string): string { return ({ not_selected: "Not selected", blocked: "Excluded · failed strategy gates", blocked_data: "Blocked · missing data", blocked_capacity: "Blocked · capacity", waiting_capacity: "Waiting for capacity", blocked_open_position: "Blocked · existing position", blocked_existing_order: "Blocked · existing order", pending: "Pending", filled: "Filled", closed: "Closed", open: "Open", watch: "Watch", avoid: "Avoid", error: "Processing error", cancelled: "Cancelled", expired: "Expired" } as Record<string, string>)[status] ?? status.replace(/_/g, " "); }
-function hasMissingReason(value: unknown): boolean { const reasons = Array.isArray(value) ? value.map(String) : value == null ? [] : [String(value)]; return reasons.some((reason) => ["missing_ticker", "missing_sector", "missing_adr_or_stop", "invalid_entry_stop_levels"].includes(reason)); }
-function humanReasons(value: unknown): string {
-  const labels: Record<string, string> = { missing_ticker: "Ticker is missing", market_cap_below_1b_or_missing: "Market cap is below $1B or unavailable", close_below_5_or_missing: "Closing price is below $5 or unavailable", rs_outside_90_99_or_missing: "Relative strength is outside 90–99 or unavailable", no_martin_focus_scanner: "No Martin Focus scanner match", marked_avoid: "Marked avoid by trade readiness", trade_readiness_not_defined_risk: "Trade risk is not defined", missing_adr_or_stop: "ADR or stop level is missing", invalid_entry_stop_levels: "Entry and stop levels are invalid", missing_sector: "Sector data is missing", sector_quota_or_session_limit: "Outside sector quota or session limit", open_position_exists: "Position already open", pending_order_exists: "An order is already pending", position_or_allocation_capacity: "Position or allocation capacity reached", not_in_complete_snapshot: "Ticker was not in the complete snapshot", open_position_already_exists: "Position already open", same_day_stop: "Stop was reached on entry day" };
+function reasonCodes(value: unknown, row?: MartinForwardRow): string[] {
   const reasons = Array.isArray(value) ? value.map(String) : value == null ? [] : [String(value)];
-  return reasons.map((reason) => labels[reason] ?? reason.replace(/_/g, " ")).join("; ") || "No reason recorded";
+  return [...new Set(reasons.flatMap((reason) => {
+    if (reason !== "trade_readiness_not_defined_risk" || !row) return [reason];
+    // Explain older saved candidates without changing their stored reason or eligibility.
+    if (row.trade_readiness === "leader") return ["no_supported_plan"];
+    if (!["pullback_zone", "reclaim_trigger"].includes(String(row.trade_readiness))) return [reason];
+    const entry = Number(row.entry), stop = Number(row.stop);
+    if (!Number.isFinite(entry) || !Number.isFinite(stop) || stop <= 0 || entry <= stop) return ["plan_levels_missing"];
+    const result = row.trade_readiness === "pullback_zone" ? ["awaiting_confirmation"] : [];
+    if (row.risk_status === "over_limit" || ((entry - stop) / entry) * 100 > 5) result.push("risk_exceeds_5pct");
+    return result.length ? result : [reason];
+  }))];
+}
+function hasMissingReason(value: unknown, row?: MartinForwardRow): boolean { return reasonCodes(value, row).some((reason) => ["missing_ticker", "missing_sector", "missing_adr_or_stop", "invalid_entry_stop_levels", "plan_levels_missing"].includes(reason)); }
+function humanReasons(value: unknown, row?: MartinForwardRow): string {
+  const labels: Record<string, string> = { missing_ticker: "Ticker is missing", market_cap_below_1b_or_missing: "Market cap is below $1B or unavailable", close_below_5_or_missing: "Closing price is below $5 or unavailable", rs_outside_90_99_or_missing: "Relative strength is outside 90–99 or unavailable", no_martin_focus_scanner: "No Martin Focus scanner match", marked_avoid: "Marked avoid by trade readiness", trade_readiness_not_defined_risk: "Readiness not yet Plan Ready", awaiting_confirmation: "Awaiting confirmation", risk_exceeds_5pct: "Risk exceeds 5%", no_supported_plan: "No supported plan", plan_levels_missing: "Plan levels missing", missing_adr_or_stop: "ADR or stop level is missing", invalid_entry_stop_levels: "Entry and stop levels are invalid", missing_sector: "Sector data is missing", sector_quota_or_session_limit: "Outside sector quota or session limit", open_position_exists: "Position already open", pending_order_exists: "An order is already pending", position_or_allocation_capacity: "Position or allocation capacity reached", not_in_complete_snapshot: "Ticker was not in the complete snapshot", open_position_already_exists: "Position already open", same_day_stop: "Stop was reached on entry day" };
+  return reasonCodes(value, row).map((reason) => labels[reason] ?? reason.replace(/_/g, " ")).join("; ") || "No reason recorded";
 }

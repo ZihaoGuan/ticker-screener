@@ -106,6 +106,44 @@ try {
   await page.getByText("selection date", { exact: true }).waitFor();
   await page.getByText("order date", { exact: true }).waitFor();
 
+  const legacyWatch = (ticker, readiness, entry, stop) => ({ ticker, status: "watch", trade_readiness: readiness, entry, stop,
+    reasons: ["trade_readiness_not_defined_risk"], selected_for_book: false });
+  apiPayload = { configured: true, books: { account: book([
+    legacyWatch("LEGACYSUPPORT", "pullback_zone", 57.018, 55.362149543412976),
+    legacyWatch("LEGACYWIDE", "reclaim_trigger", 67.0768, 63.12980351389087),
+    legacyWatch("LEGACYBOTH", "pullback_zone", 50, 45),
+    legacyWatch("LEGACYLEADER", "leader", null, null),
+    legacyWatch("LEGACYMISSING", "reclaim_trigger", null, null),
+    { ticker: "NEWCONFIRM", status: "watch", reasons: ["awaiting_confirmation"], selected_for_book: false },
+    { ticker: "NEWWIDE", status: "watch", reasons: ["risk_exceeds_5pct"], selected_for_book: false },
+    { ticker: "NEWNOPLAN", status: "watch", reasons: ["no_supported_plan"], selected_for_book: false },
+    { ticker: "NEWMISSING", status: "watch", reasons: ["plan_levels_missing"], selected_for_book: false },
+  ]) } };
+  await page.goto("http://127.0.0.1:5173/backtests/martin-forward?book=account&view=today");
+  await page.getByText("Excluded candidates and exceptions").click();
+  const expectedReasons = {
+    LEGACYSUPPORT: "Awaiting confirmation", LEGACYWIDE: "Risk exceeds 5%", LEGACYBOTH: "Awaiting confirmation; Risk exceeds 5%",
+    LEGACYLEADER: "No supported plan", LEGACYMISSING: "Plan levels missing", NEWCONFIRM: "Awaiting confirmation",
+    NEWWIDE: "Risk exceeds 5%", NEWNOPLAN: "No supported plan", NEWMISSING: "Plan levels missing",
+  };
+  for (const [ticker, reason] of Object.entries(expectedReasons)) {
+    const row = page.locator(".martin-exclusions tbody tr").filter({ has: page.getByRole("cell", { name: ticker, exact: true }) });
+    assert.equal(await row.locator("td").nth(2).locator("span").innerText(), reason);
+  }
+  const missingTickers = await page.locator(".martin-exclusions h3").filter({ hasText: "Needs attention" }).evaluate((h) =>
+    Array.from(h.nextElementSibling.querySelectorAll("tbody td:first-child"), cell => cell.textContent.trim()));
+  assert.deepEqual(missingTickers, ["LEGACYMISSING", "NEWMISSING"], "Only missing levels are data exceptions; waiting and wide risk stay routine");
+  await page.getByRole("button", { name: "All candidates", exact: true }).click();
+  const supportRow = page.locator(".martin-candidate-table tbody tr").filter({ has: page.getByRole("rowheader", { name: "LEGACYSUPPORT", exact: true }) });
+  assert.match(await supportRow.innerText(), /No order: Awaiting confirmation/);
+  await supportRow.getByRole("button", { name: "Details", exact: true }).click();
+  await page.locator(".martin-raw-code").filter({ hasText: "trade_readiness_not_defined_risk" }).waitFor();
+  assert.equal(await page.getByText("Trade risk is not defined", { exact: true }).count(), 0);
+  assert.equal(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth), true, "Watch explanations fit the mobile viewport");
+  await page.screenshot({ path: "/tmp/martin-watch-reasons-mobile.png" });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.screenshot({ path: "/tmp/martin-watch-reasons-desktop.png" });
+
   apiPayload = { configured: true, books: { account: book([], []) } };
   await page.goto("http://127.0.0.1:5173/backtests/martin-forward?book=account&view=today");
   await page.getByRole("heading", { name: "Account book · Closed positions" }).waitFor();
