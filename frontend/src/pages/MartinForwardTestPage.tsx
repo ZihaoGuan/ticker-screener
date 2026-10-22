@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { MartinForwardBook, MartinForwardResponse, MartinForwardRow } from "../lib/types";
 
@@ -116,7 +116,7 @@ function FragmentRow({ row, expanded, onToggle }: { row: MartinForwardRow; expan
   const nextEvent = row.market_data_state === "awaiting_data" ? "Awaiting exact session bar; order remains reserved" : row.status === "pending" ? "Check next completed session for limit fill" : row.status === "filled" ? "Manage open position at stop" : candidateAction(row);
   return <>
     <tr><th scope="row">{String(row.ticker ?? "—")}</th><td>{statusLabel(String(row.status ?? "Unknown"))}</td><td>{formatPrice(row.limit_price)}</td><td>{formatPrice(row.stop)}</td><td>{format(row.shares ?? row.position_size)}</td><td>{nextEvent}</td><td><button type="button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "Hide details" : "Details"}</button></td></tr>
-    {expanded ? <tr><td colSpan={7}><dl className="martin-details">{details.filter((field) => row[field] != null).map((field) => <div key={field}><dt>{field === "reasons" ? "Reason details" : field.replace(/_/g, " ")}</dt><dd>{field === "reasons" ? humanReasons(row[field], row) : format(row[field])}{field === "reasons" ? <small className="martin-raw-code">Stored value: {format(row[field])}</small> : null}</dd></div>)}</dl></td></tr> : null}
+    {expanded ? <tr><td colSpan={7}><dl className="martin-details">{details.filter((field) => row[field] != null).map((field) => <div key={field}><dt>{field === "reasons" ? "Reason details" : field.replace(/_/g, " ")}</dt><dd>{field === "reasons" ? humanReasons(row[field], row) : format(row[field])}{field === "reasons" ? <small className="martin-raw-code">Stored value: {format(row[field])}</small> : null}</dd></div>)}</dl>{row.status === "watch" ? <TradePlanPreview row={row} /> : null}</td></tr> : null}
   </>;
 }
 
@@ -180,8 +180,39 @@ function ComparisonChart({ books, field }: { books: MartinForwardResponse["books
 }
 
 function SimpleTable({ rows, columns }: { rows: MartinForwardRow[]; columns: string[] }) {
-  return <div className={`martin-table-wrap ${columns.includes("cumulative_r") ? "martin-comparison-table" : ""}`}><table><thead><tr>{columns.map((column) => <th key={column} scope="col">{columnLabel(column)}</th>)}</tr></thead><tbody>{rows.map((raw, index) => { const row = unpack(raw); return <tr key={String(raw.id ?? index)}>{columns.map((column) => <td key={column}>{column === "reason_summary" ? <><span>{humanReasons(row.reasons, row)}</span><details className="martin-code-detail"><summary>Stored reason code</summary><code>{format(row.reasons)}</code></details></> : column === "status" ? statusLabel(String(row[column] ?? raw[column] ?? "Unknown")) : format(row[column] ?? raw[column])}</td>)}</tr>; })}</tbody></table></div>;
+  const [previewRow, setPreviewRow] = useState<string | null>(null);
+  return <div className={`martin-table-wrap ${columns.includes("cumulative_r") ? "martin-comparison-table" : ""}`}><table><thead><tr>{columns.map((column) => <th key={column} scope="col">{columnLabel(column)}</th>)}</tr></thead><tbody>{rows.map((raw, index) => { const row = unpack(raw), key = String(raw.id ?? row.ticker ?? index), showPreview = previewRow === key; return <Fragment key={key}><tr className={columns.includes("reason_summary") ? "martin-exclusion-row" : undefined}>{columns.map((column) => <td key={column}>{column === "reason_summary" ? <><span>{humanReasons(row.reasons, row)}</span><details className="martin-code-detail"><summary>Stored reason code</summary><code>{format(row.reasons)}</code></details>{row.status === "watch" ? <button type="button" aria-expanded={showPreview} onClick={() => setPreviewRow(showPreview ? null : key)}>{showPreview ? "Hide trade plan" : "View trade plan"}</button> : null}</> : column === "status" ? statusLabel(String(row[column] ?? raw[column] ?? "Unknown")) : format(row[column] ?? raw[column])}</td>)}</tr>{showPreview ? <tr className="martin-exclusion-preview-row"><td colSpan={columns.length}><TradePlanPreview row={row} /></td></tr> : null}</Fragment>; })}</tbody></table></div>;
 }
+
+function TradePlanPreview({ row }: { row: MartinForwardRow }) {
+  const entry = positiveNumber(row.entry), stop = positiveNumber(row.stop), storedRiskValue = finiteNumber(row.reference_risk_pct);
+  const storedRisk = storedRiskValue != null && storedRiskValue > 0 ? storedRiskValue : null;
+  const canCalculateRisk = entry != null && stop != null && entry > stop;
+  const risk = storedRisk ?? (canCalculateRisk ? ((entry - stop) / entry) * 100 : null);
+  const overLimit = row.risk_status === "over_limit" || (risk != null && risk > 5);
+  const fields: [string, unknown, "price" | "percent" | "text"][] = [
+    ["Trigger", row.entry, "price"], ["Stop", row.stop, "price"], ["Max entry (5% risk)", row.max_entry, "price"],
+    ["Reference risk at trigger", risk, "percent"], ["Plan state", row.plan_state, "text"],
+    ["Source scanner", typeof row.source_strategy_id === "string" ? ({ ma_pullback_retest: "MA Pullback & Retest", ema21_pullback_buy: "EMA21 Pullback Buy", sma200_pullback_buy: "SMA200 Pullback Buy" } as Record<string, string>)[row.source_strategy_id] ?? row.source_strategy_id.replace(/_/g, " ") : row.source_strategy_id, "text"],
+    ["Signal date", row.signal_date, "text"], ["Selection session", row.selection_date, "text"],
+  ];
+  return <section className="martin-trade-plan" aria-label="Trade plan preview">
+    <h4>Trade plan preview</h4><p>Plan preview · not an active order</p>
+    <dl>{fields.map(([label, value, kind]) => { const unavailable = value == null || (typeof value === "string" && !value.trim()) || (kind === "price" && positiveNumber(value) == null); return <div key={label}><dt>{label}</dt><dd>{unavailable ? "Unavailable" : kind === "price" ? formatPrice(Number(value)) : kind === "percent" ? `${formatRisk(Number(value))}%${storedRisk == null ? " · Calculated from saved levels" : ""}` : format(value)}</dd></div>; })}</dl>
+    {overLimit ? <p className="martin-trade-plan-warning" role="note">Saved plan risk exceeds the 5% limit.</p> : null}
+    <p className="martin-trade-plan-why"><strong>Why Watch:</strong> {humanReasons(row.reasons, row)}</p>
+  </section>;
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value;
+}
+function positiveNumber(value: unknown): number | null {
+  const number = finiteNumber(value);
+  return number != null && number > 0 ? number : null;
+}
+function formatRisk(value: number): string { return value.toLocaleString(undefined, { maximumFractionDigits: 4 }); }
 
 function StatePanel({ title, detail }: { title: string; detail: string }) { return <section className="martin-state" role="status"><h2>{title}</h2><p>{detail}</p></section>; }
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" ? value as Record<string, unknown> : {}; }

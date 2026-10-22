@@ -35,7 +35,8 @@ try {
   const dailyTop5Candidates = candidates(sectorTickers, "TOP5").map((row, index) => ({ ...row, shares: 100, selection_date: "2026-10-19", order_date: "2026-10-19", queue_rank: index + 1, entry_policy_version: "top_hits_max_entry_5pct_v1" }));
   let apiPayload = { configured: true, books: { account: book(accountCandidates, [position("OPEN1", "open", 1), position("CLOSED1", "closed", 2)], [{ id: 44, ticker: "OLDWAIT", session_date: "2026-10-16", status: "pending", payload_json: { market_data_state: "awaiting_data", market_data_reason: "first_session_bar_missed", limit_price: 25, stop: 22 } }]), sector_opportunity: book(candidates(sectorTickers, "SECTOR"), [position("OPEN2", "open", 3)]), daily_top5: book(dailyTop5Candidates) }, comparison: {} };
   let apiStatus = 200;
-  await page.route("**/api/admin/martin-forward-test", (route) => route.fulfill({ status: apiStatus, json: apiPayload }));
+  let martinForwardRequests = 0;
+  await page.route("**/api/admin/martin-forward-test", (route) => { martinForwardRequests += 1; return route.fulfill({ status: apiStatus, json: apiPayload }); });
   await page.goto(process.env.MARTIN_FORWARD_URL || "http://127.0.0.1:5173/backtests/martin-forward");
   await page.getByRole("heading", { name: "Account book · Pending candidates" }).waitFor();
   await page.getByRole("heading", { name: "Earlier pending orders awaiting market data" }).waitFor();
@@ -80,6 +81,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   const closeDrawer = page.getByRole("button", { name: /close/i });
   if (await closeDrawer.count()) await closeDrawer.first().evaluate((element) => element.click());
+  await page.waitForFunction(() => document.querySelector(".sidebar")?.getBoundingClientRect().right <= 1 && Number.parseFloat(getComputedStyle(document.querySelector(".app-shell-backdrop")).opacity) < 0.01);
   await page.waitForTimeout(400);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(150);
@@ -118,28 +120,108 @@ try {
     { ticker: "NEWWIDE", status: "watch", reasons: ["risk_exceeds_5pct"], selected_for_book: false },
     { ticker: "NEWNOPLAN", status: "watch", reasons: ["no_supported_plan"], selected_for_book: false },
     { ticker: "NEWMISSING", status: "watch", reasons: ["plan_levels_missing"], selected_for_book: false },
+    { ticker: "TBBB", status: "watch", entry: 57.018, stop: 55.362149543412976, max_entry: 58.27594688780314, reasons: ["awaiting_confirmation"], selected_for_book: false },
+    { ticker: "CDN", status: "watch", entry: 67.0768, stop: 63.12980351389087, max_entry: 66.45242475146408, reference_risk_pct: 5.88, risk_status: "over_limit", plan_state: "watch", source_strategy_id: "ma_pullback_retest", signal_date: "2026-10-19", selection_date: "2026-10-20", reasons: ["risk_exceeds_5pct"], selected_for_book: false },
+    { ticker: "AVPT", status: "watch", reasons: ["plan_levels_missing"], selected_for_book: false },
+    { ticker: "BADLEVELS", status: "watch", entry: -2, stop: 0, max_entry: -1, reference_risk_pct: "5.88", reasons: ["plan_levels_missing"], selected_for_book: false },
+    { ticker: "PARTIAL", status: "watch", entry: 12, max_entry: 13, reasons: ["plan_levels_missing"], selected_for_book: false },
+    { ticker: "ZEROLEVEL", status: "watch", reference_risk_pct: 0, reasons: ["plan_levels_missing"], selected_for_book: false },
+    { ticker: "NEGLEVEL", status: "watch", reference_risk_pct: -1, reasons: ["plan_levels_missing"], selected_for_book: false },
+    { ticker: "RISKBOUNDARY", status: "watch", entry: 100, stop: 94.998, reasons: ["risk_exceeds_5pct"], selected_for_book: false },
   ]) } };
   await page.goto("http://127.0.0.1:5173/backtests/martin-forward?book=account&view=today");
   await page.getByText("Excluded candidates and exceptions").click();
   const expectedReasons = {
     LEGACYSUPPORT: "Awaiting confirmation", LEGACYWIDE: "Risk exceeds 5%", LEGACYBOTH: "Awaiting confirmation; Risk exceeds 5%",
     LEGACYLEADER: "No supported plan", LEGACYMISSING: "Plan levels missing", NEWCONFIRM: "Awaiting confirmation",
-    NEWWIDE: "Risk exceeds 5%", NEWNOPLAN: "No supported plan", NEWMISSING: "Plan levels missing",
+    NEWWIDE: "Risk exceeds 5%", NEWNOPLAN: "No supported plan", NEWMISSING: "Plan levels missing", TBBB: "Awaiting confirmation",
+    CDN: "Risk exceeds 5%", AVPT: "Plan levels missing", BADLEVELS: "Plan levels missing", PARTIAL: "Plan levels missing",
+    ZEROLEVEL: "Plan levels missing", NEGLEVEL: "Plan levels missing", RISKBOUNDARY: "Risk exceeds 5%",
   };
   for (const [ticker, reason] of Object.entries(expectedReasons)) {
     const row = page.locator(".martin-exclusions tbody tr").filter({ has: page.getByRole("cell", { name: ticker, exact: true }) });
     assert.equal(await row.locator("td").nth(2).locator("span").innerText(), reason);
   }
+  const watchRow = (ticker) => page.locator(".martin-exclusions tbody tr").filter({ has: page.getByRole("cell", { name: ticker, exact: true }) });
+  const previewFor = (ticker) => watchRow(ticker).getByText("View trade plan", { exact: true });
+  const previewToggleFor = (ticker) => watchRow(ticker).getByRole("button", { name: /(?:view|hide) trade plan/i });
+  const previewPanelFor = (ticker) => watchRow(ticker).locator("xpath=following-sibling::tr[1]").locator(".martin-trade-plan");
+  const requestsBeforePreviewInteractions = martinForwardRequests;
+  await previewFor("TBBB").focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await watchRow("TBBB").getByRole("button", { name: "Hide trade plan", exact: true }).getAttribute("aria-expanded"), "true", "Keyboard activation opens the trade plan disclosure");
+  const tbbbPreview = previewPanelFor("TBBB");
+  await tbbbPreview.getByText("$57.02", { exact: true }).waitFor();
+  await tbbbPreview.getByText("$55.36", { exact: true }).waitFor();
+  await tbbbPreview.getByText("$58.28", { exact: true }).waitFor();
+  await tbbbPreview.getByText("Calculated from saved levels", { exact: false }).waitFor();
+  await tbbbPreview.getByText("Plan preview · not an active order", { exact: true }).waitFor();
+  await previewFor("CDN").click();
+  const cdnPreview = previewPanelFor("CDN");
+  await cdnPreview.getByText("5.88%", { exact: true }).waitFor();
+  await cdnPreview.getByText("MA Pullback & Retest", { exact: true }).waitFor();
+  await cdnPreview.getByText("$66.45", { exact: true }).waitFor();
+  await cdnPreview.getByText("2026-10-19", { exact: true }).waitFor();
+  await cdnPreview.getByText("2026-10-20", { exact: true }).waitFor();
+  await cdnPreview.getByText("Saved plan risk exceeds the 5% limit.", { exact: true }).waitFor();
+  await previewFor("AVPT").click();
+  const avptPreview = previewPanelFor("AVPT");
+  assert.equal(await avptPreview.getByText("Unavailable", { exact: true }).count(), 8);
+  await previewFor("BADLEVELS").click();
+  const invalidPreview = previewPanelFor("BADLEVELS");
+  assert.equal(await invalidPreview.locator("dd").nth(0).innerText(), "Unavailable");
+  assert.equal(await invalidPreview.locator("dd").nth(1).innerText(), "Unavailable");
+  assert.equal(await invalidPreview.locator("dd").nth(2).innerText(), "Unavailable");
+  await previewFor("PARTIAL").click();
+  const partialPreview = previewPanelFor("PARTIAL");
+  assert.equal(await partialPreview.locator("dd").nth(0).innerText(), "$12");
+  assert.equal(await partialPreview.locator("dd").nth(1).innerText(), "Unavailable");
+  assert.equal(await partialPreview.locator("dd").nth(3).innerText(), "Unavailable");
+  for (const ticker of ["ZEROLEVEL", "NEGLEVEL"]) {
+    await previewFor(ticker).click();
+    const boundaryPreview = previewPanelFor(ticker);
+    assert.equal(await boundaryPreview.locator("dd").nth(3).innerText(), "Unavailable");
+  }
+  await previewFor("RISKBOUNDARY").click();
+  const riskBoundaryPreview = previewPanelFor("RISKBOUNDARY");
+  await riskBoundaryPreview.getByText("5.002% · Calculated from saved levels", { exact: true }).waitFor();
+  await riskBoundaryPreview.getByText("Saved plan risk exceeds the 5% limit.", { exact: true }).waitFor();
+  assert.equal(martinForwardRequests, requestsBeforePreviewInteractions, "Opening saved-row previews makes no additional endpoint requests");
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await previewToggleFor("RISKBOUNDARY").click();
+  await previewFor("TBBB").click();
+  await tbbbPreview.screenshot({ path: "/tmp/martin-trade-plan-preview-desktop.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (await closeDrawer.count()) await closeDrawer.first().evaluate((element) => element.click());
+  await page.waitForFunction(() => document.querySelector(".sidebar")?.getBoundingClientRect().right <= 1 && Number.parseFloat(getComputedStyle(document.querySelector(".app-shell-backdrop")).opacity) < 0.01);
+  await tbbbPreview.scrollIntoViewIfNeeded();
+  assert.equal(await tbbbPreview.isVisible(), true, "The preview remains visible at mobile width");
+  assert.equal(await watchRow("TBBB").getByRole("button", { name: "Hide trade plan", exact: true }).getAttribute("aria-expanded"), "true");
+  const mobilePreviewBounds = await tbbbPreview.evaluate((element) => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, width: rect.width }; });
+  assert.equal(mobilePreviewBounds.left >= 0 && mobilePreviewBounds.right <= 390, true, `Preview exceeds the mobile viewport: ${JSON.stringify(mobilePreviewBounds)}`);
+  assert.equal(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth), true, "Watch explanations fit the 390px mobile viewport");
+  await page.screenshot({ path: "/tmp/martin-trade-plan-preview-mobile.png" });
+  await page.setViewportSize({ width: 195, height: 844 });
+  await tbbbPreview.scrollIntoViewIfNeeded();
+  const zoomOverflow = await tbbbPreview.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const viewport = window.innerWidth;
+    const result = { body: document.body.scrollWidth, viewport, previewLeft: rect.left, previewRight: rect.right };
+    return result;
+  });
+  assert.equal(zoomOverflow.previewLeft >= 0 && zoomOverflow.previewRight <= zoomOverflow.viewport, true, `Preview exceeds the effective viewport at 200% zoom: ${JSON.stringify(zoomOverflow)}`);
   const missingTickers = await page.locator(".martin-exclusions h3").filter({ hasText: "Needs attention" }).evaluate((h) =>
-    Array.from(h.nextElementSibling.querySelectorAll("tbody td:first-child"), cell => cell.textContent.trim()));
-  assert.deepEqual(missingTickers, ["LEGACYMISSING", "NEWMISSING"], "Only missing levels are data exceptions; waiting and wide risk stay routine");
+    Array.from(h.nextElementSibling.querySelectorAll("tbody tr.martin-exclusion-row td:first-child"), cell => cell.textContent.trim()));
+  assert.deepEqual(missingTickers, ["LEGACYMISSING", "NEWMISSING", "AVPT", "BADLEVELS", "PARTIAL", "ZEROLEVEL", "NEGLEVEL"], "Only missing or invalid levels are data exceptions; waiting and wide risk stay routine");
   await page.getByRole("button", { name: "All candidates", exact: true }).click();
   const supportRow = page.locator(".martin-candidate-table tbody tr").filter({ has: page.getByRole("rowheader", { name: "LEGACYSUPPORT", exact: true }) });
   assert.match(await supportRow.innerText(), /No order: Awaiting confirmation/);
   await supportRow.getByRole("button", { name: "Details", exact: true }).click();
   await page.locator(".martin-raw-code").filter({ hasText: "trade_readiness_not_defined_risk" }).waitFor();
+  const detailPreview = supportRow.locator("xpath=following-sibling::tr[1]").locator(".martin-trade-plan");
+  await detailPreview.getByText("Trade plan preview", { exact: true }).waitFor();
+  assert.equal(await supportRow.getByText("View trade plan", { exact: true }).count(), 0, "The expanded candidate details reuse the same preview without duplicate controls");
   assert.equal(await page.getByText("Trade risk is not defined", { exact: true }).count(), 0);
-  assert.equal(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth), true, "Watch explanations fit the mobile viewport");
   await page.screenshot({ path: "/tmp/martin-watch-reasons-mobile.png" });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: "/tmp/martin-watch-reasons-desktop.png" });

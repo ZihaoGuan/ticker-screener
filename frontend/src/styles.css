@@ -7370,7 +7370,23 @@ dialog.modal-backdrop:not([open]) {
 .martin-code-detail { margin-top: .35rem; color: var(--muted); font-size: .75rem; }
 .martin-code-detail summary { cursor: pointer; }
 .martin-code-detail code, .martin-raw-code { display: block; margin-top: .2rem; color: #d4d4d8; overflow-wrap: anywhere; }
+.martin-trade-plan { max-width: 42rem; margin-top: .65rem; padding-top: .65rem; border-top: 1px solid var(--border); }
+.martin-trade-plan h4 { margin: 0; font-size: .9rem; }
+.martin-trade-plan > p { margin: .2rem 0 .65rem; color: var(--muted); font-size: .875rem; }
+.martin-trade-plan dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem .9rem; margin: 0; }
+.martin-trade-plan dl > div { min-width: 0; }
+.martin-trade-plan dt { color: var(--muted); font-size: .875rem; }
+.martin-trade-plan dd { margin: .1rem 0 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.martin-trade-plan .martin-trade-plan-warning { margin: .55rem 0 0; color: #efc27d; }
+.martin-trade-plan .martin-trade-plan-why { margin: .55rem 0 0; color: inherit; }
 .martin-audit { border: 1px solid var(--border); border-radius: .75rem; padding: .9rem 1rem; background: var(--surface); }
 .martin-audit summary { cursor: pointer; font-weight: 700; } .martin-audit pre { max-height: 28rem; overflow: auto; }
 @media (max-width: 760px) { .martin-header { align-items: flex-start; flex-direction: column; } .martin-lifecycle, .martin-lifecycle[aria-label="Session lifecycle"], .martin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .martin-position-summary { align-items: flex-start; flex-wrap: wrap; } .martin-details { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .martin-toolbar, .martin-panel { padding: .75rem; } .martin-freshness { align-items: flex-start; flex-wrap: wrap; } .martin-lifecycle-card { padding: .75rem; } .martin-lifecycle span { font-size: .75rem; } .martin-chart { grid-template-columns: 4.75rem minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; } .martin-comparison-chart > div:last-child { flex-wrap: wrap; justify-content: flex-start; gap: .3rem 1rem; } .martin-comparison-chart > div:last-child > span:first-child { flex-basis: 100%; } .martin-position-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) {
+  .martin-exclusions .martin-table-wrap table { min-width: 0; table-layout: fixed; }
+  .martin-exclusions .martin-table-wrap th:first-child, .martin-exclusions .martin-table-wrap td:first-child { width: 24%; }
+  .martin-exclusions .martin-table-wrap th:nth-child(2), .martin-exclusions .martin-table-wrap td:nth-child(2) { width: 22%; }
+  .martin-exclusions .martin-table-wrap td { padding: .55rem .35rem; }
+  .martin-trade-plan { max-width: 100%; }
+}
