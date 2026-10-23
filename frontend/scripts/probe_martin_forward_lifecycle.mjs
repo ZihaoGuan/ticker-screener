@@ -322,6 +322,8 @@ try {
     { ticker: "NORS", status: "blocked_data", rs_tier: "missing", reasons: ["rs_rating_missing"] },
   ]);
   expandedBook.strategy_id = "martin_rs_expanded_v1";
+  expandedBook.candidates[0].stop_policy_version = "martin_daily_structural_v1";
+  expandedBook.candidates[0].stop_policy = { version: "martin_daily_structural_v1", stop_basis: "daily_reclaim_low", profile_id: "daily_ema21", signal_date: "2026-10-19", invalidation_date: "2026-10-19", invalidation_low: 97, buffer: 0, stop: 97, legacy_stop: 94, reference_entry: 100, reference_risk_pct: 3, stop_to_adr: 0.75, adr_fit: "wide_stop_caution" };
   expandedBook.cost_model = "10 bps adverse slippage on stops and market-open exits; no commissions modeled.";
   expandedBook.history = [{ date: "2026-10-19", cumulative_r: 0, account_equity: 100000, equity_drawdown_pct: 0 }];
   expandedBook.rs_tier_metrics = {
@@ -349,6 +351,9 @@ try {
   await emergingWatch.getByRole("button", { name: "View trade plan", exact: true }).click();
   const watchEvidence = emergingWatch.locator("xpath=following-sibling::tr[1]").getByRole("region", { name: "Saved RS eligibility evidence" });
   await watchEvidence.getByRole("heading", { name: "RS tier: Emerging · RS 80–89" }).waitFor();
+  await watchEvidence.getByText("Structural stop evidence", { exact: true }).click();
+  await watchEvidence.getByText("martin_daily_structural_v1", { exact: true }).waitFor();
+  await watchEvidence.getByText("Wider than half ADR · caution", { exact: true }).waitFor();
   await watchEvidence.screenshot({ path: "/tmp/martin-rs-expanded-evidence-desktop.png" });
   await page.setViewportSize({ width: 390, height: 844 });
   const rsCloseDrawer = page.getByRole("button", { name: /close/i });

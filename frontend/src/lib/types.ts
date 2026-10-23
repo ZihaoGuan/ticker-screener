@@ -286,6 +286,40 @@ export type ScannerTopHitScanner = {
   sort_date: string;
 };
 
+export type ScannerTradePlan = {
+  source_strategy_id: string;
+  state: "ready" | "active";
+  support_label: string;
+  support_price: number | null;
+  trigger_label: string;
+  trigger_price: number | null;
+  stop_label: string;
+  stop_price: number | null;
+  reference_risk_pct: number | null;
+  execution_timeframe: "daily";
+  entry_policy: "close_confirmed";
+  max_risk_pct: number;
+  max_entry_price: number | null;
+  risk_valid: boolean;
+  risk_status: "invalid_levels" | "within_limit" | "over_limit";
+  signal_date: string | null;
+};
+
+export type SnapshotTradePlanPolicy = {
+  version: "current_v1" | "martin_daily_structural_v1";
+  as_of_date: string | null;
+  availability: "available" | "unavailable";
+  unavailable_reason: string | null;
+  trade_plan: ScannerTradePlan | null;
+  trade_readiness: string;
+  pullback_quality: Partial<PullbackQuality> | null;
+  adr14_pct: number | null;
+  stop_to_adr: number | null;
+  adr_suitability: string | null;
+  adr_reason: string | null;
+  evidence: Record<string, unknown>;
+};
+
 export type ScannerTopHitRow = {
   ticker: string;
   company: string;
@@ -376,7 +410,8 @@ export type ScannerTopHitRow = {
     };
     warnings?: string[];
   } | null;
-  trade_plan?: { source_strategy_id: string; state: "ready" | "active"; support_label: string; support_price: number | null; trigger_label: string; trigger_price: number | null; stop_label: string; stop_price: number | null; reference_risk_pct: number | null; execution_timeframe: "daily"; entry_policy: "close_confirmed"; max_risk_pct: number; max_entry_price: number | null; risk_valid: boolean; risk_status: "invalid_levels" | "within_limit" | "over_limit"; signal_date: string | null } | null;
+  trade_plan?: ScannerTradePlan | null;
+  trade_plans?: Partial<Record<SnapshotTradePlanPolicy["version"], SnapshotTradePlanPolicy>>;
   trade_readiness?: "leader" | "pullback_zone" | "reclaim_trigger" | "defined_risk" | "avoid" | string;
   adr14_pct?: number | null;
   stop_to_adr?: number | null;

@@ -7,6 +7,7 @@ from typing import Any
 
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.market_data_access import load_many_ticker_windows
+from src.trade_plan_policies import POLICY_FIELDS, STRUCTURAL_STOP_POLICY
 
 
 STRATEGY_ID = "martin_daily_v1"
@@ -115,14 +116,62 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
     return result
 
 
+def _structural_rs_row(row: dict[str, Any], as_of_date: date) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    """Consume the published policy, never recalculate stops from newer bars."""
+    policies = row.get("trade_plans")
+    saved = policies.get(STRUCTURAL_STOP_POLICY) if isinstance(policies, dict) else None
+    if not isinstance(saved, dict) or saved.get("version") != STRUCTURAL_STOP_POLICY:
+        return row, {"version": STRUCTURAL_STOP_POLICY}, "structural_snapshot_plan_missing"
+    evidence = saved.get("evidence") if isinstance(saved.get("evidence"), dict) else {"version": STRUCTURAL_STOP_POLICY}
+    if saved.get("as_of_date") != as_of_date.isoformat():
+        return row, evidence, "structural_confirmation_stale"
+    if saved.get("availability") != "available":
+        return row, evidence, saved.get("unavailable_reason") or "structural_evidence_missing"
+    plan = saved.get("trade_plan")
+    if not isinstance(plan, dict):
+        return row, evidence, "structural_evidence_missing"
+    if plan.get("signal_date") != as_of_date.isoformat():
+        return row, evidence, "structural_confirmation_stale"
+    if plan.get("source_strategy_id") not in {"ma_pullback_retest", "ema21_pullback_buy", "sma200_pullback_buy"}:
+        return row, evidence, "no_supported_plan"
+    selected = {**row, **{key: saved.get(key) for key in POLICY_FIELDS}}
+    entry, stop, maximum = (_number(plan.get(key)) for key in ("trigger_price", "stop_price", "max_entry_price"))
+    # Validate the trust boundary without replacing the snapshot's evidence or plan.
+    if any(isinstance(plan.get(key), bool) for key in ("trigger_price", "stop_price", "max_entry_price")) or entry is None or stop is None or not entry > stop > 0 or maximum is None or maximum <= stop:
+        return selected, evidence, "plan_levels_missing"
+    if selected.get("trade_readiness") == "defined_risk" and (plan.get("state") != "active" or (entry - stop) / entry * 100 > 5):
+        return selected, evidence, "structural_snapshot_plan_invalid"
+    source = plan["source_strategy_id"]
+    expected_basis = "daily_reclaim_low" if source == "ma_pullback_retest" else "saved_support_test_low"
+    if (evidence.get("version") != STRUCTURAL_STOP_POLICY or evidence.get("source_strategy_id") != source
+            or evidence.get("signal_date") != as_of_date.isoformat() or evidence.get("stop_basis") != expected_basis
+            or _number(evidence.get("stop")) != stop or _number(evidence.get("invalidation_low")) != stop
+            or _number(evidence.get("reference_entry")) != entry or _number(evidence.get("buffer")) != 0
+            or (source == "ma_pullback_retest" and (evidence.get("invalidation_date") != as_of_date.isoformat()
+                or not evidence.get("profile_id") or evidence.get("profile_id") != plan.get("profile_id")))):
+        return selected, evidence, "structural_evidence_missing"
+    if (row.get("strike_zone") or {}).get("state") == "avoid" or (selected.get("pullback_quality") or {}).get("state") == "failed":
+        selected = {**selected, "trade_readiness": "avoid"}
+    return selected, evidence, None
+
+
 def classify_rs_expanded_candidate(row: dict[str, Any], rank: int, as_of_date: date,
                                    frames: dict[str, Any]) -> dict[str, Any]:
     """Isolate the emerging-leader experiment from the unchanged baseline gates."""
+    row, stop_policy, stop_error = _structural_rs_row(row, as_of_date)
     rs = _number(row.get("daily_rs_rating"))
     tier = ("missing" if row.get("daily_rs_rating") is None else "invalid" if isinstance(row.get("daily_rs_rating"), bool) or rs is None or not 0 <= rs <= 99
             else "preferred" if rs >= 90 else "emerging" if rs >= 80 else "research")
     item = classify_candidate({**row, "daily_rs_rating": 90} if tier == "emerging" else row, rank)
-    item.update(rs_rating=rs, rs_tier=tier, rs_exception_checks={}, rs_exception_metrics={})
+    item.update(rs_rating=rs, rs_tier=tier, rs_exception_checks={}, rs_exception_metrics={},
+                stop_policy_version=STRUCTURAL_STOP_POLICY, stop_policy=stop_policy)
+    if stop_error:
+        item.update(status="avoid" if row.get("trade_readiness") == "avoid" else "blocked_data",
+                    reasons=list(dict.fromkeys([*item["reasons"], stop_error])), stop=None, max_entry=None,
+                    reference_risk_pct=None, risk_status="structural_unavailable", stop_to_adr=None)
+        item.pop("limit_price", None)
+        item["readiness_details"] = [*item["readiness_details"], RS_EXCEPTION_EXPLANATIONS.get(stop_error, "No supported structural plan is available.")]
+    item["readiness_explanation"] = (item["readiness_details"] or [None])[0]
     if tier in {"missing", "invalid", "research"}:
         code = {"missing": "rs_rating_missing", "invalid": "rs_rating_invalid", "research": "rs_below_80_research"}[tier]
         reasons = [reason for reason in item["reasons"] if reason != "rs_outside_90_99_or_missing"]
@@ -194,7 +243,7 @@ def classify_rs_expanded_candidate(row: dict[str, Any], rank: int, as_of_date: d
     metrics["reference_risk_pct"] = risk
     gate("risk_within_5pct", risk <= 5 if risk is not None else None, "risk_exceeds_5pct" if risk is not None else "plan_levels_missing")
     if reasons:
-        data_issue = any(reason in {"rs_history_missing_or_stale", "rs_exception_data_missing", "rs_pullback_quality_missing", "plan_levels_missing", "missing_adr_or_stop"} for reason in reasons)
+        data_issue = any(reason in {"rs_history_missing_or_stale", "rs_exception_data_missing", "rs_pullback_quality_missing", "plan_levels_missing", "missing_adr_or_stop", "structural_evidence_missing", "structural_confirmation_stale", "structural_snapshot_plan_missing", "structural_snapshot_plan_invalid"} for reason in reasons)
         item.update(status="avoid" if row.get("trade_readiness") == "avoid" or quality.get("state") == "failed" else "blocked_data" if data_issue else "blocked" if item["status"] == "blocked" else "watch", reasons=reasons)
     item["readiness_details"] = [*item["readiness_details"], *[RS_EXCEPTION_EXPLANATIONS[reason] for reason in reasons if reason in RS_EXCEPTION_EXPLANATIONS]]
     item["readiness_explanation"] = (item["readiness_details"] or [None])[0]
@@ -202,6 +251,10 @@ def classify_rs_expanded_candidate(row: dict[str, Any], rank: int, as_of_date: d
 
 
 RS_EXCEPTION_EXPLANATIONS = {
+    "structural_snapshot_plan_missing": "This snapshot has no saved Structural v1 plan; refresh the snapshot before selection.",
+    "structural_snapshot_plan_invalid": "The saved Structural v1 plan has inconsistent confirmation or risk levels; no order is submitted.",
+    "structural_confirmation_stale": "Structural v1 requires a source signal dated this exact completed session.",
+    "structural_evidence_missing": "Structural stop evidence is missing or stale; no ATR fallback is used.",
     "rs_rating_missing": "RS rating is missing; this is a data issue, not weak relative strength.",
     "rs_rating_invalid": "RS rating is invalid or outside the supported 0–99 range.",
     "rs_below_80_research": "RS below 80 remains research-only and cannot submit an order.",
@@ -371,7 +424,9 @@ class MartinForwardTestService:
             except Exception:
                 logging.getLogger(__name__).warning("RS-expanded qualification history unavailable; emerging candidates blocked.")
                 qualification_frames = {}
-            board_rows = [{**row, "_rs_candidate": classify_rs_expanded_candidate(row, rank, as_of_date, qualification_frames)}
+            # Never replace the engine's 35-bar exit frames with longer EMA history.
+            selection_frames = {**frames, **qualification_frames}
+            board_rows = [{**row, "_rs_candidate": classify_rs_expanded_candidate(row, rank, as_of_date, selection_frames)}
                           for rank, row in enumerate(board_rows, start=1)]
             board_rows.sort(key=lambda row: (row["_rs_candidate"]["rs_tier"] != "preferred", row["_rs_candidate"]["rank"]))
             for rank, row in enumerate(board_rows, start=1):
@@ -494,6 +549,8 @@ class MartinForwardTestService:
                 item["selected_for_book"] = bool(item.get("selection_tier"))
         summary = {"strategy_id": strategy_id, "target_trading_date": as_of_date.isoformat(), "source_run_id": source_run_id,
                    "source_fingerprint": fingerprint, "candidate_count": len(candidates)}
+        if strategy_id == RS_EXPANDED_STRATEGY_ID:
+            summary["stop_policy_version"] = STRUCTURAL_STOP_POLICY
         return self.repository.save_session(session_date=as_of_date, source_run_id=source_run_id, fingerprint=fingerprint,
                                             candidates=candidates, summary=summary, strategy_id=strategy_id)
 

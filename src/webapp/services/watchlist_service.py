@@ -30,6 +30,8 @@ from ...ftd_sweep_screen import find_recent_ftd_sweep_hit
 from ...finviz_screener_rows import is_ticker_like_finviz_company_name, repair_shifted_finviz_row
 from ...flashalpha_gex import build_gamma_exposure_report, render_gamma_exposure_report_svgs
 from ...market_extension import compute_extension_frame, resample_to_weekly
+from ...ma_pullback_retest_screen import MA_PULLBACK_RETEST_HISTORY_DAYS
+from ...trade_plan_policies import CURRENT_STOP_POLICY, STRUCTURAL_STOP_POLICY, current_plan_payload, structural_plan_payload
 from ...bollinger_band_screen import compute_latest_bollinger_snapshot
 from ...market_data_access import (
     db_frame_has_recent_coverage,
@@ -98,7 +100,7 @@ _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
 _SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v6"
-_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v9"
+_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v10"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -1620,10 +1622,11 @@ class WatchlistService:
             row["trade_plan"] = _build_trade_plan(row.get("_pullback_artifacts") or [])
             rows.append(row)
         rows_by_candidate = {str(row["ticker"]): row for row in rows}
-        self._attach_trade_readiness_adr(rows_by_candidate, as_of_date=target_date)
+        adr_frames = self._attach_trade_readiness_adr(rows_by_candidate, as_of_date=target_date)
         for row in rows:
             row["trade_readiness"] = _trade_readiness(row)
             row.pop("_pullback_artifacts", None)
+        self._attach_snapshot_trade_plans(rows_by_candidate, as_of_date=target_date, adr_frames=adr_frames or {})
         rows.sort(key=_guru_row_sort_key)
         return {
             "definitions": copy.deepcopy(_GURU_SCANNER_DEFINITIONS),
@@ -1633,10 +1636,30 @@ class WatchlistService:
             "rows": rows,
         }
 
-    def _attach_trade_readiness_adr(self, rows_by_ticker: dict[str, dict[str, Any]], *, as_of_date: dt.date | None) -> None:
+    def _attach_snapshot_trade_plans(self, rows_by_ticker: dict[str, dict[str, Any]], *, as_of_date: dt.date | None,
+                                     adr_frames: dict[str, Any]) -> None:
+        end_date = as_of_date or dt.date.today()
+        retest_tickers = [ticker for ticker, row in rows_by_ticker.items()
+                          if (row.get("trade_plan") or {}).get("source_strategy_id") == "ma_pullback_retest"]
+        structural_frames = {}
+        if retest_tickers and self.database_url:
+            try:
+                structural_frames = load_many_ticker_windows(retest_tickers, end_date, MA_PULLBACK_RETEST_HISTORY_DAYS,
+                                                            database_url=self.database_url)
+            except Exception as exc:
+                logger.warning("Snapshot structural history unavailable: %s", exc)
+        for ticker, row in rows_by_ticker.items():
+            source = (row.get("trade_plan") or {}).get("source_strategy_id")
+            frame = structural_frames.get(ticker) if source == "ma_pullback_retest" else adr_frames.get(ticker)
+            row["trade_plans"] = {
+                CURRENT_STOP_POLICY: current_plan_payload(row, end_date),
+                STRUCTURAL_STOP_POLICY: structural_plan_payload(row, end_date, frame),
+            }
+
+    def _attach_trade_readiness_adr(self, rows_by_ticker: dict[str, dict[str, Any]], *, as_of_date: dt.date | None) -> dict[str, Any]:
         """Attach completed-bar ADR14 context for the trade plan review."""
         if not rows_by_ticker or not self.database_url:
-            return
+            return {}
         end_date = as_of_date or dt.date.today()
         try:
             frames = load_many_ticker_windows_for_range(
@@ -1648,7 +1671,7 @@ class WatchlistService:
             )
         except Exception as exc:
             logger.warning("Trade readiness ADR14 enrichment unavailable: %s", exc)
-            return
+            return {}
         for ticker, row in rows_by_ticker.items():
             frame = _normalize_download_frame(frames.get(ticker))
             if frame is None or frame.empty or not {"High", "Low", "Close"}.issubset(frame.columns):
@@ -1677,6 +1700,7 @@ class WatchlistService:
             row["stop_to_adr"] = round(stop_to_adr, 2) if stop_to_adr is not None else None
             row["adr_suitability"] = status
             row["adr_reason"] = reason
+        return frames
 
     def _attach_guru_upcoming_earnings_dates(
         self,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
 import { calculatePositionSize } from "../lib/positionSizing";
 import { calculateTradeManagement, type TradeManagementPreset } from "../lib/tradeManagement";
+import { resolveSizingOrigin } from "../lib/tradeReadinessPolicy";
 import { useSearchParams } from "react-router-dom";
 
 const STORAGE_KEY = "ticker-screener:position-calculator-defaults";
@@ -23,13 +24,15 @@ const formatShares = (value: number | { min: number; max: number } | undefined) 
 export function PositionCalculatorPage() {
   const [searchParams] = useSearchParams();
   const context = useMemo(() => {
+    const origin = resolveSizingOrigin(searchParams);
     const ticker = validTicker(searchParams.get("ticker")?.toUpperCase() ?? null);
-    const entry = validPrice(searchParams.get("entry"));
-    const stop = validPrice(searchParams.get("stop"));
-    const maxEntry = validPrice(searchParams.get("maxEntry"));
-    const signalDate = validDate(searchParams.get("signalDate"));
+    const entry = validPrice(origin.entry);
+    const stop = validPrice(origin.stop);
+    const maxEntry = validPrice(origin.maxEntry);
+    const signalDate = validDate(origin.signalDate);
+    const snapshotDate = validDate(origin.snapshotDate);
     const management = searchParams.get("management");
-    return { source: searchParams.get("source") === "top-hits" ? "top-hits" : "", ticker, entry, stop, maxEntry, signalDate, management: management === "balanced_daily" || management === "martin" ? management as TradeManagementPreset : "martin" as TradeManagementPreset };
+    return { ...origin, source: origin.source ? "top-hits" : "", ticker, entry, stop, maxEntry, signalDate, snapshotDate, management: management === "balanced_daily" || management === "martin" ? management as TradeManagementPreset : "martin" as TradeManagementPreset };
   }, [searchParams]);
   const [fields, setFields] = useState(() => ({ ...INITIAL, direction: "long" as const, entryPrice: context.entry, stopPrice: context.stop }));
   const [remember, setRemember] = useState(false);
@@ -77,6 +80,7 @@ export function PositionCalculatorPage() {
   }, [fields, sizeMultiplier, wholeShares]);
 
   const overMaxEntry = Boolean(context.maxEntry && Number(fields.entryPrice) > Number(context.maxEntry));
+  const adjustedSourceLevels = Boolean(context.source && context.verifiedPolicy && (fields.entryPrice !== context.entry || fields.stopPrice !== context.stop || fields.direction !== "long"));
   const management = result ? calculateTradeManagement(Number(fields.entryPrice), Number(fields.stopPrice), managementPreset, wholeShares ? result.shares : undefined, fields.direction) : null;
 
   const update = (key: keyof Fields, value: string) => {
@@ -102,7 +106,7 @@ export function PositionCalculatorPage() {
 
   return <div className="position-calculator-page">
     <header className="risk-page-heading"><h1>Position calculator</h1><p>Size a trade from your account risk, stop distance, and allocation limit.</p></header>
-    {context.source ? <section className="risk-context" aria-label="Top Hits trade plan"><strong>{context.ticker || "Top Hits"} · Planned trade context</strong><span>Trigger {context.entry ? money(Number(context.entry)) : "Unavailable"} · Stop {context.stop ? money(Number(context.stop)) : "Unavailable"}</span><span>Max entry {context.maxEntry ? money(Number(context.maxEntry)) : "Unavailable"}{context.signalDate ? ` · Signal ${context.signalDate}` : ""} · {context.management === "martin" ? "Martin-like" : "Balanced Daily"} management</span><small>These are editable planning values. Recalculate and check against your actual intended fill.</small></section> : null}
+    {context.source ? <section className="risk-context" aria-label="Top Hits trade plan"><strong>{context.ticker || "Top Hits"} · Planned trade context</strong><span>Origin policy: {context.policyLabel}{context.snapshotDate ? ` · Snapshot ${context.snapshotDate}` : ""}</span>{!context.verifiedPolicy ? <span role="alert">Origin policy is unrecognized. Imported levels were not applied; enter and verify your own levels.</span> : null}<span>Trigger {context.entry ? money(Number(context.entry)) : "Unavailable"} · Stop {context.stop ? money(Number(context.stop)) : "Unavailable"}</span><span>Max entry {context.maxEntry ? money(Number(context.maxEntry)) : "Unavailable"}{context.signalDate ? ` · Signal ${context.signalDate}` : ""} · {context.management === "martin" ? "Martin-like" : "Balanced Daily"} management</span>{!context.entry && !context.stop && context.verifiedPolicy ? <small>No saved levels were imported. Any values you enter are manual planning inputs, not a validated snapshot plan.</small> : adjustedSourceLevels ? <small>Entry, stop, or direction changed from the imported plan; sizing is adjusted.</small> : <small>These are editable planning values. Recalculate and check against your actual intended fill.</small>}</section> : null}
     <div className="risk-layout">
       <Panel title="Trade inputs" className="risk-input-panel">
         <div className="risk-input-grid">

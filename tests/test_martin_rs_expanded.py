@@ -13,6 +13,9 @@ from src.webapp.services.martin_forward_test_service import (
 )
 from src.webapp.repositories.martin_forward_test_repository import _performance_context, _rs_tier_metrics
 from tests.test_martin_forward_test_service import _ForwardRepo
+from tests.test_ma_pullback_retest_screen import _support_reclaim_frame
+from src.ma_pullback_retest_screen import structural_retest_plan
+from src.trade_plan_policies import STRUCTURAL_STOP_POLICY, structural_plan_payload
 
 
 class RsExpandedTests(unittest.TestCase):
@@ -29,11 +32,16 @@ class RsExpandedTests(unittest.TestCase):
                     "market_cap": 2e9, "close": 121.8, "adr14_pct": 4,
                     "trade_readiness": "defined_risk", "pullback_quality": {"state": "constructive"},
                     "trade_plan": {"trigger_price": 121.8, "stop_price": 116, "max_entry_price": 122,
-                                   "state": "active", "source_strategy_id": "ma_pullback_retest", "signal_date": self.day.isoformat()}}
+                                   "state": "active", "source_strategy_id": "ema21_pullback_buy", "signal_date": self.day.isoformat()}}
 
     def classify(self, row=None, frame=None, spy=None):
-        return classify_rs_expanded_candidate(row or self.row, 1, self.day,
+        row = self.snapshot_row(row or self.row, frame)
+        return classify_rs_expanded_candidate(row, 1, self.day,
                     {"ABC": frame if frame is not None else self.frame, "SPY": spy if spy is not None else self.spy})
+
+    def snapshot_row(self, row, frame=None):
+        return {**row, "trade_plans": {STRUCTURAL_STOP_POLICY: structural_plan_payload(
+            row, self.day, frame if frame is not None else self.frame)}}
 
     def test_boundaries_and_baseline_unchanged(self):
         original = copy.deepcopy(self.row)
@@ -49,7 +57,9 @@ class RsExpandedTests(unittest.TestCase):
         self.assertEqual(classify_candidate(self.row, 1)["status"], "blocked")
         baseline = classify_candidate({**self.row, "daily_rs_rating": 90}, 1)
         preferred = self.classify({**self.row, "daily_rs_rating": 90})
-        self.assertEqual({k: preferred[k] for k in baseline}, baseline)
+        self.assertEqual(preferred["stop"], baseline["stop"])
+        self.assertEqual(preferred["status"], baseline["status"])
+        self.assertEqual(preferred["stop_policy_version"], "martin_daily_structural_v1")
 
     def test_every_gate_and_future_bars(self):
         result = self.classify()
@@ -104,7 +114,7 @@ class RsExpandedTests(unittest.TestCase):
         service = MartinForwardTestService(repo, bar_loader=loader)
         def snapshot(day, source):
             return {"target_trading_date": day.isoformat(), "_snapshot_run_id": source,
-                    "source_fingerprint": str(source), "guru_board": {"rows": [self.row]}}
+                    "source_fingerprint": str(source), "guru_board": {"rows": [self.snapshot_row(self.row)]}}
         service.run_session(as_of_date=self.day, snapshot=snapshot(self.day, 1), strategy_id=RS_EXPANDED_STRATEGY_ID)
         saved = repo.candidates[0]["payload_json"]
         self.assertEqual(saved["status"], "pending")
@@ -142,7 +152,7 @@ class RsExpandedTests(unittest.TestCase):
             if days == 260:
                 raise RuntimeError("database offline")
             return {ticker: self.frame for ticker in tickers}
-        rows = [self.row, {**self.row, "ticker": "PREF", "daily_rs_rating": 95}]
+        rows = [self.snapshot_row(self.row), self.snapshot_row({**self.row, "ticker": "PREF", "daily_rs_rating": 95})]
         snapshot = {"target_trading_date": self.day.isoformat(), "_snapshot_run_id": 1,
                     "source_fingerprint": "1", "guru_board": {"rows": rows}}
         with self.assertLogs(level="WARNING"):
@@ -196,6 +206,106 @@ class RsExpandedTests(unittest.TestCase):
         calls = service.return_value.run_session.call_args_list
         self.assertEqual(len(calls), 4)
         self.assertEqual(calls[-1].kwargs["strategy_id"], RS_EXPANDED_STRATEGY_ID)
+
+    def test_structural_retest_recalculates_legacy_risk_for_both_rs_tiers(self):
+        frame = _support_reclaim_frame()
+        frame.index = pd.bdate_range(end=self.day, periods=len(frame))
+        structural = structural_retest_plan(frame, as_of_date=self.day)
+        self.assertIsNotNone(structural)
+        row = {**self.row, "daily_rs_rating": 95, "trade_readiness": "reclaim_trigger",
+               "adr_suitability": "risk_failure", "trade_plan": {**self.row["trade_plan"],
+               "source_strategy_id": "ma_pullback_retest", "trigger_price": 125, "stop_price": 110}}
+        original = copy.deepcopy(row)
+        preferred = self.classify(row, frame=frame)
+        self.assertEqual(preferred["status"], "pending")
+        self.assertEqual(preferred["stop"], frame["Low"].iloc[-1])
+        self.assertEqual(preferred["stop_policy"]["legacy_stop"], 110)
+        self.assertEqual(preferred["stop_policy"]["buffer"], 0)
+        self.assertEqual(preferred["entry"], structural["support_price"])
+        self.assertAlmostEqual(preferred["max_entry"], preferred["stop"] / .95)
+        self.assertEqual(row, original)
+        self.assertIn("risk_exceeds_5pct", classify_candidate(row, 1)["reasons"])
+        emerging = self.classify({**row, "daily_rs_rating": 85}, frame=frame)
+        self.assertEqual(emerging["stop"], preferred["stop"])
+        self.assertNotIn("risk_exceeds_5pct", emerging["reasons"])
+        future = pd.concat([frame, frame.tail(1).set_axis([pd.Timestamp(self.dates[-1])])])
+        future.iloc[-1, future.columns.get_loc("Low")] = .01
+        self.assertEqual(self.classify(row, frame=future), preferred)
+
+    def test_structural_missing_stale_and_avoid_do_not_fall_back(self):
+        row = {**self.row, "daily_rs_rating": 95, "trade_plan": {**self.row["trade_plan"], "source_strategy_id": "ma_pullback_retest"}}
+        for frame in (pd.DataFrame(), self.frame.iloc[:100], self.frame.iloc[:-2]):
+            result = self.classify(row, frame=frame)
+            self.assertEqual(result["status"], "blocked_data")
+            self.assertIn("structural_evidence_missing", result["reasons"])
+            self.assertIsNone(result["stop"])
+            self.assertNotIn("limit_price", result)
+        stale = self.classify({**row, "trade_plan": {**row["trade_plan"], "signal_date": "2026-10-20"}})
+        self.assertIn("structural_confirmation_stale", stale["reasons"])
+        avoid = self.classify({**self.row, "daily_rs_rating": 95, "trade_readiness": "avoid"})
+        self.assertEqual(avoid["status"], "avoid")
+
+    def test_structural_provisional_retest_cannot_submit_and_loader_failure_is_local(self):
+        frame = _support_reclaim_frame()
+        frame.index = pd.bdate_range(end=self.day, periods=len(frame))
+        provisional = {**structural_retest_plan(frame, as_of_date=self.day), "state": "ready"}
+        row = {**self.row, "daily_rs_rating": 95, "trade_plan": {**self.row["trade_plan"], "source_strategy_id": "ma_pullback_retest"}}
+        with patch("src.trade_plan_policies.structural_retest_plan", return_value=provisional):
+            item = self.classify(row, frame=frame)
+        self.assertEqual(item["status"], "watch")
+        self.assertIn("awaiting_confirmation", item["reasons"])
+        self.assertTrue(item["stop_policy"]["provisional"])
+        self.assertNotIn("limit_price", item)
+        repo = _ForwardRepo()
+        def loader(tickers, day, days, **kwargs):
+            if days == 1300:
+                raise RuntimeError("history offline")
+            return {ticker: self.frame for ticker in tickers}
+        ema = {**self.row, "ticker": "EMA", "daily_rs_rating": 95}
+        snapshot = {"target_trading_date": self.day.isoformat(), "_snapshot_run_id": 1,
+                    "source_fingerprint": "failure", "guru_board": {"rows": [self.snapshot_row(row, pd.DataFrame()), self.snapshot_row(ema)]}}
+        MartinForwardTestService(repo, bar_loader=loader).run_session(as_of_date=self.day, snapshot=snapshot, strategy_id=RS_EXPANDED_STRATEGY_ID)
+        saved = {item["ticker"]: item["payload_json"] for item in repo.candidates}
+        self.assertEqual(saved["ABC"]["status"], "blocked_data")
+        self.assertIsNone(saved["ABC"]["stop"])
+        self.assertEqual(saved["EMA"]["status"], "pending")
+
+    def test_half_adr_is_caution_not_veto_and_reference_risk_cap_remains(self):
+        for rating in (85, 95):
+            row = {**self.row, "daily_rs_rating": rating, "adr14_pct": 2}
+            result = self.classify(row)
+            self.assertEqual(result["status"], "pending")
+            self.assertGreater(result["stop_to_adr"], .5)
+            self.assertEqual(result["stop_policy"]["adr_fit"], "wide_stop_caution")
+            wide = self.classify({**row, "trade_plan": {**row["trade_plan"], "stop_price": 100}})
+            self.assertNotEqual(wide["status"], "pending")
+            self.assertIn("risk_exceeds_5pct", wide["reasons"])
+
+    def test_structural_policy_is_saved_and_frozen_at_fill(self):
+        repo = _ForwardRepo()
+        frame = _support_reclaim_frame()
+        frame.index = pd.bdate_range(end=self.day, periods=len(frame))
+        row = {**self.row, "daily_rs_rating": 95, "trade_plan": {**self.row["trade_plan"], "source_strategy_id": "ma_pullback_retest"}}
+        calls = []
+        def loader(tickers, day, days, **kwargs):
+            calls.append(days)
+            if day == self.day:
+                return {"ABC": frame}
+            next_frame = pd.DataFrame({"Open": [125], "High": [126], "Low": [124.5], "Close": [125.5], "Volume": [1000000]}, index=[pd.Timestamp(day)])
+            return {"ABC": pd.concat([frame, next_frame])}
+        service = MartinForwardTestService(repo, bar_loader=loader)
+        snapshot = {"target_trading_date": self.day.isoformat(), "_snapshot_run_id": 1,
+                    "source_fingerprint": "structural", "guru_board": {"rows": [self.snapshot_row(row, frame)]}}
+        service.run_session(as_of_date=self.day, snapshot=snapshot, strategy_id=RS_EXPANDED_STRATEGY_ID)
+        saved = copy.deepcopy(repo.candidates[0]["payload_json"])
+        self.assertEqual(saved["status"], "pending")
+        self.assertEqual(calls, [35])
+        day2 = self.dates[-1].date()
+        service.run_session(as_of_date=day2, snapshot=None, strategy_id=RS_EXPANDED_STRATEGY_ID)
+        position = repo.positions[0]["payload_json"]
+        self.assertEqual(position["stop_policy"], saved["stop_policy"])
+        self.assertEqual(position["original_stop"], saved["stop"])
+        self.assertEqual(position["initial_r"], 125 - saved["stop"])
 
 
 if __name__ == "__main__":

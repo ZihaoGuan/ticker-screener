@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import datetime as dt
+import math
 
 import pandas as pd
 
@@ -101,8 +102,10 @@ def _moving_average(series: pd.Series, profile: PullbackProfile) -> pd.Series:
     return series.ewm(span=profile.period, adjust=False).mean() if profile.ma_type == "ema" else series.rolling(profile.period).mean()
 
 
-def _profile_signal(bars: pd.DataFrame, profile: PullbackProfile, atr14: pd.Series) -> tuple[str, float, float] | None:
+def _profile_signal(bars: pd.DataFrame, profile: PullbackProfile, atr14: pd.Series, *, completed_weekly: bool = False) -> tuple[str, float, float] | None:
     source = bars if profile.timeframe == "daily" else _weekly_bars(bars)
+    if completed_weekly and profile.timeframe == "weekly":
+        source = source.loc[source.index <= bars.index[-1]]
     if len(source) < profile.period + 5:
         return None
     support = _moving_average(source["Close"].astype(float), profile)
@@ -129,6 +132,38 @@ def _profile_signal(bars: pd.DataFrame, profile: PullbackProfile, atr14: pd.Seri
         return None
     reclaimed = low <= support_price + profile.tolerance_atr * atr and close > support_price and close > open_ and close >= float(bars["Close"].iloc[-2])
     return ("active" if reclaimed else "ready", support_price, distance_atr)
+
+
+def structural_retest_plan(frame: pd.DataFrame, *, as_of_date: dt.date) -> dict[str, object] | None:
+    """Daily reclaim-low adaptation; weekly references exclude the developing week."""
+    if frame is None or frame.empty:
+        return None
+    frame = frame.loc[[index.date() <= as_of_date for index in pd.to_datetime(frame.index)]]
+    bars = _bars(frame)
+    if len(bars) < 220 or bars.index[-1].date() != as_of_date or not bars.index.is_unique:
+        return None
+    if not all(math.isfinite(value) for value in bars.to_numpy().flat):
+        return None
+    if not all((bars[["Open", "High", "Low", "Close", "Volume"]] > 0).all()):
+        return None
+    if not all((bars["Low"] <= bars[["Open", "Close"]].min(axis=1)) &
+               (bars["High"] >= bars[["Open", "Close"]].max(axis=1))):
+        return None
+    atr14 = _atr14(bars)
+    if pd.isna(atr14.iloc[-1]) or atr14.iloc[-1] <= 0:
+        return None
+    matches = [(profile, *signal) for profile in PULLBACK_PROFILES
+               if (signal := _profile_signal(bars, profile, atr14, completed_weekly=True)) is not None]
+    if not matches:
+        return None
+    profile, state, support, _ = min(matches, key=lambda item: (item[1] != "active", abs(item[3])))
+    quality = evaluate_pullback_quality(bars, support_price=support, atr14=float(atr14.iloc[-1]))
+    return {"profile_id": profile.id, "support_label": profile.label, "support_price": support,
+            "state": state, "trigger_price": support, "stop_price": float(bars["Low"].iloc[-1]),
+            "invalidation_date": as_of_date.isoformat(), "invalidation_low": float(bars["Low"].iloc[-1]),
+            "buffer": 0.0, "stop_basis": "daily_reclaim_low", "support_timeframe": profile.timeframe,
+            "weekly_reference": "completed" if profile.timeframe == "weekly" else None,
+            "pullback_quality": quality.to_dict() if quality is not None else {}}
 
 
 def find_ma_pullback_retest_hit(frame: pd.DataFrame, *, ticker: UniverseTicker) -> MaPullbackRetestHit | None:
