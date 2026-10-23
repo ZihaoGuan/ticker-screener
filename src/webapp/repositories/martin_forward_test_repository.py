@@ -6,6 +6,8 @@ from typing import Any
 
 from src.market_data_access import resolve_database_url
 
+ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1"}
+
 
 class MartinForwardTestRepository:
     def __init__(self, *, database_url: str = "") -> None:
@@ -120,7 +122,7 @@ class MartinForwardTestRepository:
                     denominator = risk_per_share * int(position.get("initial_shares") or position.get("shares") or 1)
                     unrealized_r += pnl / denominator if denominator else 0
                 cumulative_r = realized_r + unrealized_r
-                equity = 100_000.0 + realized_pnl + unrealized_pnl if strategy_id == "martin_daily_v1" else None
+                equity = 100_000.0 + realized_pnl + unrealized_pnl if strategy_id in ACCOUNT_STRATEGIES else None
                 prior_equities = [float(item["account_equity"]) for item in prior_summaries if item.get("account_equity") is not None]
                 prior_rs = [float(item["cumulative_r"]) for item in prior_summaries if item.get("cumulative_r") is not None]
                 equity_peak = max([100_000.0, *prior_equities])
@@ -240,7 +242,7 @@ class MartinForwardTestRepository:
             with connection.cursor() as cursor:
                 books = {}
                 for strategy_id, key in (("martin_daily_v1", "account"), ("martin_sector_book_v1", "sector_opportunity"),
-                                         ("martin_daily_top5_v1", "daily_top5")):
+                                         ("martin_daily_top5_v1", "daily_top5"), ("martin_rs_expanded_v1", "rs_expanded")):
                     runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
                     latest_id = runs[0]["id"] if runs else None
                     candidates = self._fetch(cursor, "SELECT * FROM martin_forward_candidates WHERE run_id=%s ORDER BY rank", (latest_id,)) if latest_id else []
@@ -307,8 +309,8 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
         peak_r = max(peak_r, cumulative_r)
         peak_equity = max(peak_equity, equity)
         max_r = min(max_r, cumulative_r - peak_r)
-        history.append({"date": day, "cumulative_r": cumulative_r, "account_equity": equity if strategy_id == "martin_daily_v1" else None,
-                        "equity_drawdown_pct": (equity / peak_equity - 1) * 100 if peak_equity and strategy_id == "martin_daily_v1" else None,
+        history.append({"date": day, "cumulative_r": cumulative_r, "account_equity": equity if strategy_id in ACCOUNT_STRATEGIES else None,
+                        "equity_drawdown_pct": (equity / peak_equity - 1) * 100 if peak_equity and strategy_id in ACCOUNT_STRATEGIES else None,
                         "r_drawdown": cumulative_r - peak_r})
     realized = [float((row.get("payload_json") or {}).get("realized_pnl") or 0) for row in closed]
     realized_positions = [row.get("payload_json") or {} for row in positions]
@@ -333,13 +335,16 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
             marks.append({"date": str(run["session_date"]), "cumulative_r": summary.get("cumulative_r"),
                           "account_equity": summary.get("account_equity"),
                           "equity_drawdown_pct": summary.get("equity_drawdown_pct"), "r_drawdown": summary.get("r_drawdown")})
-    has_account_marks = strategy_id == "martin_daily_v1" and bool(marks) and any(point.get("account_equity") is not None for point in marks)
+    has_account_marks = strategy_id in ACCOUNT_STRATEGIES and bool(marks) and any(point.get("account_equity") is not None for point in marks)
     if marks:
         history = marks
     latest_mark = marks[-1] if marks else {}
     latest_summary = (runs[0].get("summary_json") or {}) if runs else {}
     return {"strategy_id": strategy_id, "runs": runs, "candidates": candidates, "positions": positions,
             "events": events, "history": history, "history_source": "stored_session_marks" if has_account_marks else "realized_close_fallback", "attribution": attribution,
+            **({"rs_tier_metrics": _rs_tier_metrics(closed),
+                "cost_model": "10 bps adverse slippage on stop and market-open exits; no commissions. Cohort drawdown is closed-trade R, not portfolio drawdown."}
+               if strategy_id == "martin_rs_expanded_v1" else {}),
             "metrics": {"realized_r": latest_summary.get("realized_r", sum(float(row.get("realized_r") or 0) for row in realized_positions)),
                         "unrealized_r": latest_summary.get("unrealized_r", 0.0),
                         "cumulative_r": latest_mark.get("cumulative_r", realized_total_r),
@@ -347,9 +352,30 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
                         "unrealized_pnl": latest_summary.get("unrealized_pnl", 0.0),
                         "closed_count": len(closed), "gross_wins": sum(x for x in realized if x > 0),
                         "gross_losses": sum(abs(x) for x in realized if x < 0), "max_r_drawdown": min([max_r, *(point.get("r_drawdown", 0) for point in history)]),
-                        "account_equity": latest_mark.get("account_equity", 100_000.0 + realized_total_pnl) if strategy_id == "martin_daily_v1" else None,
-                        "equity_drawdown_pct": latest_mark.get("equity_drawdown_pct") if strategy_id == "martin_daily_v1" else None,
+                        "account_equity": latest_mark.get("account_equity", 100_000.0 + realized_total_pnl) if strategy_id in ACCOUNT_STRATEGIES else None,
+                        "equity_drawdown_pct": latest_mark.get("equity_drawdown_pct") if strategy_id in ACCOUNT_STRATEGIES else None,
                         **_closed_trade_metrics([row.get("payload_json") or {} for row in closed])}}
+
+
+def _rs_tier_metrics(closed: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    result = {}
+    for tier in ("preferred", "emerging"):
+        rows = [row for row in closed if (row.get("payload_json") or {}).get("rs_tier") == tier]
+        payloads = [row.get("payload_json") or {} for row in rows]
+        by_date: dict[str, float] = {}
+        for row, payload in zip(rows, payloads):
+            day = str(row.get("closed_on") or payload.get("closed_on") or "")
+            by_date[day] = by_date.get(day, 0) + float(payload.get("realized_r") or 0)
+        total = peak = drawdown = 0.0
+        for day in sorted(by_date):
+            total += by_date[day]
+            peak = max(peak, total)
+            drawdown = min(drawdown, total - peak)
+        result[tier] = {"closed_count": len(rows), "realized_r": total,
+                        "realized_pnl": sum(float(row.get("realized_pnl") or 0) for row in payloads),
+                        **_closed_trade_metrics(payloads), "max_closed_drawdown_r": drawdown,
+                        "stop_out_rate_pct": sum((row.get("exit_type") or row.get("exit_reason")) in {"stop", "gap_stop"} for row in payloads) / len(rows) * 100 if rows else None}
+    return result
 
 
 def _closed_trade_metrics(closed: list[dict[str, Any]]) -> dict[str, float | None]:

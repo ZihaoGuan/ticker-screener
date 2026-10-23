@@ -7366,6 +7366,8 @@ dialog.modal-backdrop:not([open]) {
 .martin-comparison-chart .sector-legend::before, .martin-comparison-chart .account-legend::before, .martin-comparison-chart .daily-top5-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #d99b56; content: ""; }
 .martin-comparison-chart .account-legend::before { background: var(--accent); }
 .martin-comparison-chart .daily-top5-legend::before { background: #82b9e8; }
+.martin-chart path.rs-expanded-series { stroke: #d1a4ee; stroke-dasharray: 5 3; }
+.martin-comparison-chart .rs-expanded-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #d1a4ee; content: ""; }
 .martin-chart > div:last-child { grid-column: 2; grid-row: 2; display: flex; justify-content: space-between; color: #d4d4d8; font-size: .72rem; }
 .martin-exclusions { min-width: 0; border: 1px solid var(--border); border-radius: .6rem; padding: .85rem 1rem; background: var(--surface); }
 .martin-exclusions > summary { display: flex; justify-content: space-between; gap: 1rem; cursor: pointer; font-weight: 700; }
@@ -7382,6 +7384,9 @@ dialog.modal-backdrop:not([open]) {
 .martin-trade-plan dd { margin: .1rem 0 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .martin-trade-plan .martin-trade-plan-warning { margin: .55rem 0 0; color: #efc27d; }
 .martin-trade-plan .martin-trade-plan-why { margin: .55rem 0 0; color: inherit; }
+.martin-rs-evidence { margin-top: .85rem; padding-top: .65rem; border-top: 1px solid var(--border); }
+.martin-rs-evidence h4 { margin: 0; font-size: .9rem; }
+.martin-rs-evidence .martin-details { min-width: 0; }
 .martin-audit { border: 1px solid var(--border); border-radius: .75rem; padding: .9rem 1rem; background: var(--surface); }
 .martin-audit summary { cursor: pointer; font-weight: 700; } .martin-audit pre { max-height: 28rem; overflow: auto; }
 @media (max-width: 760px) { .martin-header { align-items: flex-start; flex-direction: column; } .martin-lifecycle, .martin-lifecycle[aria-label="Session lifecycle"], .martin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .martin-position-summary { align-items: flex-start; flex-wrap: wrap; } .martin-details { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

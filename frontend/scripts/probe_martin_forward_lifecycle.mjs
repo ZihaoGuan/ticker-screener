@@ -138,6 +138,7 @@ try {
   await page.getByText("Session data copied.", { exact: true }).waitFor();
   await page.getByText("Data & audit", { exact: true }).click();
   assert.equal(await page.locator(".martin-chart-scale").count(), 4);
+  assert.equal(await page.getByRole("img", { name: /^Cumulative R comparison/ }).locator("svg path").count(), 3, "The existing three R curves are unchanged before experiment history exists");
   await page.screenshot({ path: "/tmp/martin-forward-desktop.png", fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -307,6 +308,83 @@ try {
   await page.screenshot({ path: "/tmp/martin-watch-reasons-mobile.png" });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: "/tmp/martin-watch-reasons-desktop.png" });
+
+  const preservedAccount = apiPayload.books.account;
+  await page.goto("http://127.0.0.1:5173/backtests/martin-forward?book=rs_expanded&view=performance");
+  await page.getByRole("heading", { name: "No session yet" }).waitFor();
+  await page.getByText("No RS Expanded session has been saved yet.", { exact: false }).waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Account vs SPY and QQQ" }).count(), 0, "An absent experimental book never borrows baseline performance");
+  const emergingChecks = { fresh_completed_session: true, history_complete: true, trend: true, relative_strength_improving: true, liquidity: true, supported_plan: true, confirmed: false, pullback_quality: true, valid_plan_levels: true, risk_within_5pct: true, order_notional_within_liquidity: null };
+  const expandedBook = book([
+    { ticker: "EMERGE85", status: "watch", rs_tier: "emerging", rs_rating: 85, reasons: ["rs_confirmation_required"], entry: 100, stop: 97, max_entry: 102, rs_exception_checks: emergingChecks, rs_exception_metrics: { as_of_date: "2026-10-19", close: 100, sma50: 95, sma200: 80, adv20_dollars: 25000000, stock_spy_ratio: 0.152345, stock_spy_ratio_20_sessions_ago: 0.14, actual_order_notional: null } },
+    { ticker: "PREFER95", status: "pending", rs_tier: "preferred", selected_for_book: true, reasons: [], shares: 40, entry: 100, stop: 97 },
+    { ticker: "RESEARCH70", status: "watch", rs_tier: "research", reasons: ["rs_below_80_research"] },
+    { ticker: "NORS", status: "blocked_data", rs_tier: "missing", reasons: ["rs_rating_missing"] },
+  ]);
+  expandedBook.strategy_id = "martin_rs_expanded_v1";
+  expandedBook.cost_model = "10 bps adverse slippage on stops and market-open exits; no commissions modeled.";
+  expandedBook.history = [{ date: "2026-10-19", cumulative_r: 0, account_equity: 100000, equity_drawdown_pct: 0 }];
+  expandedBook.rs_tier_metrics = {
+    preferred: { closed_count: 2, realized_r: 1, realized_pnl: 500, win_rate_pct: 50, expectancy_r: 0.5, stop_out_rate_pct: 50, average_holding_sessions: 4, max_closed_drawdown_r: -1 },
+    emerging: { closed_count: 0, realized_r: 0, realized_pnl: 0, win_rate_pct: null, expectancy_r: null, stop_out_rate_pct: null, average_holding_sessions: null, max_closed_drawdown_r: 0 },
+  };
+  apiPayload.books.rs_expanded = expandedBook;
+  await page.goto("http://127.0.0.1:5173/backtests/martin-forward?book=rs_expanded&view=today");
+  await page.getByRole("heading", { name: "RS Expanded · experimental · Pending candidates" }).waitFor();
+  await page.getByRole("button", { name: "All candidates", exact: true }).click();
+  const emergingRow = page.locator(".martin-candidate-table tbody tr").filter({ has: page.getByRole("rowheader", { name: "EMERGE85", exact: true }) });
+  await emergingRow.getByRole("button", { name: "Details", exact: true }).click();
+  const emergingEvidence = emergingRow.locator("xpath=following-sibling::tr[1]").getByRole("region", { name: "Saved RS eligibility evidence" });
+  await emergingEvidence.getByRole("heading", { name: "RS tier: Emerging · RS 80–89" }).waitFor();
+  assert.equal(await emergingEvidence.locator("dd").filter({ hasText: /^Passed$/ }).count(), 9);
+  assert.equal(await emergingEvidence.locator("dd").filter({ hasText: /^Not passed$/ }).count(), 1);
+  assert.equal(await emergingEvidence.locator(":scope > dl dd").filter({ hasText: /^Unavailable$/ }).count(), 1);
+  await emergingEvidence.getByText("Saved RS measurements", { exact: true }).click();
+  await emergingEvidence.getByText("0.152345", { exact: true }).waitFor();
+  await page.getByText("Excluded candidates and exceptions").click();
+  const expandedExclusions = page.locator(".martin-exclusions");
+  await expandedExclusions.getByText("RS below 80 · research only, no entry", { exact: true }).waitFor();
+  await expandedExclusions.getByText("RS rating is missing; data is required", { exact: true }).waitFor();
+  const emergingWatch = expandedExclusions.locator("tr.martin-exclusion-row").filter({ hasText: "EMERGE85" });
+  await emergingWatch.getByRole("button", { name: "View trade plan", exact: true }).click();
+  const watchEvidence = emergingWatch.locator("xpath=following-sibling::tr[1]").getByRole("region", { name: "Saved RS eligibility evidence" });
+  await watchEvidence.getByRole("heading", { name: "RS tier: Emerging · RS 80–89" }).waitFor();
+  await watchEvidence.screenshot({ path: "/tmp/martin-rs-expanded-evidence-desktop.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const rsCloseDrawer = page.getByRole("button", { name: /close/i });
+  if (await rsCloseDrawer.count()) await rsCloseDrawer.first().evaluate((element) => element.click());
+  await page.waitForFunction(() => document.querySelector(".sidebar")?.getBoundingClientRect().right <= 1 && Number.parseFloat(getComputedStyle(document.querySelector(".app-shell-backdrop")).opacity) < 0.01);
+  await watchEvidence.scrollIntoViewIfNeeded();
+  const rsBounds = await watchEvidence.evaluate((element) => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right }; });
+  assert.ok(rsBounds.left >= 0 && rsBounds.right <= 390, "RS evidence fits the phone viewport");
+  await page.screenshot({ path: "/tmp/martin-rs-expanded-evidence-mobile.png" });
+  await page.getByRole("tab", { name: "Performance", exact: true }).click();
+  const cohortPanel = page.getByRole("heading", { name: "RS cohort outcomes" }).locator("xpath=..");
+  await cohortPanel.waitFor();
+  assert.match(await cohortPanel.innerText(), /Preferred · RS 90–99[\s\S]*Emerging · RS 80–89/);
+  assert.match(await cohortPanel.innerText(), /Drawdown is closed-trade R, not account NAV/);
+  assert.match(await cohortPanel.innerText(), /Cost model: 10 bps adverse slippage on stops and market-open exits; no commissions modeled/);
+  assert.equal(await cohortPanel.locator("tbody tr").nth(1).locator("td").nth(1).innerText(), "0", "Zero-trade emerging cohort is explicit");
+  assert.equal(await cohortPanel.locator("tbody tr").nth(1).locator("td").nth(4).innerText(), "—", "No trades do not invent a win rate");
+  await page.getByText("Books can start on different dates;", { exact: false }).waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Account vs SPY and QQQ" }).count(), 0, "Expanded book does not substitute the baseline ETF results");
+  const rsComparisonChart = page.getByRole("img", { name: /^Cumulative R comparison/ });
+  assert.equal(await rsComparisonChart.locator("svg path").count(), 4, "The experimental R series is included only when saved history exists");
+  await rsComparisonChart.getByText("RS Expanded", { exact: true }).waitFor();
+  assert.equal(await rsComparisonChart.locator("path.rs-expanded-series").count(), 1);
+  const rsLegendBounds = await rsComparisonChart.locator(".rs-expanded-legend").evaluate((element) => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right }; });
+  assert.ok(rsLegendBounds.left >= 0 && rsLegendBounds.right <= 390, "The fourth R-chart legend fits the phone viewport");
+  assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true, "The expanded performance view has no page-level overflow at 390px");
+  await rsComparisonChart.screenshot({ path: "/tmp/martin-rs-comparison-mobile.png" });
+  await cohortPanel.screenshot({ path: "/tmp/martin-rs-cohort-mobile.png" });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await cohortPanel.screenshot({ path: "/tmp/martin-rs-cohort-desktop.png" });
+  await page.getByRole("button", { name: "Account book", exact: true }).click();
+  assert.match(page.url(), /book=account/);
+  assert.match(page.url(), /view=performance/);
+  await page.getByRole("heading", { name: "Account vs SPY and QQQ" }).waitFor();
+  assert.equal(await page.getByRole("heading", { name: "RS cohort outcomes" }).count(), 0);
+  assert.equal(apiPayload.books.account, preservedAccount, "The experiment leaves baseline saved data untouched");
 
   apiPayload = { configured: true, books: { account: book([], []) } };
   await page.goto("http://127.0.0.1:5173/backtests/martin-forward?book=account&view=today");

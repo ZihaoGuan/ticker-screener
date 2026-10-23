@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 from datetime import date
 from typing import Any
 
@@ -11,6 +12,7 @@ from src.market_data_access import load_many_ticker_windows
 STRATEGY_ID = "martin_daily_v1"
 SECTOR_STRATEGY_ID = "martin_sector_book_v1"
 DAILY_TOP5_STRATEGY_ID = "martin_daily_top5_v1"
+RS_EXPANDED_STRATEGY_ID = "martin_rs_expanded_v1"
 ENTRY_POLICY_VERSION = "top_hits_max_entry_5pct_v1"
 SECTOR_ORDER = {"leading": 0, "improving": 1, "weakening": 2, "lagging": 3, "unknown": 4}
 FOCUS_SCANNERS = {"weekly_candidate_pool", "best_winners", "qullamaggie", "one_year_winners", "trend_template", "daily_rs_new_high", "rs"}
@@ -111,6 +113,123 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
                 result.update(limit_price=limit, risk_cap_pct=cap)
     result["readiness_explanation"] = (result["readiness_details"] or [None])[0]
     return result
+
+
+def classify_rs_expanded_candidate(row: dict[str, Any], rank: int, as_of_date: date,
+                                   frames: dict[str, Any]) -> dict[str, Any]:
+    """Isolate the emerging-leader experiment from the unchanged baseline gates."""
+    rs = _number(row.get("daily_rs_rating"))
+    tier = ("missing" if row.get("daily_rs_rating") is None else "invalid" if isinstance(row.get("daily_rs_rating"), bool) or rs is None or not 0 <= rs <= 99
+            else "preferred" if rs >= 90 else "emerging" if rs >= 80 else "research")
+    item = classify_candidate({**row, "daily_rs_rating": 90} if tier == "emerging" else row, rank)
+    item.update(rs_rating=rs, rs_tier=tier, rs_exception_checks={}, rs_exception_metrics={})
+    if tier in {"missing", "invalid", "research"}:
+        code = {"missing": "rs_rating_missing", "invalid": "rs_rating_invalid", "research": "rs_below_80_research"}[tier]
+        reasons = [reason for reason in item["reasons"] if reason != "rs_outside_90_99_or_missing"]
+        item.update(status="watch" if tier == "research" and not reasons else "blocked_data" if tier != "research" else "blocked",
+                    reasons=[*reasons, code])
+        item["readiness_details"] = [*item["readiness_details"], RS_EXCEPTION_EXPLANATIONS[code]]
+        item["readiness_explanation"] = item["readiness_details"][0]
+        return item
+    if tier == "preferred":
+        return item
+    checks: dict[str, bool | None] = {}
+    metrics: dict[str, Any] = {"as_of_date": as_of_date.isoformat(), "minimum_adv20_dollars": 20_000_000,
+                               "maximum_order_adv_fraction": .001}
+    item.update(rs_exception_checks=checks, rs_exception_metrics=metrics)
+    reasons = list(item["reasons"])
+
+    def gate(name: str, passed: bool | None, code: str) -> None:
+        checks[name] = passed
+        if passed is not True and code not in reasons:
+            reasons.append(code)
+
+    stock = _completed_observations(frames.get(item["ticker"]), as_of_date)
+    spy = _completed_observations(frames.get("SPY"), as_of_date)
+    fresh = bool(stock and spy and max(stock) == as_of_date and max(spy) == as_of_date)
+    gate("fresh_completed_session", fresh, "rs_history_missing_or_stale")
+    dates = sorted(spy)[-205:]
+    aligned = fresh and len(dates) == 205 and sorted(stock)[-205:] == dates
+    closes = [stock[day].get("close") for day in dates] if aligned else []
+    valid_closes = len(closes) == 205 and all(value is not None and value > 0 for value in closes)
+    gate("history_complete", valid_closes, "rs_exception_data_missing")
+    trend = strength = liquid = None
+    if valid_closes:
+        sma50, sma200 = sum(closes[-50:]) / 50, sum(closes[-200:]) / 200
+        old50, old200 = sum(closes[-55:-5]) / 50, sum(closes[-205:-5]) / 200
+        ema21 = closes[0]
+        for close in closes[1:]:
+            ema21 += (close - ema21) * 2 / 22
+        trend = closes[-1] > sma50 and closes[-1] > sma200 and sma50 > old50 and sma200 > old200 and ema21 > sma50
+        metrics.update(close=closes[-1], sma50=sma50, sma200=sma200, sma50_5_sessions_ago=old50,
+                       sma200_5_sessions_ago=old200, ema21=ema21)
+        spy_now, spy_then = spy[dates[-1]].get("close"), spy[dates[-21]].get("close")
+        if spy_now is not None and spy_then is not None and spy_now > 0 and spy_then > 0:
+            now, then = closes[-1] / spy_now, closes[-21] / spy_then
+            strength = now > then
+            metrics.update(stock_spy_ratio=now, stock_spy_ratio_20_sessions_ago=then)
+        dollars = [stock[day].get("volume") for day in dates[-20:]]
+        if all(value is not None and value > 0 for value in dollars):
+            adv = sum(close * volume for close, volume in zip(closes[-20:], dollars)) / 20
+            metrics["adv20_dollars"] = adv
+            liquid = adv >= 20_000_000
+    gate("trend", trend, "rs_trend_not_qualified" if trend is not None else "rs_exception_data_missing")
+    gate("relative_strength_improving", strength, "rs_relative_strength_not_improving" if strength is not None else "rs_exception_data_missing")
+    gate("liquidity", liquid, "rs_liquidity_below_minimum" if liquid is not None else "rs_exception_data_missing")
+    plan = row.get("trade_plan") if isinstance(row.get("trade_plan"), dict) else {}
+    quality = row.get("pullback_quality") if isinstance(row.get("pullback_quality"), dict) else {}
+    gate("supported_plan", plan.get("source_strategy_id") in {"ma_pullback_retest", "ema21_pullback_buy", "sma200_pullback_buy"}, "rs_supported_plan_required")
+    confirmed = plan.get("state") == "active" and str(plan.get("signal_date")) == as_of_date.isoformat()
+    gate("confirmed", confirmed, "rs_confirmation_required")
+    if confirmed and "awaiting_confirmation" in reasons:
+        reasons.remove("awaiting_confirmation")
+    gate("defined_risk_readiness", row.get("trade_readiness") == "defined_risk", "rs_defined_risk_required")
+    known_quality = quality.get("state") in {"constructive", "neutral", "warning", "failed"}
+    gate("pullback_quality", quality.get("state") in {"constructive", "neutral"} if known_quality else None,
+         "rs_pullback_quality_required" if known_quality else "rs_pullback_quality_missing")
+    entry, stop = item["entry"], item["stop"]
+    levels = entry is not None and stop is not None and entry > stop > 0
+    gate("valid_plan_levels", levels, "plan_levels_missing")
+    risk = (entry - stop) / entry * 100 if levels else None
+    metrics["reference_risk_pct"] = risk
+    gate("risk_within_5pct", risk <= 5 if risk is not None else None, "risk_exceeds_5pct" if risk is not None else "plan_levels_missing")
+    if reasons:
+        data_issue = any(reason in {"rs_history_missing_or_stale", "rs_exception_data_missing", "rs_pullback_quality_missing", "plan_levels_missing", "missing_adr_or_stop"} for reason in reasons)
+        item.update(status="avoid" if row.get("trade_readiness") == "avoid" or quality.get("state") == "failed" else "blocked_data" if data_issue else "blocked" if item["status"] == "blocked" else "watch", reasons=reasons)
+    item["readiness_details"] = [*item["readiness_details"], *[RS_EXCEPTION_EXPLANATIONS[reason] for reason in reasons if reason in RS_EXCEPTION_EXPLANATIONS]]
+    item["readiness_explanation"] = (item["readiness_details"] or [None])[0]
+    return item
+
+
+RS_EXCEPTION_EXPLANATIONS = {
+    "rs_rating_missing": "RS rating is missing; this is a data issue, not weak relative strength.",
+    "rs_rating_invalid": "RS rating is invalid or outside the supported 0–99 range.",
+    "rs_below_80_research": "RS below 80 remains research-only and cannot submit an order.",
+    "rs_history_missing_or_stale": "The stock and SPY need completed bars for this exact selection session.",
+    "rs_exception_data_missing": "Emerging-leader history or required price/volume observations are incomplete.",
+    "rs_trend_not_qualified": "Emerging leaders must be above rising SMA50/SMA200, with EMA21 above SMA50.",
+    "rs_relative_strength_not_improving": "The stock/SPY relative-strength ratio must improve over 20 market sessions.",
+    "rs_liquidity_below_minimum": "Twenty-session average dollar volume must be at least $20 million.",
+    "rs_supported_plan_required": "Emerging leaders require a supported MA pullback/retest plan.",
+    "rs_confirmation_required": "A fresh active daily confirmation for the exact selection session is required.",
+    "rs_defined_risk_required": "Defined-risk readiness is required; confirmation alone does not make the plan eligible.",
+    "rs_pullback_quality_missing": "Pullback quality is unavailable; emerging-leader eligibility cannot be established.",
+    "rs_pullback_quality_required": "Pullback quality must be constructive or neutral; warning or missing quality stays Watch.",
+    "rs_order_notional_exceeds_liquidity": "The actual planned order exceeds 0.1% of twenty-session average dollar volume.",
+}
+
+
+def _completed_observations(frame: Any, as_of_date: date) -> dict[date, dict[str, float | None]]:
+    if frame is None or getattr(frame, "empty", True):
+        return {}
+    observations = {}
+    for index, row in frame.iterrows():
+        day = index.date() if hasattr(index, "date") else index
+        if day > as_of_date:
+            continue
+        keys = {str(key).lower(): key for key in row.index}
+        observations[day] = {name: _number(row[keys[name]]) if name in keys else None for name in ("close", "volume")}
+    return observations
 
 
 def _snapshot_readiness_explanation(readiness: str, strike_zone: dict[str, Any], quality: dict[str, Any]) -> list[str]:
@@ -244,6 +363,19 @@ class MartinForwardTestService:
             ]
             tickers.update(str(row.get("ticker") or "").upper() for row in board_rows)
         frames = self.bar_loader(sorted(tickers), as_of_date, 35, database_url=self.database_url) if tickers else {}
+        if strategy_id == RS_EXPANDED_STRATEGY_ID:
+            emerging = {str(row.get("ticker") or "").upper() for row in board_rows
+                        if (rs := _number(row.get("daily_rs_rating"))) is not None and 80 <= rs < 90}
+            try:
+                qualification_frames = self.bar_loader(sorted(emerging | {"SPY"}), as_of_date, 260, database_url=self.database_url) if emerging else {}
+            except Exception:
+                logging.getLogger(__name__).warning("RS-expanded qualification history unavailable; emerging candidates blocked.")
+                qualification_frames = {}
+            board_rows = [{**row, "_rs_candidate": classify_rs_expanded_candidate(row, rank, as_of_date, qualification_frames)}
+                          for rank, row in enumerate(board_rows, start=1)]
+            board_rows.sort(key=lambda row: (row["_rs_candidate"]["rs_tier"] != "preferred", row["_rs_candidate"]["rank"]))
+            for rank, row in enumerate(board_rows, start=1):
+                row["_rs_candidate"]["rank"] = rank
         counts = {"filled": 0, "expired": 0, "cancelled": 0, "exited": 0, "trimmed": 0, "missing_bars": 0}
         run_id = self._save_snapshot(as_of_date, snapshot, board_rows, strategy_id)
 
@@ -342,7 +474,9 @@ class MartinForwardTestService:
         fingerprint = str(snapshot.get("source_fingerprint") or "")
         if source_run_id <= 0 or not fingerprint:
             return None
-        candidates = select_sector_candidates(rows) if strategy_id == SECTOR_STRATEGY_ID else [classify_candidate(row, rank) for rank, row in enumerate(rows, start=1)]
+        candidates = (select_sector_candidates(rows) if strategy_id == SECTOR_STRATEGY_ID else
+                      [dict(row["_rs_candidate"]) if strategy_id == RS_EXPANDED_STRATEGY_ID else classify_candidate(row, rank)
+                       for rank, row in enumerate(rows, start=1)])
         for item in candidates:
             item["selection_date"] = as_of_date.isoformat()
             if item["status"] == "pending":
@@ -392,7 +526,7 @@ class MartinForwardTestService:
                         actionable.append(ticker)
                 daily_pool = set(actionable[:5])
         for rank, row in enumerate(rows, start=1):
-            candidate = classify_candidate(row, rank)
+            candidate = dict(row["_rs_candidate"]) if strategy_id == RS_EXPANDED_STRATEGY_ID else classify_candidate(row, rank)
             if candidate["status"] != "pending":
                 continue
             ticker = candidate["ticker"]
@@ -430,6 +564,16 @@ class MartinForwardTestService:
                 candidate["queue_rank"] = rank
                 self.repository.update_candidate(run_id, ticker, candidate)
                 continue
+            if strategy_id == RS_EXPANDED_STRATEGY_ID and candidate["rs_tier"] == "emerging":
+                candidate["rs_exception_metrics"] = {**candidate["rs_exception_metrics"], "actual_order_notional": shares * limit}
+                within_liquidity = shares * limit <= .001 * candidate["rs_exception_metrics"]["adv20_dollars"]
+                candidate["rs_exception_checks"] = {**candidate["rs_exception_checks"], "order_notional_within_liquidity": within_liquidity}
+                if not within_liquidity:
+                    candidate.update(status="watch", selected_for_book=False, reasons=["rs_order_notional_exceeds_liquidity"],
+                                     readiness_explanation=RS_EXCEPTION_EXPLANATIONS["rs_order_notional_exceeds_liquidity"],
+                                     readiness_details=[RS_EXCEPTION_EXPLANATIONS["rs_order_notional_exceeds_liquidity"]])
+                    self.repository.update_candidate(run_id, ticker, candidate)
+                    continue
             candidate.update(shares=shares, equity=None if normalized or daily_top5 else equity,
                              sizing_mode="normalized_r" if normalized else "fixed_100_shares" if daily_top5 else "account_risk",
                              risk_dollars=shares * (limit - stop), allocation_dollars=shares * limit, status="pending", order_date=as_of_date.isoformat())
