@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import logging
+from contextlib import nullcontext
 from datetime import date
 from typing import Any
 
@@ -401,7 +402,16 @@ class MartinForwardTestService:
         self.bar_loader = bar_loader or load_many_ticker_windows
 
     def run_session(self, *, as_of_date: date, snapshot: dict[str, Any] | None, strategy_id: str = STRATEGY_ID) -> dict[str, Any]:
+        lock = getattr(self.repository, "execution_lock", None)
+        with lock(strategy_id) if lock and strategy_id == RS_EXPANDED_STRATEGY_ID else nullcontext():
+            return self._run_session(as_of_date=as_of_date, snapshot=snapshot, strategy_id=strategy_id)
+
+    def _run_session(self, *, as_of_date: date, snapshot: dict[str, Any] | None, strategy_id: str) -> dict[str, Any]:
         """Process one exact session only; missed intermediate sessions require explicit replay support."""
+        replay_covers = getattr(self.repository, "replay_covers_date", None)
+        if strategy_id == RS_EXPANDED_STRATEGY_ID and replay_covers and replay_covers(as_of_date, strategy_id):
+            return {"strategy_id": strategy_id, "session_date": as_of_date.isoformat(), "skipped": True,
+                    "reason": "historical_replay_already_covers_session"}
         # shortcut: settles orders and positions only on this exact session, when multi-session replay is added.
         open_positions = self.repository.open_positions(strategy_id=strategy_id)
         pending = self.repository.pending_candidates(before=as_of_date, strategy_id=strategy_id)
@@ -534,6 +544,8 @@ class MartinForwardTestService:
                        for rank, row in enumerate(rows, start=1)])
         for item in candidates:
             item["selection_date"] = as_of_date.isoformat()
+            if snapshot.get("replay_provenance"):
+                item["replay_provenance"] = snapshot["replay_provenance"]
             if item["status"] == "pending":
                 item["queue_rank"] = item["rank"]
                 item["selection_reason"] = "snapshot_rank"
@@ -551,6 +563,8 @@ class MartinForwardTestService:
                    "source_fingerprint": fingerprint, "candidate_count": len(candidates)}
         if strategy_id == RS_EXPANDED_STRATEGY_ID:
             summary["stop_policy_version"] = STRUCTURAL_STOP_POLICY
+        if snapshot.get("replay_provenance"):
+            summary["replay_provenance"] = snapshot["replay_provenance"]
         return self.repository.save_session(session_date=as_of_date, source_run_id=source_run_id, fingerprint=fingerprint,
                                             candidates=candidates, summary=summary, strategy_id=strategy_id)
 
@@ -591,7 +605,7 @@ class MartinForwardTestService:
             if existing_status != "eligible":
                 continue
             candidate.update({key: value for key, value in self.repository.candidate_payload(run_id, ticker).items()
-                              if key in {"selected_for_book", "selection_date", "selection_tier", "sector_quadrant", "sector_rs_ratio", "sector_momentum_value", "sector_as_of_date", "queue_rank"}})
+                              if key in {"selected_for_book", "selection_date", "selection_tier", "sector_quadrant", "sector_rs_ratio", "sector_momentum_value", "sector_as_of_date", "queue_rank", "replay_provenance"}})
             if not ticker or ticker in open_tickers:
                 candidate.update(status="blocked_open_position", selected_for_book=False, reasons=["open_position_exists"])
                 self.repository.update_candidate(run_id, ticker, candidate)

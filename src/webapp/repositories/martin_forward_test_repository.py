@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,24 @@ class MartinForwardTestRepository:
     def __init__(self, *, database_url: str = "") -> None:
         self.database_url = resolve_database_url(database_url)
         self._schema_ready = False
+
+    @contextmanager
+    def execution_lock(self, strategy_id: str):
+        """Share one book lock between scheduled runs and explicit historical replay."""
+        if not self.database_url:
+            yield
+            return
+        import psycopg
+        with psycopg.connect(self.database_url, autocommit=True) as connection:
+            with connection.cursor() as cursor:
+                key = f"martin-forward:{strategy_id}"
+                cursor.execute("SELECT pg_try_advisory_lock(hashtext(%s))", (key,))
+                if not cursor.fetchone()[0]:
+                    raise RuntimeError(f"Another process is working on {strategy_id}; retry later.")
+                try:
+                    yield
+                finally:
+                    cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", (key,))
 
     def _connect(self):
         if not self.database_url:
@@ -44,6 +63,10 @@ class MartinForwardTestRepository:
                         VALUES (%s,%s,%s,%s,%s::jsonb,%s::jsonb) ON CONFLICT(run_id,ticker) DO NOTHING""",
                         (run_id, item["ticker"], item["rank"], item["status"], json.dumps(item["reasons"]), json.dumps(item)))
         return int(run_id)
+
+    def replay_covers_date(self, session_date: Any, strategy_id: str) -> bool:
+        return bool(self._rows("""SELECT id FROM martin_forward_runs WHERE strategy_id=%s AND session_date >= %s
+            AND summary_json->'replay_provenance'->>'origin'='historical_replay' LIMIT 1""", (strategy_id, session_date)))
 
     def pending_candidates(self, *, before: Any, strategy_id: str = "martin_daily_v1") -> list[dict[str, Any]]:
         return self._rows("""SELECT c.id,c.run_id,c.ticker,c.rank,c.status,c.payload_json,r.session_date
