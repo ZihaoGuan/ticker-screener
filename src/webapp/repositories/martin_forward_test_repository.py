@@ -6,14 +6,59 @@ from pathlib import Path
 from typing import Any
 
 from src.market_data_access import resolve_database_url
+from src.webapp.services.martin_rotation import ROTATION_STRATEGY_ID, ROTATION_POLICY_VERSION, ROTATION_LIMITS, account_budget
 
-ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1"}
+ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1", ROTATION_STRATEGY_ID}
+
+
+class _SessionConnection:
+    def __init__(self, connection): self.connection = connection
+    def __enter__(self): return self
+    def __exit__(self, *_args): return False
+    def cursor(self): return self.connection.cursor()
 
 
 class MartinForwardTestRepository:
     def __init__(self, *, database_url: str = "") -> None:
         self.database_url = resolve_database_url(database_url)
         self._schema_ready = False
+        self._session_connection = None
+
+    @contextmanager
+    def atomic_session(self, strategy_id: str):
+        """The rotation book's linked exits and entries commit or roll back together."""
+        connection = self._connect()
+        if connection is None:
+            raise RuntimeError("Rotation strategy requires a configured database")
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_try_advisory_xact_lock(hashtext(%s))", (f"martin-forward:{strategy_id}",))
+                if not cursor.fetchone()[0]:
+                    raise RuntimeError("Another process is working on the rotation book; retry later")
+            self._session_connection = _SessionConnection(connection)
+            try:
+                yield
+            finally:
+                self._session_connection = None
+
+    def latest_session_date(self, strategy_id: str):
+        rows = self._rows("SELECT max(session_date) day FROM martin_forward_runs WHERE strategy_id=%s", (strategy_id,))
+        return rows[0]["day"] if rows else None
+
+    def account_state(self, strategy_id: str, *, exclude_order_ticker: str | None = None) -> dict[str, float]:
+        rows = self._rows("SELECT status,payload_json FROM martin_forward_positions WHERE strategy_id=%s", (strategy_id,))
+        realized = sum(float((row.get("payload_json") or {}).get("realized_pnl") or 0) for row in rows)
+        orders = [row for row in self.pending_orders(strategy_id=strategy_id) if row["ticker"] != exclude_order_ticker]
+        return account_budget([row for row in rows if row["status"] == "open"], orders, realized)
+
+    def set_run_metadata(self, run_id: int, metadata: dict) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE martin_forward_runs SET summary_json=summary_json || %s::jsonb WHERE id=%s", (json.dumps(metadata), run_id))
+
+    def last_rotation_exit(self, strategy_id: str):
+        rows = self._rows("SELECT max(event_date) day FROM martin_forward_events WHERE strategy_id=%s AND event_type='rotation_exit'", (strategy_id,))
+        return rows[0]["day"] if rows else None
 
     @contextmanager
     def execution_lock(self, strategy_id: str):
@@ -34,6 +79,8 @@ class MartinForwardTestRepository:
                     cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", (key,))
 
     def _connect(self):
+        if self._session_connection is not None:
+            return self._session_connection
         if not self.database_url:
             return None
         try:
@@ -168,6 +215,8 @@ class MartinForwardTestRepository:
                     **_closed_trade_metrics(closed),
                     "account_equity": equity, "equity_drawdown_pct": (equity / equity_peak - 1) * 100 if equity is not None else None,
                     "r_drawdown": cumulative_r - r_peak}
+                if strategy_id == ROTATION_STRATEGY_ID:
+                    summary.update(self.account_state(strategy_id))
                 cursor.execute("UPDATE martin_forward_runs SET summary_json=%s::jsonb WHERE id=%s", (json.dumps(summary), run_id))
 
     def update_candidate(self, run_id: int, ticker: str, payload: dict[str, Any]) -> None:
@@ -265,7 +314,8 @@ class MartinForwardTestRepository:
             with connection.cursor() as cursor:
                 books = {}
                 for strategy_id, key in (("martin_daily_v1", "account"), ("martin_sector_book_v1", "sector_opportunity"),
-                                         ("martin_daily_top5_v1", "daily_top5"), ("martin_rs_expanded_v1", "rs_expanded")):
+                                         ("martin_daily_top5_v1", "daily_top5"), ("martin_rs_expanded_v1", "rs_expanded"),
+                                         (ROTATION_STRATEGY_ID, "rs_expanded_rotation")):
                     runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
                     latest_id = runs[0]["id"] if runs else None
                     candidates = self._fetch(cursor, "SELECT * FROM martin_forward_candidates WHERE run_id=%s ORDER BY rank", (latest_id,)) if latest_id else []
@@ -276,15 +326,19 @@ class MartinForwardTestRepository:
                     events = self._fetch(cursor, "SELECT * FROM martin_forward_events WHERE strategy_id=%s ORDER BY event_date DESC,id DESC LIMIT 200", (strategy_id,))
                     books[key] = {**_performance_context(strategy_id, runs, candidates, positions, events),
                                   "outstanding_orders": outstanding_orders}
+                    if strategy_id == ROTATION_STRATEGY_ID:
+                        books[key]["rotation_policy_version"] = ROTATION_POLICY_VERSION
+                        books[key]["rotation_limits"] = ROTATION_LIMITS
                 account = books.get("account")
-                if account and account.get("history"):
+                for account in (account, books.get("rs_expanded_rotation")):
+                    if not account or not account.get("history"):
+                        continue
                     dates = [str(point.get("date") or "") for point in account["history"] if point.get("date")]
                     start, end = min(dates), max(dates)
                     latest_run_by_date = {}
                     for run in reversed(account.get("runs", [])):
-                        latest_run_by_date[str(run.get("session_date"))] = run
-                    partial_dates = {day for day, run in latest_run_by_date.items()
-                                     if (run.get("summary_json") or {}).get("partial")}
+                        latest_run_by_date[str(run["session_date"])] = run
+                    partial_dates = {day for day, run in latest_run_by_date.items() if (run.get("summary_json") or {}).get("partial")}
                     try:
                         with connection.transaction():
                             price_rows = self._fetch(cursor, """SELECT ticker,trade_date,close FROM daily_bars
@@ -367,7 +421,7 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
             "events": events, "history": history, "history_source": "stored_session_marks" if has_account_marks else "realized_close_fallback", "attribution": attribution,
             **({"rs_tier_metrics": _rs_tier_metrics(closed),
                 "cost_model": "10 bps adverse slippage on stop and market-open exits; no commissions. Cohort drawdown is closed-trade R, not portfolio drawdown."}
-               if strategy_id == "martin_rs_expanded_v1" else {}),
+               if strategy_id in {"martin_rs_expanded_v1", ROTATION_STRATEGY_ID} else {}),
             "metrics": {"realized_r": latest_summary.get("realized_r", sum(float(row.get("realized_r") or 0) for row in realized_positions)),
                         "unrealized_r": latest_summary.get("unrealized_r", 0.0),
                         "cumulative_r": latest_mark.get("cumulative_r", realized_total_r),

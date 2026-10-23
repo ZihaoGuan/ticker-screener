@@ -15,6 +15,7 @@ from src.webapp.config import load_webapp_config
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_forward_test_service import DAILY_TOP5_STRATEGY_ID, MartinForwardTestService, SECTOR_STRATEGY_ID, RS_EXPANDED_STRATEGY_ID
 from src.webapp.services.watchlist_service import WatchlistService
+from src.webapp.services.martin_rotation import ROTATION_STRATEGY_ID
 
 
 def main() -> int:
@@ -35,6 +36,8 @@ def main() -> int:
               "sector_opportunity": service.run_session(as_of_date=day, snapshot=snapshot, strategy_id=SECTOR_STRATEGY_ID),
               "daily_top5": service.run_session(as_of_date=day, snapshot=snapshot, strategy_id=DAILY_TOP5_STRATEGY_ID),
               "rs_expanded": service.run_session(as_of_date=day, snapshot=snapshot, strategy_id=RS_EXPANDED_STRATEGY_ID)}
+    result["rs_expanded_rotation"] = (service.run_session(as_of_date=day, snapshot=snapshot, strategy_id=ROTATION_STRATEGY_ID)
+        if config.database_url else {"skipped": True, "reason": "database_not_configured"})
     print(json.dumps(result, sort_keys=True))
     return 0
 

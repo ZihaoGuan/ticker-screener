@@ -2684,6 +2684,6 @@ export type MartinForwardBook = {
 };
 export type MartinForwardResponse = {
   configured: boolean;
-  books: { account?: MartinForwardBook; sector_opportunity?: MartinForwardBook; daily_top5?: MartinForwardBook; rs_expanded?: MartinForwardBook };
+  books: { account?: MartinForwardBook; sector_opportunity?: MartinForwardBook; daily_top5?: MartinForwardBook; rs_expanded?: MartinForwardBook; rs_expanded_rotation?: MartinForwardBook };
   comparison: Record<string, unknown>;
 };

@@ -9,12 +9,16 @@ from typing import Any
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.market_data_access import load_many_ticker_windows
 from src.trade_plan_policies import POLICY_FIELDS, STRUCTURAL_STOP_POLICY
+from src.webapp.services.martin_rotation import (ROTATION_STRATEGY_ID, ROTATION_POLICY_VERSION, ROTATION_LIMITS,
+                                                session_dates, valid_history, size_order, rotation_decision)
+from src.webapp.services.martin_rotation import replacement_metrics, require_completed_session, metrics
 
 
 STRATEGY_ID = "martin_daily_v1"
 SECTOR_STRATEGY_ID = "martin_sector_book_v1"
 DAILY_TOP5_STRATEGY_ID = "martin_daily_top5_v1"
 RS_EXPANDED_STRATEGY_ID = "martin_rs_expanded_v1"
+RS_ACCOUNT_STRATEGIES = {RS_EXPANDED_STRATEGY_ID, ROTATION_STRATEGY_ID}
 ENTRY_POLICY_VERSION = "top_hits_max_entry_5pct_v1"
 SECTOR_ORDER = {"leading": 0, "improving": 1, "weakening": 2, "lagging": 3, "unknown": 4}
 FOCUS_SCANNERS = {"weekly_candidate_pool", "best_winners", "qullamaggie", "one_year_winners", "trend_template", "daily_rs_new_high", "rs"}
@@ -412,6 +416,23 @@ class MartinForwardTestService:
         self.bar_loader = bar_loader or load_many_ticker_windows
 
     def run_session(self, *, as_of_date: date, snapshot: dict[str, Any] | None, strategy_id: str = STRATEGY_ID) -> dict[str, Any]:
+        if strategy_id == ROTATION_STRATEGY_ID:
+            require_completed_session(as_of_date)
+            with self.repository.atomic_session(strategy_id):
+                latest = self.repository.latest_session_date(strategy_id)
+                if latest is not None and latest >= as_of_date:
+                    return {"strategy_id": strategy_id, "session_date": as_of_date.isoformat(), "skipped": True, "reason": "session_already_processed"}
+                self._rotation_dates = session_dates(as_of_date)
+                if not self._rotation_dates or self._rotation_dates[-1] != as_of_date:
+                    raise ValueError("Rotation strategy requires an exchange session")
+                if latest is not None and latest != self._rotation_dates[-2]:
+                    raise ValueError("Rotation book has missed intermediate sessions; explicit recovery is required")
+                if not snapshot or str(snapshot.get("target_trading_date")) != as_of_date.isoformat():
+                    raise ValueError("Rotation strategy requires the exact session's persisted snapshot")
+                result = self._run_session(as_of_date=as_of_date, snapshot=snapshot, strategy_id=strategy_id)
+                if result.get("run_id") is None or result.get("partial"):
+                    raise ValueError("Incomplete rotation session; all changes rolled back")
+                return result
         lock = getattr(self.repository, "execution_lock", None)
         with lock(strategy_id) if lock and strategy_id == RS_EXPANDED_STRATEGY_ID else nullcontext():
             return self._run_session(as_of_date=as_of_date, snapshot=snapshot, strategy_id=strategy_id)
@@ -436,11 +457,16 @@ class MartinForwardTestService:
             ]
             tickers.update(str(row.get("ticker") or "").upper() for row in board_rows)
         frames = self.bar_loader(sorted(tickers), as_of_date, 35, database_url=self.database_url) if tickers else {}
-        if strategy_id == RS_EXPANDED_STRATEGY_ID:
+        if strategy_id == ROTATION_STRATEGY_ID:
+            for item in open_positions + pending:
+                if not valid_history(frames.get(str(item["ticker"]).upper()), self._rotation_dates):
+                    raise ValueError("Missing or invalid rotation execution history; all changes rolled back")
+        if strategy_id in RS_ACCOUNT_STRATEGIES:
             emerging = {str(row.get("ticker") or "").upper() for row in board_rows
                         if (rs := _number(row.get("daily_rs_rating"))) is not None and 80 <= rs < 90}
             try:
-                qualification_frames = self.bar_loader(sorted(emerging | {"SPY"}), as_of_date, 260, database_url=self.database_url) if emerging else {}
+                qualification_tickers = (tickers | {"SPY", "QQQ"}) if strategy_id == ROTATION_STRATEGY_ID else emerging | {"SPY"}
+                qualification_frames = self.bar_loader(sorted(qualification_tickers), as_of_date, 260, database_url=self.database_url) if emerging or strategy_id == ROTATION_STRATEGY_ID else {}
             except Exception:
                 logging.getLogger(__name__).warning("RS-expanded qualification history unavailable; emerging candidates blocked.")
                 qualification_frames = {}
@@ -451,8 +477,16 @@ class MartinForwardTestService:
             board_rows.sort(key=lambda row: (row["_rs_candidate"]["rs_tier"] != "preferred", row["_rs_candidate"]["rank"]))
             for rank, row in enumerate(board_rows, start=1):
                 row["_rs_candidate"]["rank"] = rank
+                if strategy_id == ROTATION_STRATEGY_ID and not valid_history(selection_frames.get(str(row["ticker"]).upper()), self._rotation_dates):
+                    row["_rs_candidate"].update(status="blocked_data", reasons=["rotation_candidate_history_missing"], selected_for_book=False)
+            if strategy_id == ROTATION_STRATEGY_ID:
+                self._rotation_frames = selection_frames
         counts = {"filled": 0, "expired": 0, "cancelled": 0, "exited": 0, "trimmed": 0, "missing_bars": 0}
         run_id = self._save_snapshot(as_of_date, snapshot, board_rows, strategy_id)
+        if strategy_id == ROTATION_STRATEGY_ID:
+            counts.update(rotation_exited=0, rotation_scheduled=0)
+            self._rotation_opening_exits(open_positions, frames, as_of_date, run_id, counts)
+            open_positions = self.repository.open_positions(strategy_id=strategy_id)
 
         # Pending orders are one-session orders, so the target session's exact bar settles them.
         filled_positions: list[dict[str, Any]] = []
@@ -475,6 +509,10 @@ class MartinForwardTestService:
                 continue
             event_date = next_bar_date
             payload = order.get("payload_json") or {}
+            if strategy_id == ROTATION_STRATEGY_ID:
+                payload = self._rotation_execution_order(order, payload, bar, as_of_date, counts)
+                if payload is None:
+                    continue
             state, fill, reason = order_outcome(payload, bar)
             if state == "pending":
                 continue
@@ -486,6 +524,11 @@ class MartinForwardTestService:
                             "remaining_shares": shares, "initial_shares": shares, "realized_r": 0.0, "realized_pnl": 0.0,
                             "holding_sessions": 0, "trimmed": False, "exit_next_open": False,
                             "opened_on": event_date.isoformat()}
+                if strategy_id == ROTATION_STRATEGY_ID:
+                    position.update(rotation_policy_version=ROTATION_POLICY_VERSION, last_close=float(bar["close"]),
+                                    max_favorable_r=max(0.0, (float(bar["high"]) - float(fill)) / (float(fill) - float(payload["stop"]))))
+                    if position.get("rotation_intent"):
+                        position["rotation_entry_intent"] = position.pop("rotation_intent")
                 position_id = self.repository.fill_order(candidate_id=order["id"], run_id=order["run_id"], ticker=order["ticker"],
                                                          event_date=event_date, position_payload=position,
                                                          event_payload={"price": fill, "shares": shares}, strategy_id=strategy_id)
@@ -494,6 +537,8 @@ class MartinForwardTestService:
                 else:
                     filled_positions.append({"id": position_id, "ticker": order["ticker"], "payload_json": position})
                     counts["filled"] += 1
+                    if strategy_id == ROTATION_STRATEGY_ID:
+                        continue  # Settle all entries before any intraday stop can release cash for another opening entry.
                     # Same-day stop is active, but a 3R trim is explicitly deferred.
                     stop_hit = order_outcome({"stop": position["stop"], "limit_price": fill}, bar)[0] == "cancelled"
                     if stop_hit or float(bar["low"]) <= float(position["stop"]):
@@ -515,6 +560,10 @@ class MartinForwardTestService:
                 counts[state if state in counts else "expired"] += int(changed)
 
         current_position_ids = {int(item["id"]) for item in filled_positions}
+        if strategy_id == ROTATION_STRATEGY_ID:
+            for position in filled_positions:
+                frame = frames.get(position["ticker"])
+                self._manage_position(position, _bar_for_date(frame, as_of_date), frame, as_of_date, run_id, counts, strategy_id, allow_trim=False)
         for position_row in open_positions:
             if int(position_row["id"]) in current_position_ids:
                 continue
@@ -527,6 +576,8 @@ class MartinForwardTestService:
 
         if snapshot and run_id is not None:
             self._reserve_new_candidates(board_rows, as_of_date, run_id, frames, counts, strategy_id)
+            if strategy_id == ROTATION_STRATEGY_ID:
+                self._schedule_rotation(board_rows, as_of_date, run_id, counts)
             focus_tickers = {str(row.get("ticker") or "").upper() for row in board_rows}
             for position in self.repository.open_positions(strategy_id=strategy_id):
                 payload = position.get("payload_json") or {}
@@ -550,10 +601,12 @@ class MartinForwardTestService:
         if source_run_id <= 0 or not fingerprint:
             return None
         candidates = (select_sector_candidates(rows) if strategy_id == SECTOR_STRATEGY_ID else
-                      [dict(row["_rs_candidate"]) if strategy_id == RS_EXPANDED_STRATEGY_ID else classify_candidate(row, rank)
+                      [dict(row["_rs_candidate"]) if strategy_id in RS_ACCOUNT_STRATEGIES else classify_candidate(row, rank)
                        for rank, row in enumerate(rows, start=1)])
         for item in candidates:
             item["selection_date"] = as_of_date.isoformat()
+            if strategy_id == ROTATION_STRATEGY_ID:
+                item["rotation_policy_version"] = ROTATION_POLICY_VERSION
             if snapshot.get("replay_provenance"):
                 item["replay_provenance"] = snapshot["replay_provenance"]
             if item["status"] == "pending":
@@ -571,8 +624,10 @@ class MartinForwardTestService:
                 item["selected_for_book"] = bool(item.get("selection_tier"))
         summary = {"strategy_id": strategy_id, "target_trading_date": as_of_date.isoformat(), "source_run_id": source_run_id,
                    "source_fingerprint": fingerprint, "candidate_count": len(candidates)}
-        if strategy_id == RS_EXPANDED_STRATEGY_ID:
+        if strategy_id in RS_ACCOUNT_STRATEGIES:
             summary["stop_policy_version"] = STRUCTURAL_STOP_POLICY
+        if strategy_id == ROTATION_STRATEGY_ID:
+            summary.update(rotation_policy_version=ROTATION_POLICY_VERSION, rotation_limits=ROTATION_LIMITS)
         if snapshot.get("replay_provenance"):
             summary["replay_provenance"] = snapshot["replay_provenance"]
             summary["replay_validation"] = snapshot.get("replay_validation", {})
@@ -581,6 +636,9 @@ class MartinForwardTestService:
 
     def _reserve_new_candidates(self, rows: list[dict[str, Any]], as_of_date: date, run_id: int,
                                 frames: dict[str, Any], counts: dict[str, int], strategy_id: str) -> None:
+        if strategy_id == ROTATION_STRATEGY_ID:
+            self._reserve_rotation_candidates(rows, as_of_date, run_id)
+            return
         open_positions = self.repository.open_positions(strategy_id=strategy_id)
         pending_orders = self.repository.pending_orders(strategy_id=strategy_id)
         open_tickers = {str(row["ticker"]).upper() for row in open_positions}
@@ -608,7 +666,7 @@ class MartinForwardTestService:
                         actionable.append(ticker)
                 daily_pool = set(actionable[:5])
         for rank, row in enumerate(rows, start=1):
-            candidate = dict(row["_rs_candidate"]) if strategy_id == RS_EXPANDED_STRATEGY_ID else classify_candidate(row, rank)
+            candidate = dict(row["_rs_candidate"]) if strategy_id in RS_ACCOUNT_STRATEGIES else classify_candidate(row, rank)
             if candidate["status"] != "pending":
                 continue
             ticker = candidate["ticker"]
@@ -646,7 +704,7 @@ class MartinForwardTestService:
                 candidate["queue_rank"] = rank
                 self.repository.update_candidate(run_id, ticker, candidate)
                 continue
-            if strategy_id == RS_EXPANDED_STRATEGY_ID and candidate["rs_tier"] == "emerging":
+            if strategy_id in RS_ACCOUNT_STRATEGIES and candidate["rs_tier"] == "emerging":
                 candidate["rs_exception_metrics"] = {**candidate["rs_exception_metrics"], "actual_order_notional": shares * limit}
                 within_liquidity = shares * limit <= .001 * candidate["rs_exception_metrics"]["adv20_dollars"]
                 candidate["rs_exception_checks"] = {**candidate["rs_exception_checks"], "order_notional_within_liquidity": within_liquidity}
@@ -668,6 +726,179 @@ class MartinForwardTestService:
             if strategy_id not in {SECTOR_STRATEGY_ID, DAILY_TOP5_STRATEGY_ID}:
                 slots -= 1
 
+    def _rotation_opening_exits(self, positions, frames, day, run_id, counts):
+        for row in positions:
+            ticker, p = row["ticker"], dict(row.get("payload_json") or {})
+            bar = _bar_for_date(frames.get(ticker), day)
+            opening, stop = float(bar["open"]), float(p["stop"])
+            event = "gap_stop" if opening <= stop else "ema9_exit" if p.get("exit_next_open") else None
+            intent = p.get("rotation_intent")
+            if intent and intent["outgoing"]["position_id"] != row["id"]:
+                intent = None
+            if intent and intent["decision_date"] != self._rotation_dates[-2].isoformat():
+                raise ValueError("Rotation exit missed its exact execution session")
+            if event is None and intent:
+                event = "rotation_exit"
+            if event:
+                shares, entry = int(p["remaining_shares"]), float(p["entry_price"])
+                price = opening * .999
+                pnl = (price - entry) * shares
+                original_risk = float(p["initial_r_per_share"]) * int(p["initial_shares"])
+                closed = {**p, "remaining_shares": 0, "closed_on": day.isoformat(), "exit_price": price,
+                          "exit_type": event, "exit_next_open": False,
+                          "realized_pnl": float(p.get("realized_pnl") or 0) + pnl,
+                          "realized_r": float(p.get("realized_r") or 0) + pnl / original_risk,
+                          "holding_sessions": int(p.get("holding_sessions") or 0) + 1}
+                changed = self.repository.apply_event(run_id=run_id, position_id=row["id"], ticker=ticker, event_type=event,
+                    event_date=day, payload={"price": price, "shares": shares, "realized_pnl": pnl,
+                                            "rotation_intent": intent, "rotation_policy_version": ROTATION_POLICY_VERSION},
+                    position_payload=closed, close_position=True, strategy_id=ROTATION_STRATEGY_ID)
+                if not changed:
+                    raise ValueError("Rotation opening exit could not be recorded atomically")
+                counts["exited"] += 1
+                counts["rotation_exited"] += int(event == "rotation_exit")
+            else:
+                r = float(p["initial_r_per_share"])
+                p.update(last_close=float(bar["close"]), max_favorable_r=max(float(p.get("max_favorable_r") or 0),
+                    (float(bar["high"]) - float(p["entry_price"])) / r))
+                self.repository.set_position_payload(row["id"], p)
+
+    def _rotation_execution_order(self, order, payload, bar, day, counts):
+        intent = payload.get("rotation_intent")
+        reason = None
+        if order["session_date"] != self._rotation_dates[-2]:
+            raise ValueError("Rotation book order missed its exact execution session")
+        opened = self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID)
+        if float(bar["open"]) <= float(payload["stop"]):
+            return payload  # Preserve the inherited gap-below-stop cancellation reason and status.
+        if intent and any(row["id"] == intent["outgoing"]["position_id"] for row in opened):
+            reason = "rotation_exit_not_filled"
+        elif intent and float(bar["open"]) > float(payload["limit_price"]):
+            reason = "rotation_replacement_gap_above_max_entry"
+        if reason is None:
+            budget = self.repository.account_state(ROTATION_STRATEGY_ID, exclude_order_ticker=order["ticker"])
+            price = min(float(bar["open"]), float(payload["limit_price"]))
+            shares = min(int(payload["shares"]), size_order(payload, budget, price=price))
+            if len(opened) >= 8 or shares <= 0:
+                reason = "rotation_execution_capacity_unavailable"
+            else:
+                payload = {**payload, "shares": shares, "allocation_dollars": shares * float(payload["limit_price"]),
+                           "risk_dollars": shares * (price - float(payload["stop"]))}
+                self.repository.update_candidate(order["run_id"], order["ticker"], payload)
+                return payload
+        self.repository.apply_event(run_id=order["run_id"], position_id=None, ticker=order["ticker"],
+            event_type="rotation_entry_expired" if intent else "order_expired", event_date=day,
+            payload={"reason": reason, "rotation_intent": intent}, candidate_id=order["id"], candidate_status="expired",
+            strategy_id=ROTATION_STRATEGY_ID)
+        counts["expired"] += 1
+        return None
+
+    def _reserve_rotation_candidates(self, rows, day, run_id):
+        for row in rows:
+            candidate = dict(row["_rs_candidate"])
+            ticker = candidate["ticker"]
+            if candidate["status"] != "pending" or self.repository.candidate_status(run_id, ticker) != "eligible":
+                continue
+            candidate.update({"rotation_policy_version": ROTATION_POLICY_VERSION, "selection_date": day.isoformat(),
+                              "queue_rank": candidate["rank"], "selected_for_book": False})
+            opened = self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID)
+            pending = self.repository.pending_orders(strategy_id=ROTATION_STRATEGY_ID)
+            if ticker in {p["ticker"] for p in opened}:
+                candidate.update(status="blocked_open_position", reasons=["open_position_exists"])
+            elif ticker in {p["ticker"] for p in pending}:
+                candidate.update(status="blocked_existing_order", reasons=["pending_order_exists"])
+            else:
+                budget = self.repository.account_state(ROTATION_STRATEGY_ID)
+                shares = size_order(candidate, budget)
+                if len(opened) + len(pending) >= 8 or shares <= 0:
+                    candidate.update(status="waiting_capacity", reasons=["position_cash_or_risk_capacity"])
+                else:
+                    limit, stop = float(candidate["limit_price"]), float(candidate["stop"])
+                    candidate.update(shares=shares, equity=100_000.0, sizing_mode="account_risk", risk_dollars=shares * (limit - stop),
+                        allocation_dollars=shares * limit, status="pending", order_date=day.isoformat(), selected_for_book=True)
+            self.repository.update_candidate(run_id, ticker, candidate)
+
+    def _schedule_rotation(self, rows, day, run_id, counts):
+        candidates = [self.repository.candidate_payload(run_id, row["ticker"]) for row in rows]
+        waiting = [item for item in candidates if item.get("status") == "waiting_capacity"]
+        last = self.repository.last_rotation_exit(ROTATION_STRATEGY_ID)
+        decision = rotation_decision(day=day, positions=self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID),
+            candidates=waiting, rows=rows, frames=self._rotation_frames, last_rotation=last, dates=self._rotation_dates)
+        # Prefer replacing a weaker unfilled reservation before displacing an actual holding.
+        if waiting and decision.get("reason") not in {"rotation_cooldown", "rotation_benchmark_data_missing", "rotation_market_regime"}:
+            replacement = self._replace_rotation_pending(waiting, rows, day, run_id)
+            if replacement:
+                replacement.update(decision_date=day.isoformat(), cooldown_sessions_remaining=decision["cooldown_sessions_remaining"],
+                                   last_rotation_exit=decision["last_rotation_exit"])
+                self.repository.set_run_metadata(run_id, {"rotation": replacement})
+                return
+            waiting = [self.repository.candidate_payload(run_id, item["ticker"]) for item in waiting
+                       if self.repository.candidate_status(run_id, item["ticker"]) == "waiting_capacity"]
+            decision = rotation_decision(day=day, positions=self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID),
+                candidates=waiting, rows=rows, frames=self._rotation_frames, last_rotation=last, dates=self._rotation_dates)
+        if decision["status"] == "scheduled":
+            outgoing = next(row for row in self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID)
+                            if row["id"] == decision["outgoing"]["position_id"])
+            ticker = decision["incoming"]["ticker"]
+            candidate = dict(self.repository.candidate_payload(run_id, ticker))
+            p = outgoing["payload_json"]
+            budget = self.repository.account_state(ROTATION_STRATEGY_ID)
+            budget["available_cash"] += int(p["remaining_shares"]) * float(self._rotation_frames[outgoing["ticker"]]["Close"].iloc[-1]) * .999
+            released_risk = int(p["remaining_shares"]) * max(float(p["entry_price"]) - float(p["stop"]), 0)
+            budget["available_risk"] = max(0.0, 2_500 - budget["committed_stop_risk"] + released_risk)
+            shares = size_order(candidate, budget)
+            if shares <= 0:
+                decision.update(status="not_scheduled", reason="rotation_projected_capacity_unavailable")
+            else:
+                candidate.update(status="pending", selected_for_book=True, shares=shares, order_date=day.isoformat(),
+                    equity=100_000.0, sizing_mode="account_risk", rotation_intent=decision, rotation_policy_version=ROTATION_POLICY_VERSION,
+                    risk_dollars=shares * (float(candidate["limit_price"]) - float(candidate["stop"])),
+                    allocation_dollars=shares * float(candidate["limit_price"]), reasons=["rotation_waiting_exit"])
+                self.repository.update_candidate(run_id, ticker, candidate)
+                self.repository.set_position_payload(outgoing["id"], {**p, "rotation_intent": decision})
+                if not self.repository.apply_event(run_id=run_id, position_id=outgoing["id"], ticker=outgoing["ticker"],
+                        event_type="rotation_scheduled", event_date=day, payload=decision, strategy_id=ROTATION_STRATEGY_ID):
+                    raise ValueError("Duplicate rotation intent; session rolled back")
+                counts["rotation_scheduled"] += 1
+        self.repository.set_run_metadata(run_id, {"rotation": decision})
+
+    def _replace_rotation_pending(self, waiting, rows, day, run_id):
+        row_map = {row["ticker"]: row for row in rows}
+        qualified = [(candidate, replacement_metrics(candidate, row_map[candidate["ticker"]],
+                        self._rotation_frames.get(candidate["ticker"]), day, self._rotation_dates)) for candidate in waiting]
+        qualified = [(candidate, m) for candidate, m in qualified if m is not None]
+        qualified.sort(key=lambda pair: (-pair[0]["rs_rating"], -pair[1]["return5_pct"], -pair[1]["adv20_dollars"], pair[0]["ticker"]))
+        for candidate, m in qualified:
+            new_priority = (-candidate["rs_rating"], -m["return5_pct"], -m["adv20_dollars"], candidate["ticker"])
+            pending = []
+            for old in self.repository.pending_orders(strategy_id=ROTATION_STRATEGY_ID):
+                old_metrics = metrics(self._rotation_frames.get(old["ticker"]), day, self._rotation_dates)
+                if old["payload_json"].get("rotation_intent") or old_metrics is None:
+                    continue
+                priority = (-float(old["payload_json"].get("rs_rating") or 0), -old_metrics["return5_pct"],
+                            -old_metrics["adv20_dollars"], old["ticker"])
+                if priority > new_priority:
+                    pending.append((priority, old))
+            for _, old in sorted(pending, key=lambda item: item[0], reverse=True):
+                p = old["payload_json"]
+                budget = self.repository.account_state(ROTATION_STRATEGY_ID)
+                budget["available_cash"] += float(p["limit_price"]) * int(p["shares"])
+                released_risk = max(float(p["limit_price"]) - float(p["stop"]), 0) * int(p["shares"])
+                budget["available_risk"] = max(0.0, 2_500 - budget["committed_stop_risk"] + released_risk)
+                shares = size_order(candidate, budget)
+                if shares <= 0:
+                    continue
+                self.repository.update_candidate(run_id, old["ticker"], {**p, "status": "cancelled", "selected_for_book": False,
+                    "reasons": ["replaced_by_higher_priority_pending"], "replacement_ticker": candidate["ticker"]})
+                limit, stop = float(candidate["limit_price"]), float(candidate["stop"])
+                self.repository.update_candidate(run_id, candidate["ticker"], {**candidate, "status": "pending", "selected_for_book": True,
+                    "shares": shares, "order_date": day.isoformat(), "risk_dollars": shares * (limit - stop), "allocation_dollars": shares * limit,
+                    "equity": 100_000.0, "sizing_mode": "account_risk", "reasons": ["replaced_lower_priority_pending"]})
+                self.repository.apply_event(run_id=run_id, position_id=None, ticker=old["ticker"], event_type="pending_replaced",
+                    event_date=day, payload={"incoming_ticker": candidate["ticker"], "reason": "higher_priority_unfilled_order"}, strategy_id=ROTATION_STRATEGY_ID)
+                return {"status": "pending_replaced", "reason": "higher_priority_unfilled_order", "outgoing_ticker": old["ticker"],
+                        "incoming_ticker": candidate["ticker"], "rotation_policy_version": ROTATION_POLICY_VERSION}
+
     def _mark_order_awaiting_data(self, order: dict[str, Any], reason: str, session_date: date) -> None:
         payload = dict(order.get("payload_json") or {})
         payload["market_data_state"] = "awaiting_data"
@@ -677,10 +908,12 @@ class MartinForwardTestService:
         self.repository.update_candidate(order["run_id"], order["ticker"], payload)
 
     def _manage_position(self, row: dict[str, Any], bar: dict[str, Any], frame: Any, as_of_date: date,
-                         run_id: int | None, counts: dict[str, int], strategy_id: str) -> None:
+                         run_id: int | None, counts: dict[str, int], strategy_id: str, *, allow_trim: bool = True) -> None:
         position = row.get("payload_json") or {}
         ticker, position_id = str(row["ticker"]).upper(), int(row["id"])
         outcome = position_exit(position, bar)
+        if outcome and outcome[0] == "trim_3r" and not allow_trim:
+            outcome = None
         if outcome and outcome[0] != "trim_3r":
             event_type, price = outcome
             remaining = int(position.get("remaining_shares") or position.get("shares") or 0)
