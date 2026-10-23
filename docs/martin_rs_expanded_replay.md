@@ -40,11 +40,19 @@ python scripts/replay_martin_rs_expanded.py --from-date 2026-10-19 --to-date 202
   by rebuilding today's Finviz/ratings board with an old date label.
   If saved ADR14 is missing, only the structural variant derives it from the 14
   historical completed bars; its evidence records that source. No rating is derived.
-- Preflight conservatively requires valid OHLCV for each previously seen focus
-  candidate's 35-session window on every subsequent replay session (even if it
-  would not actually be held), plus the 205-session emerging-tier evidence and
-  enough MA-retest evidence. Missing inputs block saving; they are not silently
-  skipped. Inspect the date/ticker errors rather than loosening them silently.
+- Replay v2 requires valid OHLCV for each focus candidate's 35-session window,
+  plus 205-session emerging-tier history and structural setup evidence. An
+  incomplete candidate is saved as `blocked_data` for that ticker/session with
+  explicit reasons and missing dates; valid candidates continue. Reports and saved
+  run summaries include blocked candidates and status counts. A later session
+  reassesses the ticker from its own point-in-time inputs.
+- Missing point-in-time snapshots or required SPY benchmark history still block
+  the entire range. Before processing each apply session, every open position and
+  pending order must have complete valid 35-session execution history. Missing or
+  invalid history for exposed tickers rolls back the entire range; no fills,
+  stops, trims, EMA exits or valuations are silently skipped. A missing current
+  setup blocks new selection, but does not cancel an earlier valid frozen order
+  when execution history is complete.
 - The replay starts flat. October 19 selections can first fill October 20. An
   October 19 fill would require an October 16 selection outside this range.
 - Existing account sizing, one-session order expiry, stops, trims, EMA9 exits and

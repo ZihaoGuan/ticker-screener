@@ -15,7 +15,7 @@ from src.trade_plan_policies import CURRENT_STOP_POLICY, STRUCTURAL_STOP_POLICY,
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_forward_test_service import FOCUS_SCANNERS, RS_EXPANDED_STRATEGY_ID, MartinForwardTestService, _scanner_ids, classify_rs_expanded_candidate
 
-REPLAY_VERSION = "rs_expanded_replay_v1"
+REPLAY_VERSION = "rs_expanded_replay_v2"
 
 
 def timestamp(value: Any) -> dt.datetime:
@@ -71,7 +71,7 @@ def prepare_replay(start: dt.date, end: dt.date, records: list[dict[str, Any]], 
     if end < start:
         raise ValueError("--to-date must be on or after --from-date")
     sessions = list(calendar.sessions_in_range(start.isoformat(), end.isoformat()))
-    errors, prepared, seen, candidate_counts = [], [], set(), {}
+    errors, prepared, blocked_candidates, candidate_counts = [], [], [], {}
     valid_dates = {ticker: {index.date() for index, bar in frame.iterrows() if valid_bar(bar)}
                    for ticker, frame in frames.items()}
     if not sessions:
@@ -89,18 +89,20 @@ def prepare_replay(start: dt.date, end: dt.date, records: list[dict[str, Any]], 
             continue
         rows = snapshot["guru_board"]["rows"]
         focus = [row for row in rows if isinstance(row, dict) and _scanner_ids(row).intersection(FOCUS_SCANNERS)]
-        seen.update(str(row.get("ticker") or "").strip().upper() for row in focus)
         history_dates = list(calendar.sessions_in_range((day - dt.timedelta(days=500)).isoformat(), day.isoformat()))
         expected35 = {label.date() for label in history_dates[-35:]}
         expected205 = {label.date() for label in history_dates[-205:]}
-        for ticker in sorted(seen | {"SPY"}):
-            available = valid_dates.get(ticker, set())
-            missing = expected35 - available
-            if missing:
-                errors.append({"date": day.isoformat(), "ticker": ticker, "reason": "missing_or_invalid_35_session_history",
-                               "missing_dates": sorted(value.isoformat() for value in missing)})
+        missing_spy = expected35 - valid_dates.get("SPY", set())
+        if missing_spy:
+            errors.append({"date": day.isoformat(), "ticker": "SPY", "reason": "missing_or_invalid_35_session_history",
+                           "missing_dates": sorted(value.isoformat() for value in missing_spy)})
         for row in focus:
             ticker = str(row.get("ticker") or "").strip().upper()
+            blockers = []
+            missing = expected35 - valid_dates.get(ticker, set())
+            if missing:
+                blockers.append({"reason": "missing_or_invalid_35_session_history",
+                                 "missing_dates": sorted(value.isoformat() for value in missing)})
             frame = frames.get(ticker, pd.DataFrame())
             past = frame.loc[frame.index.date <= day].tail(1300) if not frame.empty else frame
             if isinstance(row.get("daily_rs_rating"), bool):
@@ -114,7 +116,13 @@ def prepare_replay(start: dt.date, end: dt.date, records: list[dict[str, Any]], 
                 for symbol in (ticker, "SPY"):
                     available = valid_dates.get(symbol, set())
                     if not expected205.issubset(available):
-                        errors.append({"date": day.isoformat(), "ticker": symbol, "reason": "emerging_205_session_history_missing"})
+                        issue = {"date": day.isoformat(), "ticker": symbol, "reason": "emerging_205_session_history_missing",
+                                 "missing_dates": sorted(value.isoformat() for value in expected205 - available)}
+                        if symbol == "SPY":
+                            if issue not in errors:
+                                errors.append(issue)
+                        else:
+                            blockers.append({key: value for key, value in issue.items() if key not in {"date", "ticker"}})
             # Preserve the original universe, ratings, quality and Avoid gates; only reconstruct policy fields.
             structural_row = dict(row)
             adr_source = "saved_snapshot"
@@ -130,7 +138,11 @@ def prepare_replay(start: dt.date, end: dt.date, records: list[dict[str, Any]], 
             policy = row["trade_plans"][STRUCTURAL_STOP_POLICY]
             policy["evidence"]["adr_source"] = adr_source
             if policy["availability"] == "unavailable" and policy["unavailable_reason"] == "structural_evidence_missing":
-                errors.append({"date": day.isoformat(), "ticker": ticker, "reason": "structural_evidence_missing"})
+                blockers.append({"reason": "structural_evidence_missing"})
+            row["replay_data_validation"] = {"origin": "historical_replay", "as_of_date": day.isoformat(), "version": REPLAY_VERSION,
+                                             "blocked": bool(blockers), "issues": blockers}
+            if blockers:
+                blocked_candidates.append({"date": day.isoformat(), "ticker": ticker, "issues": blockers})
         candidate_counts[day.isoformat()] = {}
         for rank, row in enumerate(focus, start=1):
             state = classify_rs_expanded_candidate(row, rank, day, frames)["status"]
@@ -141,12 +153,16 @@ def prepare_replay(start: dt.date, end: dt.date, records: list[dict[str, Any]], 
                       "from_date": start.isoformat(), "to_date": end.isoformat(),
                       "limitations": "Saved universe and ratings; reconstructed stops; current stored OHLCV may include later corrections."}
         snapshot["replay_provenance"] = provenance
+        snapshot["replay_validation"] = {"required_execution_dates": sorted(value.isoformat() for value in expected35),
+                                         "candidate_status_counts": candidate_counts[day.isoformat()],
+                                         "blocked_candidates": [item for item in blocked_candidates if item["date"] == day.isoformat()]}
         digest = json.dumps(snapshot, sort_keys=True, default=str, allow_nan=False)
         snapshot["source_fingerprint"] = hashlib.sha256(digest.encode()).hexdigest()[:32]
         prepared.append(snapshot)
     report = {"strategy_id": RS_EXPANDED_STRATEGY_ID, "origin": "historical_replay", "version": REPLAY_VERSION,
               "from_date": start.isoformat(), "to_date": end.isoformat(), "sessions": [session.date().isoformat() for session in sessions],
               "prepared_sessions": len(prepared), "errors": errors, "ready": not errors,
+              "blocked_candidates": blocked_candidates,
               "candidate_status_counts": candidate_counts,
               "dry_run_scope": "Read-only input preflight; does not simulate fills or calculate performance.",
               "starting_state": "Empty RS Expanded account; no earlier positions or pending orders imported."}
@@ -193,10 +209,19 @@ def apply_replay(connection, snapshots: list[dict[str, Any]], frames: dict[str, 
     def loader(tickers, day, days, **_kwargs):
         return {ticker: frames[ticker].loc[frames[ticker].index.date <= day].tail(days)
                 for ticker in tickers if ticker in frames}
-    service = MartinForwardTestService(ReplayRepository(connection), bar_loader=loader)
+    repository = ReplayRepository(connection)
+    service = MartinForwardTestService(repository, bar_loader=loader)
     results = []
     for snapshot in snapshots:
-        result = service.run_session(as_of_date=dt.date.fromisoformat(snapshot["target_trading_date"]),
+        day = dt.date.fromisoformat(snapshot["target_trading_date"])
+        required = {dt.date.fromisoformat(value) for value in snapshot["replay_validation"]["required_execution_dates"]}
+        exposed = repository.open_positions(strategy_id=RS_EXPANDED_STRATEGY_ID) + repository.pending_candidates(before=day, strategy_id=RS_EXPANDED_STRATEGY_ID)
+        for ticker in sorted({str(item["ticker"]).strip().upper() for item in exposed}):
+            frame = frames.get(ticker, pd.DataFrame())
+            available = {index.date() for index, bar in frame.iterrows() if valid_bar(bar)}
+            if not required.issubset(available):
+                raise ValueError(f"Replay execution history missing or invalid for exposed ticker {ticker} on {day}; the entire range must be rolled back.")
+        result = service.run_session(as_of_date=day,
                                      snapshot=snapshot, strategy_id=RS_EXPANDED_STRATEGY_ID)
         if result["run_id"] is None or result["partial"]:
             raise ValueError("Replay produced an incomplete session; the entire range must be rolled back.")

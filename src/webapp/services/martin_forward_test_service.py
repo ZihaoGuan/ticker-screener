@@ -166,6 +166,16 @@ def classify_rs_expanded_candidate(row: dict[str, Any], rank: int, as_of_date: d
     item = classify_candidate({**row, "daily_rs_rating": 90} if tier == "emerging" else row, rank)
     item.update(rs_rating=rs, rs_tier=tier, rs_exception_checks={}, rs_exception_metrics={},
                 stop_policy_version=STRUCTURAL_STOP_POLICY, stop_policy=stop_policy)
+    validation = row.get("replay_data_validation")
+    if isinstance(validation, dict) and validation.get("origin") == "historical_replay" and validation.get("blocked"):
+        reasons = [issue["reason"] for issue in validation.get("issues", []) if isinstance(issue, dict) and issue.get("reason")]
+        item.update(status="blocked_data", selected_for_book=False,
+                    reasons=list(dict.fromkeys([*reasons, *item["reasons"]])) or ["replay_candidate_data_invalid"],
+                    replay_data_validation=validation,
+                    readiness_explanation="Historical replay inputs are incomplete or invalid for this ticker/session; no new order is submitted.")
+        item["readiness_details"] = [item["readiness_explanation"], *reasons]
+        item.pop("limit_price", None)
+        return item
     if stop_error:
         item.update(status="avoid" if row.get("trade_readiness") == "avoid" else "blocked_data",
                     reasons=list(dict.fromkeys([*item["reasons"], stop_error])), stop=None, max_entry=None,
@@ -565,6 +575,7 @@ class MartinForwardTestService:
             summary["stop_policy_version"] = STRUCTURAL_STOP_POLICY
         if snapshot.get("replay_provenance"):
             summary["replay_provenance"] = snapshot["replay_provenance"]
+            summary["replay_validation"] = snapshot.get("replay_validation", {})
         return self.repository.save_session(session_date=as_of_date, source_run_id=source_run_id, fingerprint=fingerprint,
                                             candidates=candidates, summary=summary, strategy_id=strategy_id)
 

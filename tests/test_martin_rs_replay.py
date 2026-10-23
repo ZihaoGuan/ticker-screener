@@ -95,13 +95,107 @@ class ReplayTests(unittest.TestCase):
             _, report = self.prepare([record, self.records[1]])
             self.assertFalse(report["ready"])
 
-    def test_missing_or_invalid_bars_fail_preflight(self):
+    def test_missing_or_invalid_candidate_bars_only_block_that_session(self):
         for value in (float("nan"), 0, 103):
             broken = self.frame.copy()
             broken.loc[str(self.end), "Low"] = value
-            _, report = self.prepare(frames={"ABC": broken, "SPY": self.frame})
+            snapshots, report = self.prepare(frames={"ABC": broken, "SPY": self.frame})
+            self.assertTrue(report["ready"])
+            self.assertEqual(report["errors"], [])
+            self.assertEqual(report["candidate_status_counts"][str(self.start)], {"pending": 1})
+            self.assertEqual(report["candidate_status_counts"][str(self.end)], {"blocked_data": 1})
+            self.assertEqual(report["blocked_candidates"][0]["ticker"], "ABC")
+            self.assertTrue(snapshots[1]["guru_board"]["rows"][0]["replay_data_validation"]["blocked"])
+
+    def test_healthy_candidate_executes_while_bad_candidate_is_saved_blocked(self):
+        records = copy.deepcopy(self.records)
+        for record in records:
+            row = copy.deepcopy(record["result_summary_json"]["guru_board"]["rows"][0])
+            row["ticker"] = "BAD"
+            record["result_summary_json"]["guru_board"]["rows"].append(row)
+        frames = {**self.frames, "BAD": self.frame.drop(self.frame.index[-10])}
+        snapshots, report = self.prepare(records, frames)
+        self.assertTrue(report["ready"])
+        repo = _ForwardRepo()
+        with patch("src.webapp.services.martin_rs_replay.ensure_empty_book"), \
+             patch("src.webapp.services.martin_rs_replay.ReplayRepository", return_value=repo):
+            results = apply_replay(object(), snapshots, frames)
+        self.assertEqual(results[1]["filled"], 1)
+        self.assertEqual([position["ticker"] for position in repo.positions], ["ABC"])
+        bad = [row for row in repo.candidates if row["ticker"] == "BAD"]
+        self.assertEqual(len(bad), 2)
+        for row in bad:
+            self.assertEqual(row["status"], "blocked_data")
+            self.assertIn("missing_or_invalid_35_session_history", row["payload_json"]["reasons"])
+            self.assertFalse(row["payload_json"]["selected_for_book"])
+            self.assertNotIn("limit_price", row["payload_json"])
+
+    def test_emerging_history_and_structural_evidence_block_only_candidate(self):
+        records = copy.deepcopy(self.records)
+        records[0]["result_summary_json"]["guru_board"]["rows"][0]["daily_rs_rating"] = 85
+        frames = {**self.frames, "ABC": self.frame.tail(40)}
+        _, report = self.prepare(records, frames)
+        self.assertTrue(report["ready"])
+        self.assertIn("emerging_205_session_history_missing", [issue["reason"] for issue in report["blocked_candidates"][0]["issues"]])
+        with patch("src.webapp.services.martin_rs_replay.structural_plan_payload", return_value={
+                "availability": "unavailable", "unavailable_reason": "structural_evidence_missing", "evidence": {}}):
+            _, report = self.prepare()
+        self.assertTrue(report["ready"])
+        self.assertEqual(report["candidate_status_counts"][str(self.start)], {"blocked_data": 1})
+
+    def test_blocked_ticker_is_reassessed_each_session(self):
+        oldest_required = pd.bdate_range(end=self.start, periods=35)[0]
+        frames = {**self.frames, "ABC": self.frame.drop(oldest_required)}
+        _, report = self.prepare(frames=frames)
+        self.assertTrue(report["ready"])
+        self.assertEqual(report["candidate_status_counts"][str(self.start)], {"blocked_data": 1})
+        self.assertEqual(report["candidate_status_counts"][str(self.end)], {"pending": 1})
+
+    def test_missing_or_invalid_spy_is_still_fatal(self):
+        for frame in (self.frame.drop(self.frame.index[-1]), self.frame.assign(Volume=0)):
+            _, report = self.prepare(frames={"ABC": self.frame, "SPY": frame})
             self.assertFalse(report["ready"])
-            self.assertTrue(any(item["ticker"] == "ABC" for item in report["errors"]))
+            self.assertEqual(report["errors"][0]["ticker"], "SPY")
+        records = copy.deepcopy(self.records)
+        records[0]["result_summary_json"]["guru_board"]["rows"][0]["daily_rs_rating"] = 85
+        _, report = self.prepare(records, {"ABC": self.frame, "SPY": self.frame.tail(40)})
+        self.assertFalse(report["ready"])
+        self.assertIn("emerging_205_session_history_missing", [error["reason"] for error in report["errors"]])
+
+    def test_pending_order_invalid_execution_history_aborts_range(self):
+        broken = self.frame.copy()
+        broken.loc[str(self.end), "Volume"] = 0
+        frames = {**self.frames, "ABC": broken}
+        snapshots, report = self.prepare(frames=frames)
+        self.assertTrue(report["ready"])
+        repo = _ForwardRepo()
+        with patch("src.webapp.services.martin_rs_replay.ensure_empty_book"), \
+             patch("src.webapp.services.martin_rs_replay.ReplayRepository", return_value=repo):
+            with self.assertRaisesRegex(ValueError, "exposed ticker ABC.*rolled back"):
+                apply_replay(object(), snapshots, frames)
+        self.assertEqual(repo.positions, [])
+
+    def test_open_position_missing_execution_history_aborts_before_processing(self):
+        snapshots, _ = self.prepare()
+        repo = _ForwardRepo()
+        repo.positions.append({"id": 1, "ticker": "ABC", "status": "open", "strategy_id": RS_EXPANDED_STRATEGY_ID,
+                               "payload_json": {}})
+        with patch("src.webapp.services.martin_rs_replay.ensure_empty_book"), \
+             patch("src.webapp.services.martin_rs_replay.ReplayRepository", return_value=repo), \
+             patch("src.webapp.services.martin_rs_replay.MartinForwardTestService") as service:
+            with self.assertRaisesRegex(ValueError, "exposed ticker ABC"):
+                apply_replay(object(), snapshots, {"SPY": self.frame})
+            service.return_value.run_session.assert_not_called()
+
+    def test_frozen_order_still_executes_when_next_session_setup_disappears(self):
+        snapshots, _ = self.prepare()
+        snapshots[1]["guru_board"]["rows"][0]["replay_data_validation"].update(
+            blocked=True, issues=[{"reason": "structural_evidence_missing"}])
+        repo = _ForwardRepo()
+        with patch("src.webapp.services.martin_rs_replay.ensure_empty_book"), \
+             patch("src.webapp.services.martin_rs_replay.ReplayRepository", return_value=repo):
+            results = apply_replay(object(), snapshots, self.frames)
+        self.assertEqual(results[1]["filled"], 1)
 
     def test_first_day_selects_then_next_session_fills_with_frozen_provenance(self):
         snapshots, _ = self.prepare()
@@ -134,6 +228,7 @@ class ReplayTests(unittest.TestCase):
     def test_partial_apply_raises_for_outer_rollback(self):
         snapshots, _ = self.prepare()
         with patch("src.webapp.services.martin_rs_replay.ensure_empty_book"), \
+             patch("src.webapp.services.martin_rs_replay.ReplayRepository", return_value=_ForwardRepo()), \
              patch("src.webapp.services.martin_rs_replay.MartinForwardTestService") as service:
             service.return_value.run_session.return_value = {"run_id": 1, "partial": True}
             with self.assertRaisesRegex(ValueError, "rolled back"):
