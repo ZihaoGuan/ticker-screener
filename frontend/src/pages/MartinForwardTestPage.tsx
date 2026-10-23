@@ -116,7 +116,7 @@ function FragmentRow({ row, expanded, onToggle }: { row: MartinForwardRow; expan
   const nextEvent = row.market_data_state === "awaiting_data" ? "Awaiting exact session bar; order remains reserved" : row.status === "pending" ? "Check next completed session for limit fill" : row.status === "filled" ? "Manage open position at stop" : candidateAction(row);
   return <>
     <tr><th scope="row">{String(row.ticker ?? "—")}</th><td>{statusLabel(String(row.status ?? "Unknown"))}</td><td>{formatPrice(row.limit_price)}</td><td>{formatPrice(row.stop)}</td><td>{format(row.shares ?? row.position_size)}</td><td>{nextEvent}</td><td><button type="button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "Hide details" : "Details"}</button></td></tr>
-    {expanded ? <tr><td colSpan={7}><dl className="martin-details">{details.filter((field) => row[field] != null).map((field) => <div key={field}><dt>{field === "reasons" ? "Reason details" : field.replace(/_/g, " ")}</dt><dd>{field === "reasons" ? humanReasons(row[field], row) : format(row[field])}{field === "reasons" ? <small className="martin-raw-code">Stored value: {format(row[field])}</small> : null}</dd></div>)}</dl>{row.status === "watch" ? <TradePlanPreview row={row} /> : null}</td></tr> : null}
+    {expanded ? <tr><td colSpan={7}><dl className="martin-details">{details.filter((field) => row[field] != null).map((field) => <div key={field}><dt>{field === "reasons" ? "Reason details" : field.replace(/_/g, " ")}</dt><dd>{field === "reasons" ? humanReasons(row[field], row) : format(row[field])}{field === "reasons" ? <small className="martin-raw-code">Stored value: {format(row[field])}</small> : null}</dd></div>)}</dl>{row.status === "watch" ? <TradePlanPreview row={row} /> : <ReadinessExplanation row={row} />}</td></tr> : null}
   </>;
 }
 
@@ -147,12 +147,47 @@ function Performance({ book, books }: { book: MartinForwardBook; books: MartinFo
   return <div className="martin-view">
     {Number(metrics.closed_count ?? 0) < 20 ? <p className="martin-inline-state" role="note">Early sample: fewer than 20 closed trades. Performance metrics are preliminary.</p> : null}
     <section className="martin-metrics martin-metrics-primary">{primary.map(([label, value]) => <div className="martin-metric" key={String(label)}><span>{label}</span><strong>{format(value)}</strong></div>)}</section>
+    {book === books.account ? <BenchmarkComparison comparison={book.benchmark_comparison} /> : null}
     <section className="martin-panel"><h2>Additional metrics</h2><div className="martin-metrics">{[["Realized R", metrics.realized_r], ["Unrealized R", metrics.unrealized_r], ["Realized P&L", formatCurrency(metrics.realized_pnl)], ["Closed trades", metrics.closed_count], ["Win rate", metrics.win_rate_pct == null ? null : `${format(metrics.win_rate_pct)}%`], ["Profit factor", metrics.profit_factor_r], ["Average holding sessions", metrics.average_holding_sessions], ["Gross wins", formatCurrency(metrics.gross_wins)], ["Gross losses", formatCurrency(metrics.gross_losses)], ["Account equity", book === books.account ? formatCurrency(metrics.account_equity) : null], ["Equity drawdown", book === books.account && metrics.equity_drawdown_pct != null ? `${format(metrics.equity_drawdown_pct)}%` : null]].map(([label, value]) => <div className="martin-metric" key={String(label)}><span>{label}</span><strong>{format(value)}</strong></div>)}</div></section>
     <section className="martin-panel"><h2>Book comparison</h2><SimpleTable rows={(["account", "sector_opportunity", "daily_top5"] as const).flatMap((key) => books[key] ? [{ name: key === "account" ? "Account" : key === "sector_opportunity" ? "Sector opportunity" : "Daily Top 5", ...books[key]!.metrics, cumulative_r: books[key]!.metrics.cumulative_r == null ? null : `${format(books[key]!.metrics.cumulative_r)} R`, expectancy_r: books[key]!.metrics.expectancy_r == null ? null : `${format(books[key]!.metrics.expectancy_r)} R`, realized_pnl: formatCurrency(books[key]!.metrics.realized_pnl), account_equity: key === "account" ? formatCurrency(books[key]!.metrics.account_equity) : null, equity_drawdown_pct: key === "account" && books[key]!.metrics.equity_drawdown_pct != null ? `${format(books[key]!.metrics.equity_drawdown_pct)}%` : null, max_r_drawdown: books[key]!.metrics.max_r_drawdown == null ? null : `${format(books[key]!.metrics.max_r_drawdown)} R` }] : [])} columns={["name", "cumulative_r", "realized_r", "unrealized_r", "expectancy_r", "realized_pnl", "win_rate_pct", "profit_factor_r", "account_equity", "equity_drawdown_pct", "max_r_drawdown"]} /></section>
     <section className="martin-panel"><h2>Cumulative R comparison</h2><ComparisonChart books={books} field="cumulative_r" /></section>
     {books.account ? <section className="martin-panel"><h2>Account book equity and drawdown</h2><p className="martin-panel-copy">Account sizing metrics use the account book’s fixed simulation capital.</p><HistoryChart points={books.account.history} field="account_equity" /><HistoryChart points={books.account.history} field="equity_drawdown_pct" /></section> : null}
     <section className="martin-panel"><h2>Trade attribution</h2>{Object.entries(book.attribution).map(([dimension, values]) => <div key={dimension}><h3>{dimension.replace(/_/g, " ")}</h3><SimpleTable rows={Object.entries(values).map(([name, result]) => ({ name, ...result }))} columns={["name", "count", "realized_r", "realized_pnl"]} /></div>)}</section>
   </div>;
+}
+
+function BenchmarkComparison({ comparison }: { comparison: MartinForwardBook["benchmark_comparison"] }) {
+  if (!comparison || comparison.status !== "available" || !comparison.series) {
+    return <section className="martin-panel"><h2>Account vs SPY and QQQ</h2><p className="martin-empty">{comparison?.reason || "Stored account and benchmark history is unavailable."}</p></section>;
+  }
+  const names = ["Account", "SPY", "QQQ"] as const;
+  const dates = Array.from(new Set(names.flatMap((name) => comparison.series![name].map((point) => point.date)))).sort();
+  const values = names.flatMap((name) => comparison.series![name].flatMap((point) => point.value == null ? [] : [point.value]));
+  const low = Math.min(100, ...values), high = Math.max(100, ...values), span = high - low || 1;
+  const pathFor = (name: typeof names[number]) => comparison.series![name].map((point, index, points) => {
+    if (point.value == null) return "";
+    const previous = index > 0 ? points[index - 1] : null;
+    return `${index && previous?.value != null ? "L" : "M"}${(dates.indexOf(point.date) / Math.max(dates.length - 1, 1)) * 100},${35 - ((point.value - low) / span) * 30}`;
+  }).filter(Boolean).join(" ");
+  const date = comparison.comparison_date || dates[dates.length - 1];
+  const atDate = (name: typeof names[number]) => comparison.series![name].find((point) => point.date === date);
+  const maxDrawdown = (name: typeof names[number]) => comparison.series![name].filter((point) => point.date <= date && point.drawdown_pct != null).reduce((minimum, point) => Math.min(minimum, point.drawdown_pct!), 0);
+  const accountReturn = atDate("Account")?.return_pct;
+  const delta = (name: "SPY" | "QQQ") => accountReturn == null || atDate(name)?.return_pct == null ? "—" : `${accountReturn - atDate(name)!.return_pct! >= 0 ? "+" : ""}${format(accountReturn - atDate(name)!.return_pct!)} pp`;
+  const rangeEnd = dates[dates.length - 1];
+  return <section className="martin-panel">
+    <h2>Account vs SPY and QQQ</h2>
+    <p className="martin-panel-copy">Rebased to 100 on {comparison.baseline_date}. Account return uses persisted simulated NAV (cash plus realized and open P&amp;L); SPY and QQQ use stored Close price returns, excluding distributions. Max drawdown starts at this common baseline.</p>
+    <p className="martin-panel-copy">Return, max drawdown, and account deltas are measured through the latest common session, {date}. The chart covers saved history through {rangeEnd}.</p>
+    <div className="martin-table-wrap martin-benchmark-table"><table><thead><tr><th scope="col">Series</th><th scope="col">Return</th><th scope="col">Max drawdown</th><th scope="col">Account delta</th></tr></thead><tbody>{names.map((name) => { const point = atDate(name); return <tr key={name}><th scope="row">{name}</th><td>{point?.return_pct == null ? "—" : `${format(point.return_pct)}%`}</td><td>{format(maxDrawdown(name))}%</td><td>{name === "Account" ? "—" : delta(name)}</td></tr>; })}</tbody></table></div>
+    <div className="martin-chart-block"><p className="martin-chart-title">Rebased value (common account and ETF sessions)</p><div className="martin-chart martin-comparison-chart" role="img" aria-label={`Account NAV and ETF price returns rebased to 100 from ${comparison.baseline_date} to ${rangeEnd}; missing sessions are shown as gaps`}>
+      <div className="martin-chart-scale"><span>{format(high)}</span><span>{format(low)}</span></div>
+      <svg viewBox="0 0 100 40" preserveAspectRatio="none">{names.map((name, index) => <path key={name} className={["account-series", "sector-series", "daily-top5-series"][index]} d={pathFor(name)} />)}</svg>
+      <div><span>{comparison.baseline_date}</span>{names.map((name, index) => <span key={name} className={["account-legend", "sector-legend", "daily-top5-legend"][index]}>{name}</span>)}<span>{rangeEnd}</span></div>
+    </div></div>
+    <p className="martin-panel-copy">Coverage: {comparison.included_sessions} of {comparison.expected_sessions} sampled saved sessions share valid account, SPY, and QQQ values. Gaps can hide deeper drawdowns. Positive account delta means the account outperformed that ETF, in percentage points.</p>
+    {comparison.missing_dates?.length ? <details className="martin-code-detail"><summary>Missing sessions ({comparison.missing_dates.length})</summary><p>{comparison.missing_dates.join(", ")}</p></details> : null}
+  </section>;
 }
 
 function HistoryChart({ points, field }: { points: MartinForwardBook["history"]; field: "cumulative_r" | "account_equity" | "equity_drawdown_pct" }) {
@@ -181,7 +216,25 @@ function ComparisonChart({ books, field }: { books: MartinForwardResponse["books
 
 function SimpleTable({ rows, columns }: { rows: MartinForwardRow[]; columns: string[] }) {
   const [previewRow, setPreviewRow] = useState<string | null>(null);
-  return <div className={`martin-table-wrap ${columns.includes("cumulative_r") ? "martin-comparison-table" : ""}`}><table><thead><tr>{columns.map((column) => <th key={column} scope="col">{columnLabel(column)}</th>)}</tr></thead><tbody>{rows.map((raw, index) => { const row = unpack(raw), key = String(raw.id ?? row.ticker ?? index), showPreview = previewRow === key; return <Fragment key={key}><tr className={columns.includes("reason_summary") ? "martin-exclusion-row" : undefined}>{columns.map((column) => <td key={column}>{column === "reason_summary" ? <><span>{humanReasons(row.reasons, row)}</span><details className="martin-code-detail"><summary>Stored reason code</summary><code>{format(row.reasons)}</code></details>{row.status === "watch" ? <button type="button" aria-expanded={showPreview} onClick={() => setPreviewRow(showPreview ? null : key)}>{showPreview ? "Hide trade plan" : "View trade plan"}</button> : null}</> : column === "status" ? statusLabel(String(row[column] ?? raw[column] ?? "Unknown")) : format(row[column] ?? raw[column])}</td>)}</tr>{showPreview ? <tr className="martin-exclusion-preview-row"><td colSpan={columns.length}><TradePlanPreview row={row} /></td></tr> : null}</Fragment>; })}</tbody></table></div>;
+  return <div className={`martin-table-wrap ${columns.includes("cumulative_r") ? "martin-comparison-table" : ""}`}><table><thead><tr>{columns.map((column) => <th key={column} scope="col">{columnLabel(column)}</th>)}</tr></thead><tbody>{rows.map((raw, index) => {
+    const row = unpack(raw), key = String(raw.id ?? row.ticker ?? index), showPreview = previewRow === key;
+    return <Fragment key={key}><tr className={columns.includes("reason_summary") ? "martin-exclusion-row" : undefined}>{columns.map((column) => <td key={column}>{column === "reason_summary" ? <>
+      <span>{row.status === "avoid" && typeof row.readiness_explanation === "string" ? row.readiness_explanation : humanReasons(row.reasons, row)}</span>
+      <ReadinessExplanation row={row} />
+      <details className="martin-code-detail"><summary>Stored reason code</summary><code>{format(row.reasons)}</code></details>
+      {row.status === "watch" ? <button type="button" aria-expanded={showPreview} onClick={() => setPreviewRow(showPreview ? null : key)}>{showPreview ? "Hide trade plan" : "View trade plan"}</button> : null}
+    </> : column === "status" ? statusLabel(String(row[column] ?? raw[column] ?? "Unknown")) : format(row[column] ?? raw[column])}</td>)}</tr>{showPreview ? <tr className="martin-exclusion-preview-row"><td colSpan={columns.length}><TradePlanPreview row={row} /></td></tr> : null}</Fragment>;
+  })}</tbody></table></div>;
+}
+
+function ReadinessExplanation({ row }: { row: MartinForwardRow }) {
+  const awaiting = reasonCodes(row.reasons, row).includes("awaiting_confirmation");
+  const avoided = row.status === "avoid" || row.trade_readiness === "avoid";
+  if (!awaiting && !avoided) return null;
+  const details = Array.isArray(row.readiness_details) ? row.readiness_details.filter((value): value is string => typeof value === "string" && Boolean(value.trim())) : [];
+  return <details className="martin-code-detail"><summary>{awaiting ? "Confirmation rule" : "Why this was avoided"}</summary>
+    {awaiting ? <p>{typeof row.confirmation_rules === "string" && row.confirmation_rules.trim() ? row.confirmation_rules : "Scanner confirmation details are unavailable in this saved snapshot."}</p> : details.length ? <ul>{details.map((detail) => <li key={detail}>{detail}</li>)}</ul> : <p>Saved explanation details are unavailable for this historical row.</p>}
+  </details>;
 }
 
 function TradePlanPreview({ row }: { row: MartinForwardRow }) {
@@ -201,6 +254,7 @@ function TradePlanPreview({ row }: { row: MartinForwardRow }) {
     <dl>{fields.map(([label, value, kind]) => { const unavailable = value == null || (typeof value === "string" && !value.trim()) || (kind === "price" && positiveNumber(value) == null); return <div key={label}><dt>{label}</dt><dd>{unavailable ? "Unavailable" : kind === "price" ? formatPrice(Number(value)) : kind === "percent" ? `${formatRisk(Number(value))}%${storedRisk == null ? " · Calculated from saved levels" : ""}` : format(value)}</dd></div>; })}</dl>
     {overLimit ? <p className="martin-trade-plan-warning" role="note">Saved plan risk exceeds the 5% limit.</p> : null}
     <p className="martin-trade-plan-why"><strong>Why Watch:</strong> {humanReasons(row.reasons, row)}</p>
+    <ReadinessExplanation row={row} />
   </section>;
 }
 

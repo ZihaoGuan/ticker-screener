@@ -1856,19 +1856,21 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
     if (typeof plan?.max_entry_price === "number" && Number.isFinite(plan.max_entry_price) && plan.max_entry_price > 0) sizeParams.set("maxEntry", String(plan.max_entry_price));
     if (plan?.signal_date) sizeParams.set("signalDate", plan.signal_date);
     const avoidReasons = [
-      row.strike_zone?.state === "avoid" ? "Strike Zone says avoid" : null,
-      row.pullback_quality?.state === "failed" ? "pullback quality failed" : null,
-    ].filter(Boolean);
+      ...(row.strike_zone?.state === "avoid" ? [row.strike_zone.reason, ...(row.strike_zone.warnings ?? [])] : []),
+      ...(row.pullback_quality?.state === "failed" ? (row.pullback_quality.reasons ?? []) : []),
+    ].filter((reason): reason is string => Boolean(reason?.trim())).filter((reason, index, all) => all.indexOf(reason) === index);
+    const confirmationRule = readinessConfirmationRule(plan?.source_strategy_id);
     const price = row.day_close == null ? "--" : `$${row.day_close.toFixed(2)}`;
     const saving = Boolean(savingMyPickTickers[row.ticker]);
     const isPick = myPickTickers.has(row.ticker);
     return <article aria-label={`${row.ticker} trade candidate`} className={`guru-ticker-card trade-readiness-card${row.ticker === selectedTicker ? " is-selected" : ""}`} key={row.ticker} aria-busy={saving}>
       <button type="button" className="trade-readiness-select" aria-pressed={row.ticker === selectedTicker} onClick={() => onSelectTicker(row.ticker)}><strong>{row.ticker}</strong><span>{price}</span></button>
       <div className="trade-readiness-card-badges"><SectorTag sector={row.sector} />{showStage ? <span className={`trade-readiness-stage is-${readinessStage(row)}`}>{stageLabels[readinessStage(row)]}</span> : null}</div>
-      <span className={`trade-readiness-eligibility is-${getEntryEligibility(row)}`} aria-label={`Plan status: ${{ within_max: "Within max entry; valid plan, not a buy signal", extended: "Extended, do not chase", waiting_trigger: "Waiting for trigger", unavailable: "No entry limit or plan unavailable" }[getEntryEligibility(row)]}`}>
+      {!isAvoided ? <span className={`trade-readiness-eligibility is-${getEntryEligibility(row)}`} aria-label={`Plan status: ${{ within_max: "Within max entry; valid plan, not a buy signal", extended: "Extended, do not chase", waiting_trigger: "Waiting for trigger", unavailable: "No entry limit or plan unavailable" }[getEntryEligibility(row)]}`}>
         ${{ within_max: "Within max entry · plan valid, not a buy signal", extended: "Extended · do not chase", waiting_trigger: "Waiting for daily trigger", unavailable: "No entry limit / plan unavailable" }[getEntryEligibility(row)]}
-      </span>
-      {isAvoided ? <div className="trade-readiness-avoid" role="alert"><strong>AVOID NEW ENTRY</strong><span>{avoidReasons.length ? avoidReasons.join("; ") : "Readiness rules rejected this setup"}.</span></div> : plan ? <>
+      </span> : null}
+      {isAvoided ? <div className="trade-readiness-avoid" role="alert"><strong>AVOID NEW ENTRY</strong><span>{avoidReasons[0] || "Saved reason details are unavailable for this candidate."}</span>
+        <details><summary>Why this was avoided</summary><ul>{avoidReasons.length ? avoidReasons.map((reason) => <li key={reason}>{reason}</li>) : <li>Saved reason details are unavailable for this candidate.</li>}</ul></details></div> : plan ? <>
         <div className="trade-readiness-plan">
           <span><b>Max Entry</b><strong>{plan.max_entry_price == null ? "Unavailable" : `$${plan.max_entry_price.toFixed(2)}`}</strong></span>
           <span><b>Stop</b><strong>{plan.stop_price == null ? "Unavailable" : `$${plan.stop_price.toFixed(2)}`}</strong></span>
@@ -1877,6 +1879,7 @@ function TradeReadinessBoard({ rows, myPickTickers, savingMyPickTickers, canMana
         </div>
         {plan.risk_status === "over_limit" ? <p className="panel-copy trade-readiness-warning">Risk exceeds {plan.max_risk_pct}% at the trigger; wait for a lower entry.</p> : null}
         {plan.risk_status === "invalid_levels" ? <p className="panel-copy trade-readiness-warning">Trigger or stop is missing or invalid; order risk cannot be confirmed.</p> : null}
+        {["pullback_zone", "reclaim_trigger"].includes(String(row.trade_readiness)) ? <details className="trade-readiness-evidence"><summary>Confirmation rule</summary><p>{confirmationRule || "Saved scanner confirmation details are unavailable."}</p></details> : null}
       </> : <p className="panel-copy trade-readiness-warning">Trade plan unavailable for this candidate.</p>}
       <div className="trade-readiness-adr" aria-label="ADR suitability">
         <span>ADR14 <strong>{row.adr14_pct == null ? "Unavailable" : `${row.adr14_pct.toFixed(2)}%`}</strong></span>
@@ -2052,6 +2055,13 @@ function buildPullbackQualityTitle(quality: NonNullable<ScannerTopHitRow["pullba
     `Aggressive downside: ${quality.aggressive_downside_days} day(s) · Distribution: ${quality.distribution_days} day(s)`,
     ...quality.reasons,
   ].join("\n");
+}
+
+function readinessConfirmationRule(source: string | undefined): string | null {
+  if (source === "ma_pullback_retest") return "MA Retest requires a rising support average, a support touch and hold within that profile’s ATR tolerance during the last three daily sessions, and a latest bar with its low near support, close above support and open, and close at or above the prior close. These are the scanner’s combined rules; this row does not preserve the result of each individual check.";
+  if (source === "ema21_pullback_buy") return "EMA21 Pullback requires its strict uptrend and a bullish breakout bar whose intraday high exceeds the saved test high. The breakout close does not need to exceed the test high; individual check results are not saved here.";
+  if (source === "sma200_pullback_buy") return "SMA200 Pullback requires its strict long trend and a bullish breakout bar whose intraday high exceeds the saved test high. The breakout close does not need to exceed the test high; individual check results are not saved here.";
+  return null;
 }
 
 function buildStrikeZoneTitle(strikeZone: ScannerTopHitRow["strike_zone"]): string {

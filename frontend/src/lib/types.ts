@@ -2640,6 +2640,8 @@ export type MartinForwardBook = {
   positions: MartinForwardRow[];
   events: MartinForwardRow[];
   history: Array<{ date: string; cumulative_r: number; account_equity: number | null; equity_drawdown_pct: number | null; r_drawdown: number }>;
+  history_source?: string;
+  benchmark_comparison?: { status: "available" | "unavailable"; reason?: string; basis: "price_return_close"; baseline_date?: string; comparison_date?: string; account_history_start?: string; account_history_end?: string; included_sessions?: number; expected_sessions?: number; missing_dates?: string[]; series?: Record<"Account" | "SPY" | "QQQ", Array<{ date: string; value: number | null; return_pct: number | null; drawdown_pct: number | null }>> };
   attribution: Record<string, Record<string, { count: number; realized_r: number; realized_pnl: number }>>;
   metrics: Record<string, number | null>;
 };

@@ -251,6 +251,26 @@ class MartinForwardTestRepository:
                     events = self._fetch(cursor, "SELECT * FROM martin_forward_events WHERE strategy_id=%s ORDER BY event_date DESC,id DESC LIMIT 200", (strategy_id,))
                     books[key] = {**_performance_context(strategy_id, runs, candidates, positions, events),
                                   "outstanding_orders": outstanding_orders}
+                account = books.get("account")
+                if account and account.get("history"):
+                    dates = [str(point.get("date") or "") for point in account["history"] if point.get("date")]
+                    start, end = min(dates), max(dates)
+                    latest_run_by_date = {}
+                    for run in reversed(account.get("runs", [])):
+                        latest_run_by_date[str(run.get("session_date"))] = run
+                    partial_dates = {day for day, run in latest_run_by_date.items()
+                                     if (run.get("summary_json") or {}).get("partial")}
+                    try:
+                        with connection.transaction():
+                            price_rows = self._fetch(cursor, """SELECT ticker,trade_date,close FROM daily_bars
+                                WHERE ticker IN ('SPY','QQQ') AND trade_date >= %s AND trade_date <= %s
+                                ORDER BY ticker,trade_date""", (start, end))
+                        if account.get("history_source") != "stored_session_marks":
+                            account["benchmark_comparison"] = {"status": "unavailable", "reason": "Stored daily account equity marks are unavailable.", "basis": "price_return_close"}
+                        else:
+                            account["benchmark_comparison"] = _benchmark_comparison(account["history"], price_rows, partial_dates)
+                    except Exception:
+                        account["benchmark_comparison"] = {"status": "unavailable", "reason": "Stored benchmark bars could not be read from the database.", "basis": "price_return_close"}
         return {"configured": True, "books": books, "comparison": _comparison_series(books)}
 
     def _rows(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -266,8 +286,6 @@ class MartinForwardTestRepository:
         cursor.execute(sql, params)
         columns = [col.name for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-
 
 def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidates: list[dict[str, Any]],
                          positions: list[dict[str, Any]], events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -315,12 +333,13 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
             marks.append({"date": str(run["session_date"]), "cumulative_r": summary.get("cumulative_r"),
                           "account_equity": summary.get("account_equity"),
                           "equity_drawdown_pct": summary.get("equity_drawdown_pct"), "r_drawdown": summary.get("r_drawdown")})
+    has_account_marks = strategy_id == "martin_daily_v1" and bool(marks) and any(point.get("account_equity") is not None for point in marks)
     if marks:
         history = marks
     latest_mark = marks[-1] if marks else {}
     latest_summary = (runs[0].get("summary_json") or {}) if runs else {}
     return {"strategy_id": strategy_id, "runs": runs, "candidates": candidates, "positions": positions,
-            "events": events, "history": history, "attribution": attribution,
+            "events": events, "history": history, "history_source": "stored_session_marks" if has_account_marks else "realized_close_fallback", "attribution": attribution,
             "metrics": {"realized_r": latest_summary.get("realized_r", sum(float(row.get("realized_r") or 0) for row in realized_positions)),
                         "unrealized_r": latest_summary.get("unrealized_r", 0.0),
                         "cumulative_r": latest_mark.get("cumulative_r", realized_total_r),
@@ -349,3 +368,63 @@ def _comparison_series(books: dict[str, dict[str, Any]]) -> dict[str, Any]:
                   "account_equity": [{"date": point["date"], "value": point["account_equity"]} for point in value.get("history", []) if point.get("account_equity") is not None],
                   "drawdowns": [{"date": point["date"], "equity_pct": point.get("equity_drawdown_pct"), "r": point.get("r_drawdown")} for point in value.get("history", [])]}
             for key, value in books.items()}
+
+
+def _benchmark_comparison(history: list[dict[str, Any]], price_rows: list[dict[str, Any]],
+                          partial_dates: set[str] | None = None) -> dict[str, Any]:
+    """Align account equity and stored ETF closes without filling missing sessions."""
+    import math
+
+    def positive(value: Any) -> float | None:
+        try:
+            result = float(value)
+            return result if math.isfinite(result) and result > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    by_date: dict[str, dict[str, float]] = {}
+    for row in price_rows:
+        ticker, day, close = str(row.get("ticker") or "").upper(), str(row.get("trade_date") or "")[:10], positive(row.get("close"))
+        if ticker in {"SPY", "QQQ"} and day and close is not None:
+            by_date.setdefault(day, {})[ticker] = close
+    account_by_date = {str(point.get("date")): positive(point.get("account_equity")) for point in history if point.get("date")}
+    account_dates = sorted(account_by_date)
+    if not account_dates:
+        return {"status": "unavailable", "reason": "Account history is unavailable.", "basis": "price_return_close"}
+    baseline = account_dates[0]
+    dates = sorted(set(account_dates) | {day for day in by_date if baseline <= day <= account_dates[-1]})
+    partial = partial_dates or set()
+    baseline_equity = account_by_date.get(baseline)
+    baseline_prices = by_date.get(baseline, {})
+    missing = [ticker for ticker in ("SPY", "QQQ") if ticker not in baseline_prices]
+    if baseline in partial:
+        missing.append("Account session is partial")
+    if baseline_equity is None:
+        missing.append("Account equity is missing or non-positive")
+    if missing:
+        return {"status": "unavailable", "reason": f"Common baseline {baseline} is unavailable: {', '.join(missing)}.",
+                "basis": "price_return_close", "baseline_date": baseline, "account_history_start": account_dates[0], "account_history_end": account_dates[-1],
+                "coverage": {"expected_sessions": len(dates), "included_sessions": 0, "missing_dates": [baseline]}}
+    base = {"Account": baseline_equity, "SPY": baseline_prices["SPY"], "QQQ": baseline_prices["QQQ"]}
+    peaks = {name: 100.0 for name in base}
+    series = {name: [] for name in base}
+    missing_dates = []
+    for day in dates:
+        prices = by_date.get(day, {})
+        values = {"Account": account_by_date.get(day), "SPY": prices.get("SPY"), "QQQ": prices.get("QQQ")}
+        if day in partial:
+            values["Account"] = None
+        if any(value is None or positive(value) is None for value in values.values()):
+            missing_dates.append(day)
+            for name in values:
+                series[name].append({"date": day, "value": None, "return_pct": None, "drawdown_pct": None})
+            continue
+        for name, value in values.items():
+            rebased = value / base[name] * 100
+            peaks[name] = max(peaks[name], rebased)
+            series[name].append({"date": day, "value": rebased, "return_pct": rebased - 100, "drawdown_pct": (rebased / peaks[name] - 1) * 100})
+    common_dates = [point["date"] for point in series["Account"] if point["value"] is not None]
+    return {"status": "available", "basis": "price_return_close", "baseline_date": baseline,
+            "account_history_start": account_dates[0], "account_history_end": account_dates[-1], "included_sessions": len(dates) - len(missing_dates),
+            "expected_sessions": len(dates), "missing_dates": missing_dates,
+            "comparison_date": common_dates[-1] if common_dates else baseline, "series": series}

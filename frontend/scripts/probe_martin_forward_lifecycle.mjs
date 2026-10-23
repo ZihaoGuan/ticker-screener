@@ -10,6 +10,8 @@ const candidates = (pending, prefix) => [
   { ticker: `${prefix}CAP`, status: "blocked_capacity", selected_for_book: false, reasons: ["position_or_allocation_capacity"] },
 ];
 const accountCandidates = [...candidates(accountTickers, "ACCOUNT"), { ticker: "ACCOUNTWAIT", status: "waiting_capacity", selected_for_book: true, queue_rank: 6, source_snapshot_rank: 6, selection_date: "2026-10-19", reasons: ["position_or_allocation_capacity"] }];
+accountCandidates.push({ ticker: "AVOIDSNAP", status: "avoid", selected_for_book: false, reasons: ["marked_avoid"], readiness_explanation: "Weinstein Stage 4 is not a preferred entry regime.", readiness_details: ["Weinstein Stage 4 is not a preferred entry regime.", "Earnings are in 7 days.", "Pullback quality failed: support broke with expanding selling pressure."] });
+accountCandidates.push({ ticker: "AVOIDLEGACY", status: "avoid", selected_for_book: false, reasons: ["marked_avoid"] });
 const position = (ticker, status, id) => ({
   id, ticker, status, payload_json: { opened_on: "2026-10-12", entry_price: 25, stop: 22, initial_shares: 40, remaining_shares: status === "open" ? 25 : 0, realized_r: status === "closed" ? 1.5 : 0.25, realized_pnl: status === "closed" ? 150 : 25, exit_next_open: status === "open", holding_sessions: 4, exit_type: status === "closed" ? "target" : null },
 });
@@ -33,7 +35,14 @@ try {
     authenticated: true, role: "admin", user: null, capabilities: ["view_results", "run_screeners"],
   } }));
   const dailyTop5Candidates = candidates(sectorTickers, "TOP5").map((row, index) => ({ ...row, shares: 100, selection_date: "2026-10-19", order_date: "2026-10-19", queue_rank: index + 1, entry_policy_version: "top_hits_max_entry_5pct_v1" }));
-  let apiPayload = { configured: true, books: { account: book(accountCandidates, [position("OPEN1", "open", 1), position("CLOSED1", "closed", 2)], [{ id: 44, ticker: "OLDWAIT", session_date: "2026-10-16", status: "pending", payload_json: { market_data_state: "awaiting_data", market_data_reason: "first_session_bar_missed", limit_price: 25, stop: 22 } }]), sector_opportunity: book(candidates(sectorTickers, "SECTOR"), [position("OPEN2", "open", 3)]), daily_top5: book(dailyTop5Candidates) }, comparison: {} };
+  const benchmarkComparison = { status: "available", basis: "price_return_close", baseline_date: "2026-10-16", comparison_date: "2026-10-20", account_history_start: "2026-10-16", account_history_end: "2026-10-21", expected_sessions: 6, included_sessions: 3, missing_dates: ["2026-10-17", "2026-10-18", "2026-10-21"], series: {
+    Account: [{ date: "2026-10-16", value: 100, return_pct: 0, drawdown_pct: 0 }, { date: "2026-10-17", value: null, return_pct: null, drawdown_pct: null }, { date: "2026-10-18", value: null, return_pct: null, drawdown_pct: null }, { date: "2026-10-19", value: 110, return_pct: 10, drawdown_pct: 0 }, { date: "2026-10-20", value: 105, return_pct: 5, drawdown_pct: -4.5454545 }, { date: "2026-10-21", value: null, return_pct: null, drawdown_pct: null }],
+    SPY: [{ date: "2026-10-16", value: 100, return_pct: 0, drawdown_pct: 0 }, { date: "2026-10-17", value: null, return_pct: null, drawdown_pct: null }, { date: "2026-10-18", value: null, return_pct: null, drawdown_pct: null }, { date: "2026-10-19", value: 120, return_pct: 20, drawdown_pct: 0 }, { date: "2026-10-20", value: 110, return_pct: 10, drawdown_pct: -8.3333333 }, { date: "2026-10-21", value: null, return_pct: null, drawdown_pct: null }],
+    QQQ: [{ date: "2026-10-16", value: 100, return_pct: 0, drawdown_pct: 0 }, { date: "2026-10-17", value: null, return_pct: null, drawdown_pct: null }, { date: "2026-10-18", value: null, return_pct: null, drawdown_pct: null }, { date: "2026-10-19", value: 110, return_pct: 10, drawdown_pct: 0 }, { date: "2026-10-20", value: 105, return_pct: 5, drawdown_pct: -4.5454545 }, { date: "2026-10-21", value: null, return_pct: null, drawdown_pct: null }],
+  } };
+  const accountBook = book(accountCandidates, [position("OPEN1", "open", 1), position("CLOSED1", "closed", 2)], [{ id: 44, ticker: "OLDWAIT", session_date: "2026-10-16", status: "pending", payload_json: { market_data_state: "awaiting_data", market_data_reason: "first_session_bar_missed", limit_price: 25, stop: 22 } }]);
+  accountBook.benchmark_comparison = benchmarkComparison;
+  let apiPayload = { configured: true, books: { account: accountBook, sector_opportunity: book(candidates(sectorTickers, "SECTOR"), [position("OPEN2", "open", 3)]), daily_top5: book(dailyTop5Candidates) }, comparison: {} };
   let apiStatus = 200;
   let martinForwardRequests = 0;
   await page.route("**/api/admin/martin-forward-test", (route) => { martinForwardRequests += 1; return route.fulfill({ status: apiStatus, json: apiPayload }); });
@@ -54,13 +63,31 @@ try {
   await page.getByRole("button", { name: "Waiting capacity" }).click();
   assert.deepEqual(await candidateTickers("Account book · Waiting candidates"), ["ACCOUNTWAIT"]);
   await page.getByRole("button", { name: "All candidates", exact: true }).click();
-  assert.deepEqual(await candidateTickers("Account book · All candidates"), [...accountTickers, "ACCOUNTAUDIT", "ACCOUNTDATA", "ACCOUNTCAP", "ACCOUNTWAIT"]);
+  assert.deepEqual(await candidateTickers("Account book · All candidates"), [...accountTickers, "ACCOUNTAUDIT", "ACCOUNTDATA", "ACCOUNTCAP", "ACCOUNTWAIT", "AVOIDSNAP", "AVOIDLEGACY"]);
   await page.getByText("Excluded candidates and exceptions").click();
   await page.getByText("ADR or stop level is missing", { exact: true }).waitFor();
   const attentionTickers = await page.locator(".martin-exclusions h3").filter({ hasText: "Needs attention" }).evaluate((heading) => Array.from(heading.nextElementSibling?.querySelectorAll("tbody td:first-child") ?? []).map((cell) => cell.textContent?.trim()));
   assert.deepEqual(attentionTickers, ["ACCOUNTDATA"]);
   await page.getByText("Stored reason code", { exact: true }).first().click();
   assert.equal((await page.locator(".martin-code-detail code").first().textContent())?.includes("sector_quota_or_session_limit"), true);
+  const routineExclusions = page.locator(".martin-exclusions");
+  const savedAvoidRow = routineExclusions.locator("tbody tr").filter({ hasText: "AVOIDSNAP" });
+  assert.equal(await savedAvoidRow.locator("td").nth(2).locator("span").innerText(), "Weinstein Stage 4 is not a preferred entry regime.");
+  await savedAvoidRow.getByText("Why this was avoided", { exact: true }).click();
+  assert.match(await savedAvoidRow.innerText(), /Earnings are in 7 days\.[\s\S]*Pullback quality failed: support broke with expanding selling pressure\./);
+  await savedAvoidRow.getByText("Stored reason code", { exact: true }).click();
+  assert.equal(await savedAvoidRow.locator("code").innerText(), '["marked_avoid"]', "Saved explanation leaves the raw reason code unchanged");
+  const legacyAvoidRow = routineExclusions.locator("tbody tr").filter({ hasText: "AVOIDLEGACY" });
+  await legacyAvoidRow.getByText("Why this was avoided", { exact: true }).click();
+  assert.match(await legacyAvoidRow.innerText(), /Saved explanation details are unavailable for this historical row\./);
+  await routineExclusions.screenshot({ path: "/tmp/martin-detailed-avoid-desktop.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const avoidCloseDrawer = page.getByRole("button", { name: /close/i });
+  if (await avoidCloseDrawer.count()) await avoidCloseDrawer.first().evaluate((element) => element.click());
+  await page.waitForFunction(() => document.querySelector(".sidebar")?.getBoundingClientRect().right <= 1 && Number.parseFloat(getComputedStyle(document.querySelector(".app-shell-backdrop")).opacity) < 0.01);
+  await routineExclusions.screenshot({ path: "/tmp/martin-detailed-avoid-mobile.png" });
+  assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true, "Expanded Avoid details fit the 390px mobile viewport");
+  await page.setViewportSize({ width: 1440, height: 1000 });
 
   await page.getByRole("button", { name: "Open · all sessions" }).click();
   await page.getByText("OPEN1", { exact: true }).waitFor();
@@ -71,11 +98,46 @@ try {
   await page.getByRole("tab", { name: "Performance", exact: true }).click();
   await page.getByRole("heading", { name: "Book comparison" }).waitFor();
   await page.getByRole("heading", { name: "Account book equity and drawdown" }).waitFor();
+  const benchmarkPanel = page.getByRole("heading", { name: "Account vs SPY and QQQ" }).locator("xpath=..");
+  await benchmarkPanel.waitFor();
+  assert.match(await benchmarkPanel.innerText(), /Rebased to 100 on 2026-10-16/);
+  assert.match(await benchmarkPanel.innerText(), /persisted simulated NAV[\s\S]*stored Close price returns, excluding distributions/);
+  assert.match(await benchmarkPanel.innerText(), /through the latest common session, 2026-10-20[\s\S]*history through 2026-10-21/);
+  const benchmarkRows = benchmarkPanel.locator("tbody tr");
+  assert.equal(await benchmarkRows.nth(0).locator("td").nth(0).innerText(), "5%", "Account return is taken at the fixed latest common date");
+  assert.equal(await benchmarkRows.nth(0).locator("td").nth(1).innerText(), "-4.55%", "Maximum drawdown is calculated through that same date");
+  assert.equal(await benchmarkRows.nth(1).locator("td").nth(0).innerText(), "10%");
+  assert.equal(await benchmarkRows.nth(1).locator("td").nth(1).innerText(), "-8.33%");
+  assert.equal(await benchmarkRows.nth(1).locator("td").nth(2).innerText(), "-5 pp");
+  assert.equal(await benchmarkRows.nth(2).locator("td").nth(2).innerText(), "+0 pp");
+  assert.match(await benchmarkPanel.innerText(), /Coverage: 3 of 6 sampled saved sessions/);
+  assert.match(await benchmarkPanel.innerText(), /Missing sessions \(3\)/);
+  assert.equal(await benchmarkPanel.locator("svg path").evaluateAll((paths) => paths.every((path) => (path.getAttribute("d")?.match(/M/g) || []).length === 2)), true, "All benchmark series break at missing sessions");
+  await benchmarkPanel.screenshot({ path: "/tmp/martin-benchmark-desktop.png" });
+  for (const bookName of ["Sector opportunity", "Daily Top 5"]) {
+    await page.getByRole("button", { name: bookName, exact: true }).click();
+    await page.getByRole("tab", { name: "Performance", exact: true }).click();
+    await page.getByRole("heading", { name: "Book comparison" }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Account vs SPY and QQQ" }).count(), 0, `${bookName} does not display the Account ETF benchmark comparison`);
+  }
+  await page.getByRole("button", { name: "Account book", exact: true }).click();
+  await page.getByRole("tab", { name: "Performance", exact: true }).click();
+  await page.getByRole("heading", { name: "Account vs SPY and QQQ" }).waitFor();
+  benchmarkComparison.status = "unavailable";
+  benchmarkComparison.reason = "Common baseline 2026-10-16 is unavailable: QQQ.";
+  await page.goto("http://127.0.0.1:5173/backtests/martin-forward?book=account&view=performance");
+  const unavailableBenchmarkPanel = page.getByRole("heading", { name: "Account vs SPY and QQQ" }).locator("xpath=..");
+  await unavailableBenchmarkPanel.getByText("Common baseline 2026-10-16 is unavailable: QQQ.", { exact: true }).waitFor();
+  assert.equal(await unavailableBenchmarkPanel.locator("table").count(), 0, "Unavailable baseline is not replaced with a shifted start or partial metric table");
+  benchmarkComparison.status = "available";
+  delete benchmarkComparison.reason;
+  await page.goto("http://127.0.0.1:5173/backtests/martin-forward?book=account&view=performance");
+  await page.getByRole("heading", { name: "Account vs SPY and QQQ" }).waitFor();
   await page.getByText("Data & audit", { exact: true }).click();
   await page.getByRole("button", { name: "Copy session JSON" }).click();
   await page.getByText("Session data copied.", { exact: true }).waitFor();
   await page.getByText("Data & audit", { exact: true }).click();
-  assert.equal(await page.locator(".martin-chart-scale").count(), 3);
+  assert.equal(await page.locator(".martin-chart-scale").count(), 4);
   await page.screenshot({ path: "/tmp/martin-forward-desktop.png", fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -86,9 +148,18 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(150);
   await page.screenshot({ path: "/tmp/martin-forward-mobile.png" });
-  await page.locator(".martin-comparison-chart").screenshot({ path: "/tmp/martin-forward-mobile-chart.png" });
-  const legendRects = await page.locator(".martin-comparison-chart > div:last-child > span").evaluateAll((items) => items.map((item) => { const rect = item.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }; }));
-  const chartRect = await page.locator(".martin-comparison-chart").boundingBox();
+  const mobileBenchmarkPanel = page.getByRole("heading", { name: "Account vs SPY and QQQ" }).locator("xpath=..");
+  await mobileBenchmarkPanel.scrollIntoViewIfNeeded();
+  const benchmarkTableBounds = await mobileBenchmarkPanel.locator('.martin-benchmark-table').evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+  assert.ok(benchmarkTableBounds.scroll <= benchmarkTableBounds.width + 1, 'All four benchmark metric columns fit without horizontal scrolling on mobile');
+  const metricCells = await mobileBenchmarkPanel.locator('tbody tr').first().locator('th, td').evaluateAll((cells) => cells.map((cell) => { const rect = cell.getBoundingClientRect(); return { left: rect.left, right: rect.right }; }));
+  assert.equal(metricCells.length, 4);
+  assert.ok(metricCells.every((cell) => cell.left >= 0 && cell.right <= 390), 'Every benchmark metric is visible within the phone viewport');
+  await mobileBenchmarkPanel.screenshot({ path: "/tmp/martin-benchmark-mobile.png" });
+  const benchmarkChart = mobileBenchmarkPanel.locator(".martin-comparison-chart");
+  await benchmarkChart.screenshot({ path: "/tmp/martin-forward-mobile-chart.png" });
+  const legendRects = await benchmarkChart.locator("> div:last-child > span").evaluateAll((items) => items.map((item) => { const rect = item.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }; }));
+  const chartRect = await benchmarkChart.boundingBox();
   assert.equal(legendRects.every((rect) => rect.bottom <= chartRect.y + chartRect.height + 1), true, "All three book labels fit inside the mobile chart");
   assert.equal(legendRects.every((rect, index) => legendRects.slice(index + 1).every((other) => rect.bottom <= other.top || other.bottom <= rect.top || rect.right <= other.left || other.right <= rect.left)), true, `Chart labels overlap: ${JSON.stringify(legendRects)}`);
   const overflow = await page.evaluate(() => ({ body: document.body.scrollWidth, viewport: window.innerWidth, main: document.querySelector(".martin-page")?.scrollWidth }));
@@ -110,6 +181,7 @@ try {
 
   const legacyWatch = (ticker, readiness, entry, stop) => ({ ticker, status: "watch", trade_readiness: readiness, entry, stop,
     reasons: ["trade_readiness_not_defined_risk"], selected_for_book: false });
+  const savedConfirmation = "Saved MA Retest requires a rising support average and a held support touch; this snapshot does not record each individual check result.";
   apiPayload = { configured: true, books: { account: book([
     legacyWatch("LEGACYSUPPORT", "pullback_zone", 57.018, 55.362149543412976),
     legacyWatch("LEGACYWIDE", "reclaim_trigger", 67.0768, 63.12980351389087),
@@ -120,7 +192,7 @@ try {
     { ticker: "NEWWIDE", status: "watch", reasons: ["risk_exceeds_5pct"], selected_for_book: false },
     { ticker: "NEWNOPLAN", status: "watch", reasons: ["no_supported_plan"], selected_for_book: false },
     { ticker: "NEWMISSING", status: "watch", reasons: ["plan_levels_missing"], selected_for_book: false },
-    { ticker: "TBBB", status: "watch", entry: 57.018, stop: 55.362149543412976, max_entry: 58.27594688780314, reasons: ["awaiting_confirmation"], selected_for_book: false },
+    { ticker: "TBBB", status: "watch", entry: 57.018, stop: 55.362149543412976, max_entry: 58.27594688780314, reasons: ["awaiting_confirmation"], confirmation_rules: savedConfirmation, source_strategy_id: "ma_pullback_retest", selected_for_book: false },
     { ticker: "CDN", status: "watch", entry: 67.0768, stop: 63.12980351389087, max_entry: 66.45242475146408, reference_risk_pct: 5.88, risk_status: "over_limit", plan_state: "watch", source_strategy_id: "ma_pullback_retest", signal_date: "2026-10-19", selection_date: "2026-10-20", reasons: ["risk_exceeds_5pct"], selected_for_book: false },
     { ticker: "AVPT", status: "watch", reasons: ["plan_levels_missing"], selected_for_book: false },
     { ticker: "BADLEVELS", status: "watch", entry: -2, stop: 0, max_entry: -1, reference_risk_pct: "5.88", reasons: ["plan_levels_missing"], selected_for_book: false },
@@ -156,6 +228,13 @@ try {
   await tbbbPreview.getByText("$58.28", { exact: true }).waitFor();
   await tbbbPreview.getByText("Calculated from saved levels", { exact: false }).waitFor();
   await tbbbPreview.getByText("Plan preview · not an active order", { exact: true }).waitFor();
+  const previewConfirmation = tbbbPreview.locator("details").filter({ hasText: "Confirmation rule" });
+  await previewConfirmation.locator("summary").click();
+  assert.match(await previewConfirmation.innerText(), /Saved MA Retest requires a rising support average[\s\S]*does not record each individual check result/);
+  const tbbbRow = watchRow("TBBB");
+  const rowConfirmation = tbbbRow.locator("details").filter({ hasText: "Confirmation rule" });
+  await rowConfirmation.locator("summary").click();
+  assert.match(await rowConfirmation.innerText(), /Saved MA Retest requires a rising support average[\s\S]*does not record each individual check result/);
   await previewFor("CDN").click();
   const cdnPreview = previewPanelFor("CDN");
   await cdnPreview.getByText("5.88%", { exact: true }).waitFor();
@@ -187,6 +266,9 @@ try {
   await riskBoundaryPreview.getByText("5.002% · Calculated from saved levels", { exact: true }).waitFor();
   await riskBoundaryPreview.getByText("Saved plan risk exceeds the 5% limit.", { exact: true }).waitFor();
   assert.equal(martinForwardRequests, requestsBeforePreviewInteractions, "Opening saved-row previews makes no additional endpoint requests");
+  const newConfirmRow = watchRow("NEWCONFIRM");
+  await newConfirmRow.getByText("Confirmation rule", { exact: true }).click();
+  assert.match(await newConfirmRow.innerText(), /Scanner confirmation details are unavailable in this saved snapshot\./, "Legacy confirmation rows explain missing saved details without reconstructing them");
   await page.setViewportSize({ width: 1440, height: 1000 });
   await previewToggleFor("RISKBOUNDARY").click();
   await previewFor("TBBB").click();

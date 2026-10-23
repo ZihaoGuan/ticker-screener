@@ -55,6 +55,8 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
     if not labels.intersection(FOCUS_SCANNERS):
         reasons.append("no_martin_focus_scanner")
     plan = row.get("trade_plan") if isinstance(row.get("trade_plan"), dict) else {}
+    strike_zone = row.get("strike_zone") if isinstance(row.get("strike_zone"), dict) else {}
+    pullback_quality = row.get("pullback_quality") if isinstance(row.get("pullback_quality"), dict) else {}
     readiness = str(row.get("trade_readiness") or "")
     orderable = readiness == "defined_risk" and not reasons
     status = "blocked" if reasons else ("pending" if orderable else ("avoid" if readiness == "avoid" else "watch"))
@@ -85,6 +87,8 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
         "close": close, "market_cap": market_cap, "rs_rating": rs,
         "entry": entry, "stop": stop, "max_entry": max_entry, "adr14_pct": adr,
         "plan_state": plan.get("state"), "risk_status": plan.get("risk_status"),
+        "readiness_details": _snapshot_readiness_explanation(readiness, strike_zone, pullback_quality),
+        "confirmation_rules": _confirmation_rules(plan.get("source_strategy_id")),
         "reference_risk_pct": _number(plan.get("reference_risk_pct")),
         "source_strategy_id": plan.get("source_strategy_id"), "signal_date": plan.get("signal_date"),
         "sector": row.get("sector") or row.get("sector_name"),
@@ -105,7 +109,33 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
                 result.update(status="blocked_data", reasons=["invalid_entry_stop_levels"])
             else:
                 result.update(limit_price=limit, risk_cap_pct=cap)
+    result["readiness_explanation"] = (result["readiness_details"] or [None])[0]
     return result
+
+
+def _snapshot_readiness_explanation(readiness: str, strike_zone: dict[str, Any], quality: dict[str, Any]) -> list[str]:
+    if readiness == "avoid":
+        reasons = strike_zone.get("warnings") if strike_zone.get("state") == "avoid" and isinstance(strike_zone.get("warnings"), list) else []
+        details = [item.strip() for item in reasons if isinstance(item, str) and item.strip()]
+        reason = str(strike_zone.get("reason") or "").strip() if strike_zone.get("state") == "avoid" else ""
+        if reason and reason not in details:
+            details.insert(0, reason)
+        if quality.get("state") == "failed":
+            if not details:
+                details.append("Pullback quality failed.")
+            if isinstance(quality.get("reasons"), list):
+                details.extend(item.strip() for item in quality["reasons"] if isinstance(item, str) and item.strip())
+        return list(dict.fromkeys(details))
+    return []
+
+
+def _confirmation_rules(source_strategy_id: Any) -> str | None:
+    rules = {
+        "ma_pullback_retest": "The MA Retest scanner requires a rising support average, a support touch and hold within its ATR tolerance during the last three daily sessions, and a latest bar with low near support, close above support, close above open, and close at or above the prior close. The saved row does not report which individual checks passed.",
+        "ema21_pullback_buy": "The EMA21 scanner requires its strict uptrend and a bullish breakout bar whose intraday high exceeds the saved test high; the test is separate from the breakout and a close above the test high is not required. The saved row does not report which individual checks passed.",
+        "sma200_pullback_buy": "The SMA200 scanner requires its strict long trend and a bullish breakout bar whose intraday high exceeds the saved test high; the test is separate from the breakout and a close above the test high is not required. The saved row does not report which individual checks passed.",
+    }
+    return rules.get(str(source_strategy_id or ""))
 
 
 def select_sector_candidates(rows: list[dict[str, Any]], *, limit: int = 10) -> list[dict[str, Any]]:

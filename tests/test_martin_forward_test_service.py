@@ -2,11 +2,96 @@ from __future__ import annotations
 
 import unittest
 import datetime as dt
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
 from src.webapp.services.martin_forward_test_service import DAILY_TOP5_STRATEGY_ID, MartinForwardTestService, SECTOR_STRATEGY_ID, classify_candidate, order_outcome, position_exit, select_sector_candidates
-from src.webapp.repositories.martin_forward_test_repository import _closed_trade_metrics, _performance_context
+from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository, _benchmark_comparison, _closed_trade_metrics, _performance_context
+
+
+class MartinBenchmarkComparisonTests(unittest.TestCase):
+    def test_missing_account_market_session_and_latest_etf_bar_remain_gaps(self) -> None:
+        history = [{"date": "2026-10-01", "account_equity": 100_000}, {"date": "2026-10-05", "account_equity": 102_000}]
+        prices = [{"ticker": ticker, "trade_date": day, "close": close} for ticker, day, close in (
+            ("SPY", "2026-10-01", 10), ("QQQ", "2026-10-01", 20), ("SPY", "2026-10-02", 11),
+            ("QQQ", "2026-10-02", 21), ("SPY", "2026-10-05", 12))]
+        result = _benchmark_comparison(history, prices)
+        self.assertEqual(result["missing_dates"], ["2026-10-02", "2026-10-05"])
+        self.assertEqual(result["comparison_date"], "2026-10-01")
+        self.assertEqual(result["account_history_end"], "2026-10-05")
+        for series in result["series"].values():
+            self.assertEqual([point["value"] for point in series], [100, None, None])
+
+    def test_partial_or_invalid_baseline_is_never_used(self) -> None:
+        prices = [{"ticker": ticker, "trade_date": "2026-10-01", "close": 10} for ticker in ("SPY", "QQQ")]
+        history = [{"date": "2026-10-01", "account_equity": 100_000}]
+        self.assertEqual(_benchmark_comparison(history, prices, {"2026-10-01"})["status"], "unavailable")
+        for invalid in (None, float("nan"), float("inf"), 0, -1):
+            with self.subTest(invalid=invalid):
+                result = _benchmark_comparison(history, [{**row, "close": invalid} for row in prices])
+                self.assertEqual(result["status"], "unavailable")
+
+    def test_repository_context_benchmarks_are_read_only_and_database_errors_are_safe(self) -> None:
+        repository = MartinForwardTestRepository(database_url="postgresql://unused")
+        connection = MagicMock()
+        runs = [{"id": 2, "session_date": dt.date(2026, 10, 1), "summary_json": {"account_equity": 100_000, "cumulative_r": 0, "r_drawdown": 0}},
+                {"id": 1, "session_date": dt.date(2026, 10, 1), "summary_json": {"account_equity": 99_000, "cumulative_r": -1, "r_drawdown": -1, "partial": True}}]
+
+        for fail in (False, True):
+            statements = []
+            def fetch(cursor, sql, params=()):
+                statements.append(sql)
+                if "FROM daily_bars" in sql:
+                    if fail:
+                        raise RuntimeError("private-database-detail")
+                    return [{"ticker": ticker, "trade_date": dt.date(2026, 10, 1), "close": 10} for ticker in ("SPY", "QQQ")]
+                return runs if "FROM martin_forward_runs" in sql and params == ("martin_daily_v1",) else []
+
+            with patch.object(repository, "_connect", return_value=connection), patch.object(repository, "_fetch", side_effect=fetch):
+                result = repository.context()
+            comparison = result["books"]["account"]["benchmark_comparison"]
+            self.assertEqual(comparison["status"], "unavailable" if fail else "available")
+            self.assertNotIn("private-database-detail", str(result))
+            self.assertTrue(all(statement.strip().startswith("SELECT") for statement in statements))
+
+    def test_negative_and_flat_returns_keep_period_drawdown(self) -> None:
+        history = [{"date": "2026-10-01", "account_equity": 100_000}, {"date": "2026-10-02", "account_equity": 90_000}, {"date": "2026-10-03", "account_equity": 100_000}]
+        prices = [{"ticker": ticker, "trade_date": day, "close": close} for ticker, day, close in (("SPY", "2026-10-01", 10), ("QQQ", "2026-10-01", 20), ("SPY", "2026-10-02", 9), ("QQQ", "2026-10-02", 22), ("SPY", "2026-10-03", 10), ("QQQ", "2026-10-03", 20))]
+        result = _benchmark_comparison(history, prices)
+        self.assertAlmostEqual(result["series"]["Account"][-1]["return_pct"], 0)
+        self.assertAlmostEqual(result["series"]["Account"][-1]["drawdown_pct"], 0)
+        self.assertAlmostEqual(result["series"]["SPY"][1]["return_pct"], -10)
+        self.assertAlmostEqual(result["series"]["QQQ"][-1]["return_pct"], 0)
+        self.assertAlmostEqual(result["series"]["Account"][1]["drawdown_pct"], -10)
+
+    def test_rebases_common_start_and_handles_unsorted_duplicate_rows(self) -> None:
+        history = [{"date": "2026-10-02", "account_equity": 101_000}, {"date": "2026-10-01", "account_equity": 100_000}, {"date": "2026-10-02", "account_equity": 102_000}]
+        prices = [{"ticker": "QQQ", "trade_date": "2026-10-02", "close": 22}, {"ticker": "SPY", "trade_date": "2026-10-01", "close": 10}, {"ticker": "QQQ", "trade_date": "2026-10-01", "close": 20}, {"ticker": "SPY", "trade_date": "2026-10-02", "close": 11}, {"ticker": "SPY", "trade_date": "2026-10-02", "close": 12}]
+        result = _benchmark_comparison(history, prices)
+        self.assertEqual(result["baseline_date"], "2026-10-01")
+        self.assertEqual(result["comparison_date"], "2026-10-02")
+        self.assertEqual(result["basis"], "price_return_close")
+        self.assertAlmostEqual(result["series"]["Account"][-1]["return_pct"], 2)
+        self.assertAlmostEqual(result["series"]["SPY"][-1]["return_pct"], 20)
+        self.assertAlmostEqual(result["series"]["QQQ"][-1]["return_pct"], 10)
+
+    def test_missing_mid_session_stays_a_gap_and_partial_account_value_is_null(self) -> None:
+        history = [{"date": "2026-10-01", "account_equity": 100_000}, {"date": "2026-10-02", "account_equity": 101_000}, {"date": "2026-10-03", "account_equity": 102_000}]
+        prices = [{"ticker": ticker, "trade_date": day, "close": close} for ticker, day, close in (("SPY", "2026-10-01", 10), ("QQQ", "2026-10-01", 20), ("QQQ", "2026-10-02", 21), ("SPY", "2026-10-03", 11), ("QQQ", "2026-10-03", 22))]
+        result = _benchmark_comparison(history, prices, {"2026-10-02"})
+        self.assertIsNone(result["series"]["Account"][1]["value"])
+        self.assertIsNone(result["series"]["SPY"][1]["value"])
+        self.assertEqual(result["missing_dates"], ["2026-10-02"])
+
+    def test_missing_baseline_does_not_shift_and_empty_or_invalid_history_is_unavailable(self) -> None:
+        history = [{"date": "2026-10-01", "account_equity": 100_000}, {"date": "2026-10-02", "account_equity": 101_000}]
+        prices = [{"ticker": "SPY", "trade_date": "2026-10-02", "close": 11}, {"ticker": "QQQ", "trade_date": "2026-10-02", "close": 21}]
+        result = _benchmark_comparison(history, prices)
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["baseline_date"], "2026-10-01")
+        self.assertEqual(_benchmark_comparison([], []) ["status"], "unavailable")
+        self.assertEqual(_benchmark_comparison([{"date": "2026-10-01", "account_equity": 0}], prices)["status"], "unavailable")
 
 
 class MartinForwardTestRulesTest(unittest.TestCase):

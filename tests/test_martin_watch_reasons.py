@@ -23,6 +23,32 @@ class MartinWatchReasonsTests(unittest.TestCase):
         self.assertEqual(result["plan_state"], "ready")
         self.assertEqual(result["reference_risk_pct"], 4)
         self.assertEqual(result["source_strategy_id"], "ma_pullback_retest")
+        self.assertIn("support touch and hold", result["confirmation_rules"])
+
+    def test_avoid_explanations_preserve_all_snapshot_warnings(self):
+        row = {**self.row, "trade_readiness": "avoid", "strike_zone": {"state": "avoid", "reason": "Primary warning", "warnings": ["Primary warning", "Earnings are in 7 days."]}, "pullback_quality": {"state": "failed", "reasons": ["Support broke."]}}
+        result = classify_candidate(row, 1)
+        self.assertEqual(result["status"], "avoid")
+        self.assertEqual(result["reasons"], ["marked_avoid"])
+        self.assertEqual(result["readiness_explanation"], "Primary warning")
+        self.assertEqual(result["readiness_details"], ["Primary warning", "Earnings are in 7 days.", "Support broke."])
+
+    def test_quality_only_avoid_ignores_nonblocking_strike_warnings(self):
+        result = classify_candidate({**self.row, "trade_readiness": "avoid",
+            "strike_zone": {"state": "context", "reason": "No fresh entry", "warnings": ["Earnings date is unavailable."]},
+            "pullback_quality": {"state": "failed", "reasons": ["Support broke.", "Selling expanded."]}}, 1)
+        self.assertEqual(result["reasons"], ["marked_avoid"])
+        self.assertEqual(result["readiness_details"], ["Pullback quality failed.", "Support broke.", "Selling expanded."])
+
+    def test_historical_missing_detail_is_not_invented_and_source_rules_are_specific(self):
+        result = classify_candidate({**self.row, "trade_readiness": "avoid"}, 1)
+        self.assertEqual(result["readiness_details"], [])
+        self.assertIsNone(result["readiness_explanation"])
+        for source in ("ema21_pullback_buy", "sma200_pullback_buy"):
+            result = self.classify(source_strategy_id=source)
+            self.assertIn("intraday high", result["confirmation_rules"])
+            self.assertIn("close above the test high is not required", result["confirmation_rules"])
+        self.assertIsNone(self.classify(source_strategy_id="unknown")["confirmation_rules"])
 
     def test_ready_over_limit_can_explain_both_obstacles(self):
         result = self.classify(stop_price=47, reference_risk_pct=6)

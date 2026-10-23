@@ -25,7 +25,7 @@ try {
     { ...row, ticker: 'OVER', sector: 'Health Care', day_close: 106, trade_readiness: 'defined_risk', trade_plan: plan(6, { state: 'active' }) },
     { ...row, ticker: 'RISK', trade_readiness: 'pullback_zone', daily_rs_rating: 70, trade_plan: plan(6) },
     { ...row, ticker: 'NOPLAN', sector: null, trade_readiness: 'pullback_zone', trade_plan: null },
-    { ...row, ticker: 'AVOID', sector: 'Financials', trade_readiness: 'avoid', trade_plan: plan(), strike_zone: { state: 'avoid', score: 20 }, pullback_quality: { state: 'failed', score: 15 } },
+    { ...row, ticker: 'AVOID', sector: 'Financials', trade_readiness: 'avoid', trade_plan: plan(), strike_zone: { state: 'avoid', score: 20, reason: 'Price is 5.2 ATR above SMA50.', warnings: ['Price is 5.2 ATR above SMA50.', 'Earnings are in 7 days.'] }, pullback_quality: { state: 'failed', score: 15, reasons: ['Support broke with expanding selling pressure.'] } },
     { ...row, ticker: 'UNKNOWN', sector: null, trade_readiness: undefined, trade_plan: plan() },
     ...Array.from({ length: 9 }, (_, i) => ({ ...row, ticker: `SUP${String(i + 1).padStart(2, '0')}`, trade_readiness: 'pullback_zone', trade_plan: plan(i + 1), daily_rs_rating: 75 + i, adr14_pct: 12 - i })),
   ];
@@ -178,7 +178,12 @@ try {
   const wideCard = page.getByRole('article', { name: 'WIDE trade candidate' });
   assert.equal(await page.locator('.trade-readiness-lane.is-plan-ready').getByRole('article', { name: 'WIDE trade candidate' }).count(), 1, 'Wide stop stays in Plan Ready');
   assert.match(await wideCard.locator('.trade-readiness-adr').innerText(), /Wide stop caution[\s\S]*half ADR is preferred/, 'Wide stop stays plan ready with an explicit ADR caution');
-  assert.match(await page.getByRole('article', { name: 'TRIG trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /Waiting for daily trigger/, 'Acceptable price alone does not imply entry');
+  const triggerCard = page.getByRole('article', { name: 'TRIG trade candidate' });
+  assert.match(await triggerCard.locator('.trade-readiness-eligibility').innerText(), /Waiting for daily trigger/, 'Acceptable price alone does not imply entry');
+  const triggerRule = triggerCard.locator('details').filter({ hasText: 'Confirmation rule' });
+  assert.equal(await triggerRule.evaluate((element) => element.hasAttribute('open')), false, 'Confirmation rule starts collapsed');
+  await triggerRule.locator('summary').click();
+  assert.match(await triggerRule.innerText(), /rising support average[\s\S]*last three daily sessions[\s\S]*close above support and open[\s\S]*close at or above the prior close[\s\S]*does not preserve the result of each individual check/i, 'MA Retest disclosure describes the saved scanner confirmation checks without inventing per-condition results');
   assert.match(await page.getByRole('article', { name: 'OVER trade candidate' }).locator('.trade-readiness-eligibility').innerText(), /Extended · do not chase/);
   const entryStatusFilter = page.getByLabel('Filter by entry status');
   assert.equal(await entryStatusFilter.inputValue(), 'all', 'Entry status defaults to all candidates');
@@ -279,10 +284,23 @@ try {
   await page.getByRole('button', { name: /Show avoided/ }).click();
   assert.equal(await page.locator('.trade-readiness-lane.is-avoided .trade-readiness-card').count(), 1, 'Avoided rows are explicitly shown');
   const avoidedCard = page.getByRole('article', { name: 'AVOID trade candidate' });
-  assert.match(await avoidedCard.innerText(), /AVOID NEW ENTRY[\s\S]*Strike Zone says avoid; pullback quality failed/);
+  assert.match(await avoidedCard.innerText(), /AVOID NEW ENTRY[\s\S]*Price is 5\.2 ATR above SMA50\./);
+  assert.equal(await avoidedCard.locator('.trade-readiness-eligibility').count(), 0, 'Avoid cards do not display a contradictory entry-eligibility badge');
+  const avoidDisclosure = avoidedCard.locator('details').filter({ hasText: 'Why this was avoided' });
+  assert.equal(await avoidDisclosure.evaluate((element) => element.hasAttribute('open')), false, 'Avoid detail starts collapsed');
+  await avoidDisclosure.locator('summary').click();
+  assert.match(await avoidDisclosure.innerText(), /Price is 5\.2 ATR above SMA50\.[\s\S]*Earnings are in 7 days\.[\s\S]*Support broke with expanding selling pressure\./i, 'Avoid detail uses actual strike warnings and failed-quality diagnostics');
   assert.equal(await avoidedCard.getByText('Max Entry').count(), 0, 'Avoided cards suppress the actionable trade ticket');
   assert.equal(await avoidedCard.locator('.trade-readiness-management').count(), 0, 'Avoided cards suppress management guidance');
   assert.equal(await avoidedCard.getByRole('button', { name: /Save|Saved|Saving/ }).count(), 0, 'Avoided cards cannot be saved as actionable picks');
+  await avoidedCard.screenshot({ path: '/tmp/top-hits-detailed-avoid-desktop.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const avoidCloseDrawer = page.getByRole('button', { name: /close/i });
+  if (await avoidCloseDrawer.count()) await avoidCloseDrawer.first().evaluate((element) => element.click());
+  await page.waitForFunction(() => document.querySelector('.sidebar')?.getBoundingClientRect().right <= 1 && Number.parseFloat(getComputedStyle(document.querySelector('.app-shell-backdrop')).opacity) < 0.01);
+  await avoidedCard.screenshot({ path: '/tmp/top-hits-detailed-avoid-mobile.png' });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Expanded Avoid explanation fits mobile viewport');
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByLabel('Group readiness candidates').selectOption('sector');
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
