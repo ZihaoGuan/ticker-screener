@@ -540,15 +540,17 @@ def _replace_trade_date_atomically(
 ) -> tuple[int, int]:
     try:
         with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM daily_bars WHERE trade_date = %s", (trade_date,))
+            cursor.execute("DELETE FROM daily_bars WHERE trade_date = %s AND COALESCE(source, '') NOT IN ('tradingview', 'tradingview_screener')", (trade_date,))
             deleted = int(cursor.rowcount or 0)
+            applied = 0
             for index in range(0, len(rows), batch_size):
                 cursor.executemany(_DAILY_BAR_UPSERT_SQL, rows[index : index + batch_size])
+                applied += cursor.rowcount
         connection.commit()
     except Exception:
         connection.rollback()
         raise
-    return deleted, len(rows)
+    return deleted, applied
 
 
 def _replace_and_record_no_price_observations(

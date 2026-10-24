@@ -53,6 +53,7 @@ class _Cursor:
             raise RuntimeError("insert failed")
         for row in rows:
             c.data.setdefault(row[0], []).append(row[1])
+        self.rowcount = len(rows)
 
 
 class MarketHistoryCoverageTests(unittest.TestCase):

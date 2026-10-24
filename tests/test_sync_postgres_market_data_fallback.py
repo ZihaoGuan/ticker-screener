@@ -43,6 +43,7 @@ class SyncPostgresMarketDataFallbackTests(unittest.TestCase):
 
             def executemany(self, sql, rows):
                 calls.append((sql, list(rows)))
+                self.rowcount = len(rows)
 
         class Connection:
             commits = 0

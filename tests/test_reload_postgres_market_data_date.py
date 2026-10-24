@@ -290,6 +290,7 @@ class ReloadPostgresMarketDataDateTests(unittest.TestCase):
     def test_replace_trade_date_atomically_deletes_and_inserts_before_one_commit(self) -> None:
         cursor = MagicMock()
         cursor.rowcount = 3
+        cursor.executemany.side_effect = lambda sql, batch: setattr(cursor, "rowcount", len(batch))
         connection = MagicMock()
         connection.cursor.return_value.__enter__.return_value = cursor
         rows = [

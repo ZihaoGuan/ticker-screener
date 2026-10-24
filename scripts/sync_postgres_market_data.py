@@ -1001,6 +1001,8 @@ _DAILY_BAR_UPSERT_SQL = """
           split_factor = EXCLUDED.split_factor,
           source = EXCLUDED.source,
           updated_at = EXCLUDED.updated_at
+        WHERE COALESCE(daily_bars.source, '') NOT IN ('tradingview', 'tradingview_screener')
+           OR EXCLUDED.source IN ('tradingview', 'tradingview_screener')
     """
 
 
@@ -1014,8 +1016,9 @@ def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, .
         try:
             with connection.cursor() as cursor:
                 cursor.executemany(_DAILY_BAR_UPSERT_SQL, batch)
+                persisted = cursor.rowcount
             connection.commit()
-            applied += len(batch)
+            applied += persisted
             continue
         except Exception as exc:
             connection.rollback()
@@ -1030,8 +1033,9 @@ def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, .
             try:
                 with connection.cursor() as cursor:
                     cursor.execute(_DAILY_BAR_UPSERT_SQL, row)
+                    persisted = cursor.rowcount
                 connection.commit()
-                applied += 1
+                applied += persisted
             except Exception as row_exc:
                 connection.rollback()
                 if _is_numeric_overflow_error(row_exc):
@@ -1071,12 +1075,13 @@ def _replace_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, 
         with connection.cursor() as cursor:
             cursor.execute("SELECT trade_date FROM daily_bars WHERE ticker = %s", (ticker,))
             check_coverage(cursor.fetchall())
-            cursor.execute("DELETE FROM daily_bars WHERE ticker = %s RETURNING trade_date", (ticker,))
+            cursor.execute("DELETE FROM daily_bars WHERE ticker = %s AND COALESCE(source, '') NOT IN ('tradingview', 'tradingview_screener') RETURNING trade_date", (ticker,))
             # A concurrent writer may have committed another date after the SELECT.
             check_coverage(cursor.fetchall())
             cursor.executemany(_DAILY_BAR_UPSERT_SQL, rows)
+            applied = cursor.rowcount
         connection.commit()
-        return len(rows), 0
+        return applied, 0
     except Exception:
         connection.rollback()
         raise
