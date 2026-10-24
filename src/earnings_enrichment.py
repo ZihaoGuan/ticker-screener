@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import datetime as dt
+import math
 import os
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -42,7 +44,8 @@ def _safe_float(value: object) -> float | None:
     if value in (None, "", "NA", "n/a", "None"):
         return None
     try:
-        return float(value)
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else None
     except (TypeError, ValueError):
         return None
 
@@ -73,6 +76,34 @@ def _parse_date(value: object) -> dt.date | None:
         return None
 
 
+def _parse_yahoo_timestamp(value: object) -> tuple[dt.date, str | None] | None:
+    """Return New York event date/timing; naive provider timestamps carry no timing evidence."""
+    try:
+        stamp = value.to_pydatetime() if hasattr(value, "to_pydatetime") else value
+        if isinstance(stamp, dt.datetime):
+            if stamp != stamp:  # pandas NaT is datetime-like but is not an event date.
+                return None
+            if stamp.tzinfo is None:
+                return stamp.date(), None
+            local = stamp.astimezone(ZoneInfo("America/New_York"))
+            time_value = local.timetz().replace(tzinfo=None)
+            if time_value == dt.time(0):
+                return local.date(), None
+            if time_value < dt.time(9, 30):
+                timing = "before_market"
+            elif time_value >= dt.time(16):
+                timing = "after_market"
+            else:
+                timing = "during_market"
+            return local.date(), timing
+        if isinstance(stamp, dt.date):
+            return stamp, None
+        parsed = dt.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        return _parse_yahoo_timestamp(parsed)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _format_release_label(release_date: dt.date | None, release_session: str | None) -> str | None:
     if release_date is None:
         return None
@@ -94,6 +125,8 @@ def _classify_status(
     as_of_date: dt.date,
 ) -> tuple[str, str]:
     release_label = _format_release_label(release_date, release_session)
+    if release_date is not None and release_date > as_of_date:
+        return "upcoming", release_label or release_date.isoformat()
     if eps_actual is not None and eps_estimate is not None:
         if eps_actual > eps_estimate:
             return "beat", "高于预期"
@@ -233,7 +266,7 @@ class YFinanceEarningsClient:
             raise RuntimeError("yfinance is not installed.") from exc
         self.yf = yf
 
-    def fetch_latest(self, ticker: str) -> dict[str, Any]:
+    def fetch_latest(self, ticker: str, as_of_date: dt.date | None = None) -> dict[str, Any]:
         stock = self.yf.Ticker(ticker)
         reported_release_date: dt.date | None = None
         upcoming_release_date: dt.date | None = None
@@ -243,41 +276,29 @@ class YFinanceEarningsClient:
         eps_surprise_pct: float | None = None
 
         try:
-            history = stock.get_earnings_history()
-        except Exception:
-            history = None
-        if history is not None and not history.empty:
-            row = history.iloc[0]
-            index_value = history.index[0]
-            if hasattr(index_value, "date"):
-                reported_release_date = index_value.date()
-            eps_actual = _safe_float(row.get("epsActual"))
-            eps_estimate = _safe_float(row.get("epsEstimate"))
-            eps_surprise_pct = _normalize_eps_surprise_pct(
-                eps_actual,
-                eps_estimate,
-                _safe_float(row.get("surprisePercent")),
-            )
-
-        try:
-            earnings_dates = stock.get_earnings_dates(limit=1)
+            earnings_dates = stock.get_earnings_dates(limit=32)
         except Exception:
             earnings_dates = None
         if earnings_dates is not None and not earnings_dates.empty:
-            index_value = earnings_dates.index[0]
-            if hasattr(index_value, "date"):
-                upcoming_release_date = index_value.date()
-            hour = getattr(index_value, "hour", None)
-            if hour is not None:
-                if hour < 12:
-                    upcoming_release_session = "before_market"
-                elif hour >= 16:
-                    upcoming_release_session = "after_market"
-                else:
-                    upcoming_release_session = "during_market"
+            parsed_dates = []
+            for index_value in earnings_dates.index:
+                event = _parse_yahoo_timestamp(index_value)
+                if event:
+                    parsed_dates.append((event, earnings_dates.loc[index_value]))
+            reference_date = as_of_date or dt.date.today()
+            past = [item for item in parsed_dates if item[0][0] <= reference_date and _safe_float(item[1].get("Reported EPS")) is not None]
+            future = [item for item in parsed_dates if item[0][0] >= reference_date]
+            if past:
+                (reported_release_date, reported_release_session), reported = max(past, key=lambda item: item[0][0])
+                eps_actual = _safe_float(reported.get("Reported EPS"))
+                eps_estimate = _safe_float(reported.get("EPS Estimate"))
+                eps_surprise_pct = _normalize_eps_surprise_pct(eps_actual, eps_estimate, _safe_float(reported.get("Surprise(%)")))
+            if future:
+                (upcoming_release_date, upcoming_release_session), _ = min(future, key=lambda item: item[0][0])
 
         return {
             "reported_release_date": reported_release_date,
+            "reported_release_session": reported_release_session if reported_release_date else None,
             "upcoming_release_date": upcoming_release_date,
             "upcoming_release_session": upcoming_release_session,
             "eps_actual": eps_actual,
@@ -365,9 +386,12 @@ def _build_fmp_annotation(
     as_of_date: dt.date,
 ) -> EarningsAnnotation:
     reported_release_date = _date_from_row(calendar_row or {}, "date", "reportDate", "reportedDate")
+    confirmed_date = _date_from_row(confirmed_row or {}, "date", "reportDate", "reportedDate")
     reported_release_session = _parse_session(
-        _value_from(confirmed_row or {}, "time", "publishTime", "session")
-        or _value_from(calendar_row or {}, "time", "publishTime", "session")
+        (_value_from(confirmed_row or {}, "time", "publishTime", "session")
+         or _value_from(calendar_row or {}, "time", "publishTime", "session"))
+        if confirmed_date == reported_release_date
+        else _value_from(calendar_row or {}, "time", "publishTime", "session")
     )
     source_summary = None
 
@@ -440,7 +464,12 @@ def _build_ainvest_annotation(
     upcoming_release_date: dt.date | None = None
 
     if history:
-        latest = history[0]
+        reported_rows = [item for item in history if (_parse_date(item.get("release_date")) or dt.date.max) <= as_of_date]
+        latest = max(reported_rows, key=lambda item: _parse_date(item.get("release_date")) or dt.date.min) if reported_rows else None
+    else:
+        latest = None
+
+    if latest:
         reported_release_date = _parse_date(latest.get("release_date"))
         eps_actual = _safe_float(latest.get("eps_actual"))
         eps_estimate = _safe_float(latest.get("eps_forecast"))
@@ -514,7 +543,7 @@ def _build_yfinance_annotation(
     as_of_date: dt.date,
 ) -> EarningsAnnotation:
     release_date = payload.get("reported_release_date")
-    release_session = None
+    release_session = payload.get("reported_release_session")
     source_summary: str | None = None
     if release_date is None:
         release_date = payload.get("upcoming_release_date")
@@ -582,7 +611,7 @@ def build_earnings_annotations(
     try:
         next_week_map = _next_week_session_map(config, as_of_date, upcoming_end)
     except Exception as exc:
-        print(f"warning: unable to load ICS earnings sessions: {exc}")
+        print(f"warning: unable to load ICS earnings sessions ({type(exc).__name__})")
         next_week_map = {}
 
     selected_provider = (provider or config.earnings_enrichment_provider or "yfinance").strip().lower()
@@ -601,9 +630,9 @@ def build_earnings_annotations(
         client = YFinanceEarningsClient()
         for ticker in normalized_tickers:
             try:
-                payload = client.fetch_latest(ticker)
+                payload = client.fetch_latest(ticker, as_of_date=as_of_date)
             except Exception as exc:
-                print(f"warning: unable to load yfinance earnings for {ticker}: {exc}")
+                print(f"warning: unable to load yfinance earnings for {ticker} ({type(exc).__name__})")
                 payload = {
                     "reported_release_date": None,
                     "upcoming_release_date": None,
@@ -641,12 +670,12 @@ def build_earnings_annotations(
         try:
             calendar_rows = client.fetch_calendar_range(as_of_date - dt.timedelta(days=120), upcoming_end)
         except Exception as exc:
-            print(f"warning: unable to load FMP earnings calendar: {exc}")
+            print(f"warning: unable to load FMP earnings calendar ({type(exc).__name__})")
             calendar_rows = []
         try:
             confirmed_rows = client.fetch_confirmed_range(as_of_date, upcoming_end)
         except Exception as exc:
-            print(f"warning: unable to load FMP confirmed earnings calendar: {exc}")
+            print(f"warning: unable to load FMP confirmed earnings calendar ({type(exc).__name__})")
             confirmed_rows = []
         calendar_by_ticker: dict[str, list[dict[str, Any]]] = {}
         for row in calendar_rows:
@@ -690,7 +719,7 @@ def build_earnings_annotations(
             try:
                 rows = client.fetch_calendar_for_date(date_value)
             except Exception as exc:
-                print(f"warning: unable to load AInvest earnings calendar for {date_value}: {exc}")
+                print(f"warning: unable to load AInvest earnings calendar for {date_value} ({type(exc).__name__})")
                 continue
             for row in rows:
                 ticker = str(row.get("ticker", "")).upper().strip()
@@ -701,7 +730,7 @@ def build_earnings_annotations(
             try:
                 history = client.fetch_history(ticker, size=5)
             except Exception as exc:
-                print(f"warning: unable to load AInvest earnings history for {ticker}: {exc}")
+                print(f"warning: unable to load AInvest earnings history for {ticker} ({type(exc).__name__})")
                 history = []
             annotations[ticker] = _build_ainvest_annotation(
                 ticker,
@@ -779,3 +808,273 @@ def enrich_raw_hits(payload: dict[str, Any], annotations: dict[str, EarningsAnno
 
 def infer_output_path(input_path: Path, suffix: str = "_earnings") -> Path:
     return input_path.with_name(f"{input_path.stem}{suffix}{input_path.suffix}")
+
+
+def _xnys_next_session(event_date: dt.date) -> dt.date | None:
+    try:
+        import exchange_calendars as xcals
+
+        calendar = xcals.get_calendar("XNYS")
+        following = calendar.sessions_in_range(
+            dt.datetime.combine(event_date + dt.timedelta(days=1), dt.time()),
+            dt.datetime.combine(event_date + dt.timedelta(days=8), dt.time()),
+        )
+        return following[0].date() if len(following) else None
+    except Exception:
+        return None
+
+
+def _reaction_session(event_date: dt.date, timing: str | None, next_session: Any) -> dt.date | None:
+    if timing == "before_market":
+        return event_date if next_session(event_date - dt.timedelta(days=1)) == event_date else None
+    if timing == "after_market":
+        return next_session(event_date)
+    return None
+
+
+def _reported_event(row: dict[str, Any], ticker: str, provider: str) -> dict[str, Any] | None:
+    event_date = _date_from_row(row, "date", "reportedDate", "release_date", "earnings_date")
+    eps_actual = _safe_float(_value_from(row, "eps", "epsActual", "actualEps", "eps_actual", "reportedEps"))
+    if event_date is None or eps_actual is None:
+        return None
+    eps_estimate = _safe_float(_value_from(row, "epsEstimated", "epsEstimate", "estimatedEps", "eps_forecast", "eps_estimate", "epsEstimate"))
+    session = _parse_session(_value_from(row, "time", "publishTime", "session", "session_timing"))
+    return {
+        "ticker": ticker,
+        "earnings_date": event_date,
+        "eps_actual": eps_actual,
+        "eps_estimate": eps_estimate,
+        "revenue_actual": _safe_float(_value_from(row, "revenue", "revenueActual", "actualRevenue", "revenue_actual")),
+        "revenue_estimate": _safe_float(_value_from(row, "revenueEstimated", "revenueEstimate", "estimatedRevenue", "revenue_estimate")),
+        "session_timing": session,
+        "source": provider,
+    }
+
+
+def _load_cached_events(tickers: list[str], start: dt.date, end: dt.date, status: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    url = os.getenv("TICKER_SCREENER_DATABASE_URL", "").strip()
+    if not url:
+        if status is not None:
+            status["read"] = "disabled"
+        return []
+    try:
+        import psycopg
+
+        with psycopg.connect(url) as connection:
+            rows = connection.execute(
+                "SELECT ticker, earnings_date, eps_actual, eps_estimate, revenue_actual, revenue_estimate, session_timing, source, updated_at "
+                "FROM earnings_events WHERE ticker = ANY(%s) AND earnings_date BETWEEN %s AND %s",
+                (tickers, start, end),
+            ).fetchall()
+        if status is not None:
+            status["read"] = "available"
+        return [event for row in rows if (event := dict(zip(("ticker", "earnings_date", "eps_actual", "eps_estimate", "revenue_actual", "revenue_estimate", "session_timing", "source", "updated_at"), row))) and _safe_float(event.get("eps_actual")) is not None]
+    except Exception:
+        if status is not None:
+            status["read"] = "failed"
+        return []
+
+
+def _cache_events(events: list[dict[str, Any]], status: dict[str, str] | None = None) -> None:
+    url = os.getenv("TICKER_SCREENER_DATABASE_URL", "").strip()
+    if not url or not events:
+        if status is not None:
+            status["write"] = "disabled" if not url else "not_needed"
+        return
+    try:
+        import psycopg
+
+        with psycopg.connect(url) as connection:
+            for event in events:
+                connection.execute(
+                    "INSERT INTO earnings_events (ticker, earnings_date, eps_actual, eps_estimate, revenue_actual, revenue_estimate, session_timing, source) "
+                    "VALUES (%(ticker)s, %(earnings_date)s, %(eps_actual)s, %(eps_estimate)s, %(revenue_actual)s, %(revenue_estimate)s, %(session_timing)s, %(source)s) "
+                    "ON CONFLICT (ticker, earnings_date) DO UPDATE SET "
+                    "eps_actual=COALESCE(EXCLUDED.eps_actual, earnings_events.eps_actual), "
+                    "eps_estimate=COALESCE(EXCLUDED.eps_estimate, earnings_events.eps_estimate), "
+                    "revenue_actual=COALESCE(EXCLUDED.revenue_actual, earnings_events.revenue_actual), "
+                    "revenue_estimate=COALESCE(EXCLUDED.revenue_estimate, earnings_events.revenue_estimate), "
+                    "session_timing=COALESCE(EXCLUDED.session_timing, earnings_events.session_timing), "
+                    "source=CASE WHEN EXCLUDED.source=ANY(string_to_array(earnings_events.source, '+')) "
+                    "THEN earnings_events.source ELSE earnings_events.source || '+' || EXCLUDED.source END, updated_at=NOW()",
+                    event,
+                )
+        if status is not None:
+            status["write"] = "available"
+    except Exception:
+        if status is not None:
+            status["write"] = "failed"
+
+
+def build_earnings_event_contexts(
+    rows: list[dict[str, Any]],
+    config: AppConfig,
+    *,
+    signal_date: dt.date | None = None,
+    as_of_date: dt.date | None = None,
+    provider: str | None = None,
+    calendar_next_session: Any = None,
+) -> list[dict[str, Any]]:
+    """Add informational event matches per row; failed/missing evidence stays explicitly unknown."""
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    calendar_next_session = calendar_next_session or _xnys_next_session
+    cutoff = as_of_date or dt.date.today()
+    by_ticker: dict[str, list[tuple[dict[str, Any], dt.date]]] = {}
+    for row in rows:
+        ticker = str(row.get("ticker", "")).strip().upper()
+        date_value = signal_date or _parse_date(row.get("signal_date"))
+        if ticker and date_value and date_value <= cutoff:
+            by_ticker.setdefault(ticker, []).append((row, date_value))
+    dates = sorted({date for values in by_ticker.values() for _, date in values if date <= cutoff})
+    ranges: list[tuple[dt.date, dt.date]] = []
+    for date_value in dates:
+        window = (date_value - dt.timedelta(days=7), date_value)
+        if ranges and window[0] <= ranges[-1][1] + dt.timedelta(days=1):
+            ranges[-1] = (ranges[-1][0], max(ranges[-1][1], window[1]))
+        else:
+            ranges.append(window)
+    tickers = list(by_ticker)
+    cache_state: dict[str, str] = {}
+    events = [event for start, end in ranges for event in _load_cached_events(tickers, start, end, cache_state)]
+    events = [e for e in events if _safe_float(e.get("eps_actual")) is not None and e.get("earnings_date") is not None]
+    events = [{**event, **{key: _safe_float(event.get(key)) for key in (
+        "eps_actual", "eps_estimate", "revenue_actual", "revenue_estimate")}} for event in events]
+    cache_by_ticker: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        cache_by_ticker.setdefault(str(event["ticker"]).upper(), []).append(event)
+    selected = (provider or config.earnings_enrichment_provider or "yfinance").lower()
+    if selected == "auto":
+        selected = "ainvest" if os.getenv("AINVEST_API_KEY", "").strip() else "fmp" if os.getenv("FMP_API_KEY", "").strip() else "yfinance"
+    fetched: list[dict[str, Any]] = []
+    failed_tickers: set[str] = set()
+    todo = []
+    for ticker, values in by_ticker.items():
+        cached_events = cache_by_ticker.get(ticker, [])
+        all_dates_cached = all(
+            any(
+                _safe_float(event.get("eps_actual")) is not None
+                and _reaction_session(event["earnings_date"], _parse_session(event.get("session_timing")), calendar_next_session) == date
+                for event in cached_events
+            )
+            for _, date in values
+        )
+        if not all_dates_cached:
+            todo.append(ticker)
+    if selected == "fmp" and (os.getenv("FMP_API_KEY") or "").strip() and todo:
+        try:
+            client = FMPEarningsClient(os.environ["FMP_API_KEY"], config.request_timeout_seconds)
+            raw = [item for start, end in ranges for item in client.fetch_calendar_range(start, end)]
+            for item in raw:
+                ticker = str(_value_from(item, "symbol", "ticker") or "").strip().upper()
+                event = _reported_event(item, ticker, "fmp") if ticker in todo else None
+                if event and any(start <= event["earnings_date"] <= end for start, end in ranges):
+                    fetched.append(event)
+        except Exception:
+            failed_tickers.update(todo)
+    elif selected == "fmp" and todo:
+        failed_tickers.update(todo)
+    elif selected in {"auto", "yfinance", "ainvest"}:
+        for ticker in todo:
+            try:
+                if selected == "ainvest":
+                    key = os.getenv("AINVEST_API_KEY", "").strip()
+                    if not key:
+                        failed_tickers.add(ticker)
+                        continue
+                    history = AInvestEarningsClient(key, config.request_timeout_seconds).fetch_history(ticker, size=100)
+                    for item in history:
+                        event = _reported_event(item, ticker, "ainvest")
+                        if event and any(start <= event["earnings_date"] <= end for start, end in ranges):
+                            fetched.append(event)
+                    continue
+                client = YFinanceEarningsClient()
+                stock = client.yf.Ticker(ticker)
+                data = stock.get_earnings_dates(limit=100)
+                if data is None:
+                    failed_tickers.add(ticker)
+                    continue
+                if data.empty:
+                    continue
+                for index, item in data.iterrows():
+                    parsed = _parse_yahoo_timestamp(index)
+                    if parsed is None or not any(start <= parsed[0] <= end for start, end in ranges):
+                        continue
+                    payload = item.to_dict()
+                    payload["date"] = parsed[0]
+                    payload["time"] = parsed[1]
+                    payload["eps"] = _value_from(payload, "Reported EPS", "epsActual", "EPS Actual")
+                    payload["epsEstimated"] = _value_from(payload, "EPS Estimate", "epsEstimate")
+                    event = _reported_event(payload, ticker, "yfinance")
+                    if event:
+                        fetched.append(event)
+            except Exception:
+                failed_tickers.add(ticker)
+    else:
+        failed_tickers.update(todo)
+    _cache_events(fetched, cache_state)
+    fresh_by_key = {(e["ticker"], e["earnings_date"]): e for e in fetched}
+    merged_cache = []
+    for event in events:
+        fresh = fresh_by_key.pop((event["ticker"], event["earnings_date"]), None)
+        if fresh:
+            sources = "+".join(dict.fromkeys((str(event.get("source") or "") + "+" + str(fresh.get("source") or "")).strip("+").split("+")))
+            merged_cache.append({**event, **{key: value for key, value in fresh.items() if value is not None}, "source": sources, "updated_at": now})
+        else:
+            merged_cache.append(event)
+    events = merged_cache + [{**event, "updated_at": now} for event in fresh_by_key.values()]
+    event_map: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        date_value = event.get("earnings_date")
+        if isinstance(date_value, str):
+            date_value = _parse_date(date_value)
+        event["earnings_date"] = date_value
+        if date_value:
+            event_map.setdefault(str(event["ticker"]).upper(), []).append(event)
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        enriched = dict(row)
+        ticker = str(row.get("ticker", "")).strip().upper()
+        date_value = signal_date or _parse_date(row.get("signal_date"))
+        context: dict[str, Any] = {"signal_date": date_value.isoformat() if date_value else None, "provider": selected, "fetched_at": now, "evidence_mode": "retrospective_lookup", "cache_status": {"read": cache_state.get("read", "disabled"), "write": cache_state.get("write", "not_needed")}}
+        if date_value is None:
+            context.update({"status": "lookup_failed", "confirmed": False, "match_reason": "signal_date_missing"})
+            enriched["earnings_context"] = context
+            result.append(enriched)
+            continue
+        if date_value > cutoff:
+            context.update({"status": "lookup_failed", "confirmed": False, "match_reason": "signal_date_after_as_of_cutoff"})
+            enriched["earnings_context"] = context
+            result.append(enriched)
+            continue
+        candidates = [e for e in event_map.get(ticker, []) if e["earnings_date"] <= date_value] if date_value else []
+        candidates = [e for e in candidates if (date_value - e["earnings_date"]).days <= 7]
+        matched = None
+        for event in sorted(candidates, key=lambda e: e["earnings_date"], reverse=True):
+            session = _parse_session(event.get("session_timing"))
+            effective = _reaction_session(event["earnings_date"], session, calendar_next_session)
+            if session in {"before_market", "after_market"} and effective == date_value:
+                matched = (event, effective)
+                break
+        if matched:
+            event, effective = matched
+            context.update({"status": "earnings_confirmed", "report_date": event["earnings_date"].isoformat(), "release_session": event.get("session_timing"), "effective_reaction_session": effective.isoformat(), "confirmed": True, "match_reason": "reported_event_and_xnys_reaction_session_match", "eps_actual": event.get("eps_actual"), "eps_estimate": event.get("eps_estimate"), "revenue_actual": event.get("revenue_actual"), "revenue_estimate": event.get("revenue_estimate"), "source": event.get("source"), "fetched_at": str(event.get("updated_at") or now)})
+        elif candidates:
+            event = max(candidates, key=lambda item: item["earnings_date"])
+            session = _parse_session(event.get("session_timing"))
+            effective = _reaction_session(event["earnings_date"], session, calendar_next_session)
+            reason = ("reported_event_near_signal_but_timing_unknown" if session is None else
+                      "during_market_report_does_not_explain_opening_gap" if session == "during_market" else
+                      "exchange_calendar_unavailable_or_report_not_on_session" if effective is None else
+                      "reaction_session_does_not_match_signal")
+            context.update({"status": "earnings_nearby_timing_unknown" if session is None else "earnings_nearby_unconfirmed",
+                            "report_date": event["earnings_date"].isoformat(), "release_session": session,
+                            "effective_reaction_session": effective.isoformat() if effective else None,
+                            "confirmed": False, "match_reason": reason, "source": event.get("source"),
+                            "fetched_at": str(event.get("updated_at") or now),
+                            "lookup_status": "failed" if ticker in failed_tickers else "available"})
+        else:
+            failed = ticker in failed_tickers
+            context.update({"status": "lookup_failed" if failed else "catalyst_unknown", "confirmed": False, "match_reason": "provider_lookup_failed" if failed else "no_confirmed_event_match_found_within_lookback"})
+        enriched["earnings_context"] = context
+        result.append(enriched)
+    return result

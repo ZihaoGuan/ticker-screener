@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.config import load_app_config
 from src.earnings_enrichment import (
     build_earnings_annotations,
+    build_earnings_event_contexts,
     enrich_raw_hits,
     enrich_watchlist_entries,
     infer_output_path,
@@ -31,6 +32,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-file", help="Output JSON file. Defaults to <input>_earnings.json.")
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config" / "market_config.json"))
     parser.add_argument("--as-of-date", help="Reference date in YYYY-MM-DD. Defaults to today.")
+    parser.add_argument("--match-signal-date", action="store_true", help="Match each row's signal_date to a confirmed reported earnings event.")
+    parser.add_argument("--signal-date", help="Common signal date in YYYY-MM-DD; enables event matching and overrides row dates.")
     parser.add_argument("--upcoming-days", type=int, default=14, help="How many forward calendar days to scan.")
     parser.add_argument(
         "--provider",
@@ -80,6 +83,20 @@ def main() -> int:
 
     config = load_app_config(args.config)
     as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else dt.date.today()
+    if args.match_signal_date or args.signal_date:
+        common_signal_date = dt.date.fromisoformat(args.signal_date) if args.signal_date else None
+        rows = payload if isinstance(payload, list) else payload.get("hits", [])
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError("Event matching requires a watchlist array or raw hits[] array.")
+        enriched_rows = build_earnings_event_contexts(rows, config, signal_date=common_signal_date, as_of_date=as_of_date, provider=args.provider)
+        if isinstance(payload, list):
+            enriched = enriched_rows
+        else:
+            enriched = dict(payload)
+            enriched["hits"] = enriched_rows
+        _write_json(output_path, enriched)
+        print(f"Wrote earnings-enriched JSON to {output_path}")
+        return 0
     annotations = build_earnings_annotations(
         tickers,
         config,
