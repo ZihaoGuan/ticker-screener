@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from src.market_data_access import load_many_ticker_windows
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_rotation import require_completed_session, session_dates, valid_history
-from src.martin_daily_gap_retest import (CONFIG, CONFIG_HASH, DISCOVERY_RULES_VERSION, STRATEGY_ID,
+from src.martin_daily_gap_retest import (CONFIG, CONFIG_HASH, DISCOVERY_RULES_VERSION, REPLAY_STRATEGY_ID, STRATEGY_ID,
     daily_indicators, evaluate_gap_retest, rank_confirmations, resolve_gap_next_open, size_gap_order)
 
 
@@ -178,7 +178,7 @@ class MartinGapRetestService:
         except StopIteration as error:
             raise ValueError("Could not resolve next XNYS session") from error
 
-    def _certify_frame(self, ticker: str, frame: Any, start: date, end: date) -> bool:
+    def _certify_frame(self, ticker: str, frame: Any, start: date, end: date, *, historical_replay: bool = False) -> bool:
         if frame is None or getattr(frame, "empty", True):
             return False
         attrs = getattr(frame, "attrs", {})
@@ -188,7 +188,9 @@ class MartinGapRetestService:
         if not provenance:
             return False
         groups = provenance(ticker, start, end)
-        if not groups or {str(row.get("source") or "").lower() for row in groups} != {"tradingview"}:
+        sources = {str(row.get("source") or "").lower() for row in groups or []}
+        allowed_sources = {"tradingview", "tradingview_screener"} if historical_replay else {"tradingview"}
+        if not groups or not sources or not sources.issubset(allowed_sources):
             return False
         dates = [idx.date() if hasattr(idx, "date") else idx for idx in frame.index]
         count = sum(int(row.get("rows") or 0) for row in groups)
@@ -200,11 +202,13 @@ class MartinGapRetestService:
                 return False
         # The refresh source validates TradingView's split-adjusted, regular-session query.
         attrs["adjustment_basis"] = "split_adjusted_regular_session"
-        attrs["provenance_source"] = "tradingview"
+        attrs["provenance_source"] = "+".join(sorted(sources))
         return True
 
-    def run_session(self, *, as_of_date: date, source_record: dict[str, Any] | None, dry_run: bool = True) -> dict[str, Any]:
-        strategy_id = STRATEGY_ID
+    def run_session(self, *, as_of_date: date, source_record: dict[str, Any] | None, dry_run: bool = True,
+                    strategy_id: str = STRATEGY_ID, historical_replay: bool = False) -> dict[str, Any]:
+        if (historical_replay and strategy_id != REPLAY_STRATEGY_ID) or (not historical_replay and strategy_id != STRATEGY_ID):
+            raise ValueError("Unsupported gap retest book identity")
         dates = self._dates(as_of_date)
         if not dates or dates[-1] != as_of_date:
             raise ValueError("Daily Gap Retest requires an XNYS session")
@@ -218,11 +222,12 @@ class MartinGapRetestService:
                 prior = dates[-2] if len(dates) > 1 else None
                 if latest is not None and latest != prior:
                     raise ValueError("Gap retest book has missed intermediate XNYS sessions; explicit sequential recovery is required")
-                return self._run(as_of_date, source_record, dry_run=False, dates=dates)
-        return self._run(as_of_date, source_record, dry_run=True, dates=dates)
+                return self._run(as_of_date, source_record, dry_run=False, dates=dates, strategy_id=strategy_id, historical_replay=historical_replay)
+        return self._run(as_of_date, source_record, dry_run=True, dates=dates, strategy_id=strategy_id, historical_replay=historical_replay)
 
-    def _run(self, day: date, source_record: dict[str, Any] | None, *, dry_run: bool, dates: list[date]) -> dict[str, Any]:
-        repo, sid = self.repository, STRATEGY_ID
+    def _run(self, day: date, source_record: dict[str, Any] | None, *, dry_run: bool, dates: list[date],
+             strategy_id: str = STRATEGY_ID, historical_replay: bool = False) -> dict[str, Any]:
+        repo, sid = self.repository, strategy_id
         if not dry_run and repo.latest_session_date(sid) is not None and repo.latest_session_date(sid) >= day:
             return {"strategy_id": sid, "session_date": day.isoformat(), "skipped": True, "reason": "session_already_processed"}
         watches = repo.latest_gap_watch_states(sid) if hasattr(repo, "latest_gap_watch_states") else {}
@@ -230,7 +235,9 @@ class MartinGapRetestService:
         pending = repo.pending_candidates(before=day, strategy_id=sid) if hasattr(repo, "pending_candidates") else []
         source_session_matches = bool(source_record and str(source_record.get("target_trading_date") or source_record.get("run_date") or source_record.get("session_date"))[:10] == day.isoformat())
         next_session = self._next_session(day)
-        source_valid = source_session_matches and _published_before_session(source_record, day, next_session, self.session_bounds)
+        reconstructed = bool(historical_replay and source_record and source_record.get("source_mode") == "historical_reconstruction"
+                             and source_record.get("rules_version") == DISCOVERY_RULES_VERSION)
+        source_valid = source_session_matches and (reconstructed or _published_before_session(source_record, day, next_session, self.session_bounds))
         events = active_gap_events(source_record if source_valid else None, day)
         prior_ids = {str(p.get("ticker", "")).upper(): p for p in positions}
         tickers = {str(x).upper() for x in watches} | {str(x["ticker"]).upper() for x in positions + pending} | {x["ticker"] for x in events}
@@ -243,11 +250,11 @@ class MartinGapRetestService:
         prior_session = dates[-2] if len(dates) > 1 else None
         frames = {ticker: _asof_frame(frame, day) for ticker, frame in frames.items()}
         for ticker, frame in frames.items():
-            self._certify_frame(ticker, frame, dates[0], day)
+            self._certify_frame(ticker, frame, dates[0], day, historical_replay=historical_replay)
         for row in positions + pending:
             ticker = str(row["ticker"]).upper()
             frame = frames.get(ticker)
-            if _bar(frame, day) is None or not valid_history(frame, dates[-260:]) or not self._certify_frame(ticker, frame, dates[0], day):
+            if _bar(frame, day) is None or not valid_history(frame, dates[-260:]) or not self._certify_frame(ticker, frame, dates[0], day, historical_replay=historical_replay):
                 if not dry_run:
                     raise ValueError("Missing or unverified execution history for existing gap retest order or position; session rolled back")
             if row in positions and hasattr(repo, "daily_bar_provenance"):
@@ -258,13 +265,19 @@ class MartinGapRetestService:
                     if len(factors) > 1:
                         raise ValueError("corporate_action_requires_review; gap retest session rolled back")
         report: dict[str, Any] = {"strategy_id": sid, "session_date": day.isoformat(), "dry_run": dry_run,
-            "source_run_id": (source_record or {}).get("source_run_id", (source_record or {}).get("id")) if source_valid else None,
+            "source_run_id": ((source_record or {}).get("source_run_id", (source_record or {}).get("id"))
+                              if source_valid and not historical_replay else None),
             "source_fingerprint": (source_record or {}).get("source_fingerprint") if source_valid else None,
             "discovery_complete": source_valid, "config_version": sid, "config_hash": CONFIG_HASH,
             "entry_policy_version": "gap_daily_reclaim_next_open_v1", "stop_policy_version": "gap_reclaim_candle_low_v1",
             "management_policy_version": "gap_trim10_3r_ema9_v1", "source_hit_count": len((source_record or {}).get("hits", [])),
             "active_gap_event_count": len(events), "candidate_count": 0, "confirmed_count": 0, "orders": [], "candidates": [],
             "execution_preview": []}
+        if historical_replay:
+            report["replay_provenance"] = {"origin": "historical_replay", "source_mode": "historical_reconstruction",
+                "from_date": (source_record or {}).get("replay_from_date"), "to_date": (source_record or {}).get("replay_to_date"),
+                "source_generated_at": (source_record or {}).get("published_at"),
+                "limitations": "Reconstructed Power Gap universe from current configured symbols and stored OHLCV; historical revisions may apply."}
         for order in pending:
             payload = order.get("payload_json") or {}
             bar = _bar(frames.get(str(order["ticker"]).upper()), day)
@@ -437,8 +450,10 @@ class MartinGapRetestService:
             return report
         source_id = int((source_record or {}).get("source_run_id", (source_record or {}).get("id")) or 0)
         fingerprint = str((source_record or {}).get("source_fingerprint") or "")
-        if source_valid and (not source_id or not fingerprint):
+        if source_valid and not historical_replay and (not source_id or not fingerprint):
             raise ValueError("Persisted source run ID and fingerprint are required")
+        if historical_replay and not fingerprint:
+            raise ValueError("Reconstructed source fingerprint is required")
         if not source_valid and not watches and not positions and not pending:
             return {**report, "status": "missing_prerequisite", "reason": "source_missing_or_stale"}
         if not source_valid:

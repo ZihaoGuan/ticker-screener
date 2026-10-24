@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from src.market_data_access import resolve_database_url
+from src.martin_daily_gap_retest import REPLAY_STRATEGY_ID
 from src.webapp.services.martin_rotation import ROTATION_STRATEGY_ID, ROTATION_POLICY_VERSION, ROTATION_LIMITS, account_budget
 
 GAP_RETEST_STRATEGY_ID = "martin_daily_gap_retest_v1"
-ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1", ROTATION_STRATEGY_ID, GAP_RETEST_STRATEGY_ID}
+GAP_RETEST_REPLAY_STRATEGY_ID = REPLAY_STRATEGY_ID
+ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1", ROTATION_STRATEGY_ID, GAP_RETEST_STRATEGY_ID, GAP_RETEST_REPLAY_STRATEGY_ID}
 
 
 class _SessionConnection:
@@ -346,7 +348,8 @@ class MartinForwardTestRepository:
                 for strategy_id, key in (("martin_daily_v1", "account"), ("martin_sector_book_v1", "sector_opportunity"),
                                          ("martin_daily_top5_v1", "daily_top5"), ("martin_rs_expanded_v1", "rs_expanded"),
                                          (ROTATION_STRATEGY_ID, "rs_expanded_rotation"),
-                                         (GAP_RETEST_STRATEGY_ID, "gap_retest")):
+                                         (GAP_RETEST_STRATEGY_ID, "gap_retest"),
+                                         (GAP_RETEST_REPLAY_STRATEGY_ID, "gap_retest_replay")):
                     runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
                     latest_id = runs[0]["id"] if runs else None
                     candidates = self._fetch(cursor, "SELECT * FROM martin_forward_candidates WHERE run_id=%s ORDER BY rank", (latest_id,)) if latest_id else []
@@ -361,7 +364,7 @@ class MartinForwardTestRepository:
                         books[key]["rotation_policy_version"] = ROTATION_POLICY_VERSION
                         books[key]["rotation_limits"] = ROTATION_LIMITS
                 account = books.get("account")
-                for account in (account, books.get("rs_expanded_rotation"), books.get("gap_retest")):
+                for account in (account, books.get("rs_expanded_rotation"), books.get("gap_retest"), books.get("gap_retest_replay")):
                     if not account or not account.get("history"):
                         continue
                     dates = [str(point.get("date") or "") for point in account["history"] if point.get("date")]
