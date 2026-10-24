@@ -4007,7 +4007,11 @@ class RunService:
             return
         screen_run_id = self.screener_history_service.persist_screen_run(
             strategy_id=action_id,
-            options=dict(job.get("options") or {}),
+            options=(
+                {**dict(job.get("options") or {}), "market_data_source": "database-first"}
+                if action_id == "power_gap_volume_watch"
+                else dict(job.get("options") or {})
+            ),
             summary_payload=summary_payload,
             raw_payload=raw_payload,
             job_run_id=job.get("job_run_id"),
