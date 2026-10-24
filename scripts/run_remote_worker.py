@@ -123,6 +123,9 @@ def _write_scheduled_status(
         ),
     }
     status_path = status_dir / f"{scheduled_job_id}.json"
+    if scheduled_job_id == "refresh_split_adjusted_history" and status not in {"queued", "running"}:
+        from src.split_refresh_reporting import read_persistence_fields
+        payload.update(read_persistence_fields(str(state.get("log_file") or "")))
     tmp_path = status_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     tmp_path.replace(status_path)
@@ -335,6 +338,9 @@ def _run_claimed_job(
             )
         }
     )
+    if action_id == "refresh_split_adjusted_history":
+        from src.split_refresh_reporting import read_persistence_fields
+        state.update(read_persistence_fields(str(state.get("log_file") or "")))
     _publish_state(run_service, job_run_id=job_run_id, state=state, status=final_status, finished_at=finished_at)
     _write_scheduled_status(run_service, options=options, state=state, status=final_status, finished_at=finished_at)
     run_service.history_repository.heartbeat_remote_worker(

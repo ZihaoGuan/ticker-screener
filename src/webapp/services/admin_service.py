@@ -288,6 +288,8 @@ class AdminService:
                     "log_file": str(payload.get("log_file") or ""),
                     "artifact_file": str(payload.get("artifact_file") or ""),
                     "persisted_to_db": payload.get("persisted_to_db"),
+                    "persistence_state": payload.get("persistence_state"),
+                    "split_refresh_summary": payload.get("split_refresh_summary"),
                     "screen_run_id": _coerce_int(payload.get("screen_run_id")),
                     "persistence_message": str(payload.get("persistence_message") or ""),
                     "message": str(payload.get("message") or ""),

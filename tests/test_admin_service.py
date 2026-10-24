@@ -261,6 +261,8 @@ class AdminServiceTests(unittest.TestCase):
                         "persisted_to_db": True,
                         "screen_run_id": 812,
                         "persistence_message": "Persisted screen run id=812.",
+                        "persistence_state": "partial",
+                        "split_refresh_summary": {"version": 1, "ticker_results": [], "rows_persisted": 320},
                         "message": "Job completed successfully.",
                     }
                 ),
@@ -274,6 +276,8 @@ class AdminServiceTests(unittest.TestCase):
         self.assertTrue(bool(payload[0]["persisted_to_db"]))
         self.assertEqual(payload[0]["screen_run_id"], 812)
         self.assertEqual(payload[0]["persistence_message"], "Persisted screen run id=812.")
+        self.assertEqual(payload[0]["persistence_state"], "partial")
+        self.assertEqual(payload[0]["split_refresh_summary"]["rows_persisted"], 320)
 
     def test_scheduled_job_log_tails_only_the_status_linked_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

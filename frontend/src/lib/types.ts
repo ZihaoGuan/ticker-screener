@@ -1922,6 +1922,18 @@ export type ScheduledJobSummary = {
   log_file: string;
   artifact_file: string;
   persisted_to_db?: boolean | null;
+  persistence_state?: "complete" | "partial" | "none" | "unknown" | "not_applicable" | null;
+  split_refresh_summary?: {
+    version: number;
+    rows_persisted: number;
+    ticker_results: Array<{
+      ticker: string;
+      status: string;
+      reason?: string;
+      rows_persisted: number | null;
+      history_retained?: boolean | null;
+    }>;
+  } | null;
   screen_run_id?: number | null;
   persistence_message?: string;
   message: string;

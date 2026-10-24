@@ -68,6 +68,30 @@ class _UnknownActionRunService(_FailingJobRunService):
 
 
 class RunRemoteWorkerTests(unittest.TestCase):
+    def test_failed_split_job_keeps_partial_persistence_in_job_run_payload(self) -> None:
+        from src.split_refresh_reporting import RESULT_PREFIX
+        summary = {"version": 1, "ticker_results": [
+            {"ticker": "GOOD", "status": "synced", "rows_persisted": 320},
+            {"ticker": "BAD", "status": "failed_coverage_loss", "rows_persisted": 0},
+        ]}
+
+        class SplitRunService(_FailingJobRunService):
+            def build_command(self, *_args, **_kwargs):
+                return [sys.executable, "-c", f"import sys; print({(RESULT_PREFIX + json.dumps(summary))!r}); sys.exit(1)"]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = SplitRunService(Path(temp_dir))
+            code = module._run_claimed_job(service, {
+                "id": 861, "job_name": "Split refresh", "trigger_source": "scheduled",
+                "request_payload": {"action_id": "refresh_split_adjusted_history", "options": {
+                    "scheduled_job_id": "refresh_split_adjusted_history"}},
+            }, worker_name="test-worker", worker_pools=("general",), heartbeat_seconds=5.0)
+            payload = service.history_repository.patches[-1]["result_payload_patch"]
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["persistence_state"], "partial")
+        self.assertTrue(payload["persisted_to_db"])
+        self.assertEqual(payload["split_refresh_summary"]["rows_persisted"], 320)
+
     def test_main_passes_configured_artifacts_directory_to_run_service(self) -> None:
         captured: dict[str, object] = {}
 

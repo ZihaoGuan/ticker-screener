@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import datetime as dt
 import json
 from pathlib import Path
@@ -133,6 +133,8 @@ class TickerSyncOutcome:
     is_active: bool | None = None
     recovered_individually: bool = False
     source: str | None = None
+    rows_persisted: int | None = None
+    history_retained: bool | None = None
 
 
 def _looks_retryable_error(message: str) -> bool:
@@ -1043,6 +1045,10 @@ def _upsert_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, .
     return applied, skipped_overflow
 
 
+class HistoryCoverageLoss(ValueError):
+    """Replacement would discard dates already stored for this ticker."""
+
+
 def _replace_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, ...]]) -> tuple[int, int]:
     if not rows:
         return 0, 0
@@ -1050,9 +1056,24 @@ def _replace_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, 
     if len(tickers) != 1:
         raise ValueError("replacement rows must contain exactly one ticker")
     ticker = next(iter(tickers))
+    incoming_dates = {row[1] for row in rows}
+
+    def check_coverage(existing_rows: list[tuple[object, ...]]) -> None:
+        missing = {row[0] for row in existing_rows} - incoming_dates
+        if missing:
+            sample = ", ".join(sorted(str(day) for day in missing)[:5])
+            raise HistoryCoverageLoss(
+                f"History coverage loss: replacement would discard {len(missing)} existing dates "
+                f"for {ticker} (sample: {sample}); existing history retained."
+            )
+
     try:
         with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM daily_bars WHERE ticker = %s", (ticker,))
+            cursor.execute("SELECT trade_date FROM daily_bars WHERE ticker = %s", (ticker,))
+            check_coverage(cursor.fetchall())
+            cursor.execute("DELETE FROM daily_bars WHERE ticker = %s RETURNING trade_date", (ticker,))
+            # A concurrent writer may have committed another date after the SELECT.
+            check_coverage(cursor.fetchall())
             cursor.executemany(_DAILY_BAR_UPSERT_SQL, rows)
         connection.commit()
         return len(rows), 0
@@ -1117,6 +1138,12 @@ def _write_manifest(
         "partial_count": len(partials),
         "failures": failures,
         "partials": partials,
+        "ticker_results": [
+            {"ticker": outcome.ticker, "status": outcome.status, "reason": outcome.reason,
+             "source": outcome.source, "rows_persisted": outcome.rows_persisted,
+             "history_retained": outcome.history_retained}
+            for outcome in outcomes
+        ],
     }
     manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -1233,7 +1260,6 @@ def main() -> int:
                         history_sources[ticker] = outcome.source or args.source_label
                 chunk_outcomes.append(outcome)
 
-            outcomes.extend(chunk_outcomes)
             downloaded_ticker_count += len(normalized_histories)
 
             bar_rows = _build_daily_bar_rows(
@@ -1247,11 +1273,23 @@ def main() -> int:
                 skipped_overflow = 0
                 for ticker in normalized_histories:
                     ticker_rows = [row for row in bar_rows if row[0] == ticker]
-                    ticker_applied, ticker_skipped = _replace_daily_bars(connection, ticker_rows)
+                    try:
+                        ticker_applied, ticker_skipped = _replace_daily_bars(connection, ticker_rows)
+                    except HistoryCoverageLoss as exc:
+                        chunk_outcomes = [replace(outcome, status="failed_coverage_loss", reason=str(exc),
+                                                  rows_persisted=0, history_retained=True)
+                                          if outcome.ticker == ticker else outcome for outcome in chunk_outcomes]
+                        continue
+                    chunk_outcomes = [replace(outcome, rows_persisted=ticker_applied, history_retained=False)
+                                      if outcome.ticker == ticker else outcome for outcome in chunk_outcomes]
                     applied += ticker_applied
                     skipped_overflow += ticker_skipped
             else:
                 applied, skipped_overflow = _upsert_daily_bars(connection, bar_rows, args.batch_size)
+            if args.replace_existing_history:
+                chunk_outcomes = [replace(outcome, rows_persisted=0, history_retained=True)
+                                  if outcome.rows_persisted is None else outcome for outcome in chunk_outcomes]
+            outcomes.extend(chunk_outcomes)
             total_bar_rows += applied
             skipped_overflow_rows += skipped_overflow
             failed = [outcome for outcome in chunk_outcomes if outcome.status.startswith("failed") or outcome.status.startswith("skipped")]

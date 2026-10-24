@@ -38,6 +38,9 @@ class SyncPostgresMarketDataFallbackTests(unittest.TestCase):
             def execute(self, sql, params):
                 calls.append((sql, params))
 
+            def fetchall(self):
+                return [(1,), (2,)]
+
             def executemany(self, sql, rows):
                 calls.append((sql, list(rows)))
 
@@ -58,8 +61,9 @@ class SyncPostgresMarketDataFallbackTests(unittest.TestCase):
         applied, skipped = script._replace_daily_bars(connection, [("AAPL", 1), ("AAPL", 2)])
 
         self.assertEqual((applied, skipped), (2, 0))
-        self.assertIn("DELETE FROM daily_bars", calls[0][0])
-        self.assertIn("INSERT INTO daily_bars", calls[1][0])
+        self.assertIn("SELECT trade_date", calls[0][0])
+        self.assertIn("DELETE FROM daily_bars", calls[1][0])
+        self.assertIn("INSERT INTO daily_bars", calls[2][0])
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 0)
 

@@ -124,6 +124,13 @@ def _sync_scheduler_persistence_from_status(job_id: str) -> None:
         )
         return
     log_file = str(payload.get("log_file") or "").strip()
+    if job_id == "refresh_split_adjusted_history":
+        from src.split_refresh_reporting import read_persistence_fields
+        payload.update(read_persistence_fields(log_file))
+        tmp_path = status_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        tmp_path.replace(status_path)
+        return
     if status == "success" and log_file:
         try:
             log_text = Path(log_file).read_text(encoding="utf-8")

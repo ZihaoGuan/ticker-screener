@@ -913,6 +913,35 @@ export function RunsPage({ mode = "screeners" }: RunsPageProps) {
   };
 
   const renderScheduledPersistenceStatus = (job: ScheduledJobSummary) => {
+    const labels = {
+      complete: "Price History Updated",
+      partial: "Price History Partially Updated",
+      none: "No Price History Updated",
+      unknown: "Persistence Unknown",
+      not_applicable: "Nothing to Refresh",
+    };
+    if (job.persistence_state && job.persistence_state in labels) {
+      const results = job.split_refresh_summary?.ticker_results;
+      return (
+        <div className="schedule-cell-stack">
+          <span className="schedule-chip schedule-chip-soft">{labels[job.persistence_state]}</span>
+          <span className="file-meta">{job.persistence_message}</span>
+          {Array.isArray(results) && results.length > 0 && (
+            <details className="file-meta">
+              <summary>Per-ticker results ({results.length})</summary>
+              <ul>{results.map((result, index) => (
+                <li key={`${result.ticker}-${index}`}>
+                  <strong>{result.ticker}</strong>: {result.status.replace(/_/g, " ")}
+                  {" · "}{result.rows_persisted == null ? "Rows unconfirmed" : `${result.rows_persisted} rows committed`}
+                  {result.history_retained === true && " · Existing history retained"}
+                  {result.reason && <div>{result.reason}</div>}
+                </li>
+              ))}</ul>
+            </details>
+          )}
+        </div>
+      );
+    }
     if (job.persisted_to_db === true) {
       return (
         <div className="schedule-cell-stack">

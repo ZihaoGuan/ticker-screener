@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import uuid
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 from zoneinfo import ZoneInfo
@@ -17,6 +18,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.sync_postgres_market_data import _connect
+from src.config import load_app_config
+from src.split_refresh_reporting import RESULT_PREFIX, persistence_fields
+from src.ticker_filters import is_excluded_ticker, load_excluded_tickers
 from src.webapp.config import load_webapp_config
 
 
@@ -138,14 +142,13 @@ def _known_tickers(database_url: str, tickers: list[str]) -> set[str]:
             return {str(row[0]).upper() for row in cursor.fetchall()}
 
 
-def _refresh_ticker(ticker: str, start_date: str, end_date: str, state_path: Path) -> bool:
-    manifest_path = state_path.parent / "split_refresh" / f"{end_date}_{ticker.replace('/', '_')}.json"
+def _refresh_ticker(ticker: str, start_date: str, end_date: str, state_path: Path) -> dict[str, object]:
+    manifest_path = state_path.parent / "split_refresh" / f"{uuid.uuid4().hex}.json"
     command = [
         sys.executable,
         str(PROJECT_ROOT / "scripts" / "sync_postgres_market_data.py"),
         "--tickers",
         ticker,
-        "--include-excluded-tickers",
         "--start-date",
         start_date,
         "--end-date",
@@ -156,11 +159,20 @@ def _refresh_ticker(ticker: str, start_date: str, end_date: str, state_path: Pat
         "--manifest-path",
         str(manifest_path),
     ]
-    result = subprocess.run(command, cwd=PROJECT_ROOT, check=False)
-    if result.returncode != 0 or not manifest_path.exists():
-        return False
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    return int(manifest.get("failure_count") or 0) == 0 and int(manifest.get("daily_bar_rows") or 0) > 0
+    unknown = {"ticker": ticker, "status": "failed_unconfirmed", "rows_persisted": None,
+               "reason": "Child refresh did not provide valid persistence evidence.", "history_retained": None}
+    try:
+        result = subprocess.run(command, cwd=PROJECT_ROOT, check=False)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        rows = manifest.get("ticker_results", [])
+        row = next((row for row in rows if row.get("ticker") == ticker), None)
+        if row is None or type(row.get("rows_persisted")) is not int or row["rows_persisted"] < 0:
+            return unknown
+        if result.returncode != 0 and str(row.get("status", "")).startswith("synced"):
+            row = {**row, "status": "failed_child_exit", "reason": "Child exited after committing price rows."}
+        return row
+    except (OSError, ValueError, TypeError, AttributeError):
+        return unknown
 
 
 def main() -> int:
@@ -188,34 +200,50 @@ def main() -> int:
     if not database_url:
         raise RuntimeError("No Postgres connection string configured.")
     known = _known_tickers(database_url, sorted({str(event["ticker"]) for event in due}))
+    excluded = load_excluded_tickers(load_app_config())
 
     failures = 0
     refreshed = 0
     ignored = 0
+    results: list[dict[str, object]] = []
     for event in due:
         ticker = str(event["ticker"])
+        if is_excluded_ticker(ticker, excluded):
+            event["status"] = "ignored_excluded"
+            event["processed_at"] = now
+            event["message"] = "Ticker is excluded from screener and market-data workflows."
+            print(f"split_ignored ticker={ticker} reason=excluded", flush=True)
+            ignored += 1
+            results.append({"ticker": ticker, "status": "ignored_excluded", "rows_persisted": 0,
+                            "reason": event["message"]})
+            continue
         if ticker not in known:
             event["status"] = "ignored_not_tracked"
             event["processed_at"] = now
             event["message"] = "Ticker is not present in ticker_metadata."
             print(f"split_ignored ticker={ticker} reason=not_tracked", flush=True)
             ignored += 1
+            results.append({"ticker": ticker, "status": "ignored_not_tracked", "rows_persisted": 0,
+                            "reason": event["message"]})
             continue
         print(
             f"split_refresh ticker={ticker} effective={event['execution_date']} ratio={event['ratio']}",
             flush=True,
         )
-        if _refresh_ticker(ticker, args.start_date, as_of_date.isoformat(), state_path):
+        outcome = _refresh_ticker(ticker, args.start_date, as_of_date.isoformat(), state_path)
+        results.append(outcome)
+        if str(outcome["status"]).startswith("synced") and int(outcome.get("rows_persisted") or 0) > 0:
             event["status"] = "completed"
             event["processed_at"] = now
             event["message"] = "Existing daily bars replaced after a successful full-history download."
             refreshed += 1
         else:
             event["status"] = "failed"
-            event["message"] = "Full-history refresh failed; existing daily bars were retained."
+            event["message"] = str(outcome.get("reason") or "Refresh failed; persistence is unconfirmed.")
             failures += 1
     _write_state(state_path, events, now)
     print(f"split_due={len(due)} split_refreshed={refreshed} split_ignored={ignored} split_failed={failures}", flush=True)
+    print(RESULT_PREFIX + json.dumps(persistence_fields(results)["split_refresh_summary"]), flush=True)
     return 1 if failures else 0
 
 
