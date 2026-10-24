@@ -42,8 +42,8 @@ class MartinForwardTestRepository:
                 self._session_connection = None
 
     def latest_session_date(self, strategy_id: str):
-        rows = self._rows("SELECT max(session_date) day FROM martin_forward_runs WHERE strategy_id=%s", (strategy_id,))
-        return rows[0]["day"] if rows else None
+        rows = self._rows("SELECT max(session_date) AS latest_date FROM martin_forward_runs WHERE strategy_id=%s", (strategy_id,))
+        return rows[0]["latest_date"] if rows else None
 
     def account_state(self, strategy_id: str, *, exclude_order_ticker: str | None = None) -> dict[str, float]:
         rows = self._rows("SELECT status,payload_json FROM martin_forward_positions WHERE strategy_id=%s", (strategy_id,))
@@ -57,8 +57,8 @@ class MartinForwardTestRepository:
                 cursor.execute("UPDATE martin_forward_runs SET summary_json=summary_json || %s::jsonb WHERE id=%s", (json.dumps(metadata), run_id))
 
     def last_rotation_exit(self, strategy_id: str):
-        rows = self._rows("SELECT max(event_date) day FROM martin_forward_events WHERE strategy_id=%s AND event_type='rotation_exit'", (strategy_id,))
-        return rows[0]["day"] if rows else None
+        rows = self._rows("SELECT max(event_date) AS latest_date FROM martin_forward_events WHERE strategy_id=%s AND event_type='rotation_exit'", (strategy_id,))
+        return rows[0]["latest_date"] if rows else None
 
     @contextmanager
     def execution_lock(self, strategy_id: str):

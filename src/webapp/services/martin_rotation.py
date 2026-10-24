@@ -17,7 +17,8 @@ ROTATION_LIMITS = {"max_positions": 8, "sizing_base": 100_000.0, "risk_per_trade
 def session_dates(day: dt.date, count: int = 35) -> list[dt.date]:
     import exchange_calendars as xcals
     calendar = xcals.get_calendar("XNYS", start=day - dt.timedelta(days=500), end=day + dt.timedelta(days=15))
-    return [label.date() for label in calendar.sessions_in_range((day - dt.timedelta(days=500)).isoformat(), day.isoformat())][-count:]
+    # The requested lookback can start on a weekend or exchange holiday.
+    return [label.date() for label in calendar.sessions_in_range(calendar.first_session, day.isoformat())][-count:]
 
 
 def require_completed_session(day: dt.date) -> None:
