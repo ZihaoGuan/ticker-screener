@@ -12,7 +12,7 @@ from src.market_data_access import load_many_ticker_windows
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_rotation import require_completed_session, session_dates, valid_history
 from src.martin_daily_gap_retest import (CONFIG, CONFIG_HASH, DISCOVERY_RULES_VERSION, REPLAY_STRATEGY_ID,
-    REPLAY_V2_STRATEGY_ID, STRATEGY_ID,
+    REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID, STRATEGY_ID,
     daily_indicators, evaluate_gap_retest, rank_confirmations, resolve_gap_next_open, size_gap_order)
 
 
@@ -209,7 +209,7 @@ class MartinGapRetestService:
 
     def run_session(self, *, as_of_date: date, source_record: dict[str, Any] | None, dry_run: bool = True,
                     strategy_id: str = STRATEGY_ID, historical_replay: bool = False) -> dict[str, Any]:
-        if (historical_replay and strategy_id not in {REPLAY_STRATEGY_ID, REPLAY_V2_STRATEGY_ID}) or (not historical_replay and strategy_id != STRATEGY_ID):
+        if (historical_replay and strategy_id not in {REPLAY_STRATEGY_ID, REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID}) or (not historical_replay and strategy_id != STRATEGY_ID):
             raise ValueError("Unsupported gap retest book identity")
         dates = self._dates(as_of_date)
         if not dates or dates[-1] != as_of_date:

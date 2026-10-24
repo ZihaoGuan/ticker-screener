@@ -2751,6 +2751,6 @@ export type MartinForwardBook = {
 };
 export type MartinForwardResponse = {
   configured: boolean;
-  books: { account?: MartinForwardBook; sector_opportunity?: MartinForwardBook; daily_top5?: MartinForwardBook; rs_expanded?: MartinForwardBook; rs_expanded_rotation?: MartinForwardBook; gap_retest?: MartinForwardBook; gap_retest_replay?: MartinForwardBook; gap_retest_replay_v2?: MartinForwardBook };
+  books: { account?: MartinForwardBook; sector_opportunity?: MartinForwardBook; daily_top5?: MartinForwardBook; rs_expanded?: MartinForwardBook; rs_expanded_rotation?: MartinForwardBook; gap_retest?: MartinForwardBook; gap_retest_replay?: MartinForwardBook; gap_retest_replay_v2?: MartinForwardBook; gap_retest_replay_v3?: MartinForwardBook };
   comparison: Record<string, unknown>;
 };

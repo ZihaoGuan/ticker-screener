@@ -11,7 +11,6 @@ import sys
 from typing import Any
 
 import exchange_calendars as xcals
-import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.config import load_app_config
 from src.market_data_access import load_many_ticker_windows
 from src.power_gap_volume_watch import detect_many
-from src.martin_daily_gap_retest import REPLAY_V2_STRATEGY_ID
+from src.martin_daily_gap_retest import REPLAY_V3_STRATEGY_ID
 from src.ticker_filters import filter_universe_tickers, load_excluded_tickers
 from src.universe import load_universe
 from src.universe_filters import add_universe_filter_args, build_filter_criteria_from_args, filter_universe_by_criteria
@@ -28,7 +27,7 @@ from src.webapp.config import load_webapp_config
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_gap_retest_service import MartinGapRetestService
 
-BOOK_ID = REPLAY_V2_STRATEGY_ID
+BOOK_ID = REPLAY_V3_STRATEGY_ID
 START = dt.date(2026, 10, 19)
 DEFAULT_END = dt.date(2026, 10, 23)
 
@@ -53,32 +52,31 @@ def reconstruct_sources(start: dt.date, end: dt.date, *, database_url: str, conf
     if len(history_sessions) < 326:
         raise ValueError(f"Could not resolve 326 XNYS history sessions through {end}")
     history_start = history_sessions[-326].date()
+    rows: dict[str, list[dict[str, Any]]] = {}
     for offset in range(0, len(symbols), 200):
         batch = symbols[offset:offset + 200]
         frames = load_many_ticker_windows(batch, end, 326, database_url=database_url, start_date=history_start)
-        rows = {ticker: [{"date": idx.date().isoformat(), "open": row["Open"], "high": row["High"],
-                          "low": row["Low"], "close": row["Close"], "volume": row["Volume"],
-                          "adjustment_basis": "stored_daily_bars_ohlcv"}
-                         for idx, row in frame.iterrows()] for ticker, frame in frames.items()}
-        observed = [dt.date.fromisoformat(row["date"]) for values in rows.values() for row in values]
-        expected = ([label.date() for label in calendar.sessions_in_range(
-            pd.Timestamp(min(observed) - dt.timedelta(days=7)), pd.Timestamp(end.isoformat()))] if observed else [])
-        for session in sessions:
-            candidates = []
-            for result in detect_many(rows, session, expected):
-                if result.get("coverage", {}).get("issues"):
-                    data_issues += 1
-                context = result.get("power_gap_volume_context") or {}
-                if "gap" in result.get("signals", []) and context.get("gap_event"):
-                    candidates.append({"ticker": result["ticker"], "hit_payload_json": {
-                        "ticker": result["ticker"], "power_gap_volume_context": context}})
-            candidates.sort(key=lambda row: row["ticker"])
-            fingerprint = hashlib.sha256(json.dumps(candidates, sort_keys=True, default=str).encode()).hexdigest()
-            sources.append({"target_trading_date": session.isoformat(), "run_date": session.isoformat(),
-                "published_at": dt.datetime.now(dt.timezone.utc).isoformat(), "source_mode": "historical_reconstruction",
-                "rules_version": "power_gap_volume_watch_v1", "source_run_id": None, "source_fingerprint": fingerprint,
-                "replay_from_date": start.isoformat(), "replay_to_date": end.isoformat(), "hits": candidates})
+        rows.update({ticker: [{"date": idx.date().isoformat(), "open": row["Open"], "high": row["High"],
+                              "low": row["Low"], "close": row["Close"], "volume": row["Volume"],
+                              "adjustment_basis": "stored_daily_bars_ohlcv"}
+                             for idx, row in frame.iterrows()] for ticker, frame in frames.items()})
         print(f"Reconstructed {min(offset + 200, len(symbols))}/{len(symbols)} tickers", flush=True)
+    expected = [label.date() for label in history_sessions[-326:]]
+    for session in sessions:
+        candidates = []
+        for result in detect_many(rows, session, expected):
+            if result.get("coverage", {}).get("issues"):
+                data_issues += 1
+            context = result.get("power_gap_volume_context") or {}
+            if "gap" in result.get("signals", []) and context.get("gap_event"):
+                candidates.append({"ticker": result["ticker"], "hit_payload_json": {
+                    "ticker": result["ticker"], "power_gap_volume_context": context}})
+        candidates.sort(key=lambda row: row["ticker"])
+        fingerprint = hashlib.sha256(json.dumps(candidates, sort_keys=True, default=str).encode()).hexdigest()
+        sources.append({"target_trading_date": session.isoformat(), "run_date": session.isoformat(),
+            "published_at": dt.datetime.now(dt.timezone.utc).isoformat(), "source_mode": "historical_reconstruction",
+            "rules_version": "power_gap_volume_watch_v1", "source_run_id": None, "source_fingerprint": fingerprint,
+            "replay_from_date": start.isoformat(), "replay_to_date": end.isoformat(), "hits": candidates})
     return sources, {"universe_size": len(symbols), "sessions": [day.isoformat() for day in sessions],
                      "coverage_issue_observations": data_issues}
 
