@@ -209,6 +209,20 @@ class ScheduledJobServiceTests(unittest.TestCase):
         )
         self.assertEqual(job["depends_on_job_ids"], ["reload_prices"])
 
+    def test_gap_retest_schedule_requires_and_depends_on_price_and_gap_sources(self) -> None:
+        self.service.upsert_job(job_id="reload_prices", job_label="Reload prices", action_id="reload_postgres_market_data_date",
+                                cron_expr="30 17 * * 1-5", cron_tz="America/New_York", enabled=True)
+        with self.assertRaisesRegex(ValueError, "enabled Power Gap"):
+            self.service.upsert_job(job_id="gap_retest", job_label="Gap Retest", action_id="run_martin_gap_retest",
+                                    cron_expr="35 20 * * 1-5", cron_tz="America/New_York", enabled=True,
+                                    options={"as_of_date": "{{local_date}}", "apply": True})
+        self.service.upsert_job(job_id="power_gap", job_label="Power Gap", action_id="power_gap_volume_watch",
+                                cron_expr="0 19 * * 1-5", cron_tz="America/New_York", enabled=True)
+        job = self.service.upsert_job(job_id="gap_retest", job_label="Gap Retest", action_id="run_martin_gap_retest",
+                                      cron_expr="35 20 * * 1-5", cron_tz="America/New_York", enabled=False,
+                                      options={"as_of_date": "{{local_date}}", "apply": True})
+        self.assertEqual(job["depends_on_job_ids"], ["reload_prices", "power_gap"])
+
     def test_upsert_rejects_price_dependent_schedule_without_enabled_reload(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires an enabled Reload Postgres Market Data Date schedule"):
             self.service.upsert_job(

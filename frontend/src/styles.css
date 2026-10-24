@@ -7388,7 +7388,9 @@ dialog.modal-backdrop:not([open]) {
 .martin-chart path.rs-expanded-series { stroke: #d1a4ee; stroke-dasharray: 5 3; }
 .martin-comparison-chart .rs-expanded-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #d1a4ee; content: ""; }
 .martin-chart path.rs-rotation-series { stroke: #f2ba73; stroke-dasharray: 2 2; }
+.martin-chart path.gap-retest-series { stroke: #54c4ad; stroke-dasharray: 4 2; }
 .martin-comparison-chart .rs-rotation-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #f2ba73; content: ""; }
+.martin-comparison-chart .gap-retest-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #54c4ad; content: ""; }
 .martin-chart > div:last-child { grid-column: 2; grid-row: 2; display: flex; justify-content: space-between; color: #d4d4d8; font-size: .72rem; }
 .martin-exclusions { min-width: 0; border: 1px solid var(--border); border-radius: .6rem; padding: .85rem 1rem; background: var(--surface); }
 .martin-exclusions > summary { display: flex; justify-content: space-between; gap: 1rem; cursor: pointer; font-weight: 700; }

@@ -418,6 +418,18 @@ export type ScannerTopHitRow = {
   adr_suitability?: "suitable" | "caution" | "low" | "wide_stop" | "risk_failure" | string;
   adr_reason?: string | null;
   power_gap_volume_context?: PowerGapVolumeContext | null;
+  gap_retest_context?: GapRetestPreviewContext | null;
+};
+
+export type GapRetestPreviewContext = {
+  status: "available" | "unavailable" | string;
+  decision_date?: string | null;
+  strategy_id?: string | null;
+  config_version?: string | null;
+  gap_state?: string | null;
+  reason?: string | null;
+  decision_id?: string | null;
+  plan?: { reference_entry?: number | null; initial_stop?: number | null; max_entry?: number | null; reference_risk_pct?: number | null; adr14_pct?: number | null; stop_to_adr?: number | null } | null;
 };
 
 export type PowerGapVolumeContext = {
@@ -2739,6 +2751,6 @@ export type MartinForwardBook = {
 };
 export type MartinForwardResponse = {
   configured: boolean;
-  books: { account?: MartinForwardBook; sector_opportunity?: MartinForwardBook; daily_top5?: MartinForwardBook; rs_expanded?: MartinForwardBook; rs_expanded_rotation?: MartinForwardBook };
+  books: { account?: MartinForwardBook; sector_opportunity?: MartinForwardBook; daily_top5?: MartinForwardBook; rs_expanded?: MartinForwardBook; rs_expanded_rotation?: MartinForwardBook; gap_retest?: MartinForwardBook };
   comparison: Record<string, unknown>;
 };

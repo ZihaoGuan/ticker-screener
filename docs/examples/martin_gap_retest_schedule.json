@@ -1,0 +1,13 @@
+{
+  "job_id": "martin_gap_retest_daily",
+  "job_label": "Martin Daily Gap Retest",
+  "action_id": "run_martin_gap_retest",
+  "cron_expr": "35 20 * * 1-5",
+  "cron_tz": "America/New_York",
+  "enabled": false,
+  "options": {
+    "as_of_date": "{{local_date}}",
+    "apply": true
+  },
+  "depends_on_job_ids": []
+}

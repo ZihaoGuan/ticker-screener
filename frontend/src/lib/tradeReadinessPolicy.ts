@@ -1,4 +1,4 @@
-import type { PullbackQuality, ScannerTopHitRow, ScannerTradePlan, SnapshotTradePlanPolicy } from "./types";
+import type { GapRetestPreviewContext, PullbackQuality, ScannerTopHitRow, ScannerTradePlan, SnapshotTradePlanPolicy } from "./types";
 
 export type StopPolicy = "current_v1" | "martin_daily_structural_v1";
 export type ResolvedTradeReadiness = {
@@ -102,17 +102,29 @@ export function getReadinessSizingParams(ticker: string, resolved: ResolvedTrade
   return params;
 }
 
+export function getGapRetestSizingParams(ticker: string, context: GapRetestPreviewContext) {
+  const plan = context.plan;
+  if (context.status !== "available" || !plan || !finitePositive(plan.reference_entry) || !finitePositive(plan.initial_stop)
+    || plan.initial_stop >= plan.reference_entry || !finitePositive(plan.max_entry) || plan.max_entry < plan.initial_stop
+    || !/^\d{4}-\d{2}-\d{2}$/.test(context.decision_date ?? "")) return null;
+  return new URLSearchParams({ ticker, source: "gap-retest", policyVersion: "gap_daily_reclaim_next_open_v1", entryPolicyVersion: "gap_daily_reclaim_next_open_v1", stopPolicyVersion: "gap_reclaim_candle_low_v1", entry: String(plan.reference_entry), stop: String(plan.initial_stop), maxEntry: String(plan.max_entry), signalDate: context.decision_date! });
+}
+
 export function resolveSizingOrigin(params: URLSearchParams) {
+  const sourceKind = params.get("source");
   const requested = params.get("policyVersion");
   const policyVersion: StopPolicy | null = requested === null ? "current_v1"
     : requested === "current_v1" || requested === "martin_daily_structural_v1" ? requested : null;
-  const source = params.get("source") === "top-hits";
-  const verifiedPolicy = source && policyVersion !== null;
+  const source = sourceKind === "top-hits" || sourceKind === "gap-retest";
+  const gapRetest = sourceKind === "gap-retest" && requested === "gap_daily_reclaim_next_open_v1"
+    && params.get("entryPolicyVersion") === "gap_daily_reclaim_next_open_v1" && params.get("stopPolicyVersion") === "gap_reclaim_candle_low_v1";
+  const verifiedPolicy = sourceKind === "top-hits" ? policyVersion !== null : gapRetest;
   return {
     source,
     verifiedPolicy,
     policyVersion,
-    policyLabel: policyVersion === "current_v1" ? "Current v1" : policyVersion === "martin_daily_structural_v1" ? "Martin-inspired daily v1" : "Unrecognized / unverified",
+    gapRetest,
+    policyLabel: gapRetest ? "Daily Gap Retest · gap_daily_reclaim_next_open_v1" : policyVersion === "current_v1" ? "Current v1" : policyVersion === "martin_daily_structural_v1" ? "Martin-inspired daily v1" : "Unrecognized / unverified",
     entry: source ? verifiedPolicy ? params.get("entry") : null : params.get("entry"),
     stop: source ? verifiedPolicy ? params.get("stop") : null : params.get("stop"),
     maxEntry: source ? verifiedPolicy ? params.get("maxEntry") : null : params.get("maxEntry"),

@@ -110,7 +110,8 @@ def refresh_scanner_top_hits(service: Any, *, project_root: Path, now: dt.dateti
         if not post_close_daily_source:
             return outcome("waiting", f"Waiting for post-close daily scanner results dated {target}; retaining the previous Top Hits snapshot.")
         state = service.get_scanner_top_hits_snapshot_refresh_state(now=now, board_payload=board)
-        if resolved.get("skip_if_current", True) and state["has_current_snapshot"] and not state["source_changed"]:
+        if (resolved.get("skip_if_current", True) and state["has_current_snapshot"]
+                and not state["source_changed"] and not state.get("gap_retest_decision_changed")):
             return outcome("current", f"Top Hits for {target} is unchanged; the saved snapshot already reflects these scanner inputs.")
         if state["source_changed"] and _is_within_debounce_window(latest_source_at=str(state["latest_source_at"]),
                 now=now, debounce_seconds=max(0, int(resolved.get("debounce_seconds", 300)))):

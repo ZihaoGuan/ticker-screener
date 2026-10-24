@@ -32,13 +32,17 @@ export function PositionCalculatorPage() {
     const signalDate = validDate(origin.signalDate);
     const snapshotDate = validDate(origin.snapshotDate);
     const management = searchParams.get("management");
-    return { ...origin, source: origin.source ? "top-hits" : "", ticker, entry, stop, maxEntry, signalDate, snapshotDate, management: management === "balanced_daily" || management === "martin" ? management as TradeManagementPreset : "martin" as TradeManagementPreset };
+    return { ...origin, source: origin.gapRetest ? "gap-retest" : origin.source ? "top-hits" : "", ticker, entry, stop, maxEntry, signalDate, snapshotDate, management: management === "balanced_daily" || management === "martin" ? management as TradeManagementPreset : "martin" as TradeManagementPreset };
   }, [searchParams]);
   const [fields, setFields] = useState(() => ({ ...INITIAL, direction: "long" as const, entryPrice: context.entry, stopPrice: context.stop }));
   const [remember, setRemember] = useState(false);
   const [sizeMultiplier, setSizeMultiplier] = useState(1);
   const [wholeShares, setWholeShares] = useState(true);
   const [managementPreset, setManagementPreset] = useState<TradeManagementPreset>(context.management);
+
+  useEffect(() => {
+    setFields((current) => ({ ...current, entryPrice: context.entry, stopPrice: context.stop, direction: "long" }));
+  }, [context.entry, context.stop]);
 
   useEffect(() => {
     try {
@@ -106,7 +110,7 @@ export function PositionCalculatorPage() {
 
   return <div className="position-calculator-page">
     <header className="risk-page-heading"><h1>Position calculator</h1><p>Size a trade from your account risk, stop distance, and allocation limit.</p></header>
-    {context.source ? <section className="risk-context" aria-label="Top Hits trade plan"><strong>{context.ticker || "Top Hits"} · Planned trade context</strong><span>Origin policy: {context.policyLabel}{context.snapshotDate ? ` · Snapshot ${context.snapshotDate}` : ""}</span>{!context.verifiedPolicy ? <span role="alert">Origin policy is unrecognized. Imported levels were not applied; enter and verify your own levels.</span> : null}<span>Trigger {context.entry ? money(Number(context.entry)) : "Unavailable"} · Stop {context.stop ? money(Number(context.stop)) : "Unavailable"}</span><span>Max entry {context.maxEntry ? money(Number(context.maxEntry)) : "Unavailable"}{context.signalDate ? ` · Signal ${context.signalDate}` : ""} · {context.management === "martin" ? "Martin-like" : "Balanced Daily"} management</span>{!context.entry && !context.stop && context.verifiedPolicy ? <small>No saved levels were imported. Any values you enter are manual planning inputs, not a validated snapshot plan.</small> : adjustedSourceLevels ? <small>Entry, stop, or direction changed from the imported plan; sizing is adjusted.</small> : <small>These are editable planning values. Recalculate and check against your actual intended fill.</small>}</section> : null}
+    {context.source ? <section className="risk-context" aria-label={context.gapRetest ? "Daily Gap Retest plan" : "Top Hits trade plan"}><strong>{context.ticker || (context.gapRetest ? "Daily Gap Retest" : "Top Hits")} · Planned trade context</strong><span>Origin policy: {context.policyLabel}{context.snapshotDate ? ` · Snapshot ${context.snapshotDate}` : ""}</span>{!context.verifiedPolicy ? <span role="alert">Origin policy is unrecognized. Imported levels were not applied; enter and verify your own levels.</span> : null}<span>Trigger {context.entry ? money(Number(context.entry)) : "Unavailable"} · Stop {context.stop ? money(Number(context.stop)) : "Unavailable"}</span><span>Max entry {context.maxEntry ? money(Number(context.maxEntry)) : "Unavailable"}{context.signalDate ? ` · Decision ${context.signalDate}` : ""}{context.gapRetest ? " · Saved management: trim 10% once at 3R; exit remainder after a daily close below EMA9 at next open" : ` · ${context.management === "martin" ? "Martin-like" : "Balanced Daily"} management`}</span>{!context.entry && !context.stop && context.verifiedPolicy ? <small>No saved levels were imported. Any values you enter are manual planning inputs, not a validated snapshot plan.</small> : adjustedSourceLevels ? <small>Entry, stop, or direction changed from the imported plan; sizing is adjusted.</small> : <small>These are editable planning values. Recalculate and check against your actual intended fill.</small>}</section> : null}
     <div className="risk-layout">
       <Panel title="Trade inputs" className="risk-input-panel">
         <div className="risk-input-grid">
@@ -129,7 +133,7 @@ export function PositionCalculatorPage() {
       </Panel>
       <Panel title="Planned position" className="risk-result-panel">
         {result ? <>
-          {overMaxEntry ? <p className="risk-max-entry-warning" role="alert"><strong>WAIT — ABOVE MAX ENTRY</strong><span>Position math is still shown for review, but this fill is above the original Top Hits plan and that readiness plan is invalid. Do not use this as a buy recommendation.</span></p> : null}
+          {overMaxEntry ? <p className="risk-max-entry-warning" role="alert"><strong>WAIT — ABOVE MAX ENTRY</strong><span>Position math is still shown for review, but this fill is above the saved {context.gapRetest ? "Daily Gap Retest" : "Top Hits"} plan and that plan is invalid. Do not use this as a buy recommendation.</span></p> : null}
           <div className="risk-result-lead"><span>{overMaxEntry ? "Calculated size · plan invalid" : "Buy up to"}</span><strong>{sharesFormat(result.shares)} shares</strong><small>Position value {money(result.positionValue)} at {money(Number(fields.entryPrice))}</small></div>
           {result.allocationCapHit ? <p className="risk-cap-note" role="status">Allocation cap applied. The position is limited to {fields.maxAllocationPercent}% of account value.</p> : null}
           <dl className="risk-result-list">
@@ -142,7 +146,7 @@ export function PositionCalculatorPage() {
             <div><dt>Account allocation</dt><dd>{result.allocationPercent.toFixed(2)}%</dd></div>
           </dl>
           <div className="risk-targets"><div><span>1R target price</span><strong>{money(result.oneRTarget)}</strong></div><div><span>2R target price</span><strong>{money(result.target2R)}</strong></div><div><span>3R target price</span><strong>{money(result.target3R)}</strong></div></div>
-          {management ? <section className="risk-management"><strong>{management.preset === "martin" ? "Martin-like" : "Balanced Daily"} management planning</strong>{management.targets.map((target) => <div key={target.label}><span>{target.label} · {target.rMultiple}R · {target.sellPercent === 33 ? "sell 33%" : "trim 10–15%"}</span><b>{money(target.price)}{wholeShares ? ` · ${formatShares(target.shares)}` : ""}</b></div>)}<div><span>Runner · daily EMA9</span><b>{wholeShares ? formatShares(management.runnerShares) : "remainder"}</b></div>{management.trimUnavailable ? <p>A {sharesFormat(result.shares)}-share position is too small for a meaningful 10–15% whole-share trim; no trim shares are suggested.</p> : null}<small>Planning guidance only; no orders are placed. Recalculate targets from your actual fill.</small></section> : null}
+          {management ? <section className="risk-management"><strong>{context.gapRetest ? "Daily Gap Retest saved management" : `${management.preset === "martin" ? "Martin-like" : "Balanced Daily"} management planning`}</strong>{context.gapRetest ? <><div><span>3R · sell 10% once</span><b>{money(result.target3R)}{wholeShares ? ` · ${formatShares(Math.floor(result.shares * 0.1))}` : ""}</b></div><div><span>Runner · exit after daily close below EMA9 at next open</span><b>{wholeShares ? formatShares(result.shares - Math.floor(result.shares * 0.1)) : "remainder"}</b></div></> : <>{management.targets.map((target) => <div key={target.label}><span>{target.label} · {target.rMultiple}R · {target.sellPercent === 33 ? "sell 33%" : "trim 10–15%"}</span><b>{money(target.price)}{wholeShares ? ` · ${formatShares(target.shares)}` : ""}</b></div>)}<div><span>Runner · daily EMA9</span><b>{wholeShares ? formatShares(management.runnerShares) : "remainder"}</b></div>{management.trimUnavailable ? <p>A {sharesFormat(result.shares)}-share position is too small for a meaningful 10–15% whole-share trim; no trim shares are suggested.</p> : null}</>}<small>Planning guidance only; no orders are placed. Recalculate targets from your actual fill.</small></section> : null}
         </> : <p className="risk-empty" role="status">{inputError}</p>}
         <p className="risk-disclaimer">This is planned risk based on the entered stop and slippage estimate. Gaps and execution slippage can exceed it.</p>
       </Panel>

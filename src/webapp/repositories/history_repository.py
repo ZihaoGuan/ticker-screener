@@ -80,9 +80,10 @@ class HistoryRepository:
         },
     }
 
-    def __init__(self, database_url: str = "", artifacts_dir: Path | None = None) -> None:
+    def __init__(self, database_url: str = "", artifacts_dir: Path | None = None, *, read_only: bool = False) -> None:
         self.database_url = resolve_database_url(database_url)
         self.artifacts_dir = artifacts_dir
+        self.read_only = read_only
         self._schema_ready = False
 
     def is_configured(self) -> bool:
@@ -96,6 +97,12 @@ class HistoryRepository:
         except ImportError:
             return
         schema_path = Path(__file__).resolve().parents[3] / "sql" / "postgres_app_schema.sql"
+        if self.read_only:
+            with psycopg.connect(self.database_url, options="-c default_transaction_read_only=on") as connection:
+                if not self._history_schema_is_ready(connection):
+                    raise RuntimeError("Read-only history access requires the persisted history schema to be installed.")
+            self._schema_ready = True
+            return
         with psycopg.connect(self.database_url) as connection:
             connection.autocommit = True
             if self._history_schema_is_ready(connection):
@@ -150,7 +157,7 @@ class HistoryRepository:
             import psycopg
         except ImportError:
             return None
-        return psycopg.connect(self.database_url)
+        return psycopg.connect(self.database_url, options="-c default_transaction_read_only=on") if self.read_only else psycopg.connect(self.database_url)
 
     def _rows_to_dicts(self, cursor: Any, rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
         columns = [item.name if hasattr(item, "name") else item[0] for item in cursor.description or []]

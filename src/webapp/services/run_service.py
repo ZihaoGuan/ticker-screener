@@ -371,6 +371,14 @@ class RunService:
             fields=(_as_of_date_field,),
             visible_in_runs=False,
         ),
+        "run_martin_gap_retest": RunAction(
+            "run_martin_gap_retest",
+            "Run Martin Daily Gap Retest",
+            "scripts/run_martin_gap_retest.py",
+            supports_limit=False,
+            fields=(_as_of_date_field, RunField("apply", "Apply to Paper Book", "boolean", help_text="Defaults to a read-only dry run.")),
+            visible_in_runs=False,
+        ),
         "rts_validation": RunAction(
             "rts_validation",
             "Validate Relative Trend Strength",
@@ -3161,6 +3169,8 @@ class RunService:
             command.extend(["--date-label", str(normalized_options["date_label"])])
         if normalized_options.get("as_of_date"):
             command.extend(["--as-of-date", str(normalized_options["as_of_date"])])
+        if action_id == "run_martin_gap_retest" and normalized_options.get("apply"):
+            command.append("--apply")
         if normalized_options.get("lookback_days") is not None:
             command.extend(["--lookback-days", str(normalized_options["lookback_days"])])
         if normalized_options.get("min_correlation") is not None:
@@ -3254,7 +3264,7 @@ class RunService:
                 command.append("--allow-incremental-refresh")
         if action_id in {"screener_history_batch", "signal_warm_batch"} and normalized_options.get("market_data_source"):
             command.extend(["--market-data-source", str(normalized_options["market_data_source"])])
-        if action_id in {"screener_history_batch", "signal_warm_batch", "overlap_backtest_v1"} and normalized_options.get("job_run_id") is not None:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "overlap_backtest_v1", "run_martin_gap_retest"} and normalized_options.get("job_run_id") is not None:
             command.extend(["--job-run-id", str(normalized_options["job_run_id"])])
         if "filter_precedence" in supported_field_ids and normalized_options.get("filter_precedence"):
             command.extend(["--filter-precedence", str(normalized_options["filter_precedence"])])
@@ -3412,6 +3422,8 @@ class RunService:
             normalized["skip_if_current"] = bool(options.get("skip_if_current"))
         if "allow_incremental_refresh" in options:
             normalized["allow_incremental_refresh"] = bool(options.get("allow_incremental_refresh"))
+        if action.action_id == "run_martin_gap_retest":
+            normalized["apply"] = str(options.get("apply") or "").strip().lower() in {"1", "true", "yes", "on"}
 
         for key in (
             "include_sectors",
@@ -3942,7 +3954,7 @@ class RunService:
             return "screen_cache_batch"
         if action_id in {"overlap_backtest_v1", "rts_validation"}:
             return "backtest_run"
-        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "refresh_split_adjusted_history", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "sync_tiger_positions", "refresh_sector_etf_holdings", "refresh_momentum_etf_holdings", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach", "build_scanner_top_hits_snapshot", "run_martin_forward_test", "build_dashboard_market_health_snapshot", "build_relative_trend_strength"}:
+        if action_id in {"sync_postgres_market_data", "reload_postgres_market_data_date", "refresh_split_adjusted_history", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "run_finviz_ratings_pipeline", "sync_tiger_positions", "refresh_sector_etf_holdings", "refresh_momentum_etf_holdings", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach", "build_scanner_top_hits_snapshot", "run_martin_forward_test", "run_martin_gap_retest", "build_dashboard_market_health_snapshot", "build_relative_trend_strength"}:
             return "admin_sync"
         return "screen_run"
 
@@ -3976,7 +3988,7 @@ class RunService:
             self._notify_completed_job(job)
             return
         action_id = str(job.get("action_id") or "")
-        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "refresh_split_adjusted_history", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "sync_tiger_positions", "refresh_sector_etf_holdings", "refresh_momentum_etf_holdings", "overlap_backtest_v1", "rts_validation", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach", "build_scanner_top_hits_snapshot", "run_martin_forward_test", "build_dashboard_market_health_snapshot", "build_relative_trend_strength"}:
+        if action_id in {"screener_history_batch", "signal_warm_batch", "sync_postgres_market_data", "reload_postgres_market_data_date", "refresh_split_adjusted_history", "run_finviz_ratings_pipeline", "sync_finviz_fundamentals", "sync_finviz_ipo_dates", "sync_chart_fundamentals_cache", "build_sector_rating_baselines", "build_ticker_ratings", "build_technical_ratings", "build_technical_indicator_ratings", "sync_tiger_positions", "refresh_sector_etf_holdings", "refresh_momentum_etf_holdings", "overlap_backtest_v1", "rts_validation", "market_breadth", "uptrend_analysis", "theme_detector", "pair_trade_screener", "ibd_distribution_day_monitor", "exposure_coach", "build_scanner_top_hits_snapshot", "run_martin_forward_test", "run_martin_gap_retest", "build_dashboard_market_health_snapshot", "build_relative_trend_strength"}:
             self._notify_completed_job(job)
             return
         summary_file = str(job.get("summary_file") or "").strip()

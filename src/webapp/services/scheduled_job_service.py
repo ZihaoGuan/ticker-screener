@@ -179,7 +179,7 @@ class ScheduledJobService:
                 }
             )
         jobs = [item for item in normalized if item["job_id"] and item["action_id"] and item["cron_expr"]]
-        jobs = [self._with_required_price_reload_dependency(job, jobs=jobs, strict=False) for job in jobs]
+        jobs = [self._with_required_gap_source_dependency(self._with_required_price_reload_dependency(job, jobs=jobs, strict=False), jobs=jobs, strict=False) for job in jobs]
         estimates = {job["job_id"]: self._estimate_job_duration(job["job_id"]) for job in jobs}
         for job in jobs:
             job.update(estimates[job["job_id"]])
@@ -268,7 +268,7 @@ class ScheduledJobService:
         if not replaced:
             next_jobs.append(next_job)
         _validate_schedule_dependencies(next_jobs)
-        next_job = self._with_required_price_reload_dependency(next_job, jobs=next_jobs, strict=True)
+        next_job = self._with_required_gap_source_dependency(self._with_required_price_reload_dependency(next_job, jobs=next_jobs, strict=True), jobs=next_jobs, strict=True)
         next_jobs = [next_job if str(item.get("job_id") or "").strip() == clean_job_id else item for item in next_jobs]
         _validate_schedule_dependencies(next_jobs)
         payload["jobs"] = sorted(next_jobs, key=lambda item: str(item.get("job_label") or item.get("job_id") or ""))
@@ -335,7 +335,8 @@ class ScheduledJobService:
         return ""
 
     def enqueue_job(self, *, job: dict[str, Any], local_now: datetime, trigger_source: str = "scheduler") -> str:
-        job = self._with_required_price_reload_dependency(job, jobs=self.list_jobs(), strict=True)
+        jobs = self.list_jobs()
+        job = self._with_required_gap_source_dependency(self._with_required_price_reload_dependency(job, jobs=jobs, strict=True), jobs=jobs, strict=True)
         action_id = str(job["action_id"])
         if action_id not in self.run_service._actions:
             raise ValueError(f"Unknown action_id: {action_id}")
@@ -415,12 +416,38 @@ class ScheduledJobService:
             return False
         if action_id == "build_daily_screening_features":
             return True
+        if action_id == "run_martin_gap_retest":
+            return True
         options = job.get("options") if isinstance(job.get("options"), dict) else {}
         if str(options.get("market_data_source") or "").strip().lower() == "database-first":
             return True
         catalog = build_screener_catalog(load_app_config())
         spec = catalog.get(action_id)
         return bool(spec and "daily_bars" in spec.required_inputs)
+
+    def _with_required_gap_source_dependency(
+        self, job: dict[str, Any], *, jobs: list[dict[str, Any]], strict: bool,
+    ) -> dict[str, Any]:
+        if str(job.get("action_id") or "") != "run_martin_gap_retest":
+            return job
+        source = next((item for item in jobs
+                       if str(item.get("action_id") or "") == "power_gap_volume_watch"
+                       and str(item.get("cron_tz") or "America/New_York") == str(job.get("cron_tz") or "America/New_York")), None)
+        if source is None or not bool(source.get("enabled", True)):
+            if strict and bool(job.get("enabled", True)):
+                raise ValueError("Martin Daily Gap Retest requires an enabled Power Gap & Volume Watch schedule in the same timezone.")
+            return job
+        consumer_days = _simple_cron_days(str(job.get("cron_expr") or ""))
+        source_days = _simple_cron_days(str(source.get("cron_expr") or ""))
+        if consumer_days is not None and source_days is not None and not consumer_days.issubset(source_days):
+            if strict and bool(job.get("enabled", True)):
+                raise ValueError("Martin Daily Gap Retest requires a Power Gap source schedule that runs on the same day.")
+            return job
+        dependencies = _normalize_dependency_job_ids(job.get("depends_on_job_ids"))
+        source_id = str(source["job_id"])
+        if source_id not in dependencies:
+            return {**job, "depends_on_job_ids": [*dependencies, source_id]}
+        return job
 
     def _write_status(self, *, job_id: str, job_label: str, message: str, artifact_file: str) -> None:
         status_dir = self.artifacts_dir / "status"
@@ -482,7 +509,7 @@ class ScheduledJobService:
                 ],
             }
             for action in self.run_service._actions.values()
-            if action.action_id == "sync_postgres_market_data"
+            if action.action_id in {"sync_postgres_market_data", "run_martin_gap_retest"}
         ]
         job_estimates = jobs if jobs is not None else self.list_jobs()
         estimates_by_action: dict[str, list[int]] = {}
@@ -502,7 +529,7 @@ class ScheduledJobService:
                 "fields": item.get("fields", []),
                 "execution_modes": item.get("execution_modes") or list(self.run_service.execution_modes_for_action(str(item["id"]))),
                 "requires_daily_bars": (
-                    str(item["id"]) == "build_daily_screening_features"
+                    str(item["id"]) in {"build_daily_screening_features", "run_martin_gap_retest"}
                     or "daily_bars" in required_inputs_by_action.get(str(item["id"]), ())
                 ),
                 **_summarize_durations(

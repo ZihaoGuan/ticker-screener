@@ -8,7 +8,8 @@ from typing import Any
 from src.market_data_access import resolve_database_url
 from src.webapp.services.martin_rotation import ROTATION_STRATEGY_ID, ROTATION_POLICY_VERSION, ROTATION_LIMITS, account_budget
 
-ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1", ROTATION_STRATEGY_ID}
+GAP_RETEST_STRATEGY_ID = "martin_daily_gap_retest_v1"
+ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1", ROTATION_STRATEGY_ID, GAP_RETEST_STRATEGY_ID}
 
 
 class _SessionConnection:
@@ -19,8 +20,9 @@ class _SessionConnection:
 
 
 class MartinForwardTestRepository:
-    def __init__(self, *, database_url: str = "") -> None:
+    def __init__(self, *, database_url: str = "", read_only: bool = False) -> None:
         self.database_url = resolve_database_url(database_url)
+        self.read_only = read_only
         self._schema_ready = False
         self._session_connection = None
 
@@ -44,6 +46,34 @@ class MartinForwardTestRepository:
     def latest_session_date(self, strategy_id: str):
         rows = self._rows("SELECT max(session_date) AS latest_date FROM martin_forward_runs WHERE strategy_id=%s", (strategy_id,))
         return rows[0]["latest_date"] if rows else None
+
+    def session_run_id(self, strategy_id: str, session_date: Any) -> int | None:
+        rows = self._rows("SELECT id FROM martin_forward_runs WHERE strategy_id=%s AND session_date=%s ORDER BY id DESC LIMIT 1", (strategy_id, session_date))
+        return int(rows[0]["id"]) if rows else None
+
+    def latest_source_run_id(self, strategy_id: str) -> int | None:
+        rows = self._rows("SELECT source_run_id FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 1", (strategy_id,))
+        return int(rows[0]["source_run_id"]) if rows and rows[0].get("source_run_id") is not None else None
+
+    def latest_gap_watch_states(self, strategy_id: str = GAP_RETEST_STRATEGY_ID) -> dict[str, dict[str, Any]]:
+        rows = self._rows("""SELECT DISTINCT ON (c.ticker) c.ticker,c.payload_json
+            FROM martin_forward_candidates c JOIN martin_forward_runs r ON r.id=c.run_id
+            WHERE r.strategy_id=%s ORDER BY c.ticker,r.session_date DESC,r.id DESC,c.id DESC""", (strategy_id,))
+        return {str(row["ticker"]).upper(): row.get("payload_json") or {} for row in rows}
+
+    def gap_events(self, strategy_id: str = GAP_RETEST_STRATEGY_ID) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM martin_forward_events WHERE strategy_id=%s ORDER BY event_date,id", (strategy_id,))
+
+    def has_gap_event_fill(self, strategy_id: str, event_identity: Any) -> bool:
+        identity = {"event_identity": event_identity}
+        rows = self._rows("""SELECT id FROM martin_forward_positions WHERE strategy_id=%s
+            AND payload_json @> %s::jsonb LIMIT 1""", (strategy_id, json.dumps(identity)))
+        if rows:
+            return True
+        # Events keep the identity after a position is closed or otherwise retired.
+        rows = self._rows("""SELECT id FROM martin_forward_events WHERE strategy_id=%s
+            AND event_type='order_filled' AND payload_json @> %s::jsonb LIMIT 1""", (strategy_id, json.dumps(identity)))
+        return bool(rows)
 
     def account_state(self, strategy_id: str, *, exclude_order_ticker: str | None = None) -> dict[str, float]:
         rows = self._rows("SELECT status,payload_json FROM martin_forward_positions WHERE strategy_id=%s", (strategy_id,))
@@ -87,13 +117,13 @@ class MartinForwardTestRepository:
             import psycopg
         except ImportError:
             return None
-        if not self._schema_ready:
+        if not self._schema_ready and not self.read_only:
             schema = Path(__file__).resolve().parents[3] / "sql" / "postgres_app_schema.sql"
             with psycopg.connect(self.database_url) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(schema.read_text(encoding="utf-8"))
             self._schema_ready = True
-        return psycopg.connect(self.database_url)
+        return psycopg.connect(self.database_url, options="-c default_transaction_read_only=on") if self.read_only else psycopg.connect(self.database_url)
 
     def save_session(self, *, session_date: Any, source_run_id: int, fingerprint: str, candidates: list[dict[str, Any]], summary: dict[str, Any], strategy_id: str = "martin_daily_v1") -> int | None:
         connection = self._connect()
@@ -315,7 +345,8 @@ class MartinForwardTestRepository:
                 books = {}
                 for strategy_id, key in (("martin_daily_v1", "account"), ("martin_sector_book_v1", "sector_opportunity"),
                                          ("martin_daily_top5_v1", "daily_top5"), ("martin_rs_expanded_v1", "rs_expanded"),
-                                         (ROTATION_STRATEGY_ID, "rs_expanded_rotation")):
+                                         (ROTATION_STRATEGY_ID, "rs_expanded_rotation"),
+                                         (GAP_RETEST_STRATEGY_ID, "gap_retest")):
                     runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
                     latest_id = runs[0]["id"] if runs else None
                     candidates = self._fetch(cursor, "SELECT * FROM martin_forward_candidates WHERE run_id=%s ORDER BY rank", (latest_id,)) if latest_id else []
@@ -330,7 +361,7 @@ class MartinForwardTestRepository:
                         books[key]["rotation_policy_version"] = ROTATION_POLICY_VERSION
                         books[key]["rotation_limits"] = ROTATION_LIMITS
                 account = books.get("account")
-                for account in (account, books.get("rs_expanded_rotation")):
+                for account in (account, books.get("rs_expanded_rotation"), books.get("gap_retest")):
                     if not account or not account.get("history"):
                         continue
                     dates = [str(point.get("date") or "") for point in account["history"] if point.get("date")]
@@ -351,6 +382,23 @@ class MartinForwardTestRepository:
                     except Exception:
                         account["benchmark_comparison"] = {"status": "unavailable", "reason": "Stored benchmark bars could not be read from the database.", "basis": "price_return_close"}
         return {"configured": True, "books": books, "comparison": _comparison_series(books)}
+
+    def gap_retest_context(self) -> dict[str, Any]:
+        context = self.context()
+        return context.get("books", {}).get("gap_retest") or {"history": [], "runs": [], "candidates": [], "positions": [], "events": [], "outstanding_orders": []}
+
+    def gap_retest_decision_snapshot(self, session_date: Any) -> dict[str, Any]:
+        rows = self._rows("""SELECT r.id,r.session_date,c.ticker,c.status,c.payload_json
+            FROM martin_forward_runs r LEFT JOIN martin_forward_candidates c ON c.run_id=r.id
+            WHERE r.strategy_id=%s AND r.session_date=%s ORDER BY c.rank,c.ticker""", (GAP_RETEST_STRATEGY_ID, session_date))
+        return {"decision_id": rows[0]["id"] if rows else None,
+                "decisions": {str(row["ticker"]).upper(): {**(row.get("payload_json") or {}), "status": row.get("status")}
+                              for row in rows if row.get("ticker")}}
+
+    def daily_bar_provenance(self, ticker: str, start_date: Any, end_date: Any) -> list[dict[str, Any]]:
+        return self._rows("""SELECT source,split_factor,COUNT(*) AS rows,MIN(trade_date) AS first_date,MAX(trade_date) AS last_date
+            FROM daily_bars WHERE ticker=%s AND trade_date BETWEEN %s AND %s
+            GROUP BY source,split_factor ORDER BY source,split_factor""", (ticker.upper(), start_date, end_date))
 
     def _rows(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         connection = self._connect()

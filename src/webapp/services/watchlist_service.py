@@ -60,6 +60,7 @@ from ..repositories.insider_repository import InsiderRepository
 from ..repositories.position_decision_repository import PositionDecisionRepository
 from ..repositories.relative_trend_strength_repository import RelativeTrendStrengthRepository
 from ..repositories.watchlist_repository import WatchlistRepository
+from ..repositories.martin_forward_test_repository import MartinForwardTestRepository, GAP_RETEST_STRATEGY_ID
 from .insider_fetcher import fetch_insider_trades_window
 from .screener_history_service import ScreenerHistoryService
 from .strike_zone import STRIKE_ZONE_SCANNER_IDS, build_strike_zone, strike_zone_scanner_label
@@ -1187,6 +1188,11 @@ class WatchlistService:
         persisted = self._load_latest_persisted_scanner_top_hits_payload() or {}
         persisted_date = str(persisted.get("target_trading_date") or "")
         persisted_fingerprint = str(persisted.get("source_fingerprint") or "")
+        try:
+            gap_decision = MartinForwardTestRepository(database_url=self.database_url or "", read_only=True).gap_retest_decision_snapshot(target_date) if target_date else {"decision_id": None}
+        except Exception:
+            gap_decision = {"decision_id": None}
+        gap_fingerprint = str(gap_decision.get("decision_id") or "")
         return {
             "target_date": target_date,
             "source_fingerprint": fingerprint,
@@ -1194,6 +1200,9 @@ class WatchlistService:
             "latest_source_at": latest_source_at,
             "has_current_snapshot": bool(target_date and persisted_date == target_date),
             "source_changed": bool(fingerprint and fingerprint != persisted_fingerprint),
+            "gap_retest_decision_fingerprint": gap_fingerprint,
+            "persisted_gap_retest_decision_fingerprint": str(persisted.get("gap_retest_decision_fingerprint") or ""),
+            "gap_retest_decision_changed": gap_fingerprint != str(persisted.get("gap_retest_decision_fingerprint") or ""),
         }
 
     def persist_scanner_top_hits_snapshot(
@@ -1215,6 +1224,18 @@ class WatchlistService:
         if not target_trading_date_text:
             return payload
         run_date = dt.date.fromisoformat(target_trading_date_text)
+        try:
+            decision_snapshot = MartinForwardTestRepository(database_url=self.database_url or "", read_only=True).gap_retest_decision_snapshot(run_date)
+        except Exception:
+            decision_snapshot = {"decision_id": None, "decisions": {}}
+        decision_map = decision_snapshot.get("decisions") or {}
+        for row in payload.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            decision = decision_map.get(normalize_ticker_symbol(str(row.get("ticker") or "")))
+            if not decision:
+                continue
+            row["gap_retest_context"] = _gap_retest_preview(decision, decision_id=decision_snapshot.get("decision_id"), decision_date=run_date)
         summary_payload = {
             "snapshot_schema_version": _SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION,
             "generated_at": payload.get("generated_at"),
@@ -1234,6 +1255,7 @@ class WatchlistService:
         }
         source_fingerprint, _ = _scanner_top_hits_source_fingerprint(resolved_board_payload)
         summary_payload["source_fingerprint"] = source_fingerprint
+        summary_payload["gap_retest_decision_fingerprint"] = str(decision_snapshot.get("decision_id") or "")
         config_json = {
             "kind": "scanner_top_hits_snapshot",
             "benchmark_ticker": self.benchmark_ticker,
@@ -1321,6 +1343,7 @@ class WatchlistService:
             "rows": snapshot_rows,
             "guru_board": copy.deepcopy(summary.get("guru_board") or {}),
             "source_fingerprint": str(summary.get("source_fingerprint") or ""),
+            "gap_retest_decision_fingerprint": str(summary.get("gap_retest_decision_fingerprint") or ""),
             "_snapshot_run_id": run_id,
             "_snapshot_generated_at": generated_at,
         }
@@ -1418,6 +1441,7 @@ class WatchlistService:
                 "rows": rows_payload,
                 "guru_board": copy.deepcopy(summary_payload.get("guru_board") or {}),
                 "source_fingerprint": str(summary_payload.get("source_fingerprint") or ""),
+                "gap_retest_decision_fingerprint": str(summary_payload.get("gap_retest_decision_fingerprint") or ""),
             }
         return None
 
@@ -6088,8 +6112,23 @@ _SCANNER_TOP_HIT_LIST_FIELDS = (
     "position_bucket", "daily_rs_rating", "weekly_rs_rating", "rs_rating_3m",
     "rs_rating_6m", "growth_acceleration_score", "growth_acceleration_label", "growth_acceleration_pass_count",
     "canslim_score", "canslim_max_score", "vcp_score", "vcp_rating",
-    "power_gap_volume_context", "trade_readiness_explanation",
+    "power_gap_volume_context", "trade_readiness_explanation", "gap_retest_context",
 )
+
+
+def _gap_retest_preview(decision: dict[str, Any], *, decision_id: Any, decision_date: dt.date) -> dict[str, Any]:
+    plan = decision.get("plan") if isinstance(decision.get("plan"), dict) else decision
+    plan = plan if all(key in plan for key in ("reference_entry", "max_entry", "reference_risk_pct")) else None
+    return {
+        "status": "available" if plan and decision.get("gap_state") in {"confirmed", "waiting_risk", "waiting_capacity", "pending"} else "unavailable",
+        "decision_date": decision_date.isoformat(), "strategy_id": GAP_RETEST_STRATEGY_ID,
+        "config_version": decision.get("config_version"), "gap_state": decision.get("gap_state"),
+        "entry_policy_version": decision.get("entry_policy_version"), "stop_policy_version": decision.get("stop_policy_version"),
+        "management_policy_version": decision.get("management_policy_version"),
+        "reason": (decision.get("reasons") or [None])[0], "decision_id": decision_id,
+        "plan": {"reference_entry": plan.get("reference_entry"), "initial_stop": plan.get("initial_stop", plan.get("stop")),
+                 **{key: plan.get(key) for key in ("max_entry", "reference_risk_pct", "adr14_pct", "stop_to_adr")}} if plan else None,
+    }
 
 
 def _project_scanner_top_hit_list_row(row: dict[str, Any]) -> dict[str, Any]:

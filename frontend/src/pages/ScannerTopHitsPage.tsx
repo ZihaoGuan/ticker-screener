@@ -11,7 +11,7 @@ import { aggregateCandlesWeekly, buildChartCandles, buildExponentialMovingAverag
 import { formatCount, formatLocalDate, formatLocalDateTime, humanizePositionAction, humanizePositionExtension, humanizePositionTrend, toneForPositionAction } from "../lib/format";
 import { resolveRsMomentumSignal } from "../lib/rsMomentum";
 import { calculateTradeManagement, type TradeManagementPreset } from "../lib/tradeManagement";
-import { getReadinessSizingParams, resolveTradeReadiness, type ResolvedTradeReadiness, type StopPolicy } from "../lib/tradeReadinessPolicy";
+import { getGapRetestSizingParams, getReadinessSizingParams, resolveTradeReadiness, type ResolvedTradeReadiness, type StopPolicy } from "../lib/tradeReadinessPolicy";
 import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPickRow, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
 type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore" | "powerGap";
@@ -1323,6 +1323,7 @@ export function ScannerTopHitsPage() {
                           </Link>
                           <span>{row.company || row.industry || "-"}</span>
                           {row.power_gap_volume_context ? <PowerGapEventSummary row={row} /> : null}
+                          {row.gap_retest_context ? <GapRetestPreview row={row} /> : null}
                         </div>
                       </td>
                       <td data-label="Hits">
@@ -2787,6 +2788,22 @@ function PowerGapEventSummary({ row }: { row: ScannerTopHitRow }) {
     <span>History coverage: {coverageText}</span>
     {coverage?.component_issues?.gap ? <span>Gap signal unavailable: {coverage.component_issues.gap}</span> : null}
     {coverage?.component_issues?.hvy ? <span>HVY signal unavailable: {coverage.component_issues.hvy}</span> : null}
+  </details>;
+}
+
+function GapRetestPreview({ row }: { row: ScannerTopHitRow }) {
+  const context = row.gap_retest_context;
+  if (!context) return null;
+  const plan = context.plan;
+  const params = getGapRetestSizingParams(row.ticker, context);
+  const available = Boolean(params && plan);
+  return <details className="power-gap-event-summary gap-retest-preview">
+    <summary>Daily Gap Retest · {available ? String(context.gap_state || "plan available").replace(/_/g, " ") : "Preview unavailable"}</summary>
+    {available && plan ? <>
+      <span>Saved decision {context.decision_date || "date unavailable"} · {context.config_version || "version unavailable"}; reference entry {formatPrice(plan.reference_entry ?? null)}, reclaim-candle stop {formatPrice(plan.initial_stop ?? null)}, max entry {formatPrice(plan.max_entry ?? null)}.</span>
+      <span>Reference risk {plan.reference_risk_pct == null ? "unavailable" : `${plan.reference_risk_pct.toFixed(2)}%`} · ADR14 {plan.adr14_pct == null ? "unavailable" : `${plan.adr14_pct.toFixed(2)}%`} · stop / ADR {plan.stop_to_adr == null ? "unavailable" : `${plan.stop_to_adr.toFixed(2)}×`}. Saved management: trim 10% once at 3R; exit remainder after daily close below EMA9 at next open.</span>
+      <Link className="ghost-button trade-readiness-size" to={`/position-calculator?${params!.toString()}`}>Size saved gap plan</Link>
+    </> : <span>{context.reason || "No saved book decision and plan are available for this snapshot."}</span>}
   </details>;
 }
 

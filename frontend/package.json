@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "check:gap-retest-sizing": "node scripts/check_gap_retest_sizing.mjs",
     "preview": "vite preview",
     "probe:schedule-timeline": "node scripts/probe_schedule_timeline_refresh.mjs",
     "validate:pine-indicator": "node scripts/validate_ema_vwap_rsi_targets.mjs",
