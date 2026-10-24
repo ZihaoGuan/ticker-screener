@@ -681,6 +681,7 @@ _LEGACY_PREFIX_TO_STRATEGY: tuple[tuple[str, str], ...] = (
     ("pine_peg", "pine_peg"),
     ("monster_gap", "monster_gap"),
     ("monster_peg", "monster_peg"),
+    ("power_gap_volume_watch", "power_gap_volume_watch"),
     ("hve", "hve"),
     ("bb_squeeze", "bb_squeeze"),
     ("bollinger_band_breakout", "bollinger_band_breakout"),

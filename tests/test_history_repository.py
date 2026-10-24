@@ -135,6 +135,16 @@ class HistoryRepositoryEnsureSchemaTests(unittest.TestCase):
         self.assertIn("ema9_20_crossover_targets", params or ())
         self.assertIn("2026-10-11", params or ())
 
+    def test_power_gap_dated_watchlist_lookup_matches_strategy_and_run_date(self) -> None:
+        connection = _FakeConnection(schema_checks=[])
+        repository = HistoryRepository(database_url="postgres://example")
+        repository._connect = lambda: connection
+        with patch.object(repository, "_rows_to_dicts", return_value=[]):
+            repository.find_screen_run_by_watchlist_stem("power_gap_volume_watch_2026-10-23")
+        sql, params = connection.executed_sql[0]
+        self.assertIn("strategy_id = %s AND run_date = %s", sql)
+        self.assertEqual(params[-2:], ("power_gap_volume_watch", "2026-10-23"))
+
     def test_claim_remote_job_applies_priority_dependencies_pool_and_global_limit(self) -> None:
         connection = _FakeConnection(schema_checks=[])
         repository = HistoryRepository(database_url="postgres://example")
