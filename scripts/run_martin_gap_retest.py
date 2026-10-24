@@ -19,9 +19,10 @@ from src.webapp.repositories.history_repository import HistoryRepository
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_gap_retest_service import MartinGapRetestService
 from src.webapp.services.screener_history_service import ScreenerHistoryService
+from src.martin_daily_gap_retest import REPLAY_V4_STRATEGY_ID
 
 SOURCE_ID = "power_gap_volume_watch"
-STRATEGY_ID = "martin_daily_gap_retest_v1"
+STRATEGY_ID = REPLAY_V4_STRATEGY_ID
 
 
 def _atomic_json(path: Path, value: dict) -> None:
@@ -79,7 +80,8 @@ def main() -> int:
     source = _load_source(history, args.as_of_date)
     repo = MartinForwardTestRepository(database_url=config.database_url, read_only=not args.apply)
     service = MartinGapRetestService(repo, database_url=config.database_url)
-    result = service.run_session(as_of_date=args.as_of_date, source_record=source, dry_run=not args.apply)
+    result = service.run_session(as_of_date=args.as_of_date, source_record=source, dry_run=not args.apply,
+                                 strategy_id=STRATEGY_ID)
     result.update({"execution_mode": "applied" if args.apply else "dry_run", "source_run_id": (source or {}).get("source_run_id", result.get("source_run_id")),
                    "source_published_at": (source or {}).get("published_at"), "source_fingerprint": (source or {}).get("source_fingerprint")})
 

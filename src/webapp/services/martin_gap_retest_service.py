@@ -280,8 +280,10 @@ class MartinGapRetestService:
 
     def run_session(self, *, as_of_date: date, source_record: dict[str, Any] | None, dry_run: bool = True,
                     strategy_id: str = STRATEGY_ID, historical_replay: bool = False) -> dict[str, Any]:
-        if (historical_replay and strategy_id not in {REPLAY_STRATEGY_ID, REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID, REPLAY_V4_STRATEGY_ID}) or (not historical_replay and strategy_id != STRATEGY_ID):
+        if (historical_replay and strategy_id not in {REPLAY_STRATEGY_ID, REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID, REPLAY_V4_STRATEGY_ID}) or (not historical_replay and strategy_id not in {STRATEGY_ID, REPLAY_V4_STRATEGY_ID}):
             raise ValueError("Unsupported gap retest book identity")
+        if strategy_id == REPLAY_V4_STRATEGY_ID and not historical_replay and self.repository.latest_session_date(strategy_id) is None:
+            raise ValueError("Replay v4 must be seeded through the previous market session before daily continuation")
         dates = self._dates(as_of_date)
         if not dates or dates[-1] != as_of_date:
             raise ValueError("Daily Gap Retest requires an XNYS session")
@@ -544,13 +546,14 @@ class MartinGapRetestService:
         if not source_valid:
             source_lookup = getattr(repo, "latest_source_run_id", None)
             source_id = int(source_lookup(sid) or 0) if source_lookup else 0
-            if not source_id:
+            if not source_id and sid != REPLAY_V4_STRATEGY_ID:
                 context = repo.gap_retest_context() if hasattr(repo, "gap_retest_context") else {}
                 prior_runs = context.get("runs", []) if isinstance(context, dict) else []
                 previous = next((run for run in prior_runs if run.get("source_run_id")), None)
                 source_id = int(previous.get("source_run_id")) if previous else 0
-            if not source_id:
+            if not source_id and sid != REPLAY_V4_STRATEGY_ID:
                 raise ValueError("Established gap retest book has no prior valid source run ID")
+            # A replay-seeded v4 book can manage existing risk with source_run_id=0.
         fingerprint = fingerprint or f"source-missing:{day.isoformat()}"
         summary = {**{k: v for k, v in report.items() if k not in {"candidates", "orders"}},
                    "execution_complete": True, "discovery_complete": source_valid,

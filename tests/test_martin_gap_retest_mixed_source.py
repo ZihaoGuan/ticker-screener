@@ -1,8 +1,12 @@
 from datetime import date, timedelta
+from contextlib import nullcontext
 import unittest
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
+from scripts.run_martin_gap_retest import STRATEGY_ID as DAILY_STRATEGY_ID
+from src.martin_daily_gap_retest import REPLAY_V4_STRATEGY_ID
 from src.webapp.services.martin_gap_retest_service import MartinGapRetestService
 
 
@@ -68,6 +72,27 @@ class MixedSourceCertificationTests(unittest.TestCase):
 
     def test_unknown_provider_is_rejected(self):
         self.assertFalse(self.certify(["tradingview", "broker_csv", "massive"])[0])
+
+    def test_scheduled_daily_run_continues_only_a_seeded_v4_book(self):
+        self.assertEqual(REPLAY_V4_STRATEGY_ID, DAILY_STRATEGY_ID)
+        previous, today = date(2026, 10, 23), date(2026, 10, 26)
+        repository = Mock()
+        repository.latest_session_date.return_value = None
+        service = MartinGapRetestService(repository, calendar=lambda through: [previous, today] if through >= today else [previous])
+        with self.assertRaisesRegex(ValueError, "must be seeded"):
+            service.run_session(as_of_date=today, source_record=None, dry_run=False,
+                                strategy_id=REPLAY_V4_STRATEGY_ID)
+
+        repository.latest_session_date.return_value = previous
+        repository.session_run_id.return_value = None
+        repository.atomic_session.return_value = nullcontext()
+        with patch("src.webapp.services.martin_gap_retest_service.require_completed_session"), \
+             patch.object(service, "_run", return_value={"strategy_id": REPLAY_V4_STRATEGY_ID}) as run:
+            result = service.run_session(as_of_date=today, source_record={"source_run_id": 42}, dry_run=False,
+                                         strategy_id=REPLAY_V4_STRATEGY_ID)
+        self.assertEqual(REPLAY_V4_STRATEGY_ID, result["strategy_id"])
+        self.assertFalse(run.call_args.kwargs["historical_replay"])
+        self.assertEqual(REPLAY_V4_STRATEGY_ID, run.call_args.kwargs["strategy_id"])
 
 
 if __name__ == "__main__":
