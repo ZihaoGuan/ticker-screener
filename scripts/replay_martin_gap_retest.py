@@ -48,9 +48,14 @@ def reconstruct_sources(start: dt.date, end: dt.date, *, database_url: str, conf
         build_filter_criteria_from_args(args))]
     sources: list[dict[str, Any]] = []
     data_issues = 0
+    history_sessions = calendar.sessions_in_range(
+        (end - dt.timedelta(days=500)).isoformat(), end.isoformat())
+    if len(history_sessions) < 326:
+        raise ValueError(f"Could not resolve 326 XNYS history sessions through {end}")
+    history_start = history_sessions[-326].date()
     for offset in range(0, len(symbols), 200):
         batch = symbols[offset:offset + 200]
-        frames = load_many_ticker_windows(batch, end, 326, database_url=database_url)
+        frames = load_many_ticker_windows(batch, end, 326, database_url=database_url, start_date=history_start)
         rows = {ticker: [{"date": idx.date().isoformat(), "open": row["Open"], "high": row["High"],
                           "low": row["Low"], "close": row["Close"], "volume": row["Volume"],
                           "adjustment_basis": "stored_daily_bars_ohlcv"}

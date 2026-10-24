@@ -163,6 +163,7 @@ class MartinGapRetestService:
         self.repository = repository or MartinForwardTestRepository(database_url=database_url)
         self.database_url = database_url
         self.bar_loader = bar_loader or load_many_ticker_windows
+        self._uses_default_bar_loader = bar_loader is None
         self.calendar = calendar
         self.session_bounds = session_bounds
 
@@ -244,7 +245,12 @@ class MartinGapRetestService:
         if source_valid:
             tickers.add("SPY")
         try:
-            frames = self.bar_loader(sorted(tickers), day, 326, database_url=self.database_url) if tickers else {}
+            if not tickers:
+                frames = {}
+            elif self._uses_default_bar_loader:
+                frames = self.bar_loader(sorted(tickers), day, 326, database_url=self.database_url, start_date=dates[0])
+            else:
+                frames = self.bar_loader(sorted(tickers), day, 326, database_url=self.database_url)
         except Exception:
             frames = {}
         prior_session = dates[-2] if len(dates) > 1 else None

@@ -220,6 +220,7 @@ def load_many_ticker_windows(
     trading_days_needed: int,
     *,
     database_url: str | None = None,
+    start_date: dt.date | None = None,
 ) -> dict[str, Any]:
     normalized = sorted({str(item).strip().upper() for item in tickers if str(item).strip()})
     if not normalized:
@@ -229,7 +230,7 @@ def load_many_ticker_windows(
     if connection is None:
         return {}
 
-    start_date = resolve_trading_window_start(as_of_date, trading_days_needed, database_url=database_url)
+    start_date = start_date or resolve_trading_window_start(as_of_date, trading_days_needed, database_url=database_url)
     sql = """
         SELECT ticker, trade_date, open, high, low, close, adj_close, volume
         FROM daily_bars
