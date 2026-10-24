@@ -1,0 +1,9 @@
+{
+  "name": "ticker-screener-tradingview-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@mathieuc/tradingview": "4.1.0-beta.2"
+  }
+}

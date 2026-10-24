@@ -23,7 +23,7 @@ class SyncPostgresMarketDataFallbackTests(unittest.TestCase):
         self.assertEqual(script._yfinance_symbol("BRK.B"), "BRK-B")
         self.assertEqual(script._yfinance_symbol("aapl"), "AAPL")
 
-    def test_replace_daily_bars_deletes_and_inserts_in_one_commit(self) -> None:
+    def test_replace_daily_bars_checks_coverage_then_uses_ranked_upsert_in_one_commit(self) -> None:
         import scripts.sync_postgres_market_data as script
 
         calls: list[tuple[str, object]] = []
@@ -63,10 +63,35 @@ class SyncPostgresMarketDataFallbackTests(unittest.TestCase):
 
         self.assertEqual((applied, skipped), (2, 0))
         self.assertIn("SELECT trade_date", calls[0][0])
-        self.assertIn("DELETE FROM daily_bars", calls[1][0])
-        self.assertIn("INSERT INTO daily_bars", calls[2][0])
+        self.assertNotIn("DELETE FROM daily_bars", " ".join(sql for sql, _ in calls))
+        self.assertIn("INSERT INTO daily_bars", calls[1][0])
+        self.assertIn("when 'massive' then 2", calls[1][0].lower())
+        self.assertIn("when 'yfinance' then 1", calls[1][0].lower())
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 0)
+
+    def test_replace_daily_bars_rejects_coverage_loss_before_upsert(self) -> None:
+        import scripts.sync_postgres_market_data as script
+
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return None
+            def execute(self, *_args): pass
+            def fetchall(self): return [(3,)]
+            def executemany(self, *_args): raise AssertionError("must not write after coverage loss")
+
+        class Connection:
+            commits = 0
+            rollbacks = 0
+            def cursor(self): return Cursor()
+            def commit(self): self.commits += 1
+            def rollback(self): self.rollbacks += 1
+
+        connection = Connection()
+        with self.assertRaisesRegex(script.HistoryCoverageLoss, "History coverage loss"):
+            script._replace_daily_bars(connection, [("AAPL", 1), ("AAPL", 2)])
+        self.assertEqual(connection.commits, 0)
+        self.assertEqual(connection.rollbacks, 1)
 
     def test_diagnose_missing_ticker_falls_back_to_nasdaq_when_yahoo_is_empty(self) -> None:
         import pandas as pd

@@ -540,7 +540,8 @@ def _replace_trade_date_atomically(
 ) -> tuple[int, int]:
     try:
         with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM daily_bars WHERE trade_date = %s AND COALESCE(source, '') NOT IN ('tradingview', 'tradingview_screener')", (trade_date,))
+            incoming_tickers = sorted({str(row[0]) for row in rows})
+            cursor.execute("DELETE FROM daily_bars WHERE trade_date = %s AND ticker <> ALL(%s::text[]) AND COALESCE(source, '') NOT IN ('tradingview', 'tradingview_screener', 'massive', 'massive_api')", (trade_date, incoming_tickers))
             deleted = int(cursor.rowcount or 0)
             applied = 0
             for index in range(0, len(rows), batch_size):

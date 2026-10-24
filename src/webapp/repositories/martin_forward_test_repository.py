@@ -6,15 +6,17 @@ from pathlib import Path
 from typing import Any
 
 from src.market_data_access import resolve_database_url
-from src.martin_daily_gap_retest import REPLAY_STRATEGY_ID, REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID
+from src.martin_daily_gap_retest import REPLAY_STRATEGY_ID, REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID, REPLAY_V4_STRATEGY_ID
 from src.webapp.services.martin_rotation import ROTATION_STRATEGY_ID, ROTATION_POLICY_VERSION, ROTATION_LIMITS, account_budget
 
 GAP_RETEST_STRATEGY_ID = "martin_daily_gap_retest_v1"
 GAP_RETEST_REPLAY_STRATEGY_ID = REPLAY_STRATEGY_ID
 GAP_RETEST_REPLAY_V2_STRATEGY_ID = REPLAY_V2_STRATEGY_ID
 GAP_RETEST_REPLAY_V3_STRATEGY_ID = REPLAY_V3_STRATEGY_ID
+GAP_RETEST_REPLAY_V4_STRATEGY_ID = REPLAY_V4_STRATEGY_ID
 ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1", ROTATION_STRATEGY_ID, GAP_RETEST_STRATEGY_ID,
-                      GAP_RETEST_REPLAY_STRATEGY_ID, GAP_RETEST_REPLAY_V2_STRATEGY_ID, GAP_RETEST_REPLAY_V3_STRATEGY_ID}
+                      GAP_RETEST_REPLAY_STRATEGY_ID, GAP_RETEST_REPLAY_V2_STRATEGY_ID, GAP_RETEST_REPLAY_V3_STRATEGY_ID,
+                      GAP_RETEST_REPLAY_V4_STRATEGY_ID}
 
 
 class _SessionConnection:
@@ -354,7 +356,8 @@ class MartinForwardTestRepository:
                                          (GAP_RETEST_STRATEGY_ID, "gap_retest"),
                                          (GAP_RETEST_REPLAY_STRATEGY_ID, "gap_retest_replay"),
                                          (GAP_RETEST_REPLAY_V2_STRATEGY_ID, "gap_retest_replay_v2"),
-                                         (GAP_RETEST_REPLAY_V3_STRATEGY_ID, "gap_retest_replay_v3")):
+                                         (GAP_RETEST_REPLAY_V3_STRATEGY_ID, "gap_retest_replay_v3"),
+                                         (GAP_RETEST_REPLAY_V4_STRATEGY_ID, "gap_retest_replay_v4")):
                     runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
                     latest_id = runs[0]["id"] if runs else None
                     candidates = self._fetch(cursor, "SELECT * FROM martin_forward_candidates WHERE run_id=%s ORDER BY rank", (latest_id,)) if latest_id else []
@@ -371,7 +374,7 @@ class MartinForwardTestRepository:
                 account = books.get("account")
                 for account in (account, books.get("rs_expanded_rotation"), books.get("gap_retest"),
                                 books.get("gap_retest_replay"), books.get("gap_retest_replay_v2"),
-                                books.get("gap_retest_replay_v3")):
+                                books.get("gap_retest_replay_v3"), books.get("gap_retest_replay_v4")):
                     if not account or not account.get("history"):
                         continue
                     dates = [str(point.get("date") or "") for point in account["history"] if point.get("date")]
@@ -409,6 +412,20 @@ class MartinForwardTestRepository:
         return self._rows("""SELECT source,split_factor,COUNT(*) AS rows,MIN(trade_date) AS first_date,MAX(trade_date) AS last_date
             FROM daily_bars WHERE ticker=%s AND trade_date BETWEEN %s AND %s
             GROUP BY source,split_factor ORDER BY source,split_factor""", (ticker.upper(), start_date, end_date))
+
+    def daily_bar_replay_provenance(self, ticker: str, start_date: Any, end_date: Any) -> list[dict[str, Any]]:
+        return self._rows("""SELECT source,split_factor,trade_date,1 AS rows,trade_date AS first_date,trade_date AS last_date,
+                (SELECT MAX(trade_date) FROM daily_bars WHERE ticker=%s AND trade_date<=%s
+                 AND split_factor IS NOT NULL AND split_factor<>1) AS latest_split_date,
+                (SELECT MIN(trade_date) FROM daily_bars WHERE ticker=%s AND trade_date<=%s) AS history_first_date,
+                (SELECT COUNT(*) FROM daily_bars WHERE ticker=%s AND trade_date<=%s
+                 AND (split_factor IS NULL OR split_factor<=0)) AS unknown_split_rows,
+                (SELECT COUNT(*) FROM daily_bars WHERE ticker=%s AND trade_date<=%s
+                 AND (source IS NULL OR source NOT IN ('tradingview','tradingview_screener','massive','massive_api',
+                     'yahoo','yahoo_finance','yfinance','yfinance+nasdaq','yfinance_historical_repair'))) AS unknown_source_rows
+            FROM daily_bars WHERE ticker=%s AND trade_date BETWEEN %s AND %s
+            ORDER BY trade_date""", (ticker.upper(), end_date, ticker.upper(), end_date, ticker.upper(), end_date,
+                                      ticker.upper(), end_date, ticker.upper(), start_date, end_date))
 
     def _rows(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         connection = self._connect()

@@ -1001,8 +1001,16 @@ _DAILY_BAR_UPSERT_SQL = """
           split_factor = EXCLUDED.split_factor,
           source = EXCLUDED.source,
           updated_at = EXCLUDED.updated_at
-        WHERE COALESCE(daily_bars.source, '') NOT IN ('tradingview', 'tradingview_screener')
-           OR EXCLUDED.source IN ('tradingview', 'tradingview_screener')
+        WHERE CASE LOWER(COALESCE(daily_bars.source, ''))
+                WHEN 'tradingview' THEN 3 WHEN 'tradingview_screener' THEN 3
+                WHEN 'massive' THEN 2 WHEN 'massive_api' THEN 2
+                WHEN 'yahoo' THEN 1 WHEN 'yahoo_finance' THEN 1 WHEN 'yfinance' THEN 1
+                WHEN 'yfinance+nasdaq' THEN 1 WHEN 'yfinance_historical_repair' THEN 1 ELSE 0 END
+           <= CASE LOWER(COALESCE(EXCLUDED.source, ''))
+                WHEN 'tradingview' THEN 3 WHEN 'tradingview_screener' THEN 3
+                WHEN 'massive' THEN 2 WHEN 'massive_api' THEN 2
+                WHEN 'yahoo' THEN 1 WHEN 'yahoo_finance' THEN 1 WHEN 'yfinance' THEN 1
+                WHEN 'yfinance+nasdaq' THEN 1 WHEN 'yfinance_historical_repair' THEN 1 ELSE 0 END
     """
 
 
@@ -1075,9 +1083,7 @@ def _replace_daily_bars(connection: "Connection[Any]", rows: list[tuple[object, 
         with connection.cursor() as cursor:
             cursor.execute("SELECT trade_date FROM daily_bars WHERE ticker = %s", (ticker,))
             check_coverage(cursor.fetchall())
-            cursor.execute("DELETE FROM daily_bars WHERE ticker = %s AND COALESCE(source, '') NOT IN ('tradingview', 'tradingview_screener') RETURNING trade_date", (ticker,))
-            # A concurrent writer may have committed another date after the SELECT.
-            check_coverage(cursor.fetchall())
+            # Coverage is checked above; let the per-date upsert enforce source priority.
             cursor.executemany(_DAILY_BAR_UPSERT_SQL, rows)
             applied = cursor.rowcount
         connection.commit()

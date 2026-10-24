@@ -12,7 +12,7 @@ from src.market_data_access import load_many_ticker_windows
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_rotation import require_completed_session, session_dates, valid_history
 from src.martin_daily_gap_retest import (CONFIG, CONFIG_HASH, DISCOVERY_RULES_VERSION, REPLAY_STRATEGY_ID,
-    REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID, STRATEGY_ID,
+    REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID, REPLAY_V4_STRATEGY_ID, STRATEGY_ID,
     daily_indicators, evaluate_gap_retest, rank_confirmations, resolve_gap_next_open, size_gap_order)
 
 
@@ -50,6 +50,68 @@ def _asof_frame(frame: Any, day: date) -> Any:
     if hasattr(frame, "attrs"):
         clipped.attrs.update(frame.attrs)
     return clipped
+
+
+_TV_SOURCES = {"tradingview", "tradingview_screener"}
+_MASSIVE_SOURCES = {"massive", "massive_api"}
+_YAHOO_SOURCES = {"yahoo", "yahoo_finance", "yfinance", "yfinance+nasdaq", "yfinance_historical_repair"}
+_SOURCE_PRIORITY = {source: 0 for source in _TV_SOURCES} | {source: 1 for source in _MASSIVE_SOURCES} | {source: 2 for source in _YAHOO_SOURCES}
+
+
+def _source_basis(frame: Any, rows: list[dict[str, Any]], start: date, end: date, *, historical_replay: bool) -> dict[str, Any] | None:
+    """Certify complete per-session provenance and fail closed on unknown action history."""
+    dates = [idx.date() if hasattr(idx, "date") else idx for idx in frame.index]
+    if not rows or len(rows) != len(dates) or any(row.get("trade_date") is None for row in rows):
+        return None
+    by_date = {row["trade_date"]: row for row in rows}
+    if len(by_date) != len(rows) or set(by_date) != set(dates) or min(dates) < start or max(dates) != end:
+        return None
+    if any(_number(row.get("split_factor")) is None or _number(row.get("split_factor")) <= 0 for row in rows):
+        return None
+    sources = {str(row.get("source") or "").strip().lower() for row in rows}
+    if not sources or not sources.issubset(_SOURCE_PRIORITY):
+        return None
+    if not historical_replay and not sources.issubset(_TV_SOURCES):
+        return None
+    latest_split = next((row.get("latest_split_date") for row in rows if row.get("latest_split_date") is not None), None)
+    history_start = next((row.get("history_first_date") for row in rows if row.get("history_first_date") is not None), None)
+    unknown_action_rows = max((int(row.get("unknown_split_rows") or 0) for row in rows), default=0)
+    unknown_source_rows = max((int(row.get("unknown_source_rows") or 0) for row in rows), default=0)
+    if history_start is None or history_start >= min(dates) or unknown_action_rows or unknown_source_rows:
+        return None
+    split_day = latest_split.date() if isinstance(latest_split, datetime) else latest_split
+    # Raw providers match a split-adjusted series only in the latest known share regime.
+    for day, row in by_date.items():
+        source = str(row.get("source") or "").strip().lower()
+        if source not in _TV_SOURCES and (not historical_replay or (split_day is not None and day < split_day)):
+            return None
+    # Catch near-exact common split ratios at provider handoffs without rejecting ordinary large gaps.
+    ordered = sorted(by_date)
+    close_by_date = {}
+    for idx, bar in frame.iterrows():
+        bar_day = idx.date() if hasattr(idx, "date") else idx
+        values = [_number(bar.get(column)) for column in ("Open", "High", "Low", "Close", "Volume")]
+        if any(value is None for value in values):
+            return None
+        opening, high, low, close, volume = values
+        if min(opening, high, low, close) <= 0 or volume < 0 or high < max(opening, close, low) or low > min(opening, close, high):
+            return None
+        close_by_date[bar_day] = close
+    for prior_day, day in zip(ordered, ordered[1:]):
+        prior_source = str(by_date[prior_day].get("source") or "").strip().lower()
+        source = str(by_date[day].get("source") or "").strip().lower()
+        if source != prior_source:
+            prior_close, close = close_by_date[prior_day], close_by_date[day]
+            ratio = close / prior_close if prior_close and close else None
+            split_ratios = (0.1, 0.2, 0.25, 1 / 3, 0.5, 2 / 3, 0.8, 1.25, 1.5, 2, 3, 4, 5, 10)
+            if ratio is None or any(abs(ratio / split_ratio - 1) <= 0.015 for split_ratio in split_ratios):
+                return None
+    ordered_sources = sorted(sources, key=lambda source: (_SOURCE_PRIORITY[source], source))
+    return {"sources": ordered_sources, "latest_split_date": split_day.isoformat() if split_day else None,
+            "history_first_date": str(history_start)[:10], "stored_split_factor_rows_complete": True,
+            "basis_confidence": "assumption_from_complete_stored_action_rows",
+            "basis_assumption": "Split factors are populated for every stored bar from the recorded history start through the replay date; absence of a split event means no split is recorded in that stored history.",
+            "basis": "split_adjusted_regular_session_assumed"}
 
 
 def _source_hit_payload(hit: dict[str, Any]) -> dict[str, Any]:
@@ -180,16 +242,25 @@ class MartinGapRetestService:
         except StopIteration as error:
             raise ValueError("Could not resolve next XNYS session") from error
 
-    def _certify_frame(self, ticker: str, frame: Any, start: date, end: date, *, historical_replay: bool = False) -> bool:
+    def _certify_frame(self, ticker: str, frame: Any, start: date, end: date, *, historical_replay: bool = False,
+                       mixed_source_replay: bool = False) -> bool:
         if frame is None or getattr(frame, "empty", True):
             return False
         attrs = getattr(frame, "attrs", {})
-        if attrs.get("adjustment_basis") == "split_adjusted_regular_session":
+        if attrs.get("adjustment_basis") == "split_adjusted_regular_session" and not mixed_source_replay:
             return True
-        provenance = getattr(self.repository, "daily_bar_provenance", None)
+        provenance = getattr(self.repository, "daily_bar_replay_provenance" if mixed_source_replay else "daily_bar_provenance", None)
         if not provenance:
             return False
         groups = provenance(ticker, start, end)
+        if mixed_source_replay:
+            basis = _source_basis(frame, groups or [], start, end, historical_replay=True)
+            if basis is None:
+                return False
+            attrs["adjustment_basis"] = "split_adjusted_regular_session"
+            attrs["provenance_source"] = "+".join(basis["sources"])
+            attrs["data_provenance"] = basis
+            return True
         sources = {str(row.get("source") or "").lower() for row in groups or []}
         allowed_sources = {"tradingview", "tradingview_screener"} if historical_replay else {"tradingview"}
         if not groups or not sources or not sources.issubset(allowed_sources):
@@ -209,7 +280,7 @@ class MartinGapRetestService:
 
     def run_session(self, *, as_of_date: date, source_record: dict[str, Any] | None, dry_run: bool = True,
                     strategy_id: str = STRATEGY_ID, historical_replay: bool = False) -> dict[str, Any]:
-        if (historical_replay and strategy_id not in {REPLAY_STRATEGY_ID, REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID}) or (not historical_replay and strategy_id != STRATEGY_ID):
+        if (historical_replay and strategy_id not in {REPLAY_STRATEGY_ID, REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID, REPLAY_V4_STRATEGY_ID}) or (not historical_replay and strategy_id != STRATEGY_ID):
             raise ValueError("Unsupported gap retest book identity")
         dates = self._dates(as_of_date)
         if not dates or dates[-1] != as_of_date:
@@ -239,6 +310,7 @@ class MartinGapRetestService:
         next_session = self._next_session(day)
         reconstructed = bool(historical_replay and source_record and source_record.get("source_mode") == "historical_reconstruction"
                              and source_record.get("rules_version") == DISCOVERY_RULES_VERSION)
+        mixed_source_replay = strategy_id == REPLAY_V4_STRATEGY_ID
         source_valid = source_session_matches and (reconstructed or _published_before_session(source_record, day, next_session, self.session_bounds))
         events = active_gap_events(source_record if source_valid else None, day)
         prior_ids = {str(p.get("ticker", "")).upper(): p for p in positions}
@@ -257,11 +329,13 @@ class MartinGapRetestService:
         prior_session = dates[-2] if len(dates) > 1 else None
         frames = {ticker: _asof_frame(frame, day) for ticker, frame in frames.items()}
         for ticker, frame in frames.items():
-            self._certify_frame(ticker, frame, dates[0], day, historical_replay=historical_replay)
+            self._certify_frame(ticker, frame, dates[0], day, historical_replay=historical_replay,
+                                mixed_source_replay=mixed_source_replay)
         for row in positions + pending:
             ticker = str(row["ticker"]).upper()
             frame = frames.get(ticker)
-            if _bar(frame, day) is None or not valid_history(frame, dates[-260:]) or not self._certify_frame(ticker, frame, dates[0], day, historical_replay=historical_replay):
+            if _bar(frame, day) is None or not valid_history(frame, dates[-260:]) or not self._certify_frame(
+                    ticker, frame, dates[0], day, historical_replay=historical_replay, mixed_source_replay=mixed_source_replay):
                 if not dry_run:
                     raise ValueError("Missing or unverified execution history for existing gap retest order or position; session rolled back")
             if row in positions and hasattr(repo, "daily_bar_provenance"):
@@ -279,7 +353,9 @@ class MartinGapRetestService:
             "entry_policy_version": "gap_daily_reclaim_next_open_v1", "stop_policy_version": "gap_reclaim_candle_low_v1",
             "management_policy_version": "gap_trim10_3r_ema9_v1", "source_hit_count": len((source_record or {}).get("hits", [])),
             "active_gap_event_count": len(events), "candidate_count": 0, "confirmed_count": 0, "orders": [], "candidates": [],
-            "execution_preview": []}
+            "execution_preview": [],
+            "data_provenance_by_ticker": {ticker: frame.attrs["data_provenance"]
+                for ticker, frame in frames.items() if getattr(frame, "attrs", {}).get("data_provenance")}}
         if historical_replay:
             report["replay_provenance"] = {"origin": "historical_replay", "source_mode": "historical_reconstruction",
                 "from_date": (source_record or {}).get("replay_from_date"), "to_date": (source_record or {}).get("replay_to_date"),
@@ -384,6 +460,7 @@ class MartinGapRetestService:
             result.update(event_identity=event.get("event_identity"), source_run_id=event.get("source_run_id"),
                           original_gap_event=event.get("original_gap_event"),
                           gap_day_low=event.get("gap_day_low"), source_published_at=event.get("source_published_at"),
+                          data_provenance_details=getattr(frame, "attrs", {}).get("data_provenance"),
                           first_observed_date=first_observed or event.get("first_observed_date"),
                           decision_date=day.isoformat(), source_missing=not source_valid,
                           management_policy_version="gap_trim10_3r_ema9_v1",
@@ -392,7 +469,8 @@ class MartinGapRetestService:
                               "bars": [[str(idx), *[str(value) for value in row]] for idx, row in frame.iterrows()]},
                               separators=(",", ":")).encode()).hexdigest() if frame is not None else None)
             if frame is not None and hasattr(frame, "attrs") and frame.attrs.get("adjustment_basis") == "split_adjusted_regular_session":
-                result["data_provenance"] = "split_adjusted_regular_session"
+                result["data_provenance"] = (getattr(frame, "attrs", {}).get("data_provenance") or {}).get(
+                    "basis", "split_adjusted_regular_session")
             else:
                 result.update(status="blocked_data", gap_state="blocked_data", reasons=["adjustment_basis_unknown"])
             if hasattr(repo, "daily_bar_provenance") and event.get("original_gap_date"):
