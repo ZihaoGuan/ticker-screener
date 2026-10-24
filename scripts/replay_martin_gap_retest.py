@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.config import load_app_config
 from src.market_data_access import load_many_ticker_windows
 from src.power_gap_volume_watch import detect_many
-from src.martin_daily_gap_retest import REPLAY_STRATEGY_ID
+from src.martin_daily_gap_retest import REPLAY_V2_STRATEGY_ID
 from src.ticker_filters import filter_universe_tickers, load_excluded_tickers
 from src.universe import load_universe
 from src.universe_filters import add_universe_filter_args, build_filter_criteria_from_args, filter_universe_by_criteria
@@ -28,7 +28,7 @@ from src.webapp.config import load_webapp_config
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_gap_retest_service import MartinGapRetestService
 
-BOOK_ID = REPLAY_STRATEGY_ID
+BOOK_ID = REPLAY_V2_STRATEGY_ID
 START = dt.date(2026, 10, 19)
 DEFAULT_END = dt.date(2026, 10, 23)
 

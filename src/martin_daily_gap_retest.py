@@ -10,6 +10,7 @@ from typing import Any
 
 STRATEGY_ID = "martin_daily_gap_retest_v1"
 REPLAY_STRATEGY_ID = "martin_daily_gap_retest_replay_20261019_v1"
+REPLAY_V2_STRATEGY_ID = "martin_daily_gap_retest_replay_20261019_v2"
 BOOK_KEY = "gap_retest"
 DISCOVERY_SOURCE = "power_gap_volume_watch"
 DISCOVERY_RULES_VERSION = "power_gap_volume_watch_v1"
