@@ -7,3 +7,8 @@
 
 MUU  # Leveraged ETF
 MULL  # Leveraged ETF
+
+LU    # User-requested exclusion from daily scans and split refresh (2026-10-24).
+NIVF  # User-requested exclusion from daily scans and split refresh (2026-10-24).
+PASW  # User-requested exclusion from daily scans and split refresh (2026-10-24).
+HCAI  # User-requested exclusion from daily scans and split refresh (2026-10-24).
