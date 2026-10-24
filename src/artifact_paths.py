@@ -111,6 +111,12 @@ _STRATEGY_SPECS: dict[str, dict[str, Any]] = {
         "legacy_raw_templates": ("hve_{date_label}.json",),
         "legacy_summary_templates": ("hve_run_summary_{date_label}.json",),
     },
+    "power_gap_volume_watch": {
+        "stem_template": "power_gap_volume_watch_{date_label}",
+        "legacy_watchlist_templates": ("power_gap_volume_watch_{date_label}.json",),
+        "legacy_raw_templates": ("power_gap_volume_watch_{date_label}.json",),
+        "legacy_summary_templates": ("power_gap_volume_watch_run_summary_{date_label}.json",),
+    },
     "elite_rs_hv1": {
         "stem_template": "elite_rs_hv1_{date_label}",
         "legacy_watchlist_templates": ("elite_rs_hv1_{date_label}.json",),

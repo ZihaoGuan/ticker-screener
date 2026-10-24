@@ -27,12 +27,93 @@ from src.webapp.services.watchlist_service import (
     _scanner_freshness,
     _scanner_family,
     _scanner_top_hits_source_fingerprint,
+    _exclude_stale_power_gap_source,
 )
 
 
 class WatchlistServiceTests(unittest.TestCase):
     def test_qullamaggie_ep_board_family_is_earnings_and_gaps(self) -> None:
         self.assertEqual(_scanner_family("qullamaggie_ep"), "Earnings & gaps")
+
+    def test_power_gap_context_survives_merge_without_replacing_another_plan(self) -> None:
+        context = {"rules_version": "power_gap_volume_watch_v1", "active_signals": ["gap", "hve"]}
+        bucket = {"ticker": "NVDA", "trade_plan": {"source_strategy_id": "ema21_pullback_buy"}}
+        self.service._merge_scanner_top_hit_entry(bucket, {"ticker": "NVDA", "power_gap_volume_context": context})
+        self.assertEqual(bucket["power_gap_volume_context"], context)
+        self.assertIsNot(bucket["power_gap_volume_context"], context)
+        self.assertEqual(bucket["trade_plan"], {"source_strategy_id": "ema21_pullback_buy"})
+
+    def test_stale_optional_power_gap_source_is_removed_without_losing_other_scanners(self) -> None:
+        payload = {
+            "rows": [
+                {"ticker": "NVDA", "scanner_count": 1, "scanners": [{"id": "power_gap_volume_watch"}], "power_gap_volume_context": {"rules_version": "v1"}},
+                {"ticker": "MSFT", "scanner_count": 3, "scanners": [{"id": "rs"}, {"id": "canslim"}, {"id": "power_gap_volume_watch"}], "power_gap_volume_context": {"rules_version": "v1"}},
+                {"ticker": "AAPL", "scanner_count": 2, "scanners": [{"id": "rs"}, {"id": "canslim"}]},
+            ],
+            "guru_board": {"rows": []},
+        }
+        _exclude_stale_power_gap_source(payload, {"cards": [{"id": "power_gap_volume_watch", "available": False, "freshness": "not_run"}]})
+        self.assertEqual([row["ticker"] for row in payload["rows"]], ["MSFT", "AAPL"])
+        self.assertEqual(payload["rows"][0]["scanners"], [{"id": "rs"}, {"id": "canslim"}])
+        self.assertNotIn("power_gap_volume_context", payload["rows"][0])
+        self.assertEqual(payload["overlapping_ticker_count"], 2)
+
+    def test_stale_power_gap_card_is_excluded_from_live_candidates(self) -> None:
+        current = {"id": "power_gap_volume_watch", "available": True, "stem": "power_gap_volume_watch_2026-10-23", "freshness": "current", "timeframe": "Daily"}
+        stale = {**current, "freshness": "stale", "stem": "power_gap_volume_watch_2026-10-22"}
+        selected = self.service._select_scanner_top_hit_live_cards({"cards": [stale, current]})
+        self.assertEqual([card["stem"] for card in selected], [current["stem"]])
+
+    def test_list_snapshot_projection_keeps_power_gap_context(self) -> None:
+        context = {"rules_version": "power_gap_volume_watch_v1", "active_signals": ["hve"]}
+        persisted = {
+            "target_trading_date": "2026-10-23",
+            "generated_at": "2026-10-24T00:00:00Z",
+            "_snapshot_generated_at": "2026-10-24T00:00:00Z",
+            "rows": [{
+                "ticker": "NVDA", "scanner_count": 1,
+                "scanners": [{"id": "power_gap_volume_watch", "label": "Power Gap & Volume Watch"}],
+                "power_gap_volume_context": context,
+                "trade_readiness_explanation": "awaiting a supported daily entry setup",
+            }],
+            "guru_board": {"rows": []},
+            "cards": [],
+            "_snapshot_run_id": 7,
+        }
+        board = {"cards": [{"id": "power_gap_volume_watch", "available": True, "freshness": "current"}]}
+        with patch.object(self.service, "get_scanner_board", return_value=board), patch.object(
+            self.service, "_load_latest_persisted_scanner_top_hits_payload", return_value=copy.deepcopy(persisted)
+        ):
+            payload = self.service.get_scanner_top_hits_snapshot_payload(
+                now=dt.datetime(2026, 10, 24, 12, tzinfo=dt.timezone.utc), section="list"
+            )
+        self.assertEqual(payload["rows"][0]["power_gap_volume_context"], context)
+        self.assertEqual(payload["rows"][0]["trade_readiness_explanation"], "awaiting a supported daily entry setup")
+
+    def test_power_gap_single_scanner_hit_is_in_normal_top_hits_rows(self) -> None:
+        context = {"rules_version": "power_gap_volume_watch_v1", "active_signals": ["hvy"]}
+        card = {"id": "power_gap_volume_watch", "strategy_id": "power_gap_volume_watch", "label": "Power Gap & Volume Watch", "stem": "power_gap_volume_watch_2026-10-23", "sort_date": "2026-10-23", "timeframe": "Daily"}
+        with patch.object(self.service, "_select_scanner_top_hit_live_cards", return_value=[card]), patch.object(
+            self.service.repository, "load_watchlist", return_value=[{"ticker": "NVDA", "power_gap_volume_context": context}]
+        ), patch.object(self.service, "_prepare_scanner_top_hit_entries", side_effect=lambda entries: entries), patch.object(
+            self.service, "_filter_excluded_entries", side_effect=lambda entries: entries
+        ), patch.object(self.service, "_attach_latest_market_snapshots", side_effect=lambda rows, tickers, **kwargs: [rows[ticker].update({"atr_to_sma50": 2.0}) for ticker in tickers]), patch.object(
+            self.service, "_attach_latest_rating_snapshots"
+        ), patch.object(self.service, "_attach_relative_strength_evidence"), patch.object(
+            self.service, "_attach_latest_position_actions"
+        ), patch.object(self.service, "_attach_relative_trend_strength"), patch.object(
+            self.service, "_attach_strike_zone_scanner_evidence"
+        ), patch.object(self.service, "_attach_guru_upcoming_earnings_dates"), patch.object(
+            self.service, "_load_sector_momentum_map", return_value={}
+        ), patch.object(self.service, "_load_latest_weinstein_stage_map", return_value={}), patch.object(
+            self.service, "_load_latest_rmv_map", return_value={}
+        ):
+            payload = self.service._build_scanner_top_hits_payload_live(
+                board_payload={"cards": [], "target_trading_date": "2026-10-23"}
+            )
+        self.assertEqual([row["ticker"] for row in payload["rows"]], ["NVDA"])
+        self.assertEqual(payload["rows"][0]["scanner_count"], 1)
+        self.assertEqual(payload["rows"][0]["power_gap_volume_context"], context)
 
     def test_phase_avwap_confirms_extremes_by_five_sessions_and_chooses_by_stage(self) -> None:
         index = pd.bdate_range("2025-01-01", periods=260)
@@ -388,7 +469,7 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["rmv"]["rank"], 1)
         self.assertEqual(payload["rows"][0]["stage_analysis"]["alias"], "2B")
         self.assertEqual(payload["rows"][0]["strike_zone"]["state"], "ready")
-        self.assertEqual(payload["definitions"][-1]["id"], "elite_rs_hv1")
+        self.assertEqual(payload["definitions"][-2]["id"], "elite_rs_hv1")
         self.assertNotIn("club_97", {item["id"] for item in payload["definitions"]})
         self.assertNotIn("liquid_growth", {item["id"] for item in payload["definitions"]})
         definitions = {item["id"]: item for item in payload["definitions"]}
@@ -398,6 +479,37 @@ class WatchlistServiceTests(unittest.TestCase):
         self.assertNotIn("high_volume_close", definitions)
         self.assertNotIn("ma_pullback_retest", definitions)
         self.assertEqual(definitions["one_year_winners"]["label"], "Wey How")
+
+    def test_power_gap_only_candidate_waits_for_setup_and_keeps_supported_plan_readiness(self) -> None:
+        context = {"rules_version": "power_gap_volume_watch_v1", "active_signals": ["gap"]}
+        rows = {
+            "NVDA": {
+                "ticker": "NVDA",
+                "scanners": [{"id": "power_gap_volume_watch", "label": "Power Gap & Volume Watch"}],
+                "power_gap_volume_context": context,
+                "position_action": {"action": "hold_position"},
+                "earnings_days": 12,
+                "daily_rs_rating": 95,
+                "stage_analysis": {"alias": "2A"},
+                "rmv": {"rank": 1},
+                "atr_to_sma50": 2.0,
+            }
+        }
+        with (
+            patch.object(self.service, "_load_latest_weinstein_stage_map", return_value={}),
+            patch.object(self.service, "_load_latest_rmv_map", return_value={}),
+        ):
+            payload = self.service._build_guru_board_payload(rows, board_payload={"target_trading_date": "2026-06-12"})
+        row = payload["rows"][0]
+        self.assertEqual(row["trade_readiness"], "leader")
+        self.assertEqual(row["trade_readiness_explanation"], "Gap or volume event detected; awaiting a supported daily entry setup.")
+        self.assertEqual(row["power_gap_volume_context"], context)
+
+        supported_plan = _build_trade_plan([{
+            "_source_strategy_id": "ema21_pullback_buy", "event_date": "2026-06-12", "signal_state": "active",
+            "trigger_price": 100, "stop_price": 95,
+        }])
+        self.assertEqual(_trade_readiness({"power_gap_volume_context": context, "trade_plan": supported_plan}), "defined_risk")
 
     def test_guru_board_excludes_extended_or_unverified_names(self) -> None:
         rows_by_ticker = {

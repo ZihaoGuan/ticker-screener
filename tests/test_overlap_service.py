@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from src.overlap_summary import build_overlap_payload, discover_supported_dates, resolve_pipeline_path
+from src.overlap_summary import PIPELINE_GROUPS, PIPELINES, build_overlap_payload, discover_supported_dates, resolve_pipeline_path
 
 
 class OverlapSummaryTests(unittest.TestCase):
@@ -98,6 +98,16 @@ class OverlapSummaryTests(unittest.TestCase):
         self.assertEqual(payload["pipeline_counts"]["sean_breakout"], 1)
         self.assertEqual(payload["pipeline_counts"]["vcs_critical_tightness"], 1)
         self.assertEqual(payload["pipeline_counts"]["sma200_pullback_buy"], 1)
+
+    def test_power_gap_pipeline_is_registered_as_neutral_discovery(self) -> None:
+        item = next(pipeline for pipeline in PIPELINES if pipeline["id"] == "power_gap_volume_watch")
+        self.assertEqual(PIPELINE_GROUPS[item["id"]]["bias_group"], "other")
+        path = self.watchlist_dir / item["filename"].format(date="2026-10-23")
+        path.write_text(json.dumps([{"ticker": "NVDA"}]), encoding="utf-8")
+        payload = build_overlap_payload("2026-10-23", self.watchlist_dir)
+        status = next(row for row in payload["pipeline_status"] if row["id"] == item["id"])
+        self.assertEqual(status["bias_group"], "other")
+        self.assertEqual(payload["pipeline_counts"][item["id"]], 1)
 
 
 if __name__ == "__main__":

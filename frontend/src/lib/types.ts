@@ -417,6 +417,49 @@ export type ScannerTopHitRow = {
   stop_to_adr?: number | null;
   adr_suitability?: "suitable" | "caution" | "low" | "wide_stop" | "risk_failure" | string;
   adr_reason?: string | null;
+  power_gap_volume_context?: PowerGapVolumeContext | null;
+};
+
+export type PowerGapVolumeContext = {
+  rules_version?: string;
+  as_of_date?: string;
+  active_signals?: Array<"gap" | "hve" | "hvy" | string>;
+  coverage?: {
+    history_start?: string | null;
+    history_end?: string | null;
+    daily_bars?: number;
+    issues?: string[];
+    component_issues?: Record<string, string>;
+    missing_sessions?: string[];
+    hvy_complete?: boolean;
+    hvy_history?: string;
+    listing_status?: string;
+    available_history_short?: boolean;
+    latest_data_stale?: boolean;
+    latest_data_days_before_as_of?: number | null;
+  };
+  gap_event?: {
+    date?: string;
+    gap_pct?: number | null;
+    volume_ratio?: number | null;
+    age_trading_sessions?: number | null;
+    age_sessions?: number | null;
+    open?: number | null;
+    high?: number | null;
+    low?: number | null;
+    close?: number | null;
+    volume?: number | null;
+    volume_baseline?: number | null;
+    volume_sma20?: number | null;
+    sma200?: number | null;
+    close_strength_pct?: number | null;
+  } | null;
+  volume_events?: {
+    hve?: { date?: string; age_calendar_days?: number | null; volume?: number | null; algorithm?: string; coverage?: unknown } | null;
+    hvy?: { date?: string; age_calendar_days?: number | null; volume?: number | null; algorithm?: string; coverage?: unknown } | null;
+  };
+  current_context?: { latest_close?: number | null; gap_day_low_breached?: boolean; distance_from_gap_low_pct?: number | null };
+  earnings_context?: { status?: string; report_date?: string | null; effective_reaction_session?: string | null; source?: string | null; fetched_at?: string | null; match_reason?: string | null; evidence_mode?: string } | null;
 };
 
 export type PullbackQuality = {

@@ -6206,6 +6206,23 @@ dialog.modal-backdrop:not([open]) {
   line-height: 1.5;
 }
 
+.power-gap-event-summary {
+  max-width: 280px;
+  color: #a1a1aa;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.power-gap-event-summary summary {
+  color: #fbbf24;
+  cursor: pointer;
+}
+
+.power-gap-event-summary[open] > span {
+  display: block;
+  margin-top: 4px;
+}
+
 .scanner-score-pill {
   display: inline-flex;
   min-width: 46px;

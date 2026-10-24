@@ -36,6 +36,7 @@ from .macd_screen import find_recent_macd_hit
 from .ma_pullback_retest_screen import MA_PULLBACK_RETEST_HISTORY_DAYS, find_ma_pullback_retest_hit
 from .near_52wk_high_screen import PRICE_HISTORY_DAYS as NEAR_52WK_HIGH_HISTORY_DAYS, run_near_52wk_high_screen
 from .near_200ma_screen import run_near_200ma_screen
+from .power_gap_volume_watch import detect_power_gap_volume
 from .one_year_winners_screen import ONE_YEAR_WINNERS_HISTORY_DAYS, find_one_year_winners_hit
 from .minervini_vcp_detector_screen import MINERVINI_VCP_HISTORY_DAYS, find_minervini_vcp_detector_hit
 from .qullamaggie_screen import QULLAMAGGIE_HISTORY_DAYS, evaluate_qullamaggie_ep, evaluate_qullamaggie_parabolic_short, find_qullamaggie_hit
@@ -852,6 +853,26 @@ def _run_hve(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
         reasons=tuple(str(item) for item in payload.get("reasons", [])),
         hit=payload,
     )
+
+
+def _run_power_gap_volume_watch(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    bars = bundle.bars
+    if bars is None or getattr(bars, "empty", False):
+        return ScreenerEvaluationResult(passed=False, error="No daily OHLCV history available.")
+    rows = []
+    for index, row in bars.iterrows():
+        rows.append({"date": index.date().isoformat() if hasattr(index, "date") else str(index)[:10],
+                     "open": row["Open"], "high": row["High"], "low": row["Low"],
+                     "close": row["Close"], "volume": row["Volume"],
+                     "adjustment_basis": "stored_daily_bars_ohlcv"})
+    result = detect_power_gap_volume(bundle.ticker, rows, bundle.as_of_date)
+    if result["coverage"].get("issues"):
+        return ScreenerEvaluationResult(passed=False, error="; ".join(result["coverage"]["issues"]))
+    if not result["signals"]:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    return ScreenerEvaluationResult(passed=True, metrics={"ticker": bundle.ticker, "signals": result["signals"]},
+                                    hit={"ticker": bundle.ticker, "power_gap_volume_context": result["power_gap_volume_context"],
+                                         "signals": result["signals"]})
 
 
 def _run_inside_dryup(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
@@ -1721,6 +1742,13 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=5000,
             warmup_trading_days=5,
             evaluator=_run_hve,
+        ),
+        "power_gap_volume_watch": ScreenerSpec(
+            id="power_gap_volume_watch",
+            required_inputs=("daily_bars", "metadata"),
+            lookback_trading_days=5000,
+            warmup_trading_days=0,
+            evaluator=_run_power_gap_volume_watch,
         ),
         "elite_rs_hv1": ScreenerSpec(
             id="elite_rs_hv1",

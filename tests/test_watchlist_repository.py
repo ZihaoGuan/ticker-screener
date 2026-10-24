@@ -469,6 +469,9 @@ class WatchlistRepositoryTests(unittest.TestCase):
         self.assertEqual(_group_for_stem("qullamaggie_ep_2026-06-06"), ("qullamaggie_ep", "Qullamaggie Episodic Pivot"))
         self.assertEqual(_group_for_stem("qullamaggie_parabolic_short_2026-06-06"), ("qullamaggie_parabolic_short", "Qullamaggie Parabolic Short"))
 
+    def test_group_key_supports_power_gap_volume_watch(self) -> None:
+        self.assertEqual(_group_for_stem("power_gap_volume_watch_2026-10-23"), ("power_gap_volume_watch", "Power Gap & Volume Watch"))
+
     def test_group_key_supports_leif_high_tight_flag(self) -> None:
         self._write_new_watchlist(
             date_folder="2026-06-06",

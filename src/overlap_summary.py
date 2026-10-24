@@ -22,6 +22,11 @@ PIPELINES = (
         "filename": "rs_phase_{date}.json",
     },
     {
+        "id": "power_gap_volume_watch",
+        "label": "Power Gap & Volume Watch",
+        "filename": "power_gap_volume_watch_{date}.json",
+    },
+    {
         "id": "weekly_rs",
         "label": "Weekly RS New High Before Price",
         "filename": "weekly_rs_new_high_{date}.json",
@@ -293,6 +298,7 @@ PIPELINES = (
 )
 
 PIPELINE_GROUPS: dict[str, dict[str, str]] = {
+    "power_gap_volume_watch": {"bias_group": "other"},
     "rs": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "weekly_rs": {"bias_group": "bullish", "bullish_subgroup": "leaders"},
     "sean_peg": {"bias_group": "bullish", "bullish_subgroup": "leaders"},

@@ -99,8 +99,8 @@ _INSIDER_CACHE_TTL_HOURS = 12
 _CHART_PAYLOAD_CACHE_TTL_SECONDS = 5 * 60
 _CHART_GEX_CACHE_TTL_SECONDS = 5 * 60
 _SCANNER_TOP_HITS_CACHE_TTL_SECONDS = 3 * 60
-_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v6"
-_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v10"
+_SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION = "guru-board-v7"
+_SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION = "top-hits-v11"
 _SECTOR_MOMENTUM_CACHE_TTL_SECONDS = 10 * 60
 _TOP_RATINGS_CACHE_TTL_SECONDS = 10 * 60
 _NEW_YORK_TZ = ZoneInfo("America/New_York")
@@ -145,6 +145,7 @@ _GURU_SCANNER_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"id": "kai_s2", "label": "Kai S2", "accent": "cyan", "available": True},
     {"id": "venu_scanner", "label": "Venu Scanner", "accent": "emerald", "available": True},
     {"id": "elite_rs_hv1", "label": "Elite RS + HV1", "accent": "cyan", "available": True},
+    {"id": "power_gap_volume_watch", "label": "Power Gap & Volume Watch", "accent": "amber", "available": True},
 )
 _GURU_AVAILABLE_SCANNER_IDS = frozenset(
     str(item["id"]) for item in _GURU_SCANNER_DEFINITIONS if bool(item.get("available"))
@@ -280,6 +281,15 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
         "timeframe": "Daily",
         "accent": "amber",
         "bias_group": "bullish",
+    },
+    {
+        "id": "power_gap_volume_watch",
+        "strategy_id": "power_gap_volume_watch",
+        "label": "Power Gap & Volume Watch",
+        "description": "Active large opening gaps and recent exceptional volume events, kept as discovery context for later setup review.",
+        "timeframe": "Daily",
+        "accent": "amber",
+        "bias_group": "other",
     },
     {
         "id": "monster_gap",
@@ -1061,8 +1071,10 @@ class WatchlistService:
     def get_scanner_top_hits_payload(self, *, rrg_service: Any | None = None, now: dt.datetime | None = None) -> dict[str, Any]:
         board_payload = self.get_scanner_board(now=now)
         cache_key = (
+            str(self.repository.artifacts_dir.resolve()),
             str(board_payload.get("target_trading_date") or ""),
             str(board_payload.get("manual_override_target_date") or ""),
+            _scanner_top_hits_source_fingerprint(board_payload)[0],
             _SCANNER_TOP_HITS_CACHE_SCHEMA_VERSION,
         )
         cached_payload = _read_scanner_top_hits_cache(cache_key)
@@ -1070,6 +1082,7 @@ class WatchlistService:
             return cached_payload
         persisted_payload = self._load_persisted_scanner_top_hits_payload(board_payload=board_payload)
         if persisted_payload is not None:
+            _exclude_stale_power_gap_source(persisted_payload, board_payload)
             _write_scanner_top_hits_cache(cache_key, persisted_payload)
             return persisted_payload
         payload = self._build_scanner_top_hits_payload_live(board_payload=board_payload, rrg_service=rrg_service)
@@ -1102,6 +1115,7 @@ class WatchlistService:
         """
         reference_now = _normalize_scanner_now(now)
         target_date = _latest_completed_trading_day(reference_now)
+        board_payload = self.get_scanner_board(now=reference_now)
         persisted = self._load_latest_persisted_scanner_top_hits_payload()
         refresh_state = _load_scanner_top_hits_refresh_state(self.repository.artifacts_dir / "status")
         if persisted is None:
@@ -1130,6 +1144,8 @@ class WatchlistService:
                 },
             }
         else:
+            _exclude_stale_power_gap_source(persisted, board_payload)
+            persisted["cards"] = copy.deepcopy(board_payload.get("cards") or [])
             snapshot_date = _coerce_optional_date(persisted.get("target_trading_date"))
             if snapshot_date and target_date < snapshot_date <= reference_now.astimezone(_NEW_YORK_TZ).date():
                 target_date = snapshot_date
@@ -1340,6 +1356,17 @@ class WatchlistService:
                 continue
             if str(summary_payload.get("manual_override_target_date") or "") != manual_override_target_date:
                 continue
+            current_power_gap_card = next(
+                (item for item in board_payload.get("cards") or [] if isinstance(item, dict) and item.get("id") == "power_gap_volume_watch"),
+                None,
+            )
+            if (
+                isinstance(current_power_gap_card, dict)
+                and current_power_gap_card.get("available")
+                and current_power_gap_card.get("freshness") == "current"
+                and str(summary_payload.get("snapshot_schema_version") or "") != _SCANNER_TOP_HITS_SNAPSHOT_SCHEMA_VERSION
+            ):
+                continue
             hit_rows = payload.get("hits") if isinstance(payload.get("hits"), list) else []
             rows_payload = []
             for hit in hit_rows:
@@ -1503,6 +1530,7 @@ class WatchlistService:
             ticker
             for ticker, row in aggregated.items()
             if int(row.get("scanner_count") or 0) >= 2
+            or any(str(scanner.get("id") or "") == "power_gap_volume_watch" for scanner in row.get("scanners", []))
         )
         if top_hit_tickers:
             self._attach_latest_market_snapshots(aggregated, top_hit_tickers)
@@ -1612,7 +1640,13 @@ class WatchlistService:
         for ticker in tickers:
             row = rows_by_ticker[ticker]
             atr_to_sma50 = _coerce_optional_float(row.get("atr_to_sma50"))
-            if atr_to_sma50 is None or atr_to_sma50 >= _GURU_MAX_ATR_TO_SMA50_EXTENSION:
+            is_power_gap_candidate = any(
+                isinstance(scanner, dict) and scanner.get("id") == "power_gap_volume_watch"
+                for scanner in (row.get("scanners") or [])
+            )
+            if (atr_to_sma50 is None and not is_power_gap_candidate) or (
+                atr_to_sma50 is not None and atr_to_sma50 >= _GURU_MAX_ATR_TO_SMA50_EXTENSION
+            ):
                 continue
             row["scanner_count"] = len(row.get("scanners") or [])
             row["scanner_labels"] = [str(item.get("label") or "") for item in row["scanners"] if str(item.get("label") or "").strip()]
@@ -1625,6 +1659,13 @@ class WatchlistService:
         adr_frames = self._attach_trade_readiness_adr(rows_by_candidate, as_of_date=target_date)
         for row in rows:
             row["trade_readiness"] = _trade_readiness(row)
+            context = row.get("power_gap_volume_context")
+            if (
+                row["trade_readiness"] == "leader"
+                and isinstance(context, dict)
+                and not isinstance(row.get("trade_plan"), dict)
+            ):
+                row["trade_readiness_explanation"] = "Gap or volume event detected; awaiting a supported daily entry setup."
             row.pop("_pullback_artifacts", None)
         self._attach_snapshot_trade_plans(rows_by_candidate, as_of_date=target_date, adr_frames=adr_frames or {})
         rows.sort(key=_guru_row_sort_key)
@@ -3226,6 +3267,9 @@ class WatchlistService:
             bucket["ready_profiles"] = list(entry_ready_profiles)
         if isinstance(entry_pullback_quality, dict):
             bucket["pullback_quality"] = copy.deepcopy(entry_pullback_quality)
+        power_gap_context = entry.get("power_gap_volume_context")
+        if isinstance(power_gap_context, dict):
+            bucket["power_gap_volume_context"] = copy.deepcopy(power_gap_context)
 
     @staticmethod
     def _merge_rs_phase_context(bucket: dict[str, Any], entry: dict[str, Any]) -> None:
@@ -3258,6 +3302,10 @@ class WatchlistService:
             if item.get("available")
             and str(item.get("stem") or "").strip()
             and str(card_config_by_id.get(str(item.get("id") or ""), {}).get("bias_group") or "bullish") != "bearish"
+            and not (
+                str(item.get("id") or "") == "power_gap_volume_watch"
+                and str(item.get("freshness") or "") == "stale"
+            )
         ]
         candidate_cards_by_id = {
             str(item.get("id") or ""): item
@@ -4075,6 +4123,71 @@ def _scanner_top_hits_source_fingerprint(board_payload: dict[str, Any]) -> tuple
     }
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16], latest_source_at
+
+
+def _exclude_stale_power_gap_source(payload: dict[str, Any], board_payload: dict[str, Any]) -> None:
+    card = next(
+        (item for item in board_payload.get("cards") or [] if isinstance(item, dict) and item.get("id") == "power_gap_volume_watch"),
+        None,
+    )
+    if not isinstance(card, dict) or (card.get("available") and card.get("freshness") == "current"):
+        return
+    source_rows = list(payload.get("rows") or [])
+    guru_rows = (payload.get("guru_board") or {}).get("rows", []) if isinstance(payload.get("guru_board"), dict) else []
+    if not any(
+        isinstance(row, dict)
+        and any(isinstance(scanner, dict) and scanner.get("id") == "power_gap_volume_watch" for scanner in row.get("scanners", []))
+        for row in source_rows + list(guru_rows or [])
+    ):
+        return
+
+    def source_only_count(rows: list[Any]) -> int:
+        return sum(
+            1 for row in rows if isinstance(row, dict)
+            and isinstance(row.get("scanners"), list)
+            and len(row["scanners"]) == 1
+            and isinstance(row["scanners"][0], dict)
+            and row["scanners"][0].get("id") == "power_gap_volume_watch"
+        )
+
+    top_source_only = source_only_count(source_rows)
+    guru_source_only = source_only_count(list(guru_rows or []))
+    guru_source_matches = sum(
+        1 for row in guru_rows if isinstance(row, dict)
+        and any(isinstance(scanner, dict) and scanner.get("id") == "power_gap_volume_watch" for scanner in row.get("scanners", []))
+    )
+
+    def strip_source(rows: object, *, require_overlap: bool = False) -> list[dict[str, Any]]:
+        retained: list[dict[str, Any]] = []
+        for row in (rows if isinstance(rows, list) else []):
+            if not isinstance(row, dict):
+                continue
+            scanners = row.get("scanners") if isinstance(row.get("scanners"), list) else []
+            has_power_gap = any(isinstance(item, dict) and item.get("id") == "power_gap_volume_watch" for item in scanners)
+            if not has_power_gap:
+                retained.append(row)
+                continue
+            scanners = [item for item in scanners if isinstance(item, dict) and item.get("id") != "power_gap_volume_watch"]
+            if not scanners or (require_overlap and len(scanners) < 2):
+                continue
+            row["scanners"] = scanners
+            row["scanner_count"] = len(scanners)
+            row["scanner_labels"] = [str(item.get("label") or "") for item in scanners if str(item.get("label") or "").strip()]
+            row.pop("power_gap_volume_context", None)
+            row.pop("trade_readiness_explanation", None)
+            retained.append(row)
+        return retained
+
+    payload["rows"] = strip_source(payload.get("rows"), require_overlap=True)
+    payload["total_unique_tickers"] = max(0, int(payload.get("total_unique_tickers") or 0) - top_source_only)
+    payload["overlapping_ticker_count"] = len(payload["rows"])
+    guru_board = payload.get("guru_board")
+    if isinstance(guru_board, dict):
+        guru_rows = strip_source(guru_board.get("rows"))
+        guru_board["rows"] = guru_rows
+        guru_board["total_unique_tickers"] = max(0, int(guru_board.get("total_unique_tickers") or 0) - guru_source_only)
+        guru_board["total_scanner_matches"] = max(0, int(guru_board.get("total_scanner_matches") or 0) - guru_source_matches)
+        guru_board["confluence_ticker_count"] = sum(1 for row in guru_rows if int(row.get("scanner_count") or 0) >= 2)
 
 
 def _load_scanner_top_hits_refresh_state(status_dir: Path) -> dict[str, str]:
@@ -5975,6 +6088,7 @@ _SCANNER_TOP_HIT_LIST_FIELDS = (
     "position_bucket", "daily_rs_rating", "weekly_rs_rating", "rs_rating_3m",
     "rs_rating_6m", "growth_acceleration_score", "growth_acceleration_label", "growth_acceleration_pass_count",
     "canslim_score", "canslim_max_score", "vcp_score", "vcp_rating",
+    "power_gap_volume_context", "trade_readiness_explanation",
 )
 
 

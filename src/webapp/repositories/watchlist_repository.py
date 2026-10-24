@@ -308,6 +308,7 @@ class WatchlistRepository:
 
 def _group_for_stem(stem: str) -> tuple[str, str]:
     rules = (
+        ("power_gap_volume_watch", "power_gap_volume_watch", "Power Gap & Volume Watch"),
         ("weekly_htf_pullback", "weekly_htf_pullback", "Weekly HTF Pullback"),
         ("weekly_rs_new_high_all", "weekly_rs_new_high", "Weekly RS New High"),
         ("eight_week_100_runup", "eight_week_100_runup", "8W 100% Runup"),

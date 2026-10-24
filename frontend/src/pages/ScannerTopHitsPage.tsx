@@ -14,8 +14,10 @@ import { calculateTradeManagement, type TradeManagementPreset } from "../lib/tra
 import { getReadinessSizingParams, resolveTradeReadiness, type ResolvedTradeReadiness, type StopPolicy } from "../lib/tradeReadinessPolicy";
 import type { MomentumEtfPortfolioRow, MomentumEtfPortfoliosResponse, MyPickRow, MyPicksContextResponse, ScannerTopHitRow, ScannerTopHitsResponse, TechnicalIndicatorRatingCell, WatchlistChartResponse } from "../lib/types";
 
-type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore";
+type SortKey = "hits" | "ticker" | "sector" | "sectorTopHit" | "industryTopHit" | "close" | "change" | "from52wLow" | "bollinger" | "rsEvidence" | "rsDays" | "rsPhaseDays" | "upOnDownDays" | "rs" | "dailyRs" | "rs3m" | "rs6m" | "rsMomentum" | "ta" | "fa" | "decision" | "decisionScore" | "powerGap";
 type SortDirection = "asc" | "desc";
+type PowerGapSignalFilter = "gap" | "hve" | "hvy" | "any";
+type EarningsContextFilter = "all" | "confirmed" | "nearby" | "unknown" | "failed";
 type ViewMode = "list" | "charts" | "guru" | "readiness" | "sectors" | "position" | "etf-portfolios";
 type ChartGridColumns = 2 | 3 | 4;
 type ChartRange = "3m" | "6m" | "1y";
@@ -65,6 +67,10 @@ type TopHitsFilterPreset = {
   sortBy: SortKey;
   sortDirection: SortDirection;
   viewMode: ViewMode;
+  powerGapSignal: PowerGapSignalFilter;
+  powerGapEarnings: EarningsContextFilter;
+  powerGapNewToday: boolean;
+  powerGapMaxAge: string;
 };
 type TopHitsPresetStore = { presets: Record<string, TopHitsFilterPreset>; defaultPresetName: string };
 const LIST_PAGE_SIZE = 50;
@@ -88,6 +94,7 @@ const MIN_TOP_HITS_PRICE = 5;
 const MOMENTUM_ETF_ACCENTS: Record<string, string> = { FMTM: "amber", SPMO: "teal", PTF: "blue", FFTY: "cyan" };
 const LEADERSHIP_SCANNER_IDS = new Set(["trend_template", "weekly_candidate_pool", "best_winners", "qullamaggie", "sean_breakout", "venu_scanner"]);
 const PINNED_SCANNER_OPTIONS = [
+  { id: "power_gap_volume_watch", label: "Power Gap & Volume Watch" },
   { id: "weekly_candidate_pool", label: "Weekly Candidate Pool" },
   { id: "best_winners", label: "Best Winners" },
   { id: "qullamaggie", label: "Qullamaggie" },
@@ -110,6 +117,10 @@ const EMPTY_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   sortBy: "hits",
   sortDirection: "desc",
   viewMode: "list",
+  powerGapSignal: "any",
+  powerGapEarnings: "all",
+  powerGapNewToday: false,
+  powerGapMaxAge: "60",
 };
 const DEFAULT_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   ...EMPTY_TOP_HITS_FILTERS,
@@ -124,7 +135,15 @@ const BUILT_IN_ENTRY_CONFLUENCE_PRESET_ID = "built-in:entry-confluence";
 const BUILT_IN_RS_NEW_HIGH_CONFLUENCE_PRESET_ID = "built-in:rs-new-high-confluence";
 const BUILT_IN_MARTIN_FOCUS_PRESET_ID = "built-in:martin-focus-list";
 const BUILT_IN_TRADE_READINESS_PRESET_ID = "built-in:trade-readiness";
+const BUILT_IN_POWER_GAP_PRESET_ID = "built-in:power-gap-volume-watch";
 const TRADE_READINESS_TOP_HITS_FILTERS: TopHitsFilterPreset = { ...DEFAULT_TOP_HITS_FILTERS, viewMode: "readiness" };
+const POWER_GAP_TOP_HITS_FILTERS: TopHitsFilterPreset = {
+  ...EMPTY_TOP_HITS_FILTERS,
+  scannerGroups: [["power_gap_volume_watch"]],
+  sortBy: "powerGap",
+  sortDirection: "desc",
+  powerGapSignal: "gap",
+};
 const MARTIN_FOCUS_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   ...EMPTY_TOP_HITS_FILTERS,
   sizePriceFloorOnly: true,
@@ -159,6 +178,7 @@ const BUILT_IN_TOP_HITS_PRESETS: Record<string, { label: string; filters: TopHit
   [BUILT_IN_RS_NEW_HIGH_CONFLUENCE_PRESET_ID]: { label: "RS New High Confluence", filters: RS_NEW_HIGH_CONFLUENCE_TOP_HITS_FILTERS },
   [BUILT_IN_MARTIN_FOCUS_PRESET_ID]: { label: "Martin Focus List", filters: MARTIN_FOCUS_TOP_HITS_FILTERS },
   [BUILT_IN_TRADE_READINESS_PRESET_ID]: { label: "Trade Readiness", filters: TRADE_READINESS_TOP_HITS_FILTERS },
+  [BUILT_IN_POWER_GAP_PRESET_ID]: { label: "Power Gap & Volume Watch", filters: POWER_GAP_TOP_HITS_FILTERS },
 };
 
 export function ScannerTopHitsPage() {
@@ -201,6 +221,10 @@ export function ScannerTopHitsPage() {
   const [rsEvidenceMin, setRsEvidenceMin] = useState(initialFilters.rsEvidenceMin);
   const [rsDaysMinPct, setRsDaysMinPct] = useState(initialFilters.rsDaysMinPct);
   const [upOnDownDaysMin, setUpOnDownDaysMin] = useState(initialFilters.upOnDownDaysMin);
+  const [powerGapSignal, setPowerGapSignal] = useState<PowerGapSignalFilter>(initialFilters.powerGapSignal);
+  const [powerGapEarnings, setPowerGapEarnings] = useState<EarningsContextFilter>(initialFilters.powerGapEarnings);
+  const [powerGapNewToday, setPowerGapNewToday] = useState(initialFilters.powerGapNewToday);
+  const [powerGapMaxAge, setPowerGapMaxAge] = useState(initialFilters.powerGapMaxAge);
   const [scannerGroups, setScannerGroups] = useState<string[][]>(() => initialFilters.scannerGroups.map((group) => [...group]));
   const [activeScannerGroupIndex, setActiveScannerGroupIndex] = useState(0);
   const [guruScannerGroupsOnly, setGuruScannerGroupsOnly] = useState(true);
@@ -248,6 +272,10 @@ export function ScannerTopHitsPage() {
     setRsEvidenceMin(preset.rsEvidenceMin);
     setRsDaysMinPct(preset.rsDaysMinPct);
     setUpOnDownDaysMin(preset.upOnDownDaysMin);
+    setPowerGapSignal(preset.powerGapSignal);
+    setPowerGapEarnings(preset.powerGapEarnings);
+    setPowerGapNewToday(preset.powerGapNewToday);
+    setPowerGapMaxAge(preset.powerGapMaxAge);
     setScannerGroups(preset.scannerGroups.map((group) => [...group]));
     setActiveScannerGroupIndex(0);
     setSortBy(preset.sortBy);
@@ -270,6 +298,10 @@ export function ScannerTopHitsPage() {
     rsEvidenceMin,
     rsDaysMinPct,
     upOnDownDaysMin,
+    powerGapSignal,
+    powerGapEarnings,
+    powerGapNewToday,
+    powerGapMaxAge,
     scannerGroups: scannerGroups.map((group) => [...group]),
     sortBy,
     sortDirection,
@@ -423,6 +455,7 @@ export function ScannerTopHitsPage() {
   const selectedScannerIds = useMemo(() => Array.from(new Set(scannerGroups.flat())), [scannerGroups]);
   const activeScannerGroup = scannerGroups[activeScannerGroupIndex] ?? [];
   const nonEmptyScannerGroupCount = scannerGroups.filter((group) => group.length > 0).length;
+  const isPowerGapView = scannerGroups.some((group) => group.includes("power_gap_volume_watch"));
   const scannerIdsByTicker = useMemo(
     () => new Map(rows.map((row) => [row.ticker, row.scanners.map((scanner) => normalizeScannerId(scanner.id))])),
     [rows],
@@ -503,6 +536,25 @@ export function ScannerTopHitsPage() {
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     let nextRows = rows;
+    if (isPowerGapView) {
+      nextRows = nextRows.filter((row) => {
+        const context = row.power_gap_volume_context;
+        const signals = context?.active_signals ?? [];
+        const hasSignal = powerGapSignal === "any" ? signals.length > 0 : signals.includes(powerGapSignal);
+        if (!hasSignal) return false;
+        const gap = signals.includes("gap") ? context?.gap_event : null;
+        const gapAge = gap?.age_trading_sessions ?? gap?.age_sessions;
+        if (powerGapNewToday && gapAge !== 0) return false;
+        const maxAge = Number.parseInt(powerGapMaxAge, 10);
+        if (gap && Number.isFinite(maxAge) && (gapAge == null || gapAge > maxAge)) return false;
+        const status = context?.earnings_context?.status;
+        if (powerGapEarnings === "confirmed" && status !== "earnings_confirmed") return false;
+        if (powerGapEarnings === "nearby" && !status?.startsWith("earnings_nearby")) return false;
+        if (powerGapEarnings === "unknown" && status !== "catalyst_unknown") return false;
+        if (powerGapEarnings === "failed" && status !== "lookup_failed") return false;
+        return true;
+      });
+    }
     if (sizePriceFloorOnly) {
       nextRows = nextRows.filter(meetsSizePriceFloor);
     }
@@ -538,15 +590,15 @@ export function ScannerTopHitsPage() {
     if (nonEmptyScannerGroupCount > 0) {
       nextRows = nextRows.filter((row) => hasScannerGroupSignals(row, scannerGroups));
     }
-    return [...nextRows].sort((left, right) => compareRows(left, right, sortBy, sortDirection, {
+    return [...nextRows].sort((left, right) => (sortBy === "powerGap" ? comparePowerGapRows(left, right) : compareRows(left, right, sortBy, sortDirection, {
       sectorLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeSectorKey(item.sector)) : new Map<string, string>(),
       industryLeaders: eliteOnly ? buildEliteLeaderMap(nextRows, (item) => normalizeIndustryKey(item.industry)) : new Map<string, string>(),
-    }));
-  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, nonEmptyScannerGroupCount, normalizedLeaderRsRange, normalizedRsDaysMinPct, normalizedRsEvidenceMin, normalizedUpOnDownDaysMin, rows, rsEvidenceOnly, scannerGroups, scannerNames, search, sectorFilter, sizePriceFloorOnly, sortBy, sortDirection]);
+    })));
+  }, [eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, isPowerGapView, leaderRsOnly, nonEmptyScannerGroupCount, normalizedLeaderRsRange, normalizedRsDaysMinPct, normalizedRsEvidenceMin, normalizedUpOnDownDaysMin, powerGapEarnings, powerGapMaxAge, powerGapNewToday, powerGapSignal, rows, rsEvidenceOnly, scannerGroups, scannerNames, search, sectorFilter, sizePriceFloorOnly, sortBy, sortDirection]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [chartWorkspace.gridColumns, eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, rsDaysMinPct, rsEvidenceMin, rsEvidenceOnly, scannerGroups, search, sectorFilter, sizePriceFloorOnly, sortBy, sortDirection, upOnDownDaysMin, viewMode]);
+  }, [chartWorkspace.gridColumns, eliteOnly, hasFundamentalQualityOnly, hasLeadershipScannerOnly, leaderRsOnly, leaderRsMax, leaderRsMin, powerGapEarnings, powerGapMaxAge, powerGapNewToday, powerGapSignal, rsDaysMinPct, rsEvidenceMin, rsEvidenceOnly, scannerGroups, search, sectorFilter, sizePriceFloorOnly, sortBy, sortDirection, upOnDownDaysMin, viewMode]);
 
   const pageSize = viewMode === "charts" ? chartPageSize(chartWorkspace.gridColumns) : LIST_PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
@@ -793,6 +845,25 @@ export function ScannerTopHitsPage() {
           <span>Search</span>
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Ticker, sector, scanner…" />
         </label>
+        {isPowerGapView ? <>
+          <label className="scanner-result-filter panel">
+            <span>Power Gap signal</span>
+            <select value={powerGapSignal} onChange={(event) => setPowerGapSignal(event.target.value as PowerGapSignalFilter)}>
+              <option value="gap">Active gap watch</option><option value="hve">Recent HVE</option><option value="hvy">Recent HVY</option><option value="any">Any active signal</option>
+            </select>
+          </label>
+          <label className="scanner-result-filter panel">
+            <span>Gap earnings context</span>
+            <select value={powerGapEarnings} onChange={(event) => setPowerGapEarnings(event.target.value as EarningsContextFilter)}>
+              <option value="all">All statuses</option><option value="confirmed">Confirmed</option><option value="nearby">Nearby, unconfirmed</option><option value="unknown">Catalyst unknown</option><option value="failed">Lookup failed</option>
+            </select>
+          </label>
+          <label className="scanner-result-filter panel">
+            <span>Gap age</span>
+            <span className="scanner-result-check"><input type="checkbox" checked={powerGapNewToday} onChange={(event) => setPowerGapNewToday(event.target.checked)} /> New gap today</span>
+            <input aria-label="Maximum gap age in trading sessions" type="number" min={0} max={60} value={powerGapMaxAge} onChange={(event) => setPowerGapMaxAge(event.target.value)} />
+          </label>
+        </> : null}
         <label className="scanner-result-filter panel">
           <span>Sector</span>
           <select value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value)}>
@@ -1251,6 +1322,7 @@ export function ScannerTopHitsPage() {
                             {row.ticker}
                           </Link>
                           <span>{row.company || row.industry || "-"}</span>
+                          {row.power_gap_volume_context ? <PowerGapEventSummary row={row} /> : null}
                         </div>
                       </td>
                       <td data-label="Hits">
@@ -2670,6 +2742,54 @@ function compareRows(
   return compareNullableNumber(left.fa_rating, right.fa_rating, sortDirection) || left.ticker.localeCompare(right.ticker);
 }
 
+function comparePowerGapRows(left: ScannerTopHitRow, right: ScannerTopHitRow) {
+  const leftContext = left.power_gap_volume_context;
+  const rightContext = right.power_gap_volume_context;
+  const leftGap = leftContext?.active_signals?.includes("gap") ? leftContext.gap_event : null;
+  const rightGap = rightContext?.active_signals?.includes("gap") ? rightContext.gap_event : null;
+  if (leftGap && rightGap) {
+    return (leftGap.age_trading_sessions ?? leftGap.age_sessions ?? Infinity) - (rightGap.age_trading_sessions ?? rightGap.age_sessions ?? Infinity)
+      || (rightGap.volume_ratio ?? -Infinity) - (leftGap.volume_ratio ?? -Infinity)
+      || (right.daily_rs_rating ?? right.rs_rating ?? -Infinity) - (left.daily_rs_rating ?? left.rs_rating ?? -Infinity)
+      || left.ticker.localeCompare(right.ticker);
+  }
+  if (leftGap || rightGap) return leftGap ? -1 : 1;
+  const eventDate = (row: ScannerTopHitRow) => {
+    const dates = [row.power_gap_volume_context?.volume_events?.hve?.date, row.power_gap_volume_context?.volume_events?.hvy?.date].filter((value): value is string => Boolean(value)).sort();
+    return dates[dates.length - 1] ?? "";
+  };
+  return eventDate(right).localeCompare(eventDate(left))
+    || (right.daily_rs_rating ?? right.rs_rating ?? -Infinity) - (left.daily_rs_rating ?? left.rs_rating ?? -Infinity)
+    || left.ticker.localeCompare(right.ticker);
+}
+
+function PowerGapEventSummary({ row }: { row: ScannerTopHitRow }) {
+  const context = row.power_gap_volume_context;
+  if (!context) return <span>Power Gap context unavailable</span>;
+  const gap = context.active_signals?.includes("gap") ? context.gap_event : null;
+  const events = context.volume_events;
+  const earningsStatus = context.earnings_context?.status;
+  const earningsLabel = earningsStatus === "earnings_confirmed" ? "Earnings confirmed"
+    : earningsStatus?.startsWith("earnings_nearby") ? "Earnings nearby, unconfirmed"
+      : earningsStatus === "lookup_failed" ? "Earnings lookup failed"
+        : "Catalyst unknown";
+  const coverage = context.coverage;
+  const hveUnavailable = coverage?.component_issues?.hve;
+  const coverageText = coverage ? `${coverage.daily_bars ?? "?"} daily bars, ${coverage.history_start ?? "start unknown"} to ${coverage.history_end ?? "end unknown"}; HVY ${coverage.hvy_history === "complete_252_expected_sessions" ? "252-session history complete" : "history incomplete or calendar unavailable"}${coverage.latest_data_stale ? "; latest bar predates the as-of date" : ""}${coverage.issues?.length ? `; data issues: ${coverage.issues.join("; ")}` : ""}${coverage.missing_sessions?.length ? `; missing sessions: ${coverage.missing_sessions.slice(0, 8).join(", ")}${coverage.missing_sessions.length > 8 ? ", …" : ""}` : ""}.` : "Coverage details unavailable.";
+  const retrospective = context.earnings_context?.evidence_mode === "retrospective_lookup";
+  return <details className="power-gap-event-summary">
+    <summary>{gap ? `Gap +${(gap.gap_pct ?? 0).toFixed(1)}% · ${(gap.volume_ratio ?? 0).toFixed(1)}× volume · ${gap.age_trading_sessions ?? gap.age_sessions ?? "?"} sessions ago · ${earningsLabel}` : `Volume event · ${(context.active_signals ?? []).join(" + ") || "signal"}`}</summary>
+    <span>{gap ? `Gap ${gap.date ?? "date unavailable"}; O/H/L/C ${[gap.open, gap.high, gap.low, gap.close].map((value) => value == null ? "–" : formatPrice(value)).join(" / ")}; event volume ${formatCount(gap.volume ?? 0)}; 20-session baseline ${formatCount(gap.volume_baseline ?? 0)}; SMA200 ${formatPrice(gap.sma200 ?? null)}.` : "No active gap; volume-only event. Any retained gap is expired and shown as inactive."}</span>
+    <span>HVE {events?.hve ? `${events.hve.date ?? ""} · ${events.hve.age_calendar_days ?? "?"} calendar days` : hveUnavailable ? `unavailable · ${hveUnavailable}` : "no recent event"}; HVY {events?.hvy ? `${events.hvy.date ?? ""} · ${events.hvy.age_calendar_days ?? "?"} calendar days` : coverage?.component_issues?.hvy ? `unavailable · ${coverage.component_issues.hvy}` : "no recent event"}.</span>
+    <span>HVE is evaluated from available input history; “ever” does not mean the company’s full lifetime. {hveUnavailable ? "HVE is omitted because its history is incomplete; valid gap and HVY signals can still appear." : ""}</span>
+    {context.current_context ? <span>{context.gap_event ? `${gap ? "Gap-day" : "Expired gap reference's"} low ${context.current_context.gap_day_low_breached ? "breached" : "not breached"}; ` : ""}Latest close {formatPrice(context.current_context.latest_close ?? null)}.</span> : null}
+    {gap ? <span>{context.earnings_context?.report_date ? `Report ${context.earnings_context.report_date}; reaction session ${context.earnings_context.effective_reaction_session ?? "unknown"}. ` : ""}{context.earnings_context?.match_reason ?? earningsLabel}{context.earnings_context?.source ? ` · ${context.earnings_context.source}` : ""}{retrospective ? " · retrospective lookup evidence" : ""}</span> : null}
+    <span>History coverage: {coverageText}</span>
+    {coverage?.component_issues?.gap ? <span>Gap signal unavailable: {coverage.component_issues.gap}</span> : null}
+    {coverage?.component_issues?.hvy ? <span>HVY signal unavailable: {coverage.component_issues.hvy}</span> : null}
+  </details>;
+}
+
 function compareNullableNumber(left: number | null, right: number | null, sortDirection: SortDirection) {
   const missingSentinel = sortDirection === "asc" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
   const normalizedLeft = typeof left === "number" ? left : missingSentinel;
@@ -2978,6 +3098,10 @@ function normalizeTopHitsFilterPreset(value: unknown): TopHitsFilterPreset {
     rsEvidenceMin: typeof preset.rsEvidenceMin === "string" ? preset.rsEvidenceMin : "5",
     rsDaysMinPct: typeof preset.rsDaysMinPct === "string" ? preset.rsDaysMinPct : "60",
     upOnDownDaysMin: typeof preset.upOnDownDaysMin === "string" ? preset.upOnDownDaysMin : "3",
+    powerGapSignal: preset.powerGapSignal === "hve" || preset.powerGapSignal === "hvy" || preset.powerGapSignal === "any" ? preset.powerGapSignal : "gap",
+    powerGapEarnings: preset.powerGapEarnings === "confirmed" || preset.powerGapEarnings === "nearby" || preset.powerGapEarnings === "unknown" || preset.powerGapEarnings === "failed" ? preset.powerGapEarnings : "all",
+    powerGapNewToday: preset.powerGapNewToday === true,
+    powerGapMaxAge: typeof preset.powerGapMaxAge === "string" ? preset.powerGapMaxAge : "60",
     scannerGroups: scannerGroups.length > 0 ? scannerGroups : [[]],
     sortBy: typeof preset.sortBy === "string" ? preset.sortBy as SortKey : "hits",
     sortDirection: preset.sortDirection === "asc" ? "asc" : "desc",

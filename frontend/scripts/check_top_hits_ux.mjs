@@ -14,7 +14,10 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const scanners = Array.from({ length: 12 }, (_, i) => ({ id: `scanner_${i}`, label: `Scanner ${String(i).padStart(2, '0')}` }));
+  const powerGapContext = { rules_version: 'power_gap_volume_watch_v1', as_of_date: '2026-10-23', active_signals: ['gap'], coverage: { history_start: '2025-10-01', history_end: '2026-10-23', daily_bars: 252, hvy_complete: true, hvy_history: 'complete_252_expected_sessions', issues: [] }, gap_event: { date: '2026-10-23', gap_pct: 12.4, volume_ratio: 4.1, age_trading_sessions: 0, open: 112, high: 118, low: 109, close: 116, volume: 4100000, volume_baseline: 1000000, sma200: 80 }, volume_events: {}, current_context: { latest_close: 116, gap_day_low_breached: false }, earnings_context: { status: 'earnings_confirmed', report_date: '2026-10-22', effective_reaction_session: '2026-10-23', evidence_mode: 'retrospective_lookup', match_reason: 'reported_event_and_xnys_reaction_session_match', source: 'fixture' } };
+  const powerGapScanner = { id: 'power_gap_volume_watch', label: 'Power Gap & Volume Watch' };
   const row = { ticker: 'TEST', company: 'Example Company', sector: 'Technology', industry: 'Software', day_close: 104, scanner_count: scanners.length, scanners, scanner_labels: scanners.map(s => s.label) };
+  const powerGapRow = { ...row, ticker: 'GAP', scanner_count: 1, scanners: [powerGapScanner], scanner_labels: [powerGapScanner.label], power_gap_volume_context: powerGapContext };
   const plan = (risk = 2, overrides = {}) => ({ source_strategy_id: 'ma_pullback_retest', state: 'ready', support_label: 'EMA21', support_price: 98, trigger_label: 'Close', trigger_price: 103, stop_label: 'Low', stop_price: 95, reference_risk_pct: risk, execution_timeframe: 'daily', entry_policy: 'close_confirmed', max_risk_pct: 5, max_entry_price: 105, risk_valid: true, risk_status: risk > 5 ? 'over_limit' : 'within_limit', signal_date: '2026-10-16', ...overrides });
   const readinessRows = [
     { ...row, ticker: 'LEAD', trade_readiness: 'leader', daily_rs_rating: 80 },
@@ -45,7 +48,7 @@ try {
         if (section === 'guru') {
           return { rows: [], guru_board: { definitions: [], total_unique_tickers: readinessRows.length, total_scanner_matches: 0, confluence_ticker_count: 0, rows: readinessRows } };
         }
-        return { rows: [row, { ...row, ticker: 'OTHER', scanners: scanners.slice(0, 2), scanner_count: 2 }], total_unique_tickers: 2, total_live_scanners: 12 };
+        return { rows: [row, { ...row, ticker: 'OTHER', scanners: scanners.slice(0, 2), scanner_count: 2 }, powerGapRow], total_unique_tickers: 3, total_live_scanners: 13 };
       })()
       : path === '/api/admin/my-picks' ? { rows: [] }
       : { rows: [] };
@@ -63,6 +66,10 @@ try {
     /Qullamaggie[\s\S]*Weekly Candidate Pool[\s\S]*kai_s2[\s\S]*AND Group 2[\s\S]*one_year_winners/i,
     'Built-in scanner groups load by default',
   );
+  await page.getByLabel('Saved filter preset').selectOption('built-in:power-gap-volume-watch');
+  assert.match(await page.getByLabel('Scanner filter expression').innerText(), /Power Gap & Volume Watch/i, 'Power Gap preset uses its single scanner group');
+  assert.equal(await page.getByLabel('Power Gap signal').inputValue(), 'gap', 'Power Gap preset defaults to active gaps');
+  assert.match(await page.locator('.power-gap-event-summary summary').innerText(), /Gap \+12\.4% · 4\.1× volume · 0 sessions ago · Earnings confirmed/);
   await page.getByLabel('Saved filter preset').selectOption('built-in:martin-focus-list');
   assert.equal(await page.getByLabel('Saved filter preset').inputValue(), 'built-in:martin-focus-list');
   assert.equal(await page.getByLabel('Minimum daily RS').inputValue(), '90');
@@ -100,7 +107,7 @@ try {
   assert.equal(await page.getByLabel('Saved filter preset').inputValue(), 'Momentum setup');
   assert.equal(await cells.count(), 1, 'Default preset restores scanner groups');
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  assert.equal(await cells.count(), 2, 'Deleting a preset restores unfiltered results');
+  assert.equal(await cells.count(), 3, 'Deleting a preset restores unfiltered results');
   await page.getByLabel('Scanner 11', { exact: true }).check();
   await page.getByText('Customize scanner names', { exact: true }).click();
   const name = page.getByRole('textbox', { name: 'Display name for Scanner 11', exact: true });
@@ -118,7 +125,7 @@ try {
   assert.ok(Math.abs((await pick.boundingBox()).x - pickBefore.x) < 2, 'My Pick stays pinned');
   assert.ok(before.x >= pickBefore.x + pickBefore.width - 1, 'Pinned columns do not overlap');
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
-  assert.equal(await cells.count(), 2);
+  assert.equal(await cells.count(), 3);
   await page.reload();
   await page.getByText('No tickers match current filters.', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('My momentum', { exact: true }).count(), 1, 'Alias persists');
