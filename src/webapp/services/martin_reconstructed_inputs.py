@@ -859,7 +859,7 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
         "manifest_version": manifest["version"], "manifest_digest": manifest["digest"],
         "code_fingerprint": manifest["code_fingerprint"],
         "config_fingerprint": config_fingerprint,
-        "source_fingerprint": hashlib.sha256(json.dumps(fingerprint_payload, sort_keys=True).encode()).hexdigest(),
+        "source_fingerprint": hashlib.sha256(json.dumps(fingerprint_payload, sort_keys=True, default=str).encode()).hexdigest(),
         "input_source": RECONSTRUCTION_VERSION,
         "coverage": {"focus_recalculated": sorted(FOCUS_SCANNERS - unavailable_scanners),
                      "focus_matches_by_scanner": scanner_states,

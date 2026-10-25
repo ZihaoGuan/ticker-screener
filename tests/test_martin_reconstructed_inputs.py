@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 from types import SimpleNamespace
 import sys
 import unittest
@@ -126,7 +127,10 @@ class MartinReconstructedInputsTests(unittest.TestCase):
              mock.patch.object(reconstructed_inputs, "build_screener_catalog", return_value=catalog), \
              mock.patch.object(reconstructed_inputs, "load_published_rating_evidence", return_value=({}, {})), \
              mock.patch.object(reconstructed_inputs, "load_published_earnings_evidence", return_value={}), \
-             mock.patch.object(reconstructed_inputs, "load_dated_scanner_evidence", return_value=({}, {})), \
+             mock.patch.object(reconstructed_inputs, "load_dated_scanner_evidence", return_value=({
+                 "best_winners": {"id": 1, "run_date": day, "config_hash": Decimal("1.2"),
+                                  "status": "executed", "created_at": dt.datetime(2026, 10, 24,
+                                      tzinfo=dt.timezone.utc)}}, {})), \
              mock.patch.object(reconstructed_inputs, "evaluate_focus_price_sources", side_effect=evaluate):
             report = reconstructed_inputs.reconstruct_price_focus_session(cursor, day,
                 next_open=dt.datetime(2026, 10, 26, 13, 30, tzinfo=dt.timezone.utc),
@@ -144,6 +148,7 @@ class MartinReconstructedInputsTests(unittest.TestCase):
         self.assertEqual(report["coverage"]["history_coverage_issues"][0]["ticker"], "IPO")
         self.assertEqual(report["coverage"]["history_coverage_issues"][0]["reason"], "too_young_for_scanner")
         self.assertTrue(report["ready"])
+        self.assertEqual(len(report["source_fingerprint"]), 64)
 
     def test_manifest_is_derived_and_versioned(self):
         manifest = source_manifest()
