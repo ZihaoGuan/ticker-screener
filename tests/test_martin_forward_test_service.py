@@ -102,8 +102,10 @@ class MartinExecutionBookContextTests(unittest.TestCase):
         def fetch(_cursor, sql, params=()):
             statements.append(sql)
             if "SELECT DISTINCT strategy_id" in sql:
-                self.assertIn("martin_range_bar_retest_%", sql)
+                self.assertIn("position(%s in strategy_id)=1", sql)
                 self.assertIn("execution_book_version", sql)
+                self.assertNotIn("%", sql.replace("%s", ""))
+                self.assertEqual(params, ("martin_range_bar_retest_", "martin_bar_retest_execution_v1"))
                 # The classification-only prefixed book has no version marker and is omitted.
                 return [{"strategy_id": execution_id}]
             if "FROM martin_forward_runs" in sql and params:

@@ -380,9 +380,9 @@ class MartinForwardTestRepository:
                         books[key]["rotation_policy_version"] = ROTATION_POLICY_VERSION
                         books[key]["rotation_limits"] = ROTATION_LIMITS
                 execution_books = self._fetch(cursor, """SELECT DISTINCT strategy_id FROM martin_forward_runs
-                    WHERE strategy_id LIKE 'martin_range_bar_retest_%'
-                    AND summary_json->>'execution_book_version'='martin_bar_retest_execution_v1'
-                    ORDER BY strategy_id""")
+                    WHERE position(%s in strategy_id)=1
+                    AND summary_json->>'execution_book_version'=%s
+                    ORDER BY strategy_id""", ("martin_range_bar_retest_", "martin_bar_retest_execution_v1"))
                 for item in execution_books:
                     strategy_id = str(item["strategy_id"])
                     runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
