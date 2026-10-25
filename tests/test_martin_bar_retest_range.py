@@ -236,6 +236,55 @@ class MartinBarRetestRangeTests(unittest.TestCase):
                                      database_url="test", apply=True)
         self.assertEqual((connection.commits, connection.rollbacks), (0, 2))
 
+    def test_run_range_records_backdated_mode_and_preserves_default(self):
+        class ReplayRepo:
+            def __init__(self): self.metadata = []
+            def set_run_metadata(self, run_id, payload): self.metadata.append((run_id, payload))
+
+        class Execution:
+            def __init__(self, repository, **_kwargs): self.repository = repository; self.book_id = None
+            def run_session(self, **kwargs):
+                self.repository.execution_calls.append(kwargs)
+                return {"missing_bars": 0, "scheduled": 0}
+
+        class Service:
+            def __init__(self, _repository, **_kwargs): pass
+            def run_session(self, **_kwargs):
+                return {"status": "complete", "run_id": 31, "candidates": [],
+                        "source_hit_count": 1, "new_event_count": 0, "active_event_count": 0,
+                        "zero_hit_day": False, "retrospective_source_scan": True}
+
+        repositories = []
+        class RepoFactory(ReplayRepo):
+            def __init__(self, _connection):
+                super().__init__(); self.execution_calls = []; repositories.append(self)
+
+        class PerformanceCursor:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def execute(self, *_args): pass
+            def fetchall(self): return []
+
+        class PerformanceConnection:
+            def cursor(self): return PerformanceCursor()
+
+        day = dt.date(2026, 10, 19)
+        sources = {day: {"source_run_id": 7110, "replay_provenance": {"source_mode": "published_after_next_open"}}}
+        for enabled in (False, True):
+            with patch("src.webapp.services.martin_bar_retest_service.MartinBarRetestService", Service), \
+                    patch("src.webapp.services.martin_bar_retest_execution.MartinBarRetestExecutionService", Execution), \
+                    patch("src.webapp.services.martin_rs_replay.ReplayRepository", RepoFactory):
+                results = replay.run_range(PerformanceConnection(), sessions=[day], sources=sources,
+                    book_id="martin_range_bar_retest_mode_test", database_url="test",
+                    simulate_backdated_buys=enabled)
+            repository = repositories[-1]
+            self.assertEqual(repository.execution_calls[0]["simulate_backdated_buys"], enabled)
+            metadata = repository.metadata[0][1]
+            self.assertEqual(metadata["simulate_backdated_buys"], enabled)
+            self.assertEqual(metadata["backdated_buy_basis"], "hypothetical_backdated_simulation" if enabled else "forward_safe")
+            self.assertEqual(results[0]["backdated_buy_simulation"], enabled)
+            self.assertEqual(results[0]["fill_basis"], "hypothetical_backdated_simulation" if enabled else "forward_safe")
+
     def test_existing_book_refusal_and_range_identity_validation(self):
         class ExistingConnection:
             def __init__(self): self.tables = []

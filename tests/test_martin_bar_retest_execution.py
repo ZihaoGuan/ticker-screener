@@ -131,6 +131,35 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
             if repo.updated:
                 self.assertEqual(repo.updated[0][2]["shares"], 500)
 
+    def test_retrospective_source_requires_opt_in_then_marks_hypothetical_fill(self):
+        candidate = {"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9.0,
+                     "max_entry": 10.0, "retrospective_source_scan": True}
+        repo = LifecycleRepo()
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
+        service.book_id = "martin_range_bar_retest_backdated_test"
+        blocked = service.run_session(day=dt.date(2026, 10, 19), run_id=19,
+                                      candidates=[candidate], source_on_time=False)
+        self.assertEqual(blocked["scheduled"], 0)
+
+        allowed = service.run_session(day=dt.date(2026, 10, 19), run_id=19,
+                                      candidates=[candidate], source_on_time=False,
+                                      simulate_backdated_buys=True)
+        self.assertEqual(allowed["scheduled"], 1)
+        order_payload = repo.updated[-1][2]
+        self.assertTrue(order_payload["source_reconstructed_later"])
+        self.assertEqual(order_payload["fill_basis"], "hypothetical_backdated_simulation")
+
+        frame = pd.DataFrame([{"Open": 9.8, "High": 10.2, "Low": 9.5, "Close": 10.0, "Volume": 1000}],
+                             index=pd.to_datetime(["2026-10-20"]))
+        service.bar_loader = lambda *_a, **_k: {"ABC": frame}
+        filled = service.run_session(day=dt.date(2026, 10, 20), run_id=20, candidates=[], source_on_time=False)
+        self.assertEqual(filled["filled"], 1)
+        position = repo.positions[0]["payload_json"]
+        self.assertTrue(position["backdated_simulation"])
+        self.assertEqual(position["opened_on"], "2026-10-20")
+        fill_event = next(event for event in repo.events if event["event_type"] == "order_filled")
+        self.assertEqual(fill_event["payload"]["fill_basis"], "hypothetical_backdated_simulation")
+
     def test_oct23_confirmation_fills_on_oct26_and_persists_position_and_event(self):
         repo = LifecycleRepo()
         service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})

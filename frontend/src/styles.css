@@ -7334,6 +7334,9 @@ dialog.modal-backdrop:not([open]) {
 .martin-dot { width: .55rem; height: .55rem; border-radius: 50%; background: #43bd89; }
 .martin-dot.stale { background: #e6a844; }
 .martin-inline-state, .martin-state { border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; background: var(--surface); }
+.martin-backdated-banner { border: 2px solid #d39a31; border-radius: .75rem; padding: 1rem 1.15rem; background: color-mix(in srgb, #d39a31 12%, var(--surface)); }
+.martin-backdated-banner strong { display: block; font-size: 1.05rem; }
+.martin-backdated-banner p { margin: .35rem 0 0; }
 .martin-state h2, .martin-state p { margin: 0; } .martin-state p { margin-top: .35rem; color: var(--muted); }
 .martin-view { display: grid; gap: 1rem; }
 .martin-lifecycle, .martin-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }

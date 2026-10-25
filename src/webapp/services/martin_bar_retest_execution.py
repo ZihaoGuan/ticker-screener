@@ -127,7 +127,7 @@ class MartinBarRetestExecutionService:
         self.bar_loader = bar_loader or load_many_ticker_windows
 
     def run_session(self, *, day: dt.date, run_id: int | None, candidates: list[dict[str, Any]],
-                    source_on_time: bool) -> dict[str, int]:
+                    source_on_time: bool, simulate_backdated_buys: bool = False) -> dict[str, int]:
         book = getattr(self, "book_id", None) or "martin_range_bar_retest_v1"
         pending = self.repository.pending_candidates(before=day, strategy_id=book)
         positions = self.repository.open_positions(strategy_id=book)
@@ -160,7 +160,10 @@ class MartinBarRetestExecutionService:
             position = outcome["position"]
             position_id = self.repository.fill_order(candidate_id=order["id"], run_id=order["run_id"], ticker=ticker,
                 event_date=day, position_payload=position, event_payload={"price": outcome["price"],
-                "shares": position["shares"], "same_day_stop": outcome["same_day_stop"]}, strategy_id=book)
+                "shares": position["shares"], "same_day_stop": outcome["same_day_stop"],
+                **({"backdated_simulation": True, "source_reconstructed_later": True,
+                   "fill_basis": "hypothetical_backdated_simulation"}
+                  if position.get("backdated_simulation") else {})}, strategy_id=book)
             if position_id is None:
                 continue
             counts["filled"] += 1
@@ -213,7 +216,8 @@ class MartinBarRetestExecutionService:
         held_names = {str(x["ticker"]).upper() for x in open_now + orders_now}
         for candidate in ordered:
             ticker = str(candidate["ticker"]).upper()
-            if (candidate.get("status") != "confirmed" or not source_on_time
+            backdated = simulate_backdated_buys and candidate.get("retrospective_source_scan") is True
+            if (candidate.get("status") != "confirmed" or not (source_on_time or backdated)
                     or ticker in held_names or run_id is None):
                 continue
             try:
@@ -226,7 +230,9 @@ class MartinBarRetestExecutionService:
             shares = size_order({**candidate, "limit_price": limit}, budget)
             if not shares:
                 continue
-            payload = schedule_payload(candidate, day=day, shares=shares)
+            payload = schedule_payload({**candidate, **({"backdated_simulation": True,
+                "source_reconstructed_later": True,
+                "fill_basis": "hypothetical_backdated_simulation"} if backdated else {})}, day=day, shares=shares)
             self.repository.update_candidate(run_id, ticker, payload)
             held_names.add(ticker)
             orders_now.append({"ticker": ticker, "payload_json": payload})

@@ -120,7 +120,7 @@ def book_performance(connection: Any, book_id: str) -> dict[str, Any]:
 
 
 def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date, dict[str, Any]],
-              book_id: str, database_url: str) -> list[dict[str, Any]]:
+              book_id: str, database_url: str, simulate_backdated_buys: bool = False) -> list[dict[str, Any]]:
     from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
     from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService
     from src.webapp.services.martin_rs_replay import ReplayRepository
@@ -140,7 +140,9 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             if actions["missing_bars"]:
                 raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
             repository.set_run_metadata(run_id, {"execution_book_version": "martin_bar_retest_execution_v1",
-                "execution_only": True, "execution_actions": actions})
+                "execution_only": True, "execution_actions": actions,
+                "simulate_backdated_buys": simulate_backdated_buys,
+                "backdated_buy_basis": None})
             results.append({"date": day.isoformat(), "source_run_id": None, "source_hit_count": 0,
                 "new_event_count": 0, "active_event_count": 0, "zero_hit_day": None,
                 "retrospective_source_scan": None, "source_publication_timing": "no_scan_execution_only",
@@ -152,7 +154,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
         if result.get("status") in {"missing_source", "blocked_source"} or result.get("skipped"):
             raise ValueError(f"Replay blocked or duplicated on {day}: {result.get('reason') or result.get('status')}.")
         actions = execution.run_session(day=day, run_id=result.get("run_id"), candidates=result.get("candidates", []),
-                                        source_on_time=result.get("retrospective_source_scan") is False)
+                                        source_on_time=result.get("retrospective_source_scan") is False,
+                                        simulate_backdated_buys=simulate_backdated_buys)
         if actions["missing_bars"]:
             raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
         cohorts = {category: sum(item.get("event_category") == category for item in result.get("candidates", []))
@@ -160,6 +163,9 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
         if result.get("run_id") is not None:
             repository.set_run_metadata(result["run_id"], {"execution_book_version": "martin_bar_retest_execution_v1",
                 "execution_actions": actions, "execution_source_on_time": result.get("retrospective_source_scan") is False,
+                "simulate_backdated_buys": simulate_backdated_buys,
+                "backdated_buy_basis": "hypothetical_backdated_simulation" if simulate_backdated_buys and result.get("retrospective_source_scan") else "forward_safe",
+                "source_reconstructed_later": bool(result.get("retrospective_source_scan")),
                 "category_cohorts": cohorts, "execution_account_limits": {"base_equity": 100000,
                 "risk_per_trade": 500, "max_name_value": 20000, "max_committed_risk": 2500, "max_positions": 8}})
         statuses = Counter(str(item.get("status") or "unknown") for item in result.get("candidates", []))
@@ -171,6 +177,9 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                         "active_event_count": result["active_event_count"],
                         "zero_hit_day": result["zero_hit_day"],
                         "retrospective_source_scan": result["retrospective_source_scan"],
+                        "backdated_buy_simulation": bool(simulate_backdated_buys and result["retrospective_source_scan"]),
+                        "source_reconstructed_later": bool(result["retrospective_source_scan"]),
+                        "fill_basis": "hypothetical_backdated_simulation" if simulate_backdated_buys and result["retrospective_source_scan"] else "forward_safe",
                         "source_publication_timing": source["replay_provenance"]["source_mode"],
                         "candidate_status_counts": dict(statuses), "reason_counts": dict(reasons),
                         "execution_actions": actions,
@@ -183,7 +192,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
 
 
 def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date, dict[str, Any]],
-                  book_id: str, database_url: str, apply: bool) -> list[dict[str, Any]]:
+                  book_id: str, database_url: str, apply: bool, simulate_backdated_buys: bool = False) -> list[dict[str, Any]]:
     try:
         with connection.cursor() as cursor:
             cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
@@ -192,7 +201,7 @@ def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.
                 raise RuntimeError(f"Replay book {book_id} is currently locked.")
         check_empty_book(connection, book_id)
         results = run_range(connection, sessions=sessions, sources=sources, book_id=book_id,
-                            database_url=database_url)
+                            database_url=database_url, simulate_backdated_buys=simulate_backdated_buys)
         if apply:
             connection.commit()
         else:
@@ -209,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--to-date", required=True, type=dt.date.fromisoformat)
     parser.add_argument("--book-id", required=True)
     parser.add_argument("--apply", action="store_true", help="Commit the full session range atomically; default simulates then rolls back.")
+    parser.add_argument("--simulate-backdated-buys", action="store_true",
+        help="Allow confirmed signals from scans saved after next-session open to schedule hypothetical historical fills.")
     args = parser.parse_args(argv)
     if args.from_date != FROM_DATE or args.to_date < TO_DATE:
         parser.error("this replay requires --from-date 2026-10-19 and --to-date on or after 2026-10-23")
@@ -234,10 +245,13 @@ def main(argv: list[str] | None = None) -> int:
 
     with psycopg.connect(config.database_url) as connection:
         results = execute_range(connection, sessions=sessions, sources=sources, book_id=args.book_id,
-                                database_url=config.database_url, apply=args.apply)
+                                database_url=config.database_url, apply=args.apply,
+                                simulate_backdated_buys=args.simulate_backdated_buys)
     print(json.dumps({"ready": True, "policy_id": POLICY_ID, "execution_policy_id": "martin_bar_retest_execution_v1", "book_id": args.book_id,
         "from_date": args.from_date.isoformat(), "to_date": args.to_date.isoformat(),
         "mode": "apply" if args.apply else "dry_run_rolled_back", "saved": bool(args.apply),
+        "simulate_backdated_buys": args.simulate_backdated_buys,
+        "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
         "source_mode": "saved_screen_runs_with_execution_only_sessions", "sessions": results}, indent=2, default=str))
     return 0
 
