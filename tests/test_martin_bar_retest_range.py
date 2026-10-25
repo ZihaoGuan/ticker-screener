@@ -147,6 +147,21 @@ class MartinBarRetestRangeTests(unittest.TestCase):
                          [True, True, True, True, False])
         self.assertEqual(results[-1][1], "saved_before_next_open")
 
+    def test_execution_only_run_keeps_next_session_sequential(self):
+        day26, day27 = dt.date(2026, 10, 26), dt.date(2026, 10, 27)
+        repo = FakeRepo()
+        replay.save_execution_only_run(repo, book_id="martin_range_bar_retest_seq", day=day26)
+        source = {"target_trading_date": day27.isoformat(), "rules_version": replay.SOURCE_ID,
+                  "source_run_id": 8001, "hits": []}
+        with patch("src.webapp.services.martin_bar_retest_service.session_dates",
+                   lambda day, *_: [day26, day27]), \
+                patch("src.webapp.services.martin_bar_retest_service.require_completed_session", lambda *_: None):
+            result = MartinBarRetestService(repo, bar_loader=lambda *_a, **_k: {}).run_session(
+                as_of_date=day27, source_record=source, dry_run=False,
+                book_id="martin_range_bar_retest_seq")
+        self.assertEqual(repo.latest, day27)
+        self.assertEqual(result["session_date"], day27.isoformat())
+
     def test_service_separates_policy_from_book_and_reads_prior_from_book(self):
         day = dt.date(2026, 10, 23)
         repo = FakeRepo()

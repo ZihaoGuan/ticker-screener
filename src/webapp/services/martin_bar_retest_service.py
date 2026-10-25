@@ -128,7 +128,8 @@ class MartinBarRetestService:
                    "execution_mode": "dry_run" if dry_run else "applied"}
         if source and source.get("replay_provenance"):
             summary["replay_provenance"] = source["replay_provenance"]
+        run_id = None
         if not dry_run:
-            self.repository.save_session(session_date=day, source_run_id=source_id, fingerprint=digest,
+            run_id = self.repository.save_session(session_date=day, source_run_id=source_id, fingerprint=digest,
                 candidates=candidates, summary=summary, strategy_id=book)
-        return {**summary, "candidates": candidates, "dry_run": dry_run}
+        return {**summary, "run_id": run_id, "candidates": candidates, "dry_run": dry_run}

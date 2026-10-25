@@ -379,6 +379,24 @@ class MartinForwardTestRepository:
                     if strategy_id == ROTATION_STRATEGY_ID:
                         books[key]["rotation_policy_version"] = ROTATION_POLICY_VERSION
                         books[key]["rotation_limits"] = ROTATION_LIMITS
+                execution_books = self._fetch(cursor, """SELECT DISTINCT strategy_id FROM martin_forward_runs
+                    WHERE strategy_id LIKE 'martin_range_bar_retest_%'
+                    AND summary_json->>'execution_book_version'='martin_bar_retest_execution_v1'
+                    ORDER BY strategy_id""")
+                for item in execution_books:
+                    strategy_id = str(item["strategy_id"])
+                    runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
+                    latest_id = runs[0]["id"] if runs else None
+                    candidates = self._fetch(cursor, "SELECT * FROM martin_forward_candidates WHERE run_id=%s ORDER BY rank", (latest_id,)) if latest_id else []
+                    outstanding_orders = self._fetch(cursor, """SELECT c.id,c.run_id,c.ticker,c.rank,c.status,c.reasons_json,c.payload_json,r.session_date
+                        FROM martin_forward_candidates c JOIN martin_forward_runs r ON r.id=c.run_id
+                        WHERE c.status='pending' AND r.strategy_id=%s ORDER BY r.session_date,c.rank,c.id""", (strategy_id,))
+                    positions = self._fetch(cursor, "SELECT * FROM martin_forward_positions WHERE strategy_id=%s ORDER BY opened_on DESC,id DESC", (strategy_id,))
+                    events = self._fetch(cursor, "SELECT * FROM martin_forward_events WHERE strategy_id=%s ORDER BY event_date DESC,id DESC LIMIT 200", (strategy_id,))
+                    book = _performance_context(strategy_id, runs, candidates, positions, events)
+                    book["outstanding_orders"] = outstanding_orders
+                    book["execution_book_version"] = "martin_bar_retest_execution_v1"
+                    books[strategy_id] = book
                 account = books.get("account")
                 for account in (account, books.get("rs_expanded_rotation"), books.get("gap_retest"),
                                 books.get("gap_retest_replay"), books.get("gap_retest_replay_v2"),
@@ -451,6 +469,7 @@ class MartinForwardTestRepository:
 
 def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidates: list[dict[str, Any]],
                          positions: list[dict[str, Any]], events: list[dict[str, Any]]) -> dict[str, Any]:
+    account_sized = strategy_id in ACCOUNT_STRATEGIES
     closed = [row for row in positions if row.get("status") == "closed"]
     grouped: dict[str, dict[str, float]] = {}
     for row in closed:
@@ -469,8 +488,8 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
         peak_r = max(peak_r, cumulative_r)
         peak_equity = max(peak_equity, equity)
         max_r = min(max_r, cumulative_r - peak_r)
-        history.append({"date": day, "cumulative_r": cumulative_r, "account_equity": equity if strategy_id in ACCOUNT_STRATEGIES else None,
-                        "equity_drawdown_pct": (equity / peak_equity - 1) * 100 if peak_equity and strategy_id in ACCOUNT_STRATEGIES else None,
+        history.append({"date": day, "cumulative_r": cumulative_r, "account_equity": equity if account_sized else None,
+                        "equity_drawdown_pct": (equity / peak_equity - 1) * 100 if peak_equity and account_sized else None,
                         "r_drawdown": cumulative_r - peak_r})
     realized = [float((row.get("payload_json") or {}).get("realized_pnl") or 0) for row in closed]
     realized_positions = [row.get("payload_json") or {} for row in positions]
@@ -479,11 +498,14 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
     attribution: dict[str, dict[str, dict[str, float]]] = {}
     for row in closed:
         payload = row.get("payload_json") or {}
-        for dimension, value in (("sector", payload.get("sector") or "Unknown"),
+        dimensions = (("sector", payload.get("sector") or "Unknown"),
                                  ("quadrant", payload.get("sector_quadrant") or "Unknown"),
                                  ("selection_tier", payload.get("selection_tier") or "Unknown"),
                                  ("adr_suitability", payload.get("adr_suitability") or "Unknown"),
-                                 ("exit_reason", payload.get("exit_reason") or payload.get("exit_type") or "Unknown")):
+                                 ("exit_reason", payload.get("exit_reason") or payload.get("exit_type") or "Unknown"))
+        if strategy_id.startswith("martin_range_bar_retest_"):
+            dimensions += (("discovery_category", payload.get("event_category") or payload.get("category") or "Unknown"),)
+        for dimension, value in dimensions:
             stats = attribution.setdefault(dimension, {}).setdefault(str(value), {"count": 0, "realized_r": 0.0, "realized_pnl": 0.0})
             stats["count"] += 1
             stats["realized_r"] += float(payload.get("realized_r") or 0)
@@ -492,10 +514,11 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
     for run in reversed(runs):
         summary = run.get("summary_json") or {}
         if summary.get("cumulative_r") is not None:
+            equity = summary.get("account_equity")
             marks.append({"date": str(run["session_date"]), "cumulative_r": summary.get("cumulative_r"),
-                          "account_equity": summary.get("account_equity"),
+                          "account_equity": equity,
                           "equity_drawdown_pct": summary.get("equity_drawdown_pct"), "r_drawdown": summary.get("r_drawdown")})
-    has_account_marks = strategy_id in ACCOUNT_STRATEGIES and bool(marks) and any(point.get("account_equity") is not None for point in marks)
+    has_account_marks = account_sized and bool(marks) and any(point.get("account_equity") is not None for point in marks)
     if marks:
         history = marks
     latest_mark = marks[-1] if marks else {}
@@ -512,8 +535,8 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
                         "unrealized_pnl": latest_summary.get("unrealized_pnl", 0.0),
                         "closed_count": len(closed), "gross_wins": sum(x for x in realized if x > 0),
                         "gross_losses": sum(abs(x) for x in realized if x < 0), "max_r_drawdown": min([max_r, *(point.get("r_drawdown", 0) for point in history)]),
-                        "account_equity": latest_mark.get("account_equity", 100_000.0 + realized_total_pnl) if strategy_id in ACCOUNT_STRATEGIES else None,
-                        "equity_drawdown_pct": latest_mark.get("equity_drawdown_pct") if strategy_id in ACCOUNT_STRATEGIES else None,
+                        "account_equity": latest_mark.get("account_equity", 100_000.0 + realized_total_pnl) if account_sized else None,
+                        "equity_drawdown_pct": latest_mark.get("equity_drawdown_pct") if account_sized else None,
                         **_closed_trade_metrics([row.get("payload_json") or {} for row in closed])}}
 
 
