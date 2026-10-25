@@ -63,7 +63,32 @@ class SaveConnection:
     def cursor(self): return self.db_cursor
 
 
+class PerformanceCursor:
+    def __init__(self, rows): self.rows = rows
+    def __enter__(self): return self
+    def __exit__(self, *_args): return False
+    def execute(self, *_args): pass
+    def fetchall(self): return self.rows
+
+
+class PerformanceConnection:
+    def __init__(self, rows): self.rows = rows
+    def cursor(self): return PerformanceCursor(self.rows)
+
+
 class MartinBarRetestRangeTests(unittest.TestCase):
+    def test_book_performance_uses_database_status_over_stale_payload(self):
+        connection = PerformanceConnection([
+            ("open", "ABC", {"status": "closed", "ticker": "STALE", "realized_pnl": 0}),
+            ("closed", "XYZ", {"status": "open", "ticker": "STALE", "realized_pnl": 12.5}),
+        ])
+
+        performance = replay.book_performance(connection, "martin_range_bar_retest_test")
+
+        self.assertEqual(performance["open_positions"], 1)
+        self.assertEqual(performance["closed_positions"], 1)
+        self.assertEqual(performance["open_tickers"], ["ABC"])
+
     def test_service_repository_save_serializes_datetime_fields_as_iso8601(self):
         day = dt.date(2026, 10, 19)
         published_at = dt.datetime(2026, 10, 20, 13, 30, tzinfo=dt.timezone.utc)

@@ -107,7 +107,7 @@ def book_performance(connection: Any, book_id: str) -> dict[str, Any]:
     with connection.cursor() as cursor:
         cursor.execute("SELECT status,ticker,payload_json FROM martin_forward_positions WHERE strategy_id=%s", (book_id,))
         rows = cursor.fetchall()
-    positions = [{"status": row[0], "ticker": row[1], **(row[2] or {})} for row in rows]
+    positions = [{**(row[2] or {}), "status": row[0], "ticker": row[1]} for row in rows]
     fills_by_category: dict[str, int] = {}
     for position in positions:
         category = str(position.get("event_category") or position.get("category") or "unknown")
