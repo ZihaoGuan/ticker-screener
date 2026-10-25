@@ -66,6 +66,9 @@ class _ReconstructionCursor:
     def fetchall(self):
         if "SELECT DISTINCT ticker FROM daily_bars" in self.current:
             return [{"ticker": item} for item in self.universe]
+        if "FROM ticker_metadata" in self.current:
+            return [{"ticker": "IPO", "ipo_date": dt.date(2026, 10, 23),
+                     "updated_at": dt.datetime(2026, 10, 24, tzinfo=dt.timezone.utc)}]
         if "SELECT ticker,trade_date,open,high,low,close" in self.current:
             return self.bars
         raise AssertionError(f"Unexpected query: {self.current}")
@@ -99,7 +102,8 @@ class MartinReconstructedInputsTests(unittest.TestCase):
                        set(reconstructed_inputs.PLAN_SCANNER_IDS) |
                        set(reconstructed_inputs.DERIVED_SCANNER_IDS))
         catalog = {scanner_id: SimpleNamespace(id=scanner_id,
-            total_trading_days=2 if scanner_id == long_history_id else 1,
+            total_trading_days=(10 if scanner_id in reconstructed_inputs.PLAN_SCANNER_IDS else
+                2 if scanner_id == long_history_id else 1),
             required_inputs={"daily_bars"}, evaluator=None) for scanner_id in scanner_ids}
 
         def bar(ticker, session):
@@ -120,7 +124,6 @@ class MartinReconstructedInputsTests(unittest.TestCase):
              mock.patch.object(reconstructed_inputs, "source_manifest", return_value=fake_manifest), \
              mock.patch.object(reconstructed_inputs, "configuration_fingerprint", return_value="config"), \
              mock.patch.object(reconstructed_inputs, "build_screener_catalog", return_value=catalog), \
-             mock.patch.object(reconstructed_inputs, "resolve_max_trading_days", return_value=2), \
              mock.patch.object(reconstructed_inputs, "load_published_rating_evidence", return_value=({}, {})), \
              mock.patch.object(reconstructed_inputs, "load_published_earnings_evidence", return_value={}), \
              mock.patch.object(reconstructed_inputs, "load_dated_scanner_evidence", return_value=({}, {})), \
@@ -132,10 +135,14 @@ class MartinReconstructedInputsTests(unittest.TestCase):
         universe_query, universe_params = cursor.queries[0]
         self.assertIn("WHERE trade_date=%s", universe_query)
         self.assertEqual(universe_params, (day,))
+        bar_query = next(params for sql, params in cursor.queries
+            if "SELECT ticker,trade_date,open,high,low,close" in sql)
+        self.assertEqual(bar_query[1], previous_session)
         self.assertEqual(report["coverage"]["universe_count"], 2)
         self.assertEqual(report["coverage"]["scanner_history_exclusions"][long_history_id], 1)
         self.assertNotIn(long_history_id, report["coverage"]["unavailable"])
         self.assertEqual(report["coverage"]["history_coverage_issues"][0]["ticker"], "IPO")
+        self.assertEqual(report["coverage"]["history_coverage_issues"][0]["reason"], "too_young_for_scanner")
         self.assertTrue(report["ready"])
 
     def test_manifest_is_derived_and_versioned(self):
@@ -207,6 +214,36 @@ class MartinReconstructedInputsTests(unittest.TestCase):
         self.assertTrue(results)
         self.assertTrue(all(item["status"] == "unavailable" for item in results.values()))
         self.assertTrue(all(item["reason"] == "future_or_missing_daily_bars" for item in results.values()))
+
+    def test_explicit_empty_scanner_set_does_not_run_focus_scanners(self):
+        with mock.patch.object(reconstructed_inputs, "build_screener_catalog",
+                               side_effect=AssertionError("no evaluator should run")):
+            self.assertEqual(evaluate_focus_price_sources(ticker="IPO", as_of_date=dt.date(2026, 10, 23),
+                bars=pd.DataFrame(), benchmark_bars=pd.DataFrame(), metadata={},
+                app_config=object(), scanner_ids=set()), {})
+
+    def test_trend_replay_uses_supplied_frame_without_catalog_fallback(self):
+        day = dt.date(2026, 10, 23)
+        bars = pd.DataFrame([{"Open": 10, "High": 11, "Low": 9, "Close": 10, "Volume": 100}],
+                            index=pd.to_datetime([day]))
+        evaluator = mock.Mock(side_effect=AssertionError("ordinary DB or internet wrapper used"))
+        catalog = {"trend_template": SimpleNamespace(id="trend_template", required_inputs={"daily_bars"},
+            total_trading_days=1, evaluator=evaluator)}
+        with mock.patch("src.trend_template_screen._build_hit", return_value=None):
+            result = evaluate_focus_price_sources(ticker="ABC", as_of_date=day, bars=bars,
+                benchmark_bars=pd.DataFrame(), metadata={"ticker": "ABC"},
+                app_config=SimpleNamespace(benchmark_ticker="SPY"), catalog=catalog,
+                scanner_ids={"trend_template"})
+        self.assertEqual(result["trend_template"]["status"], "executed_empty")
+        evaluator.assert_not_called()
+
+    def test_history_shortfall_distinguishes_ipo_gap_and_unknown(self):
+        missing = [dt.date(2026, 10, 21), dt.date(2026, 10, 22)]
+        available = {dt.date(2026, 10, 23)}
+        classify = reconstructed_inputs._history_shortfall_kind
+        self.assertEqual(classify(missing, available, dt.date(2026, 10, 23)), "too_young_for_scanner")
+        self.assertEqual(classify(missing, available, dt.date(2025, 1, 1)), "history_gap")
+        self.assertEqual(classify(missing, available, None), "listing_age_unknown")
 
     def test_dated_saved_source_excludes_future_hit_and_keeps_provenance(self):
         day = dt.date(2026, 10, 23)

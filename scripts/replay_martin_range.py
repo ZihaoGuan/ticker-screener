@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
 import datetime as dt
 import json
 from pathlib import Path
@@ -245,8 +246,9 @@ def main(argv=None) -> int:
     if args.policy == "gap_retest":
         from scripts.replay_martin_gap_retest import reconstruct_sources
         try:
-            records, details = reconstruct_sources(args.from_date, args.to_date,
-                database_url=config.database_url, config=load_app_config())
+            with redirect_stdout(sys.stderr):
+                records, details = reconstruct_sources(args.from_date, args.to_date,
+                    database_url=config.database_url, config=load_app_config())
         except ValueError as exc:
             print(json.dumps({"ready": False, "policy": args.policy, "book_id": args.book_id,
                 "reason": "gap_source_reconstruction_failed", "detail": str(exc)}))
@@ -260,13 +262,17 @@ def main(argv=None) -> int:
                 cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                 reconstructed = {}
                 saved_calibration_inputs = {}
-                for day in sessions:
+                for index, day in enumerate(sessions, start=1):
+                    print(f"Reconstructing {day} ({index}/{len(sessions)})", file=sys.stderr, flush=True)
                     next_open = calendar.session_open(calendar.next_session(day.isoformat()))
-                    reconstructed[day] = reconstruct_price_focus_session(
-                        cursor, day, next_open=next_open, database_url=config.database_url,
-                        app_config=load_app_config(), policy_id=POLICIES[args.policy])
+                    with redirect_stdout(sys.stderr):
+                        reconstructed[day] = reconstruct_price_focus_session(
+                            cursor, day, next_open=next_open, database_url=config.database_url,
+                            app_config=load_app_config(), policy_id=POLICIES[args.policy])
                     saved_calibration_inputs[day] = load_saved_top_hits(
                         cursor, day, calendar=calendar, now=now)
+                    print(f"Reconstructed {day}: candidates={reconstructed[day].get('candidate_count')} "
+                          f"ready={reconstructed[day].get('ready')}", file=sys.stderr, flush=True)
                 calibration_report = build_reconstruction_calibration_report(
                     sessions, saved_snapshots=saved_calibration_inputs,
                     reconstructed=reconstructed, policy_id=POLICIES[args.policy])
@@ -309,8 +315,9 @@ def main(argv=None) -> int:
             if not cursor.fetchone()[0]:
                 raise RuntimeError(f"Replay book {args.book_id} is currently locked.")
         _check_book_empty(connection, args.book_id)
-        results = _replay_sessions(connection, sessions, dated, sources, policy=args.policy,
-            book_id=args.book_id, database_url=config.database_url, from_date=args.from_date, to_date=args.to_date)
+        with redirect_stdout(sys.stderr):
+            results = _replay_sessions(connection, sessions, dated, sources, policy=args.policy,
+                book_id=args.book_id, database_url=config.database_url, from_date=args.from_date, to_date=args.to_date)
         if args.apply:
             connection.commit()
         else:

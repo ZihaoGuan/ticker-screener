@@ -115,6 +115,8 @@ def _apply_market_data_source_patches(module: ModuleType, market_data_source: st
                 payload = build_cookstock_payload_from_frame(str(self.ticker), sliced)
                 if payload is not None:
                     return payload
+        if prefetched and prefetched.get("strict"):
+            raise ValueError(f"Replay price history unavailable for {self.ticker} in supplied frames")
         active_strategy = resolve_market_data_source(getattr(module.algoParas, "MARKET_DATA_SOURCE", strategy))
         if active_strategy == "database-first" and time_interval == "daily":
             start_dt = real_dt.date.fromisoformat(str(start_date))
@@ -137,9 +139,11 @@ def _apply_market_data_source_patches(module: ModuleType, market_data_source: st
                 frame = prefetched.get("ticker_frames", {}).get(ticker)
             if frame is not None:
                 cache_key = (ticker, int(getattr(self, "history_lookback_days", 365)))
-                if cache_key not in self.benchmark_price_cache:
+                if prefetched.get("strict") or cache_key not in self.benchmark_price_cache:
                     self.benchmark_price_cache[cache_key] = build_cookstock_price_list_from_frame(frame)
                 return self.benchmark_price_cache[cache_key]
+            if prefetched.get("strict"):
+                raise ValueError(f"Replay benchmark history unavailable for {ticker} in supplied frames")
         active_strategy = resolve_market_data_source(getattr(module.algoParas, "MARKET_DATA_SOURCE", strategy))
         if active_strategy == "database-first":
             ticker = self._resolve_benchmark_ticker(benchmarkTicker)
@@ -175,6 +179,8 @@ def _apply_market_data_source_patches(module: ModuleType, market_data_source: st
                     module.cookFinancials.benchmark_price_cache[cache_key] = build_cookstock_price_list_from_frame(frame)
                     self.shared_benchmark_cache_warmed = True
                     return
+                if prefetched.get("strict"):
+                    raise ValueError(f"Replay benchmark history unavailable for {self.benchmark_ticker} in supplied frames")
             active_strategy = resolve_market_data_source(getattr(module.algoParas, "MARKET_DATA_SOURCE", strategy))
             if active_strategy == "database-first":
                 cache_key = (self.benchmark_ticker.upper(), int(history_days))
@@ -235,11 +241,14 @@ def should_use_prefetched_market_data(*, market_data_source: str | None = None, 
 
 
 @contextmanager
-def use_prefetched_market_data(*, ticker_frames: dict[str, object], benchmark_frames: dict[str, object]) -> None:
+def use_prefetched_market_data(*, ticker_frames: dict[str, object], benchmark_frames: dict[str, object],
+                               strict: bool = False) -> None:
+    parent = _prefetched_market_data.get() or {}
     token = _prefetched_market_data.set(
         {
             "ticker_frames": {str(key).upper(): value for key, value in ticker_frames.items()},
             "benchmark_frames": {str(key).upper(): value for key, value in benchmark_frames.items()},
+            "strict": strict or bool(parent.get("strict")),
         }
     )
     try:
@@ -259,6 +268,9 @@ def prefetched_cookstock_market_data(
     market_data_source: str | None = None,
     database_url: str | None = None,
 ):
+    if (_prefetched_market_data.get() or {}).get("strict"):
+        yield
+        return
     if not should_use_prefetched_market_data(market_data_source=market_data_source, database_url=database_url):
         yield
         return

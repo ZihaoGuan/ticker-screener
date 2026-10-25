@@ -9,7 +9,9 @@ from __future__ import annotations
 import datetime as dt
 import dataclasses
 import hashlib
+import io
 import json
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -336,7 +338,9 @@ def evaluate_focus_price_sources(*, ticker: str, as_of_date: dt.date, bars: Any,
                                  fundamentals: dict[str, Any] | None = None,
                                  catalog: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     """Evaluate Martin Focus scanners using only explicitly supplied as-of frames."""
-    requested_scanners = set(scanner_ids or FOCUS_SCANNERS)
+    requested_scanners = set(FOCUS_SCANNERS if scanner_ids is None else scanner_ids)
+    if not requested_scanners:
+        return {}
     if bars is None or getattr(bars, "empty", False):
         return {scanner_id: {"status": "unavailable", "reason": "missing_as_of_daily_bars"}
                 for scanner_id in sorted(requested_scanners)}
@@ -380,6 +384,7 @@ def evaluate_focus_price_sources(*, ticker: str, as_of_date: dt.date, bars: Any,
     with use_prefetched_market_data(
         ticker_frames={ticker.upper(): bars},
         benchmark_frames={str(app_config.benchmark_ticker).upper(): benchmark_bars},
+        strict=True,
     ):
         for spec in specs:
             if spec is None:
@@ -391,7 +396,20 @@ def evaluate_focus_price_sources(*, ticker: str, as_of_date: dt.date, bars: Any,
                 results[spec.id] = {"status": "unavailable", "reason": "non_price_input_required"}
                 continue
             try:
-                evaluated = spec.evaluator(bundle) if spec.evaluator is not None else None
+                if spec.id == "trend_template":
+                    # The ordinary wrapper can fetch current internet bars on a short DB window.
+                    from src.trend_template_screen import _build_hit
+                    from src.universe import UniverseTicker
+                    metadata = dict(bundle.metadata or {})
+                    hit = _build_hit(UniverseTicker(symbol=ticker.upper(),
+                        sector=metadata.get("sector"), industry=metadata.get("industry"),
+                        exchange=metadata.get("exchange")), bars, signal_date=as_of_date)
+                    results[spec.id] = {"status": "executed_match" if hit else "executed_empty",
+                        "metrics": {"ticker": ticker.upper()}, "hit": hit.to_dict() if hit else {},
+                        "reasons": list(hit.reasons) if hit else [], "lookback_trading_days": days_needed}
+                    continue
+                with redirect_stdout(io.StringIO()):
+                    evaluated = spec.evaluator(bundle) if spec.evaluator is not None else None
                 if evaluated is None or evaluated.error:
                     results[spec.id] = {"status": "unavailable", "reason":
                         str(getattr(evaluated, "error", None) or "evaluator_not_configured")}
@@ -402,6 +420,28 @@ def evaluate_focus_price_sources(*, ticker: str, as_of_date: dt.date, bars: Any,
             except Exception as exc:
                 results[spec.id] = {"status": "unavailable", "reason": f"evaluator_error:{type(exc).__name__}"}
     return results
+
+
+def _history_shortfall_kind(missing_dates: list[dt.date], available_dates: set[dt.date],
+                            ipo_date: dt.date | None) -> str:
+    if ipo_date and all(missing < ipo_date for missing in missing_dates):
+        return "too_young_for_scanner"
+    if ipo_date or (available_dates and min(available_dates) <= min(missing_dates)):
+        return "history_gap"
+    return "listing_age_unknown"
+
+
+def _bars_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    frame = pd.DataFrame([{"Open": bar["open"], "High": bar["high"], "Low": bar["low"],
+                           "Close": bar["close"], "Adj Close": bar["adj_close"],
+                           "Volume": bar["volume"], "Split Factor": bar["split_factor"]} for bar in rows],
+                         index=pd.to_datetime([bar["trade_date"] for bar in rows]))
+    frame.attrs["bar_sources"] = sorted({str(bar["source"] or "") for bar in rows})
+    frame.attrs["bar_max_updated_at"] = max(_utc(bar["updated_at"]) for bar in rows).isoformat()
+    frame.attrs["bar_revision_fingerprint"] = hashlib.sha256(
+        frame[["Open", "High", "Low", "Close", "Adj Close", "Volume", "Split Factor"]]
+            .to_json(date_format="iso", double_precision=15).encode()).hexdigest()
+    return frame
 
 
 def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any,
@@ -425,9 +465,11 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
         if board_item.get("id") in producer_ids and board_item.get("strategy_id"):
             producer_ids.add(str(board_item["strategy_id"]))
     required_price_ids = set(FOCUS_SCANNERS) | set(PLAN_SCANNER_IDS) | set(DERIVED_SCANNER_IDS)
-    focus_specs = [catalog[scanner_id] for scanner_id in sorted(required_price_ids) if scanner_id in catalog]
+    focus_specs = [catalog[scanner_id] for scanner_id in sorted(FOCUS_SCANNERS) if scanner_id in catalog]
+    extra_specs = [catalog[scanner_id] for scanner_id in sorted(required_price_ids - FOCUS_SCANNERS)
+                   if scanner_id in catalog]
     missing_specs = sorted(FOCUS_SCANNERS - set(catalog))
-    lookback = resolve_max_trading_days(focus_specs)
+    lookback = resolve_max_trading_days(focus_specs + extra_specs)
     import exchange_calendars as xcals
     calendar = xcals.get_calendar("XNYS", start=day - dt.timedelta(days=lookback * 3 + 30),
                                   end=day + dt.timedelta(days=10))
@@ -439,6 +481,7 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
                 "blockers": [{"reason": "insufficient_xnys_warmup_sessions", "required": lookback,
                               "available": len(history_dates)}]}
     history_start = history_dates[-lookback]
+    focus_start = history_dates[-resolve_max_trading_days(focus_specs)]
     universe_window_start = day
     # The replay universe is the set of symbols with a valid observable bar on
     # the target session. Prior bars are then loaded for those symbols below.
@@ -450,27 +493,21 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
         universe = universe[:max(0, int(ticker_limit))]
     benchmark = str(app_config.benchmark_ticker).upper()
     cursor.execute("""SELECT COUNT(*) AS count FROM daily_bars
-        WHERE trade_date BETWEEN %s AND %s AND updated_at >= %s""", (history_start, day, cutoff))
+        WHERE trade_date BETWEEN %s AND %s AND updated_at >= %s""", (focus_start, day, cutoff))
     revised_bar_count = int(cursor.fetchone()["count"])
     cursor.execute("""SELECT ticker,trade_date,open,high,low,close,adj_close,volume,source,split_factor,updated_at
         FROM daily_bars WHERE ticker=ANY(%s) AND trade_date BETWEEN %s AND %s
-        ORDER BY ticker,trade_date""", ([*universe, benchmark], history_start, day))
+        ORDER BY ticker,trade_date""", ([*universe, benchmark], focus_start, day))
     bar_rows = cursor.fetchall()
+    cursor.execute("""SELECT ticker,ipo_date,updated_at FROM ticker_metadata
+        WHERE ticker=ANY(%s)""", (universe,))
+    listing_evidence = {str(row["ticker"]).upper(): row for row in cursor.fetchall()}
     grouped_bars: dict[str, list[dict[str, Any]]] = {}
     for bar in bar_rows:
         grouped_bars.setdefault(str(bar["ticker"]).upper(), []).append(bar)
     frames = {}
     for ticker, ticker_bars in grouped_bars.items():
-        frame = pd.DataFrame([{"Open": bar["open"], "High": bar["high"], "Low": bar["low"],
-                               "Close": bar["close"], "Adj Close": bar["adj_close"],
-                               "Volume": bar["volume"], "Split Factor": bar["split_factor"]} for bar in ticker_bars],
-                             index=pd.to_datetime([bar["trade_date"] for bar in ticker_bars]))
-        frame.attrs["bar_sources"] = sorted({str(bar["source"] or "") for bar in ticker_bars})
-        frame.attrs["bar_max_updated_at"] = max(_utc(bar["updated_at"]) for bar in ticker_bars).isoformat()
-        frame.attrs["bar_revision_fingerprint"] = hashlib.sha256(
-            frame[["Open", "High", "Low", "Close", "Adj Close", "Volume", "Split Factor"]]
-                .to_json(date_format="iso", double_precision=15).encode()).hexdigest()
-        frames[ticker] = frame
+        frames[ticker] = _bars_frame(ticker_bars)
     benchmark_bars = frames.get(benchmark)
     technical_by_ticker, fundamentals_by_ticker = load_published_rating_evidence(
         cursor, universe, day, next_open=cutoff)
@@ -519,13 +556,24 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
             expected_sessions = history_dates[-spec.total_trading_days:]
             missing_sessions = sorted(set(expected_sessions) - available_dates)
             if missing_sessions:
+                listing = listing_evidence.get(ticker) or {}
+                ipo_date = listing.get("ipo_date")
+                if isinstance(ipo_date, str):
+                    ipo_date = dt.date.fromisoformat(ipo_date[:10])
+                kind = _history_shortfall_kind(missing_sessions, available_dates,
+                    ipo_date if isinstance(ipo_date, dt.date) and ipo_date <= day else None)
                 history_coverage_issues.append({"ticker": ticker, "scanner_id": spec.id,
-                    "reason": "required_xnys_history_missing",
-                    "missing_dates": [item.isoformat() for item in missing_sessions]})
+                    "reason": kind, "ipo_date": ipo_date.isoformat() if isinstance(ipo_date, dt.date) else None,
+                    "ipo_date_basis": ("retrospective_metadata" if listing.get("updated_at") and
+                        _utc(listing["updated_at"]) >= cutoff else "published_before_cutoff") if ipo_date else None,
+                    "missing_date_count": len(missing_sessions),
+                    "first_missing_dates": [item.isoformat() for item in missing_sessions[:5]]})
                 ticker_history_gaps.setdefault(ticker, set()).add(spec.id)
                 if spec.id in FOCUS_SCANNERS:
                     insufficient_focus_ids.add(spec.id)
                     scanner_history_exclusions[spec.id] += 1
+                    if kind != "too_young_for_scanner":
+                        unavailable_scanners.add(spec.id)
         if benchmark_coverage_issues:
             continue
         scan_results = evaluate_focus_price_sources(ticker=ticker, as_of_date=day, bars=frame,
@@ -535,7 +583,7 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
             scanner_ids=set(FOCUS_SCANNERS) - insufficient_focus_ids)
         for scanner_id in insufficient_focus_ids:
             scan_results[scanner_id] = {"status": "excluded_insufficient_history",
-                "reason": "required_xnys_history_missing"}
+                "reason": "history_shortfall"}
         focus_hits = []
         focus_evidence = {}
         for scanner_id, result in scan_results.items():
@@ -565,6 +613,16 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
                             "bar_max_updated_at": frame.attrs.get("bar_max_updated_at"),
                             "adjustment_basis": "stored_ohlcv_and_split_factor"})
     tickers = [row["ticker"] for row in matched]
+    if tickers and history_start < focus_start:
+        cursor.execute("""SELECT ticker,trade_date,open,high,low,close,adj_close,volume,source,split_factor,updated_at
+            FROM daily_bars WHERE ticker=ANY(%s) AND trade_date BETWEEN %s AND %s
+            ORDER BY ticker,trade_date""", (tickers, history_start, focus_start - dt.timedelta(days=1)))
+        older: dict[str, list[dict[str, Any]]] = {}
+        for bar in cursor.fetchall():
+            older.setdefault(str(bar["ticker"]).upper(), []).append(bar)
+        for ticker in tickers:
+            frames[ticker] = _bars_frame(older.get(ticker, []) + grouped_bars[ticker])
+            revised_bar_count += sum(_utc(bar["updated_at"]) >= cutoff for bar in older.get(ticker, []))
     price_recalculated_ids = set(FOCUS_SCANNERS) | set(PLAN_SCANNER_IDS) | set(DERIVED_SCANNER_IDS)
     unavailable_source_ids, not_published_source_ids = _partition_missing_sources(
         set(manifest["sources"]["all"]), saved_source_runs, price_recalculated_ids, producer_ids)
@@ -584,17 +642,41 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
         market = fundamentals_by_ticker.get(ticker)
         rating = technical_by_ticker.get(ticker)
         candidate_issues = []
+        deferred_plan_issues = []
         frame = frames[ticker]
+        row["bar_revision_fingerprint"] = frame.attrs.get("bar_revision_fingerprint")
+        row["bar_sources"] = frame.attrs.get("bar_sources", [])
+        row["bar_max_updated_at"] = frame.attrs.get("bar_max_updated_at")
+        if any(not valid_bar(bar) for _, bar in frame.iterrows()):
+            candidate_issues.append({"reason": "candidate_history_invalid_bar"})
         evidence = dict(row.get("source_evidence") or {})
         plan_artifacts = []
-        insufficient_candidate_ids = ticker_history_gaps.get(ticker, set())
+        insufficient_candidate_ids = set(ticker_history_gaps.get(ticker, set()))
+        available_dates = {index.date() for index in frame.index}
+        listing = listing_evidence.get(ticker) or {}
+        ipo_date = listing.get("ipo_date")
+        if isinstance(ipo_date, str):
+            ipo_date = dt.date.fromisoformat(ipo_date[:10])
+        for spec in extra_specs:
+            missing_sessions = sorted(set(history_dates[-spec.total_trading_days:]) - available_dates)
+            if not missing_sessions:
+                continue
+            kind = _history_shortfall_kind(missing_sessions, available_dates,
+                ipo_date if isinstance(ipo_date, dt.date) and ipo_date <= day else None)
+            history_coverage_issues.append({"ticker": ticker, "scanner_id": spec.id,
+                "reason": kind, "missing_date_count": len(missing_sessions),
+                "first_missing_dates": [item.isoformat() for item in missing_sessions[:5]]})
+            insufficient_candidate_ids.add(spec.id)
+            if kind != "too_young_for_scanner":
+                issue = {"reason": kind, "scanner_id": spec.id}
+                (deferred_plan_issues if spec.id in PLAN_SCANNER_IDS else candidate_issues).append(issue)
         eligible_extra_ids = (set(PLAN_SCANNER_IDS) | set(DERIVED_SCANNER_IDS)) - insufficient_candidate_ids
         extra_price = evaluate_focus_price_sources(ticker=ticker, as_of_date=day, bars=frame,
             benchmark_bars=benchmark_bars, metadata={"ticker": ticker}, app_config=app_config,
-            scanner_ids=eligible_extra_ids, database_url=database_url,
+            scanner_ids=eligible_extra_ids if not candidate_issues else set(), database_url=database_url,
             technical_rating=rating or {}, fundamentals=market or {}, catalog=catalog)
         for scanner_id in insufficient_candidate_ids & (set(PLAN_SCANNER_IDS) | set(DERIVED_SCANNER_IDS)):
-            extra_price[scanner_id] = {"status": "unavailable", "reason": "required_xnys_history_missing"}
+            extra_price[scanner_id] = {"status": "excluded_insufficient_history", "reason": "history_shortfall"}
         for scanner_id, result in extra_price.items():
             evidence[scanner_id] = {"status": result.get("status"), "source": "recalculated_price_evaluator",
                                     "as_of_date": day.isoformat(), "evidence": result}
@@ -711,6 +793,10 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
         row["rs_phase_state"] = phase.get("rs_phase_state")
         row["rs_phase_active_days"] = phase.get("rs_phase_active_days")
         row["trade_plan"] = _build_trade_plan(plan_artifacts)
+        plan = row["trade_plan"] or {}
+        if not (plan.get("trigger_price") and plan.get("stop_price") and
+                plan["trigger_price"] > plan["stop_price"]):
+            candidate_issues.extend(deferred_plan_issues)
         row["trade_plans"] = {CURRENT_STOP_POLICY: current_plan_payload(row, day),
                                STRUCTURAL_STOP_POLICY: structural_plan_payload(row, day, frame)}
         risk = (row.get("trade_plan") or {}).get("reference_risk_pct")
@@ -764,6 +850,10 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
     # hit proves a positive, while an unproven no-hit blocks that candidate.
     source_unavailable = sorted(set(unavailable_scanners) | set(failed_source_ids))
     ready = bool(universe) and not source_unavailable and not any(row.get("blocked") for row in rows)
+    history_issue_counts: dict[str, int] = {}
+    for issue in history_coverage_issues:
+        reason = str(issue["reason"])
+        history_issue_counts[reason] = history_issue_counts.get(reason, 0) + 1
     return {
         "session_date": day.isoformat(), "data_cutoff": cutoff.isoformat(),
         "manifest_version": manifest["version"], "manifest_digest": manifest["digest"],
@@ -778,7 +868,10 @@ def reconstruct_price_focus_session(cursor: Any, day: dt.date, *, next_open: Any
                      "scanner_history_exclusions": scanner_history_exclusions,
                      "unavailable": sorted(unavailable_scanners),
                      "stale_or_missing_target_bar_tickers": sorted(set(stale_universe_tickers)),
-                     "history_coverage_issues": history_coverage_issues,
+                     "history_coverage_issue_count": len(history_coverage_issues),
+                     "history_coverage_issue_counts": history_issue_counts,
+                     "history_coverage_issues": history_coverage_issues[:500],
+                     "history_coverage_truncated_count": max(0, len(history_coverage_issues) - 500),
                      "benchmark_coverage_issues": benchmark_coverage_issues,
                      "retrospectively_revised_bar_rows": revised_bar_count,
                      "source_run_count": len(saved_source_runs),
