@@ -46,6 +46,32 @@ class Connection:
 
 
 class MartinBarRetestRangeTests(unittest.TestCase):
+    def test_service_publication_timing_uses_next_session_at_calendar_boundary(self):
+        day = dt.date(2026, 10, 19)
+
+        class Calendar:
+            def next_session(self, _day):
+                import pandas as pd
+                return pd.Timestamp("2026-10-20")
+
+            def session_open(self, _day):
+                import pandas as pd
+                return pd.Timestamp("2026-10-20T13:30:00Z")
+
+            def sessions_in_range(self, *_args):
+                raise AssertionError("service should not query through the calendar end date")
+
+        fake_exchange_calendars = types.SimpleNamespace(get_calendar=lambda *_args, **_kwargs: Calendar())
+        source = {"target_trading_date": day.isoformat(), "rules_version": "martin_bar_watchlist_v1",
+                  "published_at": "2026-10-19T12:00:00Z", "hits": []}
+        with patch.dict(sys.modules, {"exchange_calendars": fake_exchange_calendars}), \
+                patch("src.webapp.services.martin_bar_retest_service.session_dates", lambda *_: [day]), \
+                patch("src.webapp.services.martin_bar_retest_service.require_completed_session", lambda *_: None):
+            result = MartinBarRetestService(FakeRepo(), bar_loader=lambda *_a, **_k: {}).run_session(
+                as_of_date=day, source_record=source)
+
+        self.assertFalse(result["retrospective_source_scan"])
+
     def test_publication_timing_handles_weekend_after_calendar_end(self):
         class Calendar:
             def next_session(self, day):

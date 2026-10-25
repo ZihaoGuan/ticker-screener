@@ -84,12 +84,11 @@ class MartinBarRetestService:
         if publication is not None:
             import exchange_calendars as xcals
             calendar = xcals.get_calendar("XNYS", start=day - dt.timedelta(days=5), end=day + dt.timedelta(days=20))
-            following = next((label.date() for label in calendar.sessions_in_range(day.isoformat(), (day + dt.timedelta(days=20)).isoformat()) if label.date() > day), None)
-            if following is not None:
-                published = pd.Timestamp(publication)
-                if published.tzinfo is None:
-                    published = published.tz_localize("UTC")
-                retrospective = published >= calendar.session_open(following.isoformat())
+            following = calendar.next_session(day.isoformat()).date()
+            published = pd.Timestamp(publication)
+            if published.tzinfo is None:
+                published = published.tz_localize("UTC")
+            retrospective = published >= calendar.session_open(following.isoformat())
         tickers = sorted(active)
         try:
             frames = self.bar_loader(tickers, day, 320, database_url=self.database_url, start_date=sessions[0]) if tickers else {}
