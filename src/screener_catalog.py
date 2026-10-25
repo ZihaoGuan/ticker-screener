@@ -30,6 +30,7 @@ from .inside_dryup_screen import find_recent_inside_dryup_hit
 from .inside_dryup_v2_screen import HISTORY_DAYS as INSIDE_DRYUP_V2_HISTORY_DAYS, find_recent_inside_dryup_v2_hit
 from .kai_s1_screen import KAI_S1_HISTORY_DAYS, find_kai_s1_hit
 from .kai_s2_screen import KAI_S2_HISTORY_DAYS, find_kai_s2_hit
+from .martin_bar_watchlist_screen import evaluate_martin_bar_watchlist
 from .leif_high_tight_flag_screen import LEIF_HTF_LOOKBACK_DAYS, find_leif_high_tight_flag_hit
 from .lost_21ema_screen import run_lost_21ema_screen
 from .macd_screen import find_recent_macd_hit
@@ -1330,6 +1331,24 @@ def _run_kai_s2(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     )
 
 
+def _run_martin_bar_watchlist(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
+    context = bundle.extras.get("universe_rank_context")
+    if not isinstance(context, dict):
+        return ScreenerEvaluationResult(passed=False, error="missing_cross_sectional_universe_rank_context")
+    if bundle.ticker.upper() not in context:
+        return ScreenerEvaluationResult(passed=False, error="ticker_missing_from_eligible_rank_context")
+    hit = evaluate_martin_bar_watchlist(
+        bundle.bars, bundle.benchmark_bars, context,
+        ticker=bundle.ticker, as_of_date=bundle.as_of_date, metadata=bundle.metadata,
+        expected_sessions=bundle.extras.get("expected_sessions"),
+    )
+    if hit is None:
+        return ScreenerEvaluationResult(passed=False, metrics={"ticker": bundle.ticker})
+    return ScreenerEvaluationResult(
+        passed=True, metrics=dict(hit), reasons=tuple(hit["reasons"]), hit=hit,
+    )
+
+
 def _run_kai_s1(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     metadata = dict(bundle.metadata or {})
     try:
@@ -2186,5 +2205,12 @@ def build_screener_catalog(config: AppConfig) -> dict[str, ScreenerSpec]:
             lookback_trading_days=KAI_S2_HISTORY_DAYS,
             warmup_trading_days=20,
             evaluator=_run_kai_s2,
+        ),
+        "martin_bar_watchlist_v1": ScreenerSpec(
+            id="martin_bar_watchlist_v1",
+            required_inputs=("daily_bars", "benchmark_bars", "metadata"),
+            lookback_trading_days=252,
+            warmup_trading_days=20,
+            evaluator=_run_martin_bar_watchlist,
         ),
     }

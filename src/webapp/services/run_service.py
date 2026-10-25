@@ -728,6 +728,15 @@ class RunService:
             bias_group="bullish",
             bullish_subgroup="leaders",
         ),
+        "martin_bar_watchlist_v1": RunAction(
+            "martin_bar_watchlist_v1",
+            "Martin Bar Watchlist V1",
+            "scripts/run_martin_bar_watchlist_v1.py",
+            supports_limit=False,
+            fields=(_as_of_date_field,),
+            bias_group="bullish",
+            bullish_subgroup="leaders",
+        ),
         "rs_phase": RunAction(
             "rs_phase",
             "Run RS Phase",
