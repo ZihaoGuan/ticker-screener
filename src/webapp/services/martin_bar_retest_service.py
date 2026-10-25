@@ -20,30 +20,36 @@ class MartinBarRetestService:
         self.database_url = database_url
         self.bar_loader = bar_loader or load_many_ticker_windows
 
-    def run_session(self, *, as_of_date: dt.date, source_record: dict[str, Any] | None, dry_run: bool = True) -> dict[str, Any]:
+    def run_session(self, *, as_of_date: dt.date, source_record: dict[str, Any] | None, dry_run: bool = True,
+                    policy_id: str = STRATEGY_ID, book_id: str | None = None) -> dict[str, Any]:
+        if policy_id != STRATEGY_ID:
+            raise ValueError(f"Unsupported Martin Bar Retest policy identity: {policy_id}")
+        book = book_id or policy_id
         sessions = session_dates(as_of_date, 320)
         if not sessions or sessions[-1] != as_of_date:
             raise ValueError("Martin Bar Retest requires an XNYS session")
         require_completed_session(as_of_date)
         if source_record is None:
-            return {"strategy_id": STRATEGY_ID, "session_date": as_of_date.isoformat(),
+            return {"strategy_id": policy_id, "session_date": as_of_date.isoformat(),
                     "status": "missing_source", "reason": "persisted_watchlist_run_missing", "dry_run": dry_run}
         if (str(source_record.get("target_trading_date") or source_record.get("run_date"))[:10] != as_of_date.isoformat()
                 or source_record.get("rules_version") != "martin_bar_watchlist_v1"):
-            return {"strategy_id": STRATEGY_ID, "session_date": as_of_date.isoformat(),
+            return {"strategy_id": policy_id, "session_date": as_of_date.isoformat(),
                     "status": "blocked_source", "reason": "source_date_or_rules_version_mismatch", "dry_run": dry_run}
         if not dry_run:
-            with self.repository.atomic_session(STRATEGY_ID):
-                if self.repository.session_run_id(STRATEGY_ID, as_of_date) is not None:
-                    return {"strategy_id": STRATEGY_ID, "session_date": as_of_date.isoformat(), "skipped": True, "reason": "session_already_processed"}
-                latest = self.repository.latest_session_date(STRATEGY_ID)
+            with self.repository.atomic_session(book):
+                if self.repository.session_run_id(book, as_of_date) is not None:
+                    return {"strategy_id": policy_id, "book_id": book, "session_date": as_of_date.isoformat(), "skipped": True, "reason": "session_already_processed"}
+                latest = self.repository.latest_session_date(book)
                 if latest is not None and latest != sessions[-2]:
                     raise ValueError("Martin Bar Retest requires sequential XNYS sessions, including zero-hit days")
-                return self._run(as_of_date, source_record, sessions, False)
-        return self._run(as_of_date, source_record, sessions, True)
+                return self._run(as_of_date, source_record, sessions, False, policy_id=policy_id, book_id=book)
+        return self._run(as_of_date, source_record, sessions, True, policy_id=policy_id, book_id=book)
 
-    def _run(self, day: dt.date, source: dict[str, Any] | None, sessions: list[dt.date], dry_run: bool) -> dict[str, Any]:
-        prior = self.repository.latest_gap_watch_states(STRATEGY_ID) if hasattr(self.repository, "latest_gap_watch_states") else {}
+    def _run(self, day: dt.date, source: dict[str, Any] | None, sessions: list[dt.date], dry_run: bool,
+             *, policy_id: str = STRATEGY_ID, book_id: str | None = None) -> dict[str, Any]:
+        book = book_id or policy_id
+        prior = self.repository.latest_gap_watch_states(book) if hasattr(self.repository, "latest_gap_watch_states") else {}
         previously_seen = set(prior)
         active: dict[str, dict[str, Any]] = {}
         for ticker, payload in prior.items():
@@ -114,14 +120,16 @@ class MartinBarRetestService:
         source_id = int((source or {}).get("source_run_id") or 0)
         source_fp = str((source or {}).get("source_fingerprint") or "no-source")
         digest = hashlib.sha256(json.dumps({"day": day.isoformat(), "source": source_fp,
-            "bars": [(x["ticker"], x.get("bar_fingerprint")) for x in candidates], "rules": STRATEGY_ID}, sort_keys=True).encode()).hexdigest()
-        summary = {"strategy_id": STRATEGY_ID, "rule_version": STRATEGY_ID, "session_date": day.isoformat(),
+            "bars": [(x["ticker"], x.get("bar_fingerprint")) for x in candidates], "rules": policy_id}, sort_keys=True).encode()).hexdigest()
+        summary = {"strategy_id": policy_id, "book_id": book, "rule_version": policy_id, "session_date": day.isoformat(),
                    "source_run_id": source_id or None, "source_fingerprint": source_fp,
                    "source_hit_count": len((source or {}).get("hits", [])) if source_valid else 0,
                    "active_event_count": len(candidates), "new_event_count": len(new_events),
                    "zero_hit_day": source_valid and not (source or {}).get("hits"), "retrospective_source_scan": retrospective,
                    "execution_mode": "dry_run" if dry_run else "applied"}
+        if source and source.get("replay_provenance"):
+            summary["replay_provenance"] = source["replay_provenance"]
         if not dry_run:
             self.repository.save_session(session_date=day, source_run_id=source_id, fingerprint=digest,
-                candidates=candidates, summary=summary, strategy_id=STRATEGY_ID)
+                candidates=candidates, summary=summary, strategy_id=book)
         return {**summary, "candidates": candidates, "dry_run": dry_run}
