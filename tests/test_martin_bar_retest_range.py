@@ -1,5 +1,7 @@
 import datetime as dt
 from contextlib import nullcontext
+import sys
+import types
 import unittest
 from unittest.mock import patch
 
@@ -44,6 +46,32 @@ class Connection:
 
 
 class MartinBarRetestRangeTests(unittest.TestCase):
+    def test_publication_timing_handles_weekend_after_calendar_end(self):
+        class Calendar:
+            def next_session(self, day):
+                session = dt.date.fromisoformat(day)
+                return dt.datetime.combine(session + dt.timedelta(days=3 if session.weekday() == 4 else 1),
+                                           dt.time())
+
+            def session_open(self, day):
+                import pandas as pd
+                return pd.Timestamp(f"{day}T13:30:00Z")
+
+            def sessions_in_range(self, _start, end):
+                if dt.date.fromisoformat(end).weekday() >= 5:
+                    raise AssertionError("range end falls on a weekend outside the calendar")
+                raise AssertionError("publication timing should use next_session directly")
+
+        fake_exchange_calendars = types.SimpleNamespace(get_calendar=lambda *_args, **_kwargs: Calendar())
+        published_at = "2026-10-25T00:00:00Z"
+        with patch.dict(sys.modules, {"exchange_calendars": fake_exchange_calendars}):
+            results = [replay.publication_timing(day, published_at)
+                       for day in replay.EXPECTED_SOURCES]
+
+        self.assertEqual([retrospective for retrospective, _ in results],
+                         [True, True, True, True, False])
+        self.assertEqual(results[-1][1], "saved_before_next_open")
+
     def test_service_separates_policy_from_book_and_reads_prior_from_book(self):
         day = dt.date(2026, 10, 23)
         repo = FakeRepo()

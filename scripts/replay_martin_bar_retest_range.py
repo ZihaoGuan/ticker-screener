@@ -37,8 +37,7 @@ def publication_timing(day: dt.date, published_at: Any) -> tuple[bool, str]:
     import exchange_calendars as xcals
     import pandas as pd
     calendar = xcals.get_calendar("XNYS", start=day - dt.timedelta(days=5), end=day + dt.timedelta(days=20))
-    following = next(label.date() for label in calendar.sessions_in_range(
-        day.isoformat(), (day + dt.timedelta(days=20)).isoformat()) if label.date() > day)
+    following = calendar.next_session(day.isoformat()).date()
     published = pd.Timestamp(published_at)
     if published.tzinfo is None:
         published = published.tz_localize("UTC")
