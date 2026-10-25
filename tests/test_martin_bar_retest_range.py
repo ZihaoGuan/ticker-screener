@@ -82,6 +82,35 @@ class PerformanceConnection:
 
 
 class MartinBarRetestRangeTests(unittest.TestCase):
+    def test_run_range_uses_replay_repository_with_outer_transaction(self):
+        from unittest.mock import patch
+
+        class Cursor:
+            description = []
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def execute(self, *_args): pass
+            def fetchall(self): return []
+
+        class Connection:
+            def cursor(self): return Cursor()
+
+        day = dt.date(2026, 10, 19)
+        source = {"source_run_id": 71, "target_trading_date": day.isoformat(),
+                  "rules_version": "martin_bar_watchlist_v1", "hits": [],
+                  "replay_provenance": {"source_mode": "published_after_next_open"}}
+        with patch("src.webapp.services.martin_bar_retest_service.session_dates", return_value=[day - dt.timedelta(days=1), day]), \
+             patch("src.webapp.services.martin_bar_retest_service.require_completed_session"), \
+             patch("src.webapp.repositories.martin_forward_test_repository.MartinForwardTestRepository._rows", return_value=[]), \
+             patch("src.webapp.repositories.martin_forward_test_repository.MartinForwardTestRepository.save_session", return_value=9), \
+             patch("src.webapp.repositories.martin_forward_test_repository.MartinForwardTestRepository.set_run_metadata"), \
+             patch("src.webapp.services.martin_bar_retest_execution.MartinBarRetestExecutionService") as execution, \
+             patch("scripts.replay_martin_bar_retest_range.continuation_mark", return_value={"mark_coverage": {"status": "complete"}}):
+            execution.return_value.run_session.return_value = {"missing_bars": 0, "scheduled": 0}
+            result = replay.run_range(Connection(), sessions=[day], sources={day: source},
+                                      book_id="martin_range_atomic_regression", database_url="test")
+        self.assertEqual(result[0]["date"], day.isoformat())
+
     def test_daily_mark_uses_close_and_reports_missing_position_coverage(self):
         class MarkRepo:
             def _rows(self, sql, _params):

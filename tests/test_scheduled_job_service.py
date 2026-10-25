@@ -521,6 +521,7 @@ class ScheduledJobServiceTests(unittest.TestCase):
         actions = {item["id"] for item in self.service.get_context()["available_actions"]}
 
         self.assertIn("sync_postgres_market_data", actions)
+        self.assertIn("continue_martin_bar_retest", actions)
         self.assertIn("reload_postgres_market_data_date", actions)
         self.assertIn("build_daily_screening_features", actions)
         self.assertIn("refresh_split_adjusted_history", actions)

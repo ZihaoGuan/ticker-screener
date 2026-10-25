@@ -187,6 +187,8 @@ class _BorrowedConnection:
 class ReplayRepository(MartinForwardTestRepository):
     def __init__(self, connection):
         self.connection = _BorrowedConnection(connection)
+        # The caller owns the transaction and already holds the book advisory lock.
+        self._session_connection = self.connection
 
     def _connect(self):
         return self.connection

@@ -509,7 +509,7 @@ class ScheduledJobService:
                 ],
             }
             for action in self.run_service._actions.values()
-            if action.action_id in {"sync_postgres_market_data", "run_martin_gap_retest"}
+            if action.action_id in {"sync_postgres_market_data", "run_martin_gap_retest", "continue_martin_bar_retest"}
         ]
         job_estimates = jobs if jobs is not None else self.list_jobs()
         estimates_by_action: dict[str, list[int]] = {}
