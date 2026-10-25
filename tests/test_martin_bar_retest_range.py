@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from scripts import replay_martin_bar_retest_range as replay
 from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
+from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 
 
 class FakeRepo:
@@ -45,7 +46,55 @@ class Connection:
     def rollback(self): self.rollbacks += 1
 
 
+class SaveCursor:
+    def __init__(self):
+        self.calls = []
+    def __enter__(self): return self
+    def __exit__(self, *_args): return False
+    def execute(self, sql, params=()): self.calls.append((sql, params))
+    def fetchall(self): return []
+    def fetchone(self): return (1,)
+
+
+class SaveConnection:
+    def __init__(self): self.db_cursor = SaveCursor()
+    def __enter__(self): return self
+    def __exit__(self, *_args): return False
+    def cursor(self): return self.db_cursor
+
+
 class MartinBarRetestRangeTests(unittest.TestCase):
+    def test_service_repository_save_serializes_datetime_fields_as_iso8601(self):
+        day = dt.date(2026, 10, 19)
+        published_at = dt.datetime(2026, 10, 20, 13, 30, tzinfo=dt.timezone.utc)
+        connection = SaveConnection()
+        class Repo(MartinForwardTestRepository):
+            def _connect(self): return connection
+            def session_run_id(self, *_args): return None
+            def latest_session_date(self, *_args): return None
+            def latest_gap_watch_states(self, *_args): return {}
+        repo = Repo()
+        source = {"target_trading_date": day.isoformat(), "rules_version": replay.SOURCE_ID,
+                  "source_run_id": 7110, "published_at": published_at,
+                  "replay_provenance": {"publication": published_at},
+                  "hits": [{"ticker": "ABC", "discovery_categories": ["leader_30_session"]}]}
+
+        class Calendar:
+            def next_session(self, _day): return dt.datetime(2026, 10, 20)
+            def session_open(self, _day): return dt.datetime(2026, 10, 20, 13, 30, tzinfo=dt.timezone.utc)
+        fake_exchange_calendars = types.SimpleNamespace(get_calendar=lambda *_a, **_k: Calendar())
+
+        with patch("src.webapp.services.martin_bar_retest_service.session_dates", lambda *_: [day - dt.timedelta(days=1), day]), \
+                patch("src.webapp.services.martin_bar_retest_service.require_completed_session", lambda *_: None), \
+                patch.dict(sys.modules, {"exchange_calendars": fake_exchange_calendars}):
+            MartinBarRetestService(repo, bar_loader=lambda *_a, **_k: {}).run_session(
+                as_of_date=day, source_record=source, dry_run=False)
+
+        run_params = next(params for sql, params in connection.db_cursor.calls if "INSERT INTO martin_forward_runs" in sql)
+        candidate_params = next(params for sql, params in connection.db_cursor.calls if "INSERT INTO martin_forward_candidates" in sql)
+        self.assertIn('"publication": "2026-10-20T13:30:00+00:00"', run_params[4])
+        self.assertIn('2026-10-20T13:30:00+00:00', candidate_params[5])
+
     def test_service_publication_timing_uses_next_session_at_calendar_boundary(self):
         day = dt.date(2026, 10, 19)
 

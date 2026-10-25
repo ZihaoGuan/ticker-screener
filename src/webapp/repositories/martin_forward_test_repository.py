@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,6 +18,12 @@ GAP_RETEST_REPLAY_V4_STRATEGY_ID = REPLAY_V4_STRATEGY_ID
 ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1", ROTATION_STRATEGY_ID, GAP_RETEST_STRATEGY_ID,
                       GAP_RETEST_REPLAY_STRATEGY_ID, GAP_RETEST_REPLAY_V2_STRATEGY_ID, GAP_RETEST_REPLAY_V3_STRATEGY_ID,
                       GAP_RETEST_REPLAY_V4_STRATEGY_ID}
+
+
+def _json_default(value: Any) -> str:
+    if isinstance(value, (dt.date, dt.datetime)):
+        return value.isoformat()
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
 
 class _SessionConnection:
@@ -140,12 +147,12 @@ class MartinForwardTestRepository:
             with connection.cursor() as cursor:
                 cursor.execute("""INSERT INTO martin_forward_runs(strategy_id,session_date,source_run_id,source_fingerprint,summary_json)
                     VALUES (%s,%s,%s,%s,%s::jsonb) ON CONFLICT(strategy_id,session_date,source_fingerprint)
-                    DO UPDATE SET summary_json=EXCLUDED.summary_json RETURNING id""", (strategy_id, session_date, source_run_id, fingerprint, json.dumps(summary)))
+                    DO UPDATE SET summary_json=EXCLUDED.summary_json RETURNING id""", (strategy_id, session_date, source_run_id, fingerprint, json.dumps(summary, default=_json_default)))
                 run_id = cursor.fetchone()[0]
                 for item in candidates:
                     cursor.execute("""INSERT INTO martin_forward_candidates(run_id,ticker,rank,status,reasons_json,payload_json)
                         VALUES (%s,%s,%s,%s,%s::jsonb,%s::jsonb) ON CONFLICT(run_id,ticker) DO NOTHING""",
-                        (run_id, item["ticker"], item["rank"], item["status"], json.dumps(item["reasons"]), json.dumps(item)))
+                        (run_id, item["ticker"], item["rank"], item["status"], json.dumps(item["reasons"], default=_json_default), json.dumps(item, default=_json_default)))
         return int(run_id)
 
     def replay_covers_date(self, session_date: Any, strategy_id: str) -> bool:
