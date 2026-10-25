@@ -139,10 +139,11 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             actions = execution.run_session(day=day, run_id=run_id, candidates=[], source_on_time=False)
             if actions["missing_bars"]:
                 raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
+            marks = continuation_mark(repository, book_id, day, database_url)
             repository.set_run_metadata(run_id, {"execution_book_version": "martin_bar_retest_execution_v1",
                 "execution_only": True, "execution_actions": actions,
                 "simulate_backdated_buys": simulate_backdated_buys,
-                "backdated_buy_basis": None})
+                "backdated_buy_basis": None, "partial": marks["mark_coverage"]["status"] != "complete", **marks})
             results.append({"date": day.isoformat(), "source_run_id": None, "source_hit_count": 0,
                 "new_event_count": 0, "active_event_count": 0, "zero_hit_day": None,
                 "retrospective_source_scan": None, "source_publication_timing": "no_scan_execution_only",
@@ -161,11 +162,14 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
         cohorts = {category: sum(item.get("event_category") == category for item in result.get("candidates", []))
                    for category in sorted({str(item.get("event_category") or "unknown") for item in result.get("candidates", [])})}
         if result.get("run_id") is not None:
+            marks = continuation_mark(repository, book_id, day, database_url)
             repository.set_run_metadata(result["run_id"], {"execution_book_version": "martin_bar_retest_execution_v1",
                 "execution_actions": actions, "execution_source_on_time": result.get("retrospective_source_scan") is False,
                 "simulate_backdated_buys": simulate_backdated_buys,
                 "backdated_buy_basis": "hypothetical_backdated_simulation" if simulate_backdated_buys and result.get("retrospective_source_scan") else "forward_safe",
                 "source_reconstructed_later": bool(result.get("retrospective_source_scan")),
+                "partial": marks["mark_coverage"]["status"] != "complete",
+                **marks,
                 "category_cohorts": cohorts, "execution_account_limits": {"base_equity": 100000,
                 "risk_per_trade": 500, "max_name_value": 20000, "max_committed_risk": 2500, "max_positions": 8}})
         statuses = Counter(str(item.get("status") or "unknown") for item in result.get("candidates", []))
@@ -189,6 +193,145 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
     if results:
         results[-1]["book_performance"] = book_performance(connection, book_id)
     return results
+
+
+def continuation_mark(repository: Any, book_id: str, day: dt.date, database_url: str) -> dict[str, Any]:
+    """Mark only positions actually open on this session, using that session's Close."""
+    from src.market_data_access import load_many_ticker_windows
+    from src.webapp.services.martin_bar_retest_execution import bar_for
+    rows = [(row["status"], row["ticker"], row["payload_json"]) for row in repository._rows(
+        "SELECT status,ticker,payload_json FROM martin_forward_positions WHERE strategy_id=%s", (book_id,))]
+    previous_rows = repository._rows("SELECT summary_json FROM martin_forward_runs WHERE strategy_id=%s AND session_date<%s AND summary_json->>'account_equity' IS NOT NULL AND summary_json->>'cumulative_r' IS NOT NULL ORDER BY session_date DESC,id DESC LIMIT 1", (book_id, day))
+    opened = [row for row in rows if row[0] == "open"]
+    tickers = sorted({str(row[1]).upper() for row in opened})
+    frames = load_many_ticker_windows(tickers, day, 320, database_url=database_url) if tickers else {}
+    realized_pnl = sum(float((row[2] or {}).get("realized_pnl") or 0) for row in rows)
+    realized_r = sum(float((row[2] or {}).get("realized_r") or 0) for row in rows)
+    unrealized_pnl = unrealized_r = 0.0
+    covered = []
+    for _, ticker, payload in opened:
+        bar = bar_for(frames.get(str(ticker).upper()), day)
+        if bar is None:
+            continue
+        payload = payload or {}
+        shares = int(payload.get("remaining_shares") or 0)
+        pnl = (bar["close"] - float(payload.get("entry_price") or 0)) * shares
+        denominator = float(payload.get("initial_r_per_share") or 0) * int(payload.get("initial_shares") or payload.get("shares") or 1)
+        unrealized_pnl += pnl
+        unrealized_r += pnl / denominator if denominator else 0.0
+        covered.append(str(ticker).upper())
+    cumulative_r = realized_r + unrealized_r
+    equity = 100000.0 + realized_pnl + unrealized_pnl
+    prev = (previous_rows[0].get("summary_json") or {}) if previous_rows else {}
+    peak_equity = max(100000.0, float(prev.get("equity_peak") or prev.get("account_equity") or 100000.0), equity)
+    peak_r = max(0.0, float(prev.get("r_peak") or prev.get("cumulative_r") or 0.0), cumulative_r)
+    complete = len(covered) == len(opened)
+    return {"mark_date": day.isoformat(), "realized_pnl": realized_pnl, "unrealized_pnl": unrealized_pnl if complete else None,
+        "realized_r": realized_r, "unrealized_r": unrealized_r if complete else None, "cumulative_r": cumulative_r if complete else None,
+        "account_equity": equity if complete else None, "equity_peak": peak_equity if complete else None, "r_peak": peak_r if complete else None,
+        "equity_drawdown_pct": (equity / peak_equity - 1) * 100 if complete else None,
+        "r_drawdown": cumulative_r - peak_r if complete else None, "mark_coverage": {"open_positions": len(opened), "marked_positions": len(covered),
+        "missing_tickers": sorted(set(tickers) - set(covered)), "status": "complete" if complete else "partial"}}
+
+
+def continue_book(*, book_id: str, database_url: str, history: Any) -> dict[str, Any]:
+    """Apply exactly the next completed XNYS session to an existing execution book."""
+    from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
+    from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
+    from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService
+    from src.webapp.services.martin_rotation import require_completed_session
+    repository = MartinForwardTestRepository(database_url=database_url)
+    latest = repository.latest_session_date(book_id)
+    if latest is None:
+        raise ValueError("Continuation requires an existing execution book; historical replay must create a fresh book first.")
+    version_rows = repository._rows("SELECT summary_json FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 1", (book_id,))
+    version = (version_rows[0].get("summary_json") or {}).get("execution_book_version") if version_rows else None
+    if version != "martin_bar_retest_execution_v1":
+        raise ValueError(f"Book {book_id} is not a versioned Martin Bar Retest execution book.")
+    day = xnys_sessions(latest + dt.timedelta(days=1), latest + dt.timedelta(days=30))[0]
+    prior_run = repository.session_run_id(book_id, day)
+    if prior_run is not None:
+        return {"status": "already_processed", "book_id": book_id, "session_date": day.isoformat(), "run_id": prior_run}
+    try:
+        require_completed_session(day)
+    except ValueError as exc:
+        if "completed exchange session" not in str(exc):
+            raise
+        return {"status": "not_ready", "book_id": book_id,
+                "session_date": latest.isoformat(), "next_session_date": day.isoformat(),
+                "reason": "awaiting_next_completed_session"}
+    source = None
+    from scripts.run_martin_bar_retest import _load_source
+    source = _load_source(history, day)
+    with repository.atomic_session(book_id):
+        latest = repository.latest_session_date(book_id)
+        if latest is None or xnys_sessions(latest + dt.timedelta(days=1), latest + dt.timedelta(days=30))[0] != day:
+            raise ValueError("Execution book advanced concurrently; retry to process its next session.")
+        locked_version_rows = repository._rows("SELECT summary_json FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 1", (book_id,))
+        locked_version = (locked_version_rows[0].get("summary_json") or {}).get("execution_book_version") if locked_version_rows else None
+        if locked_version != "martin_bar_retest_execution_v1":
+            raise ValueError(f"Book {book_id} is not a versioned Martin Bar Retest execution book.")
+        if source is None:
+            run_id = save_execution_only_run(repository, book_id=book_id, day=day)
+            actions = MartinBarRetestExecutionService(repository, database_url=database_url)
+            actions.book_id = book_id
+            action_counts = actions.run_session(day=day, run_id=run_id, candidates=[], source_on_time=False)
+            mode = "execution_only_no_saved_scan"
+            result = None
+        else:
+            result = MartinBarRetestService(repository, database_url=database_url).run_session(
+                as_of_date=day, source_record=source, dry_run=False, policy_id=POLICY_ID, book_id=book_id)
+            if result.get("status") in {"missing_source", "blocked_source"}:
+                raise ValueError(f"Persisted watchlist source failed validation for {day}: {result.get('reason') or result.get('status')}")
+            run_id = result.get("run_id")
+            if result.get("skipped"):
+                return {"status": "already_processed", "book_id": book_id, "session_date": day.isoformat(), "run_id": run_id}
+            executor = MartinBarRetestExecutionService(repository, database_url=database_url)
+            executor.book_id = book_id
+            action_counts = executor.run_session(day=day, run_id=run_id, candidates=result.get("candidates", []),
+                source_on_time=result.get("retrospective_source_scan") is False)
+            mode = "persisted_watchlist"
+        if action_counts.get("missing_bars"):
+            mark_status = "partial"
+        else:
+            mark_status = "complete"
+        marks = continuation_mark(repository, book_id, day, database_url)
+        if mark_status == "partial":
+            marks["mark_coverage"]["status"] = "partial"
+            for key in ("unrealized_pnl", "unrealized_r", "cumulative_r", "account_equity", "equity_peak", "r_peak", "equity_drawdown_pct", "r_drawdown"):
+                marks[key] = None
+        repository.set_run_metadata(run_id, {"execution_book_version": "martin_bar_retest_execution_v1",
+            "execution_mode": "forward_continuation", "source_mode": mode,
+            "source_run_id": (source or {}).get("source_run_id"), "source_published_at": (source or {}).get("published_at"),
+            "source_on_time": bool(result and result.get("retrospective_source_scan") is False),
+            "execution_actions": action_counts, "partial": marks["mark_coverage"]["status"] != "complete", **marks})
+    return {"status": "complete", "book_id": book_id, "session_date": day.isoformat(), "source_mode": mode,
+            "execution_actions": action_counts, **marks}
+
+
+def continue_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Continue an existing Martin Bar Retest execution book by one completed XNYS session.")
+    parser.add_argument("--book-id", required=True)
+    parser.add_argument("--apply", action="store_true", help="Execute and persist one continuation session.")
+    args = parser.parse_args(argv)
+    if not args.book_id.startswith("martin_range_bar_retest_") or args.book_id == POLICY_ID:
+        parser.error("--book-id must name an isolated martin_range_bar_retest_ execution book")
+    if not args.apply:
+        print(json.dumps({"ready": True, "book_id": args.book_id, "mode": "preflight_only_no_writes",
+                          "executed": False, "saved": False,
+                          "detail": "Continuation was not evaluated; pass --apply to run it."}))
+        return 0
+    from src.webapp.config import load_webapp_config
+    from src.webapp.repositories.history_repository import HistoryRepository
+    from src.webapp.services.screener_history_service import ScreenerHistoryService
+    config = load_webapp_config()
+    if not config.database_url:
+        parser.error("TICKER_SCREENER_DATABASE_URL is required")
+    history = ScreenerHistoryService(database_url=config.database_url, artifacts_dir=config.artifacts_dir,
+        repository=HistoryRepository(database_url=config.database_url, artifacts_dir=config.artifacts_dir, read_only=True))
+    result = continue_book(book_id=args.book_id, database_url=config.database_url, history=history)
+    print(json.dumps(result, sort_keys=True, default=str))
+    return 0 if result["status"] in {"complete", "already_processed", "not_ready"} else 2
 
 
 def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date, dict[str, Any]],

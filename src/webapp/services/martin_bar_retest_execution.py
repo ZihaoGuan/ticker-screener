@@ -216,8 +216,11 @@ class MartinBarRetestExecutionService:
         held_names = {str(x["ticker"]).upper() for x in open_now + orders_now}
         for candidate in ordered:
             ticker = str(candidate["ticker"]).upper()
-            backdated = simulate_backdated_buys and candidate.get("retrospective_source_scan") is True
+            backdated = simulate_backdated_buys and (candidate.get("retrospective_source_scan") is True
+                or candidate.get("original_source_retrospective") is True)
+            original_source_retrospective = candidate.get("original_source_retrospective") is True
             if (candidate.get("status") != "confirmed" or not (source_on_time or backdated)
+                    or (original_source_retrospective and not backdated)
                     or ticker in held_names or run_id is None):
                 continue
             try:

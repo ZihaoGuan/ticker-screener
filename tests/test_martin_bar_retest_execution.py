@@ -131,6 +131,16 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
             if repo.updated:
                 self.assertEqual(repo.updated[0][2]["shares"], 500)
 
+    def test_current_scan_cannot_make_a_retroactive_origin_eligible_for_new_buy(self):
+        repo = Repo()
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
+        service.book_id = "martin_range_bar_retest_execution_test"
+        result = service.run_session(day=dt.date(2026, 10, 26), run_id=99,
+            candidates=[{"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9,
+                         "max_entry": 10, "original_source_retrospective": True}], source_on_time=True)
+        self.assertEqual(result["scheduled"], 0)
+        self.assertEqual(repo.updated, [])
+
     def test_retrospective_source_requires_opt_in_then_marks_hypothetical_fill(self):
         candidate = {"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9.0,
                      "max_entry": 10.0, "retrospective_source_scan": True}

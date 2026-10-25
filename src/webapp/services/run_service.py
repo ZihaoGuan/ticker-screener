@@ -379,6 +379,15 @@ class RunService:
             fields=(_as_of_date_field, RunField("apply", "Apply to Paper Book", "boolean", help_text="Defaults to a read-only dry run.")),
             visible_in_runs=False,
         ),
+        "continue_martin_bar_retest": RunAction(
+            "continue_martin_bar_retest",
+            "Continue Martin Bar Retest Execution Book",
+            "scripts/continue_martin_bar_retest.py",
+            supports_limit=False,
+            fields=(RunField("book_id", "Execution Book ID", "text", placeholder="martin_range_bar_retest_…"),
+                    RunField("apply", "Apply to Paper Book", "boolean", help_text="Defaults to a read-only no-write run.")),
+            visible_in_runs=False,
+        ),
         "rts_validation": RunAction(
             "rts_validation",
             "Validate Relative Trend Strength",
@@ -3180,6 +3189,10 @@ class RunService:
             command.extend(["--as-of-date", str(normalized_options["as_of_date"])])
         if action_id == "run_martin_gap_retest" and normalized_options.get("apply"):
             command.append("--apply")
+        if action_id == "continue_martin_bar_retest":
+            command.extend(["--book-id", str(normalized_options["book_id"])])
+            if normalized_options.get("apply"):
+                command.append("--apply")
         if normalized_options.get("lookback_days") is not None:
             command.extend(["--lookback-days", str(normalized_options["lookback_days"])])
         if normalized_options.get("min_correlation") is not None:
@@ -3432,6 +3445,12 @@ class RunService:
         if "allow_incremental_refresh" in options:
             normalized["allow_incremental_refresh"] = bool(options.get("allow_incremental_refresh"))
         if action.action_id == "run_martin_gap_retest":
+            normalized["apply"] = str(options.get("apply") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if action.action_id == "continue_martin_bar_retest":
+            book_id = str(options.get("book_id") or "").strip()
+            if not book_id.startswith("martin_range_bar_retest_"):
+                raise ValueError("Execution Book ID must start with martin_range_bar_retest_.")
+            normalized["book_id"] = book_id
             normalized["apply"] = str(options.get("apply") or "").strip().lower() in {"1", "true", "yes", "on"}
 
         for key in (

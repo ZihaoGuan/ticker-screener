@@ -43,6 +43,9 @@ class MartinForwardTestRepository:
     @contextmanager
     def atomic_session(self, strategy_id: str):
         """The rotation book's linked exits and entries commit or roll back together."""
+        if self._session_connection is not None:
+            yield
+            return
         connection = self._connect()
         if connection is None:
             raise RuntimeError("Rotation strategy requires a configured database")
@@ -400,7 +403,8 @@ class MartinForwardTestRepository:
                 account = books.get("account")
                 for account in (account, books.get("rs_expanded_rotation"), books.get("gap_retest"),
                                 books.get("gap_retest_replay"), books.get("gap_retest_replay_v2"),
-                                books.get("gap_retest_replay_v3"), books.get("gap_retest_replay_v4")):
+                                books.get("gap_retest_replay_v3"), books.get("gap_retest_replay_v4"),
+                                *[book for key, book in books.items() if key.startswith("martin_range_bar_retest_")]):
                     if not account or not account.get("history"):
                         continue
                     dates = [str(point.get("date") or "") for point in account["history"] if point.get("date")]
@@ -469,7 +473,7 @@ class MartinForwardTestRepository:
 
 def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidates: list[dict[str, Any]],
                          positions: list[dict[str, Any]], events: list[dict[str, Any]]) -> dict[str, Any]:
-    account_sized = strategy_id in ACCOUNT_STRATEGIES
+    account_sized = strategy_id in ACCOUNT_STRATEGIES or strategy_id.startswith("martin_range_bar_retest_")
     closed = [row for row in positions if row.get("status") == "closed"]
     grouped: dict[str, dict[str, float]] = {}
     for row in closed:
@@ -513,30 +517,35 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
     marks = []
     for run in reversed(runs):
         summary = run.get("summary_json") or {}
-        if summary.get("cumulative_r") is not None:
+        if summary.get("cumulative_r") is not None or (strategy_id.startswith("martin_range_bar_retest_") and summary.get("mark_date")):
             equity = summary.get("account_equity")
             marks.append({"date": str(run["session_date"]), "cumulative_r": summary.get("cumulative_r"),
                           "account_equity": equity,
                           "equity_drawdown_pct": summary.get("equity_drawdown_pct"), "r_drawdown": summary.get("r_drawdown")})
     has_account_marks = account_sized and bool(marks) and any(point.get("account_equity") is not None for point in marks)
+    execution_book = strategy_id.startswith("martin_range_bar_retest_")
+    has_execution_marks = execution_book and any((run.get("summary_json") or {}).get("mark_date") for run in runs)
     if marks:
         history = marks
+    elif execution_book:
+        history = []
     latest_mark = marks[-1] if marks else {}
     latest_summary = (runs[0].get("summary_json") or {}) if runs else {}
     return {"strategy_id": strategy_id, "runs": runs, "candidates": candidates, "positions": positions,
-            "events": events, "history": history, "history_source": "stored_session_marks" if has_account_marks else "realized_close_fallback", "attribution": attribution,
+            "events": events, "history": history, "history_source": "stored_session_marks" if has_account_marks else "stored_session_marks_partial" if has_execution_marks else "unavailable_legacy_no_daily_marks" if execution_book else "realized_close_fallback", "attribution": attribution,
             **({"rs_tier_metrics": _rs_tier_metrics(closed),
                 "cost_model": "10 bps adverse slippage on stop and market-open exits; no commissions. Cohort drawdown is closed-trade R, not portfolio drawdown."}
                if strategy_id in {"martin_rs_expanded_v1", ROTATION_STRATEGY_ID} else {}),
             "metrics": {"realized_r": latest_summary.get("realized_r", sum(float(row.get("realized_r") or 0) for row in realized_positions)),
-                        "unrealized_r": latest_summary.get("unrealized_r", 0.0),
-                        "cumulative_r": latest_mark.get("cumulative_r", realized_total_r),
+                        "unrealized_r": latest_summary.get("unrealized_r", None if execution_book and not has_account_marks else 0.0),
+                        "cumulative_r": latest_mark.get("cumulative_r", None if execution_book else realized_total_r),
                         "realized_pnl": latest_summary.get("realized_pnl", realized_total_pnl),
-                        "unrealized_pnl": latest_summary.get("unrealized_pnl", 0.0),
+                        "unrealized_pnl": latest_summary.get("unrealized_pnl", None if execution_book and not has_account_marks else 0.0),
                         "closed_count": len(closed), "gross_wins": sum(x for x in realized if x > 0),
-                        "gross_losses": sum(abs(x) for x in realized if x < 0), "max_r_drawdown": min([max_r, *(point.get("r_drawdown", 0) for point in history)]),
-                        "account_equity": latest_mark.get("account_equity", 100_000.0 + realized_total_pnl) if account_sized else None,
+                        "gross_losses": sum(abs(x) for x in realized if x < 0), "max_r_drawdown": None if execution_book and not has_account_marks else min([max_r, *(point.get("r_drawdown", 0) for point in history)]),
+                        "account_equity": latest_mark.get("account_equity", 100_000.0 + realized_total_pnl) if account_sized and (has_account_marks or not execution_book) else None,
                         "equity_drawdown_pct": latest_mark.get("equity_drawdown_pct") if account_sized else None,
+                        "mark_coverage": latest_summary.get("mark_coverage") if execution_book else None,
                         **_closed_trade_metrics([row.get("payload_json") or {} for row in closed])}}
 
 

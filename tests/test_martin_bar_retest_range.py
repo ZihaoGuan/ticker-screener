@@ -1,6 +1,11 @@
 import datetime as dt
 from contextlib import nullcontext
+from contextlib import redirect_stdout
+import io
+import json
+from pathlib import Path
 import sys
+import subprocess
 import types
 import unittest
 from unittest.mock import patch
@@ -77,6 +82,115 @@ class PerformanceConnection:
 
 
 class MartinBarRetestRangeTests(unittest.TestCase):
+    def test_daily_mark_uses_close_and_reports_missing_position_coverage(self):
+        class MarkRepo:
+            def _rows(self, sql, _params):
+                if "SELECT status,ticker" in sql:
+                    return [{"status": "open", "ticker": "ABC", "payload_json": {"entry_price": 10, "remaining_shares": 5,
+                             "initial_r_per_share": 1, "initial_shares": 5, "realized_pnl": 2, "realized_r": .4}},
+                            {"status": "open", "ticker": "MISS", "payload_json": {"entry_price": 10, "remaining_shares": 5,
+                             "initial_r_per_share": 1, "initial_shares": 5}}]
+                return []
+        frame = __import__("pandas").DataFrame([{"Open": 11, "High": 13, "Low": 10, "Close": 12, "Volume": 100}],
+                 index=__import__("pandas").to_datetime(["2026-10-26"]))
+        with patch("src.market_data_access.load_many_ticker_windows", lambda *_a, **_k: {"ABC": frame}):
+            mark = replay.continuation_mark(MarkRepo(), "martin_range_bar_retest_test", dt.date(2026, 10, 26), "test")
+        self.assertIsNone(mark["unrealized_pnl"])
+        self.assertIsNone(mark["cumulative_r"])
+        self.assertEqual(mark["realized_pnl"], 2)
+        self.assertEqual(mark["mark_coverage"], {"open_positions": 2, "marked_positions": 1,
+                         "missing_tickers": ["MISS"], "status": "partial"})
+
+    def test_continuation_uses_next_session_and_missing_source_settles_without_new_candidates(self):
+        day = dt.date(2026, 10, 23)
+        class Repo:
+            latest = day
+            def __init__(self, **_kwargs): self.saved = []; self.metadata = []
+            def latest_session_date(self, _book): return self.latest
+            def session_run_id(self, _book, _day): return None
+            def atomic_session(self, _book): return nullcontext()
+            def save_session(self, **kwargs): self.saved.append(kwargs); return 91
+            def _rows(self, sql, _params):
+                return [{"summary_json": {"execution_book_version": "martin_bar_retest_execution_v1"}}] if "SELECT summary_json FROM martin_forward_runs WHERE strategy_id=%s ORDER BY" in sql else []
+            def set_run_metadata(self, run_id, payload): self.metadata.append((run_id, payload))
+        class Execution:
+            def __init__(self, *_args, **_kwargs): self.book_id = None
+            def run_session(self, **kwargs):
+                self.kwargs = kwargs
+                return {"missing_bars": 1, "scheduled": 0}
+        repo_instances = []
+        class RepoFactory(Repo):
+            def __init__(self, **kwargs): super().__init__(**kwargs); repo_instances.append(self)
+        with patch.object(replay, "xnys_sessions", lambda start, _end: [dt.date(2026, 10, 26)]), \
+                patch("src.webapp.repositories.martin_forward_test_repository.MartinForwardTestRepository", RepoFactory), \
+                patch("src.webapp.services.martin_bar_retest_execution.MartinBarRetestExecutionService", Execution), \
+                patch("src.webapp.services.martin_rotation.require_completed_session"), \
+                patch("scripts.run_martin_bar_retest._load_source", return_value=None), \
+                patch.object(replay, "continuation_mark", return_value={"account_equity": 101000, "cumulative_r": 1,
+                    "mark_coverage": {"status": "complete"}}):
+            result = replay.continue_book(book_id="martin_range_bar_retest_live", database_url="test", history=object())
+        repo = repo_instances[-1]
+        self.assertEqual(result["session_date"], "2026-10-26")
+        self.assertEqual(repo.saved[0]["source_run_id"], 0)
+        self.assertEqual(repo.metadata[0][1]["source_mode"], "execution_only_no_saved_scan")
+        self.assertIsNone(result["account_equity"])
+        self.assertIsNone(result["cumulative_r"])
+        self.assertTrue(repo.metadata[0][1]["partial"])
+
+    def test_continuation_is_idempotent_for_existing_next_session(self):
+        class Repo:
+            def __init__(self, **_kwargs): pass
+            def latest_session_date(self, _book): return dt.date(2026, 10, 23)
+            def session_run_id(self, _book, _day): return 55
+            def _rows(self, *_args): return [{"summary_json": {"execution_book_version": "martin_bar_retest_execution_v1"}}]
+        with patch("src.webapp.repositories.martin_forward_test_repository.MartinForwardTestRepository", Repo), \
+                patch.object(replay, "xnys_sessions", lambda *_args: [dt.date(2026, 10, 26)]), \
+                patch("src.webapp.services.martin_rotation.require_completed_session"):
+            result = replay.continue_book(book_id="martin_range_bar_retest_live", database_url="test", history=object())
+        self.assertEqual(result["status"], "already_processed")
+        self.assertEqual(result["run_id"], 55)
+
+    def test_repeated_invocation_after_latest_processed_is_noop_until_next_close(self):
+        class Repo:
+            def __init__(self, **_kwargs): pass
+            def latest_session_date(self, _book): return dt.date(2026, 10, 26)
+            def session_run_id(self, _book, day): return 61 if day == dt.date(2026, 10, 26) else None
+            def _rows(self, *_args): return [{"summary_json": {"execution_book_version": "martin_bar_retest_execution_v1"}}]
+        with patch("src.webapp.repositories.martin_forward_test_repository.MartinForwardTestRepository", Repo), \
+                patch.object(replay, "xnys_sessions", lambda *_args: [dt.date(2026, 10, 27)]), \
+                patch("src.webapp.services.martin_rotation.require_completed_session", side_effect=ValueError("Rotation strategy requires a completed exchange session")):
+            result = replay.continue_book(book_id="martin_range_bar_retest_live", database_url="test", history=object())
+        self.assertEqual(result["status"], "not_ready")
+        self.assertEqual(result["session_date"], "2026-10-26")
+        self.assertEqual(result["next_session_date"], "2026-10-27")
+        self.assertEqual(result["reason"], "awaiting_next_completed_session")
+
+    def test_continuation_refuses_unversioned_book_before_writes(self):
+        class Repo:
+            def __init__(self, **_kwargs): pass
+            def latest_session_date(self, _book): return dt.date(2026, 10, 23)
+            def _rows(self, *_args): return [{"summary_json": {"execution_book_version": "other"}}]
+        with patch("src.webapp.repositories.martin_forward_test_repository.MartinForwardTestRepository", Repo):
+            with self.assertRaisesRegex(ValueError, "not a versioned"):
+                replay.continue_book(book_id="martin_range_bar_retest_other", database_url="test", history=object())
+
+    def test_continue_cli_without_apply_is_explicitly_preflight_only(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = replay.continue_main(["--book-id", "martin_range_bar_retest_live"])
+        self.assertEqual(result, 0)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["mode"], "preflight_only_no_writes")
+        self.assertFalse(payload["executed"])
+
+    def test_continue_script_path_supports_help_without_package_import_error(self):
+        root = Path(__file__).resolve().parents[1]
+        script = root / "scripts" / "continue_martin_bar_retest.py"
+        result = subprocess.run([sys.executable, str(script), "--help"], cwd=root, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--book-id", result.stdout)
+        self.assertNotIn("ModuleNotFoundError", result.stderr)
+
     def test_book_performance_uses_database_status_over_stale_payload(self):
         connection = PerformanceConnection([
             ("open", "ABC", {"status": "closed", "ticker": "STALE", "realized_pnl": 0}),
@@ -265,6 +379,7 @@ class MartinBarRetestRangeTests(unittest.TestCase):
         class ReplayRepo:
             def __init__(self): self.metadata = []
             def set_run_metadata(self, run_id, payload): self.metadata.append((run_id, payload))
+            def _rows(self, *_args): return []
 
         class Execution:
             def __init__(self, repository, **_kwargs): self.repository = repository; self.book_id = None

@@ -30,6 +30,15 @@ class RunServiceTests(unittest.TestCase):
         self.project_root = Path(self.temp_dir.name)
         self.service = RunService(project_root=self.project_root)
 
+    def test_martin_bar_retest_continuation_is_registered_and_apply_is_explicit(self) -> None:
+        command = self.service.build_command("continue_martin_bar_retest", {"book_id": "martin_range_bar_retest_live"})
+        self.assertEqual(command[-2:], ["--book-id", "martin_range_bar_retest_live"])
+        self.assertNotIn("--apply", command)
+        applied = self.service.build_command("continue_martin_bar_retest", {"book_id": "martin_range_bar_retest_live", "apply": True})
+        self.assertEqual(applied[-1], "--apply")
+        with self.assertRaisesRegex(ValueError, "must start with"):
+            self.service.build_command("continue_martin_bar_retest", {"book_id": "martin_bar_retest_v1"})
+
     def test_update_progress_tracks_percent_and_success_count(self) -> None:
         job = {
             "success_count": 0,

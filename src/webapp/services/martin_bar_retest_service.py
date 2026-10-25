@@ -55,11 +55,15 @@ class MartinBarRetestService:
         for ticker, payload in prior.items():
             if payload.get("status") != "retired" and payload.get("event_identity"):
                 invalidation = payload.get("invalidation") or {}
+                origin_retrospective = payload.get("source_retrospective")
+                if origin_retrospective is None and payload.get("source_published_at") and payload.get("event_date"):
+                    origin_retrospective = _source_was_retrospective(dt.date.fromisoformat(str(payload["event_date"])[:10]), payload["source_published_at"])
                 active[ticker] = {**payload, "ticker": ticker, "event_identity": payload["event_identity"],
                     "gap_low": payload.get("gap_low", invalidation.get("price") if invalidation.get("basis") == "original_gap_low" else None),
                     "category": payload.get("category") or payload.get("event_category"),
                     "source_published_at": payload.get("source_published_at"),
-                    "discovery_categories": payload.get("discovery_categories", [])}
+                    "discovery_categories": payload.get("discovery_categories", []),
+                    "source_retrospective": origin_retrospective}
         source_valid = bool(source and str(source.get("target_trading_date") or source.get("run_date"))[:10] == day.isoformat()
                             and source.get("rules_version") == "martin_bar_watchlist_v1")
         new_events = []
@@ -89,6 +93,8 @@ class MartinBarRetestService:
             if published.tzinfo is None:
                 published = published.tz_localize("UTC")
             retrospective = published >= calendar.session_open(following.isoformat())
+        for event in new_events:
+            event["source_retrospective"] = retrospective
         tickers = sorted(active)
         try:
             frames = self.bar_loader(tickers, day, 320, database_url=self.database_url, start_date=sessions[0]) if tickers else {}
@@ -113,6 +119,7 @@ class MartinBarRetestService:
                                        "persisted_screen_run_preopen" if retrospective is False else
                                        "persisted_screen_run_publication_unknown"),
                           retrospective_source_scan=retrospective, bar_fingerprint=fingerprint(frames.get(ticker), day))
+            result["original_source_retrospective"] = event.get("source_retrospective")
             candidates.append(result)
         candidates.sort(key=lambda x: (-(float(x.get("adr14_pct") or 0)), x["ticker"]))
         for rank, item in enumerate(candidates, 1): item["rank"] = rank
@@ -126,6 +133,7 @@ class MartinBarRetestService:
                    "active_event_count": len(candidates), "new_event_count": len(new_events),
                    "zero_hit_day": source_valid and not (source or {}).get("hits"), "retrospective_source_scan": retrospective,
                    "execution_mode": "dry_run" if dry_run else "applied"}
+        summary["original_source_retrospective_count"] = sum(item.get("original_source_retrospective") is True for item in candidates)
         if source and source.get("replay_provenance"):
             summary["replay_provenance"] = source["replay_provenance"]
         run_id = None
@@ -133,3 +141,14 @@ class MartinBarRetestService:
             run_id = self.repository.save_session(session_date=day, source_run_id=source_id, fingerprint=digest,
                 candidates=candidates, summary=summary, strategy_id=book)
         return {**summary, "run_id": run_id, "candidates": candidates, "dry_run": dry_run}
+
+
+def _source_was_retrospective(day: dt.date, published_at: Any) -> bool:
+    import exchange_calendars as xcals
+    import pandas as pd
+    calendar = xcals.get_calendar("XNYS", start=day - dt.timedelta(days=5), end=day + dt.timedelta(days=20))
+    following = calendar.next_session(day.isoformat()).date()
+    published = pd.Timestamp(published_at)
+    if published.tzinfo is None:
+        published = published.tz_localize("UTC")
+    return published >= calendar.session_open(following.isoformat())
