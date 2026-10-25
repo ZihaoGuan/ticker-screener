@@ -196,8 +196,8 @@ class _ForwardRepo:
     def submitted_order_count(self, *, session_date, strategy_id):
         return sum(row["strategy_id"] == strategy_id and row["session_date"] == session_date and "order_date" in row["payload_json"] for row in self.candidates)
 
-    def daily_top5_selected_tickers(self, *, session_date):
-        return [row["ticker"] for row in self.candidates if row["strategy_id"] == DAILY_TOP5_STRATEGY_ID and row["session_date"] == session_date and row["payload_json"].get("selected_for_book")]
+    def daily_top5_selected_tickers(self, *, session_date, book_id=DAILY_TOP5_STRATEGY_ID):
+        return [row["ticker"] for row in self.candidates if row["strategy_id"] == book_id and row["session_date"] == session_date and row["payload_json"].get("selected_for_book")]
 
     def open_positions(self, *, strategy_id="martin_daily_v1"):
         _ = strategy_id
@@ -264,6 +264,17 @@ class _ForwardRepo:
 
 
 class MartinForwardTestLifecycleTest(unittest.TestCase):
+    def test_policy_uses_separate_replay_book_identity(self) -> None:
+        repo = _ForwardRepo()
+        day = dt.date(2026, 1, 2)
+        service = MartinForwardTestService(repo, bar_loader=lambda *_args, **_kwargs: {})
+        service.run_session(as_of_date=day,
+            snapshot={"target_trading_date": day.isoformat(), "_snapshot_run_id": 51,
+                      "source_fingerprint": "fp", "guru_board": {"rows": []}},
+            policy_id=DAILY_TOP5_STRATEGY_ID, book_id="martin_replay_top5_2026")
+        self.assertEqual({row["strategy_id"] for row in repo.candidates}, set())
+        self.assertEqual(repo.runs and next(iter(repo.runs))[0], "martin_replay_top5_2026")
+
     def test_daily_top5_is_five_orders_per_session_across_fingerprints(self) -> None:
         repo = _ForwardRepo()
         day = dt.date(2026, 1, 2)

@@ -279,35 +279,40 @@ class MartinGapRetestService:
         return True
 
     def run_session(self, *, as_of_date: date, source_record: dict[str, Any] | None, dry_run: bool = True,
-                    strategy_id: str = STRATEGY_ID, historical_replay: bool = False) -> dict[str, Any]:
+                    strategy_id: str = STRATEGY_ID, historical_replay: bool = False,
+                    book_id: str | None = None, policy_id: str | None = None) -> dict[str, Any]:
+        if policy_id is not None:
+            if strategy_id != STRATEGY_ID and strategy_id != policy_id:
+                raise ValueError("Conflicting Gap Retest policy identities")
+            strategy_id = policy_id
         if (historical_replay and strategy_id not in {REPLAY_STRATEGY_ID, REPLAY_V2_STRATEGY_ID, REPLAY_V3_STRATEGY_ID, REPLAY_V4_STRATEGY_ID}) or (not historical_replay and strategy_id not in {STRATEGY_ID, REPLAY_V4_STRATEGY_ID}):
             raise ValueError("Unsupported gap retest book identity")
-        if strategy_id == REPLAY_V4_STRATEGY_ID and not historical_replay and self.repository.latest_session_date(strategy_id) is None:
+        if strategy_id == REPLAY_V4_STRATEGY_ID and not historical_replay and self.repository.latest_session_date(book_id or strategy_id) is None:
             raise ValueError("Replay v4 must be seeded through the previous market session before daily continuation")
         dates = self._dates(as_of_date)
         if not dates or dates[-1] != as_of_date:
             raise ValueError("Daily Gap Retest requires an XNYS session")
         require_completed_session(as_of_date)
         if not dry_run:
-            with self.repository.atomic_session(strategy_id):
-                if self.repository.session_run_id(strategy_id, as_of_date) is not None:
+            with self.repository.atomic_session(book_id or strategy_id):
+                if self.repository.session_run_id(book_id or strategy_id, as_of_date) is not None:
                     return {"strategy_id": strategy_id, "session_date": as_of_date.isoformat(), "skipped": True,
                             "reason": "session_already_processed"}
-                latest = self.repository.latest_session_date(strategy_id)
+                latest = self.repository.latest_session_date(book_id or strategy_id)
                 prior = dates[-2] if len(dates) > 1 else None
                 if latest is not None and latest != prior:
                     raise ValueError("Gap retest book has missed intermediate XNYS sessions; explicit sequential recovery is required")
-                return self._run(as_of_date, source_record, dry_run=False, dates=dates, strategy_id=strategy_id, historical_replay=historical_replay)
-        return self._run(as_of_date, source_record, dry_run=True, dates=dates, strategy_id=strategy_id, historical_replay=historical_replay)
+                return self._run(as_of_date, source_record, dry_run=False, dates=dates, strategy_id=strategy_id, historical_replay=historical_replay, book_id=book_id or strategy_id)
+        return self._run(as_of_date, source_record, dry_run=True, dates=dates, strategy_id=strategy_id, historical_replay=historical_replay, book_id=book_id or strategy_id)
 
     def _run(self, day: date, source_record: dict[str, Any] | None, *, dry_run: bool, dates: list[date],
-             strategy_id: str = STRATEGY_ID, historical_replay: bool = False) -> dict[str, Any]:
-        repo, sid = self.repository, strategy_id
-        if not dry_run and repo.latest_session_date(sid) is not None and repo.latest_session_date(sid) >= day:
+             strategy_id: str = STRATEGY_ID, historical_replay: bool = False, book_id: str | None = None) -> dict[str, Any]:
+        repo, sid, bid = self.repository, strategy_id, book_id or strategy_id
+        if not dry_run and repo.latest_session_date(bid) is not None and repo.latest_session_date(bid) >= day:
             return {"strategy_id": sid, "session_date": day.isoformat(), "skipped": True, "reason": "session_already_processed"}
-        watches = repo.latest_gap_watch_states(sid) if hasattr(repo, "latest_gap_watch_states") else {}
-        positions = repo.open_positions(strategy_id=sid) if hasattr(repo, "open_positions") else []
-        pending = repo.pending_candidates(before=day, strategy_id=sid) if hasattr(repo, "pending_candidates") else []
+        watches = repo.latest_gap_watch_states(bid) if hasattr(repo, "latest_gap_watch_states") else {}
+        positions = repo.open_positions(strategy_id=bid) if hasattr(repo, "open_positions") else []
+        pending = repo.pending_candidates(before=day, strategy_id=bid) if hasattr(repo, "pending_candidates") else []
         source_session_matches = bool(source_record and str(source_record.get("target_trading_date") or source_record.get("run_date") or source_record.get("session_date"))[:10] == day.isoformat())
         next_session = self._next_session(day)
         reconstructed = bool(historical_replay and source_record and source_record.get("source_mode") == "historical_reconstruction"
@@ -378,7 +383,7 @@ class MartinGapRetestService:
                 report["execution_preview"].append({"ticker": ticker, "kind": "position", **action})
         # Apply the preview to a temporary budget ledger so dry-run and apply
         # allocate against the same post-session book state.
-        budget_state = dict(repo.account_state(sid)) if hasattr(repo, "account_state") else {"available_cash": 100000.0, "committed_stop_risk": 0.0}
+        budget_state = dict(repo.account_state(bid)) if hasattr(repo, "account_state") else {"available_cash": 100000.0, "committed_stop_risk": 0.0}
         virtual_cash = float(budget_state.get("available_cash", 100000))
         virtual_risk = float(budget_state.get("committed_stop_risk", 0))
         virtual_slots = max(0, 8 - len(positions) - len(pending))
@@ -516,7 +521,7 @@ class MartinGapRetestService:
                 if ticker in pending_tickers:
                     candidate.update(status="waiting_capacity", gap_state="waiting_capacity", reasons=["capacity_full"])
                     continue
-                if identity and (json.dumps(identity, sort_keys=True) in filled_event_ids or repo.has_gap_event_fill(sid, identity)):
+                if identity and (json.dumps(identity, sort_keys=True) in filled_event_ids or repo.has_gap_event_fill(bid, identity)):
                     candidate.update(status="retired", gap_state="retired", reasons=["event_already_traded"])
                     continue
                 budget = size_gap_order(candidate, available_cash=cash, available_risk=free_risk, slots_available=slots)
@@ -559,7 +564,7 @@ class MartinGapRetestService:
                    "execution_complete": True, "discovery_complete": source_valid,
                    "source_missing_reason": None if source_valid else "source_missing_or_stale"}
         run_id = repo.save_session(session_date=day, source_run_id=source_id, fingerprint=fingerprint,
-                                   candidates=report["candidates"], summary=summary, strategy_id=sid)
+                                   candidates=report["candidates"], summary=summary, strategy_id=bid)
         if run_id is None:
             raise RuntimeError("Gap retest session could not be persisted")
         counts = {"fills": 0, "expiries": 0, "cancellations": 0, "stops": 0, "trims": 0, "trail_exits": 0}
@@ -582,7 +587,7 @@ class MartinGapRetestService:
                     "last_close": bar["close"], "management_policy_version": "gap_trim10_3r_ema9_v1"}
                 position_id = repo.fill_order(candidate_id=order["id"], run_id=order["run_id"], ticker=ticker,
                     event_date=day, position_payload=position,
-                    event_payload={"price": fill, "shares": shares, "event_identity": payload.get("event_identity")}, strategy_id=sid)
+                    event_payload={"price": fill, "shares": shares, "event_identity": payload.get("event_identity")}, strategy_id=bid)
                 if position_id is None:
                     raise ValueError("Gap retest fill could not be recorded atomically")
                 counts["fills"] += 1
@@ -595,7 +600,7 @@ class MartinGapRetestService:
                               "realized_pnl": pnl, "realized_r": pnl / (position["initial_r_per_share"] * shares)}
                     repo.apply_event(run_id=run_id, position_id=position_id, ticker=ticker, event_type=closed["exit_type"],
                         event_date=day, payload={"price": exit_price, "shares": shares}, position_payload=closed,
-                        close_position=True, strategy_id=sid)
+                        close_position=True, strategy_id=bid)
                     counts["stops"] += 1
                 else:
                     ema9 = daily_indicators(frames.get(ticker)).get("ema9")
@@ -604,7 +609,7 @@ class MartinGapRetestService:
             else:
                 event_type = "order_expired" if outcome["status"] == "expired" else "order_cancelled"
                 if not repo.apply_event(run_id=run_id, position_id=None, ticker=ticker, event_type=event_type,
-                    event_date=day, payload=outcome, candidate_id=order["id"], candidate_status=outcome["status"], strategy_id=sid):
+                    event_date=day, payload=outcome, candidate_id=order["id"], candidate_status=outcome["status"], strategy_id=bid):
                     raise ValueError("Gap retest order outcome could not be recorded atomically")
                 counts["expiries" if outcome["status"] == "expired" else "cancellations"] += 1
         # Manage positions with the same 260-session as-of EMA policy used for entry calculations.
@@ -636,7 +641,7 @@ class MartinGapRetestService:
                 event_type=action["type"], event_date=day,
                 payload={"price": exit_price, "shares": shares, "realized_pnl": pnl,
                          "gap_through_stop_diagnostic": bool(action.get("gap_through_stop_diagnostic"))},
-                position_payload=updated, close_position=close_position, strategy_id=sid):
+                position_payload=updated, close_position=close_position, strategy_id=bid):
                 raise ValueError("Gap retest management event could not be recorded atomically")
             counts["stops"] += int(action["type"] in {"stop", "gap_stop"})
             counts["trims"] += int(action["type"] == "trim_3r")
@@ -647,8 +652,11 @@ class MartinGapRetestService:
             repo.set_run_metadata(run_id, {**counts, "execution_complete": True, "discovery_complete": source_valid,
                                            "new_source_run_id": source_id if source_valid else None})
         if hasattr(repo, "update_run_summary"):
-            current_positions = repo.open_positions(strategy_id=sid)
+            current_positions = repo.open_positions(strategy_id=bid)
             marks = {str(p["ticker"]).upper(): float((p.get("payload_json") or {}).get("last_close") or 0)
                      for p in current_positions if (p.get("payload_json") or {}).get("last_close")}
-            repo.update_run_summary(run_id=run_id, strategy_id=sid, mark_prices=marks, action_counts=counts)
+            kwargs = {"run_id": run_id, "strategy_id": bid, "mark_prices": marks, "action_counts": counts}
+            if bid != sid:
+                kwargs["policy_id"] = sid
+            repo.update_run_summary(**kwargs)
         return report

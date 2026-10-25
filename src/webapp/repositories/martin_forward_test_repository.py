@@ -167,11 +167,11 @@ class MartinForwardTestRepository:
             WHERE r.strategy_id=%s AND r.session_date=%s AND c.payload_json ? 'order_date'""", (strategy_id, session_date))
         return int(rows[0]["count"]) if rows else 0
 
-    def daily_top5_selected_tickers(self, *, session_date: Any) -> list[str]:
+    def daily_top5_selected_tickers(self, *, session_date: Any, book_id: str = "martin_daily_top5_v1") -> list[str]:
         rows = self._rows("""SELECT DISTINCT c.ticker FROM martin_forward_candidates c
             JOIN martin_forward_runs r ON r.id=c.run_id
-            WHERE r.strategy_id='martin_daily_top5_v1' AND r.session_date=%s
-              AND c.payload_json->>'selected_for_book'='true' ORDER BY c.ticker""", (session_date,))
+            WHERE r.strategy_id=%s AND r.session_date=%s
+              AND c.payload_json->>'selected_for_book'='true' ORDER BY c.ticker""", (book_id, session_date))
         return [str(row["ticker"]).upper() for row in rows]
 
     def open_positions(self, *, strategy_id: str = "martin_daily_v1") -> list[dict[str, Any]]:
@@ -193,7 +193,7 @@ class MartinForwardTestRepository:
         rows = self._rows("SELECT payload_json FROM martin_forward_candidates WHERE run_id=%s AND ticker=%s", (run_id, ticker))
         return rows[0].get("payload_json") or {} if rows else {}
 
-    def update_run_summary(self, *, run_id: int, strategy_id: str, mark_prices: dict[str, float], action_counts: dict[str, int]) -> None:
+    def update_run_summary(self, *, run_id: int, strategy_id: str, mark_prices: dict[str, float], action_counts: dict[str, int], policy_id: str | None = None) -> None:
         connection = self._connect()
         if connection is None:
             return
@@ -229,7 +229,8 @@ class MartinForwardTestRepository:
                     denominator = risk_per_share * int(position.get("initial_shares") or position.get("shares") or 1)
                     unrealized_r += pnl / denominator if denominator else 0
                 cumulative_r = realized_r + unrealized_r
-                equity = 100_000.0 + realized_pnl + unrealized_pnl if strategy_id in ACCOUNT_STRATEGIES else None
+                metric_policy = policy_id or strategy_id
+                equity = 100_000.0 + realized_pnl + unrealized_pnl if metric_policy in ACCOUNT_STRATEGIES else None
                 prior_equities = [float(item["account_equity"]) for item in prior_summaries if item.get("account_equity") is not None]
                 prior_rs = [float(item["cumulative_r"]) for item in prior_summaries if item.get("cumulative_r") is not None]
                 equity_peak = max([100_000.0, *prior_equities])
@@ -252,7 +253,7 @@ class MartinForwardTestRepository:
                     **_closed_trade_metrics(closed),
                     "account_equity": equity, "equity_drawdown_pct": (equity / equity_peak - 1) * 100 if equity is not None else None,
                     "r_drawdown": cumulative_r - r_peak}
-                if strategy_id == ROTATION_STRATEGY_ID:
+                if metric_policy == ROTATION_STRATEGY_ID:
                     summary.update(self.account_state(strategy_id))
                 cursor.execute("UPDATE martin_forward_runs SET summary_json=%s::jsonb WHERE id=%s", (json.dumps(summary), run_id))
 

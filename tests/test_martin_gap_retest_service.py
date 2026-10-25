@@ -2,11 +2,24 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from unittest.mock import patch
 
-from src.webapp.services.martin_gap_retest_service import active_gap_events, manage_position
+from src.webapp.services.martin_gap_retest_service import MartinGapRetestService, active_gap_events, manage_position
+from src.martin_daily_gap_retest import REPLAY_V4_STRATEGY_ID
 
 
 class GapRetestServiceTests(unittest.TestCase):
+    def test_policy_and_book_id_are_forwarded_separately(self):
+        service = MartinGapRetestService(object(), calendar=lambda day: [day])
+        with patch("src.webapp.services.martin_gap_retest_service.require_completed_session"), \
+             patch.object(service, "_run", return_value={"status": "dry_run_complete"}) as run:
+            result = service.run_session(as_of_date=date(2026, 10, 23), source_record=None,
+                dry_run=True, policy_id=REPLAY_V4_STRATEGY_ID, historical_replay=True,
+                book_id="range_gap_book")
+        self.assertEqual(result["status"], "dry_run_complete")
+        self.assertEqual(run.call_args.kwargs["strategy_id"], REPLAY_V4_STRATEGY_ID)
+        self.assertEqual(run.call_args.kwargs["book_id"], "range_gap_book")
+
     def test_admission_uses_only_active_gap_signal(self):
         source = {"id": 42, "target_trading_date": "2026-10-23", "source_fingerprint": "f",
                   "hits": [

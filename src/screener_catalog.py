@@ -566,11 +566,11 @@ def _run_weekly_sepa_vcp(bundle: ScreenerInputBundle) -> ScreenerEvaluationResul
 
 def _run_weekly_candidate_pool(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     database_url = str(bundle.extras.get("database_url") or "")
-    technical = RatingsRepository(database_url).load_latest_technical_rating_snapshots_for_tickers(
-        [bundle.ticker],
-        as_of_date=bundle.as_of_date,
-        allow_older_as_of_date=True,
-    ).get(bundle.ticker.upper(), {})
+    technical_map = bundle.extras.get("technical_rating_snapshots")
+    technical = (technical_map.get(bundle.ticker.upper(), {}) if isinstance(technical_map, dict) else
+        RatingsRepository(database_url).load_latest_technical_rating_snapshots_for_tickers(
+            [bundle.ticker], as_of_date=bundle.as_of_date, allow_older_as_of_date=True,
+        ).get(bundle.ticker.upper(), {}))
     hit = find_weekly_candidate_pool_hit(
         bundle.bars,
         ticker=_ticker_from_bundle(bundle),
@@ -1350,10 +1350,11 @@ def _run_kai_s1(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
 
 def _run_one_year_winners(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     database_url = str(bundle.extras.get("database_url") or "")
-    fundamentals = RatingsRepository(database_url).load_latest_fundamentals_snapshots_for_tickers(
-        [bundle.ticker],
-        as_of_date=bundle.as_of_date,
-    ).get(bundle.ticker.upper(), {})
+    fundamentals_map = bundle.extras.get("fundamental_snapshots")
+    fundamentals = (fundamentals_map.get(bundle.ticker.upper(), {}) if isinstance(fundamentals_map, dict) else
+        RatingsRepository(database_url).load_latest_fundamentals_snapshots_for_tickers(
+            [bundle.ticker], as_of_date=bundle.as_of_date,
+        ).get(bundle.ticker.upper(), {}))
     hit = find_one_year_winners_hit(
         bundle.bars,
         bundle.benchmark_bars,
@@ -1409,16 +1410,20 @@ def _run_minervini_vcp_detector(bundle: ScreenerInputBundle) -> ScreenerEvaluati
 
 def _run_qullamaggie(bundle: ScreenerInputBundle) -> ScreenerEvaluationResult:
     database_url = str(bundle.extras.get("database_url") or "")
-    ratings = RatingsRepository(database_url)
-    fundamentals = ratings.load_latest_fundamentals_snapshots_for_tickers(
-        [bundle.ticker],
-        as_of_date=bundle.as_of_date,
-    ).get(bundle.ticker.upper(), {})
-    technicals = ratings.load_latest_technical_rating_snapshots_for_tickers(
-        [bundle.ticker],
-        as_of_date=bundle.as_of_date,
-        allow_older_as_of_date=True,
-    ).get(bundle.ticker.upper(), {})
+    fundamentals_map = bundle.extras.get("fundamental_snapshots")
+    technical_map = bundle.extras.get("technical_rating_snapshots")
+    if isinstance(fundamentals_map, dict) and isinstance(technical_map, dict):
+        fundamentals = fundamentals_map.get(bundle.ticker.upper(), {})
+        technicals = technical_map.get(bundle.ticker.upper(), {})
+    else:
+        ratings = RatingsRepository(database_url)
+        fundamentals = ratings.load_latest_fundamentals_snapshots_for_tickers(
+            [bundle.ticker], as_of_date=bundle.as_of_date,
+        ).get(bundle.ticker.upper(), {})
+        technicals = ratings.load_latest_technical_rating_snapshots_for_tickers(
+            [bundle.ticker], as_of_date=bundle.as_of_date,
+            allow_older_as_of_date=True,
+        ).get(bundle.ticker.upper(), {})
     hit = find_qullamaggie_hit(
         bundle.bars,
         ticker=_ticker_from_bundle(bundle),

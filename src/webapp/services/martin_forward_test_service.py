@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import logging
+from contextvars import ContextVar
 from contextlib import nullcontext
 from datetime import date
 from typing import Any
@@ -22,6 +23,7 @@ RS_ACCOUNT_STRATEGIES = {RS_EXPANDED_STRATEGY_ID, ROTATION_STRATEGY_ID}
 ENTRY_POLICY_VERSION = "top_hits_max_entry_5pct_v1"
 SECTOR_ORDER = {"leading": 0, "improving": 1, "weakening": 2, "lagging": 3, "unknown": 4}
 FOCUS_SCANNERS = {"weekly_candidate_pool", "best_winners", "qullamaggie", "one_year_winners", "trend_template", "daily_rs_new_high", "rs"}
+_BOOK_ID: ContextVar[str | None] = ContextVar("martin_forward_book_id", default=None)
 
 
 def _number(value: Any) -> float | None:
@@ -415,11 +417,29 @@ class MartinForwardTestService:
         self.database_url = database_url
         self.bar_loader = bar_loader or load_many_ticker_windows
 
-    def run_session(self, *, as_of_date: date, snapshot: dict[str, Any] | None, strategy_id: str = STRATEGY_ID) -> dict[str, Any]:
+    @property
+    def _book_id(self) -> str:
+        return _BOOK_ID.get() or STRATEGY_ID
+
+    def run_session(self, *, as_of_date: date, snapshot: dict[str, Any] | None, strategy_id: str = STRATEGY_ID,
+                    book_id: str | None = None, policy_id: str | None = None) -> dict[str, Any]:
+        if policy_id is not None:
+            if strategy_id != STRATEGY_ID and strategy_id != policy_id:
+                raise ValueError("Conflicting Martin policy identities")
+            strategy_id = policy_id
+        token = _BOOK_ID.set(book_id or strategy_id)
+        try:
+            return self._run_session_with_book(as_of_date=as_of_date, snapshot=snapshot, strategy_id=strategy_id)
+        finally:
+            _BOOK_ID.reset(token)
+
+    def _run_session_with_book(self, *, as_of_date: date, snapshot: dict[str, Any] | None,
+                               strategy_id: str) -> dict[str, Any]:
+        # strategy_id selects policy; the context-local book ID selects persistence.
         if strategy_id == ROTATION_STRATEGY_ID:
             require_completed_session(as_of_date)
-            with self.repository.atomic_session(strategy_id):
-                latest = self.repository.latest_session_date(strategy_id)
+            with self.repository.atomic_session(self._book_id):
+                latest = self.repository.latest_session_date(self._book_id)
                 if latest is not None and latest >= as_of_date:
                     return {"strategy_id": strategy_id, "session_date": as_of_date.isoformat(), "skipped": True, "reason": "session_already_processed"}
                 self._rotation_dates = session_dates(as_of_date)
@@ -434,18 +454,19 @@ class MartinForwardTestService:
                     raise ValueError("Incomplete rotation session; all changes rolled back")
                 return result
         lock = getattr(self.repository, "execution_lock", None)
-        with lock(strategy_id) if lock and strategy_id == RS_EXPANDED_STRATEGY_ID else nullcontext():
+        with lock(self._book_id) if lock and strategy_id == RS_EXPANDED_STRATEGY_ID else nullcontext():
             return self._run_session(as_of_date=as_of_date, snapshot=snapshot, strategy_id=strategy_id)
 
     def _run_session(self, *, as_of_date: date, snapshot: dict[str, Any] | None, strategy_id: str) -> dict[str, Any]:
         """Process one exact session only; missed intermediate sessions require explicit replay support."""
         replay_covers = getattr(self.repository, "replay_covers_date", None)
-        if strategy_id == RS_EXPANDED_STRATEGY_ID and replay_covers and replay_covers(as_of_date, strategy_id):
+        if strategy_id == RS_EXPANDED_STRATEGY_ID and replay_covers and replay_covers(as_of_date, self._book_id):
             return {"strategy_id": strategy_id, "session_date": as_of_date.isoformat(), "skipped": True,
                     "reason": "historical_replay_already_covers_session"}
         # shortcut: settles orders and positions only on this exact session, when multi-session replay is added.
-        open_positions = self.repository.open_positions(strategy_id=strategy_id)
-        pending = self.repository.pending_candidates(before=as_of_date, strategy_id=strategy_id)
+        book_id = getattr(self, "_book_id", strategy_id)
+        open_positions = self.repository.open_positions(strategy_id=book_id)
+        pending = self.repository.pending_candidates(before=as_of_date, strategy_id=book_id)
         tickers = {str(item.get("ticker") or "").upper() for item in pending + open_positions}
         board_rows: list[dict[str, Any]] = []
         if snapshot and str(snapshot.get("target_trading_date")) == as_of_date.isoformat():
@@ -486,7 +507,7 @@ class MartinForwardTestService:
         if strategy_id == ROTATION_STRATEGY_ID:
             counts.update(rotation_exited=0, rotation_scheduled=0)
             self._rotation_opening_exits(open_positions, frames, as_of_date, run_id, counts)
-            open_positions = self.repository.open_positions(strategy_id=strategy_id)
+            open_positions = self.repository.open_positions(strategy_id=self._book_id)
 
         # Pending orders are one-session orders, so the target session's exact bar settles them.
         filled_positions: list[dict[str, Any]] = []
@@ -531,7 +552,7 @@ class MartinForwardTestService:
                         position["rotation_entry_intent"] = position.pop("rotation_intent")
                 position_id = self.repository.fill_order(candidate_id=order["id"], run_id=order["run_id"], ticker=order["ticker"],
                                                          event_date=event_date, position_payload=position,
-                                                         event_payload={"price": fill, "shares": shares}, strategy_id=strategy_id)
+                                                         event_payload={"price": fill, "shares": shares}, strategy_id=self._book_id)
                 if position_id is None:
                     state, reason = "blocked", "open_position_already_exists"
                 else:
@@ -549,14 +570,14 @@ class MartinForwardTestService:
                                   "exit_type": exit_type, "realized_pnl": pnl, "realized_r": pnl / initial_risk if initial_risk else 0,
                                   "holding_sessions": 1}
                         self.repository.apply_event(run_id=run_id, position_id=position_id, ticker=order["ticker"], event_type=exit_type,
-                            event_date=event_date, payload={"price": exit_price, "reason": "same_day_stop", "realized_pnl": pnl}, position_payload=closed, close_position=True, strategy_id=strategy_id)
+                            event_date=event_date, payload={"price": exit_price, "reason": "same_day_stop", "realized_pnl": pnl}, position_payload=closed, close_position=True, strategy_id=self._book_id)
                         counts["exited"] += 1
                     else:
                         self._schedule_ema_exit(order["ticker"], position_id, position, frame, event_date, strategy_id)
             if state != "filled":
                 event_type = "order_expired" if state == "expired" else ("order_cancelled" if state == "cancelled" else "order_blocked")
                 changed = self.repository.apply_event(run_id=run_id, position_id=None, ticker=order["ticker"], event_type=event_type,
-                    event_date=event_date, payload={"reason": reason, "status": state}, candidate_id=order["id"], candidate_status=state, strategy_id=strategy_id)
+                    event_date=event_date, payload={"reason": reason, "status": state}, candidate_id=order["id"], candidate_status=state, strategy_id=self._book_id)
                 counts[state if state in counts else "expired"] += int(changed)
 
         current_position_ids = {int(item["id"]) for item in filled_positions}
@@ -579,17 +600,20 @@ class MartinForwardTestService:
             if strategy_id == ROTATION_STRATEGY_ID:
                 self._schedule_rotation(board_rows, as_of_date, run_id, counts)
             focus_tickers = {str(row.get("ticker") or "").upper() for row in board_rows}
-            for position in self.repository.open_positions(strategy_id=strategy_id):
+            for position in self.repository.open_positions(strategy_id=self._book_id):
                 payload = position.get("payload_json") or {}
                 if str(position["ticker"]).upper() not in focus_tickers and not payload.get("dropped_from_focus"):
                     updated = {**payload, "dropped_from_focus": True, "dropped_from_focus_date": as_of_date.isoformat()}
                     self.repository.apply_event(run_id=run_id, position_id=int(position["id"]), ticker=position["ticker"],
                         event_type="dropped_from_focus", event_date=as_of_date,
-                        payload={"reason": "not_in_complete_snapshot"}, position_payload=updated, strategy_id=strategy_id)
+                        payload={"reason": "not_in_complete_snapshot"}, position_payload=updated, strategy_id=self._book_id)
         mark_prices = {ticker: bar["close"] for ticker in tickers if (bar := _bar_for_date(frames.get(ticker), as_of_date)) is not None}
         finalize = getattr(self.repository, "update_run_summary", None)
         if run_id is not None and finalize:
-            finalize(run_id=run_id, strategy_id=strategy_id, mark_prices=mark_prices, action_counts=counts)
+            kwargs = {"run_id": run_id, "strategy_id": self._book_id, "mark_prices": mark_prices, "action_counts": counts}
+            if self._book_id != strategy_id:
+                kwargs["policy_id"] = strategy_id
+            finalize(**kwargs)
         return {"strategy_id": strategy_id, "session_date": as_of_date.isoformat(), "run_id": run_id, **counts, "partial": counts["missing_bars"] > 0,
                 "snapshot_available": bool(snapshot and str(snapshot.get("target_trading_date")) == as_of_date.isoformat())}
 
@@ -598,7 +622,9 @@ class MartinForwardTestService:
             return None
         source_run_id = int(snapshot.get("_snapshot_run_id") or 0)
         fingerprint = str(snapshot.get("source_fingerprint") or "")
-        if source_run_id <= 0 or not fingerprint:
+        replay_provenance = snapshot.get("replay_provenance") if isinstance(snapshot.get("replay_provenance"), dict) else {}
+        reconstructed = replay_provenance.get("source_mode") == "martin_reconstructed_inputs_v1"
+        if (source_run_id <= 0 and not reconstructed) or not fingerprint:
             return None
         candidates = (select_sector_candidates(rows) if strategy_id == SECTOR_STRATEGY_ID else
                       [dict(row["_rs_candidate"]) if strategy_id in RS_ACCOUNT_STRATEGIES else classify_candidate(row, rank)
@@ -607,8 +633,8 @@ class MartinForwardTestService:
             item["selection_date"] = as_of_date.isoformat()
             if strategy_id == ROTATION_STRATEGY_ID:
                 item["rotation_policy_version"] = ROTATION_POLICY_VERSION
-            if snapshot.get("replay_provenance"):
-                item["replay_provenance"] = snapshot["replay_provenance"]
+            if replay_provenance:
+                item["replay_provenance"] = replay_provenance
             if item["status"] == "pending":
                 item["queue_rank"] = item["rank"]
                 item["selection_reason"] = "snapshot_rank"
@@ -628,19 +654,19 @@ class MartinForwardTestService:
             summary["stop_policy_version"] = STRUCTURAL_STOP_POLICY
         if strategy_id == ROTATION_STRATEGY_ID:
             summary.update(rotation_policy_version=ROTATION_POLICY_VERSION, rotation_limits=ROTATION_LIMITS)
-        if snapshot.get("replay_provenance"):
-            summary["replay_provenance"] = snapshot["replay_provenance"]
+        if replay_provenance:
+            summary["replay_provenance"] = replay_provenance
             summary["replay_validation"] = snapshot.get("replay_validation", {})
         return self.repository.save_session(session_date=as_of_date, source_run_id=source_run_id, fingerprint=fingerprint,
-                                            candidates=candidates, summary=summary, strategy_id=strategy_id)
+                                            candidates=candidates, summary=summary, strategy_id=self._book_id)
 
     def _reserve_new_candidates(self, rows: list[dict[str, Any]], as_of_date: date, run_id: int,
                                 frames: dict[str, Any], counts: dict[str, int], strategy_id: str) -> None:
         if strategy_id == ROTATION_STRATEGY_ID:
             self._reserve_rotation_candidates(rows, as_of_date, run_id)
             return
-        open_positions = self.repository.open_positions(strategy_id=strategy_id)
-        pending_orders = self.repository.pending_orders(strategy_id=strategy_id)
+        open_positions = self.repository.open_positions(strategy_id=self._book_id)
+        pending_orders = self.repository.pending_orders(strategy_id=self._book_id)
         open_tickers = {str(row["ticker"]).upper() for row in open_positions}
         pending_tickers = {str(row["ticker"]).upper() for row in pending_orders}
         equity = 100_000.0
@@ -650,9 +676,15 @@ class MartinForwardTestService:
         allocated += sum(float((row.get("payload_json") or {}).get("limit_price") or 0) * int((row.get("payload_json") or {}).get("shares") or 0) for row in pending_orders)
         slots = (10 if strategy_id == SECTOR_STRATEGY_ID else
                  5 if strategy_id == DAILY_TOP5_STRATEGY_ID else max(0, 5 - len(open_positions) - len(pending_orders)))
-        submitted_today = self.repository.submitted_order_count(session_date=as_of_date, strategy_id=strategy_id) if strategy_id == DAILY_TOP5_STRATEGY_ID else 0
+        submitted_today = self.repository.submitted_order_count(session_date=as_of_date, strategy_id=self._book_id) if strategy_id == DAILY_TOP5_STRATEGY_ID else 0
         daily_orders_remaining = max(0, 5 - submitted_today) if strategy_id == DAILY_TOP5_STRATEGY_ID else None
-        prior_selection = set(self.repository.daily_top5_selected_tickers(session_date=as_of_date)) if strategy_id == DAILY_TOP5_STRATEGY_ID else set()
+        if strategy_id == DAILY_TOP5_STRATEGY_ID:
+            selected = (self.repository.daily_top5_selected_tickers(session_date=as_of_date)
+                        if self._book_id == DAILY_TOP5_STRATEGY_ID else
+                        self.repository.daily_top5_selected_tickers(session_date=as_of_date, book_id=self._book_id))
+            prior_selection = set(selected)
+        else:
+            prior_selection = set()
         daily_pool: set[str] = set()
         if strategy_id == DAILY_TOP5_STRATEGY_ID:
             if prior_selection:
@@ -679,9 +711,9 @@ class MartinForwardTestService:
                 candidate.update(status="blocked_open_position", selected_for_book=False, reasons=["open_position_exists"])
                 self.repository.update_candidate(run_id, ticker, candidate)
                 self.repository.apply_event(run_id=run_id, position_id=None, ticker=ticker, event_type="candidate_blocked_open_position",
-                    event_date=as_of_date, payload={"reason": "open_position_exists"}, candidate_id=None, strategy_id=strategy_id)
+                    event_date=as_of_date, payload={"reason": "open_position_exists"}, candidate_id=None, strategy_id=self._book_id)
                 continue
-            if self.repository.has_pending_order(ticker, strategy_id=strategy_id):
+            if self.repository.has_pending_order(ticker, strategy_id=self._book_id):
                 candidate.update(status="blocked_existing_order", selected_for_book=False, reasons=["pending_order_exists"])
                 self.repository.update_candidate(run_id, ticker, candidate)
                 continue
@@ -752,7 +784,7 @@ class MartinForwardTestService:
                 changed = self.repository.apply_event(run_id=run_id, position_id=row["id"], ticker=ticker, event_type=event,
                     event_date=day, payload={"price": price, "shares": shares, "realized_pnl": pnl,
                                             "rotation_intent": intent, "rotation_policy_version": ROTATION_POLICY_VERSION},
-                    position_payload=closed, close_position=True, strategy_id=ROTATION_STRATEGY_ID)
+                    position_payload=closed, close_position=True, strategy_id=self._book_id)
                 if not changed:
                     raise ValueError("Rotation opening exit could not be recorded atomically")
                 counts["exited"] += 1
@@ -768,7 +800,7 @@ class MartinForwardTestService:
         reason = None
         if order["session_date"] != self._rotation_dates[-2]:
             raise ValueError("Rotation book order missed its exact execution session")
-        opened = self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID)
+        opened = self.repository.open_positions(strategy_id=self._book_id)
         if float(bar["open"]) <= float(payload["stop"]):
             return payload  # Preserve the inherited gap-below-stop cancellation reason and status.
         if intent and any(row["id"] == intent["outgoing"]["position_id"] for row in opened):
@@ -776,7 +808,7 @@ class MartinForwardTestService:
         elif intent and float(bar["open"]) > float(payload["limit_price"]):
             reason = "rotation_replacement_gap_above_max_entry"
         if reason is None:
-            budget = self.repository.account_state(ROTATION_STRATEGY_ID, exclude_order_ticker=order["ticker"])
+            budget = self.repository.account_state(self._book_id, exclude_order_ticker=order["ticker"])
             price = min(float(bar["open"]), float(payload["limit_price"]))
             shares = min(int(payload["shares"]), size_order(payload, budget, price=price))
             if len(opened) >= 8 or shares <= 0:
@@ -789,7 +821,7 @@ class MartinForwardTestService:
         self.repository.apply_event(run_id=order["run_id"], position_id=None, ticker=order["ticker"],
             event_type="rotation_entry_expired" if intent else "order_expired", event_date=day,
             payload={"reason": reason, "rotation_intent": intent}, candidate_id=order["id"], candidate_status="expired",
-            strategy_id=ROTATION_STRATEGY_ID)
+            strategy_id=self._book_id)
         counts["expired"] += 1
         return None
 
@@ -801,14 +833,14 @@ class MartinForwardTestService:
                 continue
             candidate.update({"rotation_policy_version": ROTATION_POLICY_VERSION, "selection_date": day.isoformat(),
                               "queue_rank": candidate["rank"], "selected_for_book": False})
-            opened = self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID)
-            pending = self.repository.pending_orders(strategy_id=ROTATION_STRATEGY_ID)
+            opened = self.repository.open_positions(strategy_id=self._book_id)
+            pending = self.repository.pending_orders(strategy_id=self._book_id)
             if ticker in {p["ticker"] for p in opened}:
                 candidate.update(status="blocked_open_position", reasons=["open_position_exists"])
             elif ticker in {p["ticker"] for p in pending}:
                 candidate.update(status="blocked_existing_order", reasons=["pending_order_exists"])
             else:
-                budget = self.repository.account_state(ROTATION_STRATEGY_ID)
+                budget = self.repository.account_state(self._book_id)
                 shares = size_order(candidate, budget)
                 if len(opened) + len(pending) >= 8 or shares <= 0:
                     candidate.update(status="waiting_capacity", reasons=["position_cash_or_risk_capacity"])
@@ -821,8 +853,8 @@ class MartinForwardTestService:
     def _schedule_rotation(self, rows, day, run_id, counts):
         candidates = [self.repository.candidate_payload(run_id, row["ticker"]) for row in rows]
         waiting = [item for item in candidates if item.get("status") == "waiting_capacity"]
-        last = self.repository.last_rotation_exit(ROTATION_STRATEGY_ID)
-        decision = rotation_decision(day=day, positions=self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID),
+        last = self.repository.last_rotation_exit(self._book_id)
+        decision = rotation_decision(day=day, positions=self.repository.open_positions(strategy_id=self._book_id),
             candidates=waiting, rows=rows, frames=self._rotation_frames, last_rotation=last, dates=self._rotation_dates)
         # Prefer replacing a weaker unfilled reservation before displacing an actual holding.
         if waiting and decision.get("reason") not in {"rotation_cooldown", "rotation_benchmark_data_missing", "rotation_market_regime"}:
@@ -834,15 +866,15 @@ class MartinForwardTestService:
                 return
             waiting = [self.repository.candidate_payload(run_id, item["ticker"]) for item in waiting
                        if self.repository.candidate_status(run_id, item["ticker"]) == "waiting_capacity"]
-            decision = rotation_decision(day=day, positions=self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID),
+            decision = rotation_decision(day=day, positions=self.repository.open_positions(strategy_id=self._book_id),
                 candidates=waiting, rows=rows, frames=self._rotation_frames, last_rotation=last, dates=self._rotation_dates)
         if decision["status"] == "scheduled":
-            outgoing = next(row for row in self.repository.open_positions(strategy_id=ROTATION_STRATEGY_ID)
+            outgoing = next(row for row in self.repository.open_positions(strategy_id=self._book_id)
                             if row["id"] == decision["outgoing"]["position_id"])
             ticker = decision["incoming"]["ticker"]
             candidate = dict(self.repository.candidate_payload(run_id, ticker))
             p = outgoing["payload_json"]
-            budget = self.repository.account_state(ROTATION_STRATEGY_ID)
+            budget = self.repository.account_state(self._book_id)
             budget["available_cash"] += int(p["remaining_shares"]) * float(self._rotation_frames[outgoing["ticker"]]["Close"].iloc[-1]) * .999
             released_risk = int(p["remaining_shares"]) * max(float(p["entry_price"]) - float(p["stop"]), 0)
             budget["available_risk"] = max(0.0, 2_500 - budget["committed_stop_risk"] + released_risk)
@@ -857,7 +889,7 @@ class MartinForwardTestService:
                 self.repository.update_candidate(run_id, ticker, candidate)
                 self.repository.set_position_payload(outgoing["id"], {**p, "rotation_intent": decision})
                 if not self.repository.apply_event(run_id=run_id, position_id=outgoing["id"], ticker=outgoing["ticker"],
-                        event_type="rotation_scheduled", event_date=day, payload=decision, strategy_id=ROTATION_STRATEGY_ID):
+                        event_type="rotation_scheduled", event_date=day, payload=decision, strategy_id=self._book_id):
                     raise ValueError("Duplicate rotation intent; session rolled back")
                 counts["rotation_scheduled"] += 1
         self.repository.set_run_metadata(run_id, {"rotation": decision})
@@ -871,7 +903,7 @@ class MartinForwardTestService:
         for candidate, m in qualified:
             new_priority = (-candidate["rs_rating"], -m["return5_pct"], -m["adv20_dollars"], candidate["ticker"])
             pending = []
-            for old in self.repository.pending_orders(strategy_id=ROTATION_STRATEGY_ID):
+            for old in self.repository.pending_orders(strategy_id=self._book_id):
                 old_metrics = metrics(self._rotation_frames.get(old["ticker"]), day, self._rotation_dates)
                 if old["payload_json"].get("rotation_intent") or old_metrics is None:
                     continue
@@ -881,7 +913,7 @@ class MartinForwardTestService:
                     pending.append((priority, old))
             for _, old in sorted(pending, key=lambda item: item[0], reverse=True):
                 p = old["payload_json"]
-                budget = self.repository.account_state(ROTATION_STRATEGY_ID)
+                budget = self.repository.account_state(self._book_id)
                 budget["available_cash"] += float(p["limit_price"]) * int(p["shares"])
                 released_risk = max(float(p["limit_price"]) - float(p["stop"]), 0) * int(p["shares"])
                 budget["available_risk"] = max(0.0, 2_500 - budget["committed_stop_risk"] + released_risk)
@@ -895,7 +927,7 @@ class MartinForwardTestService:
                     "shares": shares, "order_date": day.isoformat(), "risk_dollars": shares * (limit - stop), "allocation_dollars": shares * limit,
                     "equity": 100_000.0, "sizing_mode": "account_risk", "reasons": ["replaced_lower_priority_pending"]})
                 self.repository.apply_event(run_id=run_id, position_id=None, ticker=old["ticker"], event_type="pending_replaced",
-                    event_date=day, payload={"incoming_ticker": candidate["ticker"], "reason": "higher_priority_unfilled_order"}, strategy_id=ROTATION_STRATEGY_ID)
+                    event_date=day, payload={"incoming_ticker": candidate["ticker"], "reason": "higher_priority_unfilled_order"}, strategy_id=self._book_id)
                 return {"status": "pending_replaced", "reason": "higher_priority_unfilled_order", "outgoing_ticker": old["ticker"],
                         "incoming_ticker": candidate["ticker"], "rotation_policy_version": ROTATION_POLICY_VERSION}
 
@@ -925,7 +957,7 @@ class MartinForwardTestService:
                       "realized_r": float(position.get("realized_r") or 0) + (pnl / (risk * int(position.get("initial_shares") or position.get("shares") or 1)) if risk > 0 else 0),
                       "holding_sessions": int(position.get("holding_sessions") or 0) + 1}
             if self.repository.apply_event(run_id=run_id, position_id=position_id, ticker=ticker, event_type=event_type,
-                    event_date=as_of_date, payload={"price": price, "realized_pnl": pnl}, position_payload=closed, close_position=True, strategy_id=strategy_id):
+                    event_date=as_of_date, payload={"price": price, "realized_pnl": pnl}, position_payload=closed, close_position=True, strategy_id=self._book_id):
                 counts["exited"] += 1
             return
         if outcome and outcome[0] == "trim_3r":
@@ -941,7 +973,7 @@ class MartinForwardTestService:
                            "holding_sessions": int(position.get("holding_sessions") or 0) + int(position.get("last_managed_date") != as_of_date.isoformat()),
                            "last_managed_date": as_of_date.isoformat()}
                 if self.repository.apply_event(run_id=run_id, position_id=position_id, ticker=ticker, event_type="trim_3r",
-                        event_date=as_of_date, payload={"price": outcome[1], "shares": trim_shares, "realized_pnl": pnl}, position_payload=updated, strategy_id=strategy_id):
+                        event_date=as_of_date, payload={"price": outcome[1], "shares": trim_shares, "realized_pnl": pnl}, position_payload=updated, strategy_id=self._book_id):
                     counts["trimmed"] += 1
                 position = updated
         else:
@@ -960,7 +992,7 @@ class MartinForwardTestService:
         if close < ema9 and not position.get("exit_next_open"):
             updated = {**position, "exit_next_open": True, "ema9_breach_date": as_of_date.isoformat()}
             self.repository.apply_event(run_id=None, position_id=position_id, ticker=ticker, event_type="ema9_exit_scheduled",
-                event_date=as_of_date, payload={"close": close, "ema9": ema9}, position_payload=updated, strategy_id=strategy_id)
+                event_date=as_of_date, payload={"close": close, "ema9": ema9}, position_payload=updated, strategy_id=self._book_id)
 
 
 def _bar_for_date(frame: Any, as_of_date: date) -> dict[str, float] | None:
