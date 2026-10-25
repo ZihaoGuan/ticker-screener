@@ -31,7 +31,7 @@ def _require_completed_xnys_session(day: dt.date) -> list[dt.date]:
     close = calendar.session_close(day.isoformat())
     if close > pd.Timestamp.now(tz="UTC"):
         raise ValueError(f"{day} has not reached the XNYS regular-market close.")
-    sessions = calendar.sessions_in_range((day - dt.timedelta(days=365)).isoformat(), day.isoformat())
+    sessions = calendar.sessions
     if len(sessions) < 120:
         raise ValueError(f"Could not resolve 120 XNYS sessions through {day}.")
     return [session.date() for session in sessions[-120:]]
