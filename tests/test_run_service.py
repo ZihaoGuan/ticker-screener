@@ -30,6 +30,10 @@ class RunServiceTests(unittest.TestCase):
         self.project_root = Path(self.temp_dir.name)
         self.service = RunService(project_root=self.project_root)
 
+    def test_tradingview_exclusion_refresh_is_a_schedulable_action(self) -> None:
+        actions = {item["id"]: item for item in self.service.list_actions()}
+        self.assertIn("refresh_tradingview_fund_exclusions", actions)
+
     def test_martin_bar_retest_continuation_is_registered_and_apply_is_explicit(self) -> None:
         command = self.service.build_command("continue_martin_bar_retest", {"book_id": "martin_range_bar_retest_live"})
         self.assertEqual(command[-2:], ["--book-id", "martin_range_bar_retest_live"])

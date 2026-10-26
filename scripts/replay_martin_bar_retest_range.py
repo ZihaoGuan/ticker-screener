@@ -80,14 +80,18 @@ def check_empty_book(connection: Any, book_id: str) -> None:
                 raise ValueError(f"Book {book_id} already has history; replay refuses to modify it.")
 
 
-def save_execution_only_run(repository: Any, *, book_id: str, day: dt.date) -> int | None:
+def save_execution_only_run(repository: Any, *, book_id: str, day: dt.date,
+                            exclusion_provenance: dict[str, Any] | None = None) -> int | None:
     """Keep zero-scan execution sessions in the book's sequential session history."""
+    from src.ticker_filters import leveraged_or_inverse_provenance
+    exclusion = exclusion_provenance or leveraged_or_inverse_provenance()
     return repository.save_session(session_date=day, source_run_id=0,
         fingerprint=hashlib.sha256(f"{book_id}:{day}:execution-only".encode()).hexdigest(),
         candidates=[], summary={"strategy_id": POLICY_ID, "book_id": book_id,
             "rule_version": "martin_bar_retest_execution_v1", "session_date": day.isoformat(),
             "source_run_id": None, "source_mode": "execution_only_no_saved_scan", "zero_hit_day": None,
-            "execution_mode": "historical_replay"}, strategy_id=book_id)
+            "execution_mode": "historical_replay", "replay_provenance": {"fund_exclusions": {
+                "version": exclusion["version"], "sha256": exclusion["sha256"]}}}, strategy_id=book_id)
 
 
 def book_performance(connection: Any, book_id: str) -> dict[str, Any]:
@@ -107,7 +111,8 @@ def book_performance(connection: Any, book_id: str) -> dict[str, Any]:
 
 
 def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date, dict[str, Any]],
-              book_id: str, database_url: str, simulate_backdated_buys: bool = False) -> list[dict[str, Any]]:
+              book_id: str, database_url: str, simulate_backdated_buys: bool = False,
+              exclusion_provenance: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
     from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService
     from src.webapp.services.martin_rs_replay import ReplayRepository
@@ -122,7 +127,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
         if source is None:
             from src.webapp.services.martin_rotation import require_completed_session
             require_completed_session(day)
-            run_id = save_execution_only_run(repository, book_id=book_id, day=day)
+            run_id = save_execution_only_run(repository, book_id=book_id, day=day,
+                                             exclusion_provenance=exclusion_provenance)
             actions = execution.run_session(day=day, run_id=run_id, candidates=[], source_on_time=False)
             if actions["missing_bars"]:
                 raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
@@ -323,6 +329,12 @@ def continue_main(argv: list[str] | None = None) -> int:
 
 def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date, dict[str, Any]],
                   book_id: str, database_url: str, apply: bool, simulate_backdated_buys: bool = False) -> list[dict[str, Any]]:
+    from src.ticker_filters import leveraged_or_inverse_provenance, set_replay_fund_exclusions, reset_replay_fund_exclusions
+    exclusion_provenance = leveraged_or_inverse_provenance()
+    for source in sources.values():
+        source.setdefault("replay_provenance", {})["fund_exclusions"] = {
+            "version": exclusion_provenance["version"], "sha256": exclusion_provenance["sha256"]}
+    token = set_replay_fund_exclusions(exclusion_provenance["symbols"])
     try:
         with connection.cursor() as cursor:
             cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
@@ -331,7 +343,8 @@ def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.
                 raise RuntimeError(f"Replay book {book_id} is currently locked.")
         check_empty_book(connection, book_id)
         results = run_range(connection, sessions=sessions, sources=sources, book_id=book_id,
-                            database_url=database_url, simulate_backdated_buys=simulate_backdated_buys)
+                            database_url=database_url, simulate_backdated_buys=simulate_backdated_buys,
+                            exclusion_provenance=exclusion_provenance)
         if apply:
             connection.commit()
         else:
@@ -340,6 +353,8 @@ def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.
     except Exception:
         connection.rollback()
         raise
+    finally:
+        reset_replay_fund_exclusions(token)
 
 
 def main(argv: list[str] | None = None) -> int:

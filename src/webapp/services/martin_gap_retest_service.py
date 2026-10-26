@@ -368,7 +368,8 @@ class MartinGapRetestService:
             report["replay_provenance"] = {"origin": "historical_replay", "source_mode": "historical_reconstruction",
                 "from_date": (source_record or {}).get("replay_from_date"), "to_date": (source_record or {}).get("replay_to_date"),
                 "source_generated_at": (source_record or {}).get("published_at"),
-                "limitations": "Reconstructed Power Gap universe from current configured symbols and stored OHLCV; historical revisions may apply."}
+                "limitations": "Reconstructed Power Gap universe from current configured symbols and stored OHLCV; historical revisions may apply.",
+                "fund_exclusions": ((source_record or {}).get("replay_provenance") or {}).get("fund_exclusions")}
         for order in pending:
             payload = order.get("payload_json") or {}
             ticker = str(order["ticker"]).upper()

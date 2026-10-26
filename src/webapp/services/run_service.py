@@ -315,6 +315,14 @@ class RunService:
             supports_limit=False,
             visible_in_runs=False,
         ),
+        "refresh_tradingview_fund_exclusions": RunAction(
+            "refresh_tradingview_fund_exclusions",
+            "Refresh TradingView Leveraged ETF Exclusions",
+            "scripts/refresh_tradingview_fund_exclusions.py",
+            supports_limit=False,
+            extra_args=("--apply",),
+            visible_in_runs=True,
+        ),
         "build_scanner_top_hits_snapshot": RunAction(
             "build_scanner_top_hits_snapshot",
             "Build Top Hits Snapshot",

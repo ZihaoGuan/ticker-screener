@@ -237,6 +237,8 @@ def main(argv=None) -> int:
     if not sessions:
         parser.error("date range contains no XNYS sessions")
     now = dt.datetime.now(dt.timezone.utc)
+    from src.ticker_filters import leveraged_or_inverse_provenance
+    exclusion_provenance = leveraged_or_inverse_provenance()
 
     dated: dict[dt.date, dict[str, Any]] = {}
     sources: dict[dt.date, dict[str, Any]] = {}
@@ -308,6 +310,17 @@ def main(argv=None) -> int:
             "blocked_sessions": missing, "reason": "exact_dated_input_missing_or_invalid", **details}, indent=2, default=str))
         return 2
 
+    for entry in dated.values():
+        snapshot = entry.get("snapshot") if isinstance(entry, dict) else None
+        if isinstance(snapshot, dict):
+            provenance = snapshot.setdefault("replay_provenance", {})
+            provenance["fund_exclusions"] = {"version": exclusion_provenance["version"],
+                "sha256": exclusion_provenance["sha256"]}
+    for source in sources.values():
+        if isinstance(source, dict):
+            source.setdefault("replay_provenance", {})["fund_exclusions"] = {
+                "version": exclusion_provenance["version"], "sha256": exclusion_provenance["sha256"]}
+
     with psycopg.connect(config.database_url) as connection:
         with connection.cursor() as cursor:
             cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
@@ -315,9 +328,14 @@ def main(argv=None) -> int:
             if not cursor.fetchone()[0]:
                 raise RuntimeError(f"Replay book {args.book_id} is currently locked.")
         _check_book_empty(connection, args.book_id)
-        with redirect_stdout(sys.stderr):
-            results = _replay_sessions(connection, sessions, dated, sources, policy=args.policy,
-                book_id=args.book_id, database_url=config.database_url, from_date=args.from_date, to_date=args.to_date)
+        from src.ticker_filters import set_replay_fund_exclusions, reset_replay_fund_exclusions
+        exclusion_token = set_replay_fund_exclusions(exclusion_provenance["symbols"])
+        try:
+            with redirect_stdout(sys.stderr):
+                results = _replay_sessions(connection, sessions, dated, sources, policy=args.policy,
+                    book_id=args.book_id, database_url=config.database_url, from_date=args.from_date, to_date=args.to_date)
+        finally:
+            reset_replay_fund_exclusions(exclusion_token)
         if args.apply:
             connection.commit()
         else:

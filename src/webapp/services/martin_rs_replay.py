@@ -208,27 +208,36 @@ def ensure_empty_book(connection) -> None:
 
 def apply_replay(connection, snapshots: list[dict[str, Any]], frames: dict[str, pd.DataFrame]) -> list[dict[str, Any]]:
     ensure_empty_book(connection)
+    from src.ticker_filters import leveraged_or_inverse_provenance, set_replay_fund_exclusions, reset_replay_fund_exclusions
+    exclusions = leveraged_or_inverse_provenance()
+    token = set_replay_fund_exclusions(exclusions["symbols"])
+    for snapshot in snapshots:
+        snapshot.setdefault("replay_provenance", {})["fund_exclusions"] = {
+            "version": exclusions["version"], "sha256": exclusions["sha256"]}
     def loader(tickers, day, days, **_kwargs):
         return {ticker: frames[ticker].loc[frames[ticker].index.date <= day].tail(days)
                 for ticker in tickers if ticker in frames}
     repository = ReplayRepository(connection)
     service = MartinForwardTestService(repository, bar_loader=loader)
     results = []
-    for snapshot in snapshots:
-        day = dt.date.fromisoformat(snapshot["target_trading_date"])
-        required = {dt.date.fromisoformat(value) for value in snapshot["replay_validation"]["required_execution_dates"]}
-        exposed = repository.open_positions(strategy_id=RS_EXPANDED_STRATEGY_ID) + repository.pending_candidates(before=day, strategy_id=RS_EXPANDED_STRATEGY_ID)
-        for ticker in sorted({str(item["ticker"]).strip().upper() for item in exposed}):
-            frame = frames.get(ticker, pd.DataFrame())
-            available = {index.date() for index, bar in frame.iterrows() if valid_bar(bar)}
-            if not required.issubset(available):
-                raise ValueError(f"Replay execution history missing or invalid for exposed ticker {ticker} on {day}; the entire range must be rolled back.")
-        result = service.run_session(as_of_date=day,
-                                     snapshot=snapshot, strategy_id=RS_EXPANDED_STRATEGY_ID)
-        if result["run_id"] is None or result["partial"]:
-            raise ValueError("Replay produced an incomplete session; the entire range must be rolled back.")
-        results.append(result)
-    return results
+    try:
+        for snapshot in snapshots:
+            day = dt.date.fromisoformat(snapshot["target_trading_date"])
+            required = {dt.date.fromisoformat(value) for value in snapshot["replay_validation"]["required_execution_dates"]}
+            exposed = repository.open_positions(strategy_id=RS_EXPANDED_STRATEGY_ID) + repository.pending_candidates(before=day, strategy_id=RS_EXPANDED_STRATEGY_ID)
+            for ticker in sorted({str(item["ticker"]).strip().upper() for item in exposed}):
+                frame = frames.get(ticker, pd.DataFrame())
+                available = {index.date() for index, bar in frame.iterrows() if valid_bar(bar)}
+                if not required.issubset(available):
+                    raise ValueError(f"Replay execution history missing or invalid for exposed ticker {ticker} on {day}; the entire range must be rolled back.")
+            result = service.run_session(as_of_date=day,
+                                         snapshot=snapshot, strategy_id=RS_EXPANDED_STRATEGY_ID)
+            if result["run_id"] is None or result["partial"]:
+                raise ValueError("Replay produced an incomplete session; the entire range must be rolled back.")
+            results.append(result)
+        return results
+    finally:
+        reset_replay_fund_exclusions(token)
 
 
 def run_database_replay(database_url: str, start: dt.date, end: dt.date, *, apply: bool = False) -> dict[str, Any]:

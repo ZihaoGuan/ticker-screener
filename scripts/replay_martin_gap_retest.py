@@ -99,25 +99,34 @@ def main(argv=None) -> int:
     if args.apply and repo.latest_session_date(BOOK_ID) is not None:
         parser.error(f"Replay book {BOOK_ID} already has saved sessions; refusing to overwrite it.")
     sources, coverage = reconstruct_sources(args.from_date, args.to_date, database_url=web_config.database_url, config=app_config)
-    if args.apply:
-        preview_service = MartinGapRetestService(MartinForwardTestRepository(database_url=web_config.database_url, read_only=True),
-                                                 database_url=web_config.database_url)
-        for source in sources:
-            preview = preview_service.run_session(as_of_date=dt.date.fromisoformat(source["target_trading_date"]),
-                source_record=source, dry_run=True, strategy_id=BOOK_ID, historical_replay=True)
-            if preview.get("status") != "dry_run_complete":
-                parser.error(f"Replay preflight failed for {source['target_trading_date']}: {preview.get('status')}")
-    service = MartinGapRetestService(repo, database_url=web_config.database_url)
-    results = []
+    from src.ticker_filters import leveraged_or_inverse_provenance, set_replay_fund_exclusions, reset_replay_fund_exclusions
+    exclusion_provenance = leveraged_or_inverse_provenance()
     for source in sources:
-        result = service.run_session(as_of_date=dt.date.fromisoformat(source["target_trading_date"]),
-            source_record=source, dry_run=not args.apply, strategy_id=BOOK_ID, historical_replay=True)
-        results.append({"date": source["target_trading_date"], "gap_events": len(source["hits"]),
-                        "candidate_count": result.get("candidate_count"), "status": result.get("status"),
-                        "skipped": result.get("skipped", False), "reason": result.get("reason")})
-        if result.get("status") == "missing_prerequisite":
-            print(json.dumps({"ready": False, "coverage": coverage, "sessions": results}, indent=2))
-            return 2
+        source.setdefault("replay_provenance", {})["fund_exclusions"] = {
+            "version": exclusion_provenance["version"], "sha256": exclusion_provenance["sha256"]}
+    exclusion_token = set_replay_fund_exclusions(exclusion_provenance["symbols"])
+    try:
+        if args.apply:
+            preview_service = MartinGapRetestService(MartinForwardTestRepository(database_url=web_config.database_url, read_only=True),
+                                                     database_url=web_config.database_url)
+            for source in sources:
+                preview = preview_service.run_session(as_of_date=dt.date.fromisoformat(source["target_trading_date"]),
+                    source_record=source, dry_run=True, strategy_id=BOOK_ID, historical_replay=True)
+                if preview.get("status") != "dry_run_complete":
+                    parser.error(f"Replay preflight failed for {source['target_trading_date']}: {preview.get('status')}")
+        service = MartinGapRetestService(repo, database_url=web_config.database_url)
+        results = []
+        for source in sources:
+            result = service.run_session(as_of_date=dt.date.fromisoformat(source["target_trading_date"]),
+                source_record=source, dry_run=not args.apply, strategy_id=BOOK_ID, historical_replay=True)
+            results.append({"date": source["target_trading_date"], "gap_events": len(source["hits"]),
+                            "candidate_count": result.get("candidate_count"), "status": result.get("status"),
+                            "skipped": result.get("skipped", False), "reason": result.get("reason")})
+            if result.get("status") == "missing_prerequisite":
+                print(json.dumps({"ready": False, "coverage": coverage, "sessions": results}, indent=2))
+                return 2
+    finally:
+        reset_replay_fund_exclusions(exclusion_token)
     print(json.dumps({"ready": True, "strategy_id": BOOK_ID, "mode": "apply" if args.apply else "dry_run",
         "coverage": coverage, "sessions": results,
         "note": "Reconstructed universe and stored OHLCV; no contemporaneous scanner snapshots exist before Oct 23."}, indent=2))

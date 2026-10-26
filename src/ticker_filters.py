@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from contextvars import ContextVar
+import hashlib
 import csv
-from functools import lru_cache
 from pathlib import Path
 import re
 from typing import TYPE_CHECKING, Iterable
@@ -25,6 +26,26 @@ _LEVERAGED_OR_INVERSE_NAME_PATTERN = re.compile(
 # deliberately separate from configurable/manual exclusions: manual includes
 # must never make leveraged products eligible for Martin paper trading.
 _LEVERAGED_OR_INVERSE_SYMBOLS = {"KORU", "SOXS", "INTW", "MVLL"}
+_REPLAY_FUND_EXCLUSIONS: ContextVar[frozenset[str] | None] = ContextVar("replay_fund_exclusions", default=None)
+_FUNDS_CACHE_KEY: tuple[object, ...] | None = None
+_FUNDS_CACHE: frozenset[str] = frozenset()
+
+
+def set_replay_fund_exclusions(symbols: Iterable[str] | None):
+    """Pin the hard fund guard for one historical replay context."""
+    return _REPLAY_FUND_EXCLUSIONS.set(None if symbols is None else frozenset(normalize_ticker_symbol(s) for s in symbols))
+
+
+def reset_replay_fund_exclusions(token) -> None:
+    _REPLAY_FUND_EXCLUSIONS.reset(token)
+
+
+def leveraged_or_inverse_provenance() -> dict[str, object]:
+    version = "tradingview_fund_exclusions_v1"
+    symbols = sorted(leveraged_or_inverse_tickers())
+    canonical = version + "\n" + "\n".join(symbols)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return {"version": version, "sha256": digest, "symbols": symbols}
 
 
 def excluded_tickers_path(config: AppConfig) -> Path:
@@ -94,20 +115,40 @@ def leveraged_or_inverse_catalog_symbols(catalog: Iterable[dict[str, object]]) -
     }
 
 
-@lru_cache(maxsize=1)
 def leveraged_or_inverse_tickers() -> frozenset[str]:
+    global _FUNDS_CACHE_KEY, _FUNDS_CACHE
     symbols = set(_LEVERAGED_OR_INVERSE_SYMBOLS)
+    generated = project_root() / "config" / "tradingview_leveraged_inverse_etfs.txt"
+    try:
+        generated_stat = generated.stat()
+        generated_key: tuple[object, ...] = (str(generated), generated_stat.st_ino, generated_stat.st_mtime_ns, generated_stat.st_size)
+    except OSError:
+        generated_key = (str(generated), None, None, None)
+    try:
+        from .etf_matcher import ETF_CATALOG_PATH
+        catalog_stat = ETF_CATALOG_PATH.stat()
+        catalog_key: tuple[object, ...] = (str(ETF_CATALOG_PATH), catalog_stat.st_ino, catalog_stat.st_mtime_ns, catalog_stat.st_size)
+    except (OSError, ImportError):
+        ETF_CATALOG_PATH = None
+        catalog_key = (None, None, None, None)
+    key = (*generated_key, *catalog_key)
+    if key == _FUNDS_CACHE_KEY:
+        return _FUNDS_CACHE
+    symbols.update(_load_ticker_file(generated))
     try:
         from .etf_matcher import load_etf_catalog
 
         symbols.update(leveraged_or_inverse_catalog_symbols(load_etf_catalog()))
     except Exception:
         pass
-    return frozenset(symbols)
+    _FUNDS_CACHE = frozenset(symbols)
+    _FUNDS_CACHE_KEY = key
+    return _FUNDS_CACHE
 
 
 def is_leveraged_or_inverse_ticker(ticker: str) -> bool:
-    return normalize_ticker_symbol(ticker) in leveraged_or_inverse_tickers()
+    replay_set = _REPLAY_FUND_EXCLUSIONS.get()
+    return normalize_ticker_symbol(ticker) in (replay_set if replay_set is not None else leveraged_or_inverse_tickers())
 
 
 def _load_ticker_file(path: Path) -> set[str]:
@@ -175,7 +216,10 @@ def load_excluded_tickers(config: AppConfig) -> set[str]:
     except Exception:
         pass
     excluded.update(_load_special_security_tickers(special_security_tickers_path(config)))
-    excluded.difference_update(load_included_tickers(config))
+    replay_set = _REPLAY_FUND_EXCLUSIONS.get()
+    hard_funds = set(replay_set if replay_set is not None else leveraged_or_inverse_tickers())
+    excluded.update(hard_funds)
+    excluded.difference_update(load_included_tickers(config) - hard_funds)
     return excluded
 
 

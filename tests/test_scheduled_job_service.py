@@ -527,6 +527,7 @@ class ScheduledJobServiceTests(unittest.TestCase):
         self.assertIn("refresh_split_adjusted_history", actions)
         self.assertIn("venu_scanner", actions)
         self.assertIn("fundamental_quality", actions)
+        self.assertIn("refresh_tradingview_fund_exclusions", actions)
         self.assertNotIn("gamma_squeeze", actions)
         self.assertNotIn("liquid_growth", actions)
 
