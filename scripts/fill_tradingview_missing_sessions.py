@@ -63,7 +63,7 @@ def plan_inserts(
     rows: list[dict[str, object]], candles: dict[str, dict[str, object]], dates: list[str],
     *, known_split_dates: set[str] | None = None,
 ) -> tuple[dict[str, dict[str, object]], dict[str, str]]:
-    """Require two matching TradingView anchors on each side of every new bar."""
+    """Require two matching stored/TradingView anchors on each side of every new bar."""
     by_day = {str(row["trade_date"]): row for row in rows}
     if len(by_day) != len(rows):
         raise ValueError("duplicate_stored_session")
@@ -85,16 +85,15 @@ def plan_inserts(
             continue
         nearby = [
             row for row in rows
-            if row["source"] == "tradingview"
-            and str(row["trade_date"]) in candles
-            and abs((dt.date.fromisoformat(str(row["trade_date"])) - dt.date.fromisoformat(day)).days) <= 30
+            if str(row["trade_date"]) in candles
+            and abs((dt.date.fromisoformat(str(row["trade_date"])) - dt.date.fromisoformat(day)).days) <= 9
         ]
         before = sorted((row for row in nearby if str(row["trade_date"]) < day),
                         key=lambda row: str(row["trade_date"]), reverse=True)[:2]
         after = sorted((row for row in nearby if str(row["trade_date"]) > day),
                        key=lambda row: str(row["trade_date"]))[:2]
         if len(before) < 2 or len(after) < 2:
-            blockers[day] = "insufficient_tradingview_basis_anchors"
+            blockers[day] = "insufficient_matching_basis_anchors"
             continue
         mismatch = False
         for row in [*before, *after]:
@@ -187,6 +186,16 @@ def _rollback_one(ticker: str, end_date: str, backup_path: Path) -> int:
     return removed
 
 
+def select_repair_items(cache_tickers: list[dict[str, str]], requested: set[str], blocked: set[str],
+                        allowed_tickers: set[str], explicit: bool) -> tuple[list[dict[str, str]], int]:
+    """Select cached, eligible stocks; report requested symbols outside that scope."""
+    scope = requested if explicit else blocked & requested
+    items = sorted((item for item in cache_tickers
+                    if item["ticker"] in scope & allowed_tickers), key=lambda item: item["ticker"])
+    included = {item["ticker"] for item in items}
+    return items, len(scope - included)
+
+
 def _process(item: dict[str, str], args, config, split_events: set[tuple[str, str]]) -> dict[str, object]:
     ticker = item["ticker"]
     folder = Path(args.artifacts_dir) / ticker
@@ -234,7 +243,8 @@ def _process(item: dict[str, str], args, config, split_events: set[tuple[str, st
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--raw-results-file", required=True)
+    parser.add_argument("--raw-results-file",
+                        help="Optional for explicit historical repairs; required for failed-result selection.")
     parser.add_argument("--provider-cache-root", required=True)
     parser.add_argument("--split-events-file", required=True,
                         help="Dated split-event artifact; a matching ticker/date is left for split repair.")
@@ -250,11 +260,16 @@ def main() -> int:
         parser.error("--apply and --rollback are mutually exclusive")
     args.dates = sorted(set(args.dates))
     _completed_sessions(args.dates, args.end_date)
-    raw = tv.read_json(Path(args.raw_results_file))
-    if raw.get("as_of_date") != args.end_date:
-        parser.error("raw result date does not match --end-date")
-    blocked = {str(row["ticker"]).upper() for row in raw.get("failed_tickers", [])
-               if row.get("error") == "missing_required_market_session"}
+    if args.raw_results_file:
+        raw = tv.read_json(Path(args.raw_results_file))
+        if raw.get("as_of_date") != args.end_date:
+            parser.error("raw result date does not match --end-date")
+        blocked = {str(row["ticker"]).upper() for row in raw.get("failed_tickers", [])
+                   if row.get("error") == "missing_required_market_session"}
+    else:
+        blocked = set()
+    if not args.tickers and not args.raw_results_file:
+        parser.error("provide --tickers for explicit repair or --raw-results-file for blocked-ticker selection")
     cache_scope = tv.read_json(Path(args.provider_cache_root) / "scope.json")
     if cache_scope.get("end_date") != args.end_date:
         parser.error("provider cache end date does not match --end-date")
@@ -269,8 +284,12 @@ def main() -> int:
             metadata = {row["ticker"]: row["active"] for row in cursor.fetchall()}
     allowed = {row["ticker"]: row for row in tv.select_universe(load_universe(config), metadata, tv.exclusions(config))}
     requested = {ticker.upper() for ticker in args.tickers} if args.tickers else blocked
-    items = sorted((item for item in cache_scope["tickers"]
-                    if item["ticker"] in blocked & requested & allowed.keys()), key=lambda item: item["ticker"])
+    # Explicit tickers are an audit scope. The default mode remains limited to
+    # tickers blocked by the supplied saved result. Supplying a raw-results
+    # file preserves the legacy blocked-ticker intersection even with --tickers.
+    items, outside_eligible_scope = select_repair_items(
+        cache_scope["tickers"], requested, blocked, set(allowed),
+        explicit=bool(args.tickers and not args.raw_results_file))
     scope = {"raw_results_file": args.raw_results_file, "provider_cache_root": args.provider_cache_root,
              "split_events_file": args.split_events_file,
              "split_events_sha256": hashlib.sha256(split_raw).hexdigest(),
@@ -286,7 +305,7 @@ def main() -> int:
         dry_summary_path = root / "dry_run_summary.json"
         if not dry_summary_path.exists() or tv.read_json(dry_summary_path).get("processed") != len(items):
             parser.error("a completed dry run for this exact scope is required before --apply")
-    print(f"eligible_tickers={len(items)} outside_eligible_scope={len(blocked & requested) - len(items)} "
+    print(f"eligible_tickers={len(items)} outside_eligible_scope={outside_eligible_scope} "
           f"mode={'rollback' if args.rollback else 'apply' if args.apply else 'dry-run'}", flush=True)
     results = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
