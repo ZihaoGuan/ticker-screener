@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from src.market_data_access import load_many_ticker_windows
+from src.ticker_filters import is_leveraged_or_inverse_ticker
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_rotation import require_completed_session, session_dates, valid_history
 from src.martin_daily_gap_retest import (CONFIG, CONFIG_HASH, DISCOVERY_RULES_VERSION, REPLAY_STRATEGY_ID,
@@ -138,7 +139,7 @@ def active_gap_events(source_record: dict[str, Any] | None, day: date) -> list[d
         ticker = str(payload.get("ticker") or hit.get("ticker") or "").strip().upper()
         gap = context.get("gap_event") if isinstance(context.get("gap_event"), dict) else {}
         gap_date = gap.get("date", context.get("gap_date", context.get("original_gap_date")))
-        if not ticker or not gap_date:
+        if not ticker or is_leveraged_or_inverse_ticker(ticker) or not gap_date:
             continue
         event = {"ticker": ticker, "original_gap_date": str(gap_date)[:10], "source_run_id": run_id,
                  "source_published_at": source_record.get("published_at", source_record.get("created_at")),
@@ -370,9 +371,13 @@ class MartinGapRetestService:
                 "limitations": "Reconstructed Power Gap universe from current configured symbols and stored OHLCV; historical revisions may apply."}
         for order in pending:
             payload = order.get("payload_json") or {}
-            bar = _bar(frames.get(str(order["ticker"]).upper()), day)
-            preview = resolve_gap_next_open(payload, bar) if bar and payload.get("awaiting_session_date") == day.isoformat() else {
-                "status": "blocked_data", "reason": "missing_execution_bar"}
+            ticker = str(order["ticker"]).upper()
+            if is_leveraged_or_inverse_ticker(ticker):
+                preview = {"status": "cancelled", "reason": "leveraged_or_inverse_fund"}
+            else:
+                bar = _bar(frames.get(ticker), day)
+                preview = resolve_gap_next_open(payload, bar) if bar and payload.get("awaiting_session_date") == day.isoformat() else {
+                    "status": "blocked_data", "reason": "missing_execution_bar"}
             report["execution_preview"].append({"ticker": order["ticker"], "kind": "pending_order", **preview})
         for held in positions:
             ticker = str(held["ticker"]).upper()
@@ -427,6 +432,8 @@ class MartinGapRetestService:
         # Existing retained watches are always reassessed, even when the source run omits them.
         event_map = {event["ticker"]: event for event in events}
         for ticker, saved in watches.items():
+            if is_leveraged_or_inverse_ticker(ticker):
+                continue
             payload = saved if isinstance(saved, dict) else {}
             identity = payload.get("event_identity") or {"ticker": ticker, "original_gap_date": payload.get("original_gap_date"),
                 "discovery_rules_version": payload.get("discovery_rules_version", DISCOVERY_RULES_VERSION)}
@@ -572,6 +579,13 @@ class MartinGapRetestService:
         for order in pending:
             payload = dict(order.get("payload_json") or {})
             ticker = str(order["ticker"]).upper()
+            if is_leveraged_or_inverse_ticker(ticker):
+                if not repo.apply_event(run_id=run_id, position_id=None, ticker=ticker, event_type="order_cancelled",
+                    event_date=day, payload={"status": "cancelled", "reason": "leveraged_or_inverse_fund"},
+                    candidate_id=order["id"], candidate_status="cancelled", strategy_id=bid):
+                    raise ValueError("Leveraged gap retest order cancellation could not be recorded atomically")
+                counts["cancellations"] += 1
+                continue
             if payload.get("awaiting_session_date") != day.isoformat():
                 raise ValueError("Pending gap retest order missed its exact execution session; session rolled back")
             bar = _bar(frames.get(ticker), day)

@@ -5,6 +5,8 @@ import datetime as dt
 import math
 from typing import Any
 
+from src.ticker_filters import is_leveraged_or_inverse_ticker
+
 from src.webapp.services.martin_forward_test_service import order_outcome, position_exit
 from src.webapp.services.martin_rotation import size_order
 
@@ -140,6 +142,13 @@ class MartinBarRetestExecutionService:
         closed_today: set[str] = set()
         for order in pending:
             ticker = str(order["ticker"]).upper()
+            if is_leveraged_or_inverse_ticker(ticker):
+                changed = self.repository.apply_event(run_id=run_id, position_id=None, ticker=ticker,
+                    event_type="order_cancelled", event_date=day,
+                    payload={"reason": "leveraged_or_inverse_fund", "status": "cancelled"},
+                    candidate_id=order["id"], candidate_status="cancelled", strategy_id=book)
+                counts["cancelled"] += int(changed)
+                continue
             bar = bar_for(frames.get(ticker), day)
             if bar is None:
                 counts["missing_bars"] += 1

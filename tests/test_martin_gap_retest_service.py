@@ -9,6 +9,18 @@ from src.martin_daily_gap_retest import REPLAY_V4_STRATEGY_ID
 
 
 class GapRetestServiceTests(unittest.TestCase):
+    def test_old_persisted_gap_scan_cannot_admit_leveraged_candidates(self):
+        source = {"target_trading_date": "2026-10-23", "hits": [
+            {"ticker": "KORU", "hit_payload_json": {"ticker": "KORU", "power_gap_volume_context": {
+                "active_signals": ["gap"], "rules_version": "power_gap_volume_watch_v1",
+                "gap_event": {"date": "2026-10-22", "low": 10}}}},
+            {"ticker": "TRLV", "hit_payload_json": {"ticker": "TRLV", "power_gap_volume_context": {
+                "active_signals": ["gap"], "rules_version": "power_gap_volume_watch_v1",
+                "gap_event": {"date": "2026-10-22", "low": 10}}}},
+        ]}
+        events = active_gap_events(source, date(2026, 10, 23))
+        self.assertEqual([event["ticker"] for event in events], ["TRLV"])
+
     def test_policy_and_book_id_are_forwarded_separately(self):
         service = MartinGapRetestService(object(), calendar=lambda day: [day])
         with patch("src.webapp.services.martin_gap_retest_service.require_completed_session"), \

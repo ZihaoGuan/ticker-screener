@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from src.market_data_access import load_many_ticker_windows
+from src.ticker_filters import is_leveraged_or_inverse_ticker
 from src.martin_bar_retest import STRATEGY_ID, evaluate, fingerprint
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.webapp.services.martin_rotation import require_completed_session, session_dates
@@ -53,7 +54,7 @@ class MartinBarRetestService:
         previously_seen = set(prior)
         active: dict[str, dict[str, Any]] = {}
         for ticker, payload in prior.items():
-            if payload.get("status") != "retired" and payload.get("event_identity"):
+            if not is_leveraged_or_inverse_ticker(ticker) and payload.get("status") != "retired" and payload.get("event_identity"):
                 invalidation = payload.get("invalidation") or {}
                 origin_retrospective = payload.get("source_retrospective")
                 if origin_retrospective is None and payload.get("source_published_at") and payload.get("event_date"):
@@ -70,6 +71,8 @@ class MartinBarRetestService:
         if source_valid:
             for hit in source.get("hits", []):
                 ticker = str(hit.get("ticker") or "").upper()
+                if is_leveraged_or_inverse_ticker(ticker):
+                    continue
                 categories = set(hit.get("discovery_categories") or [])
                 fresh = categories & {"potent_mover", "gap_mover"}
                 if not ticker or (not fresh and (not categories.intersection({"leader_30_session"}) or ticker in previously_seen)):

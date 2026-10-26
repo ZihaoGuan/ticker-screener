@@ -117,6 +117,18 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
         self.assertEqual(repo.events[0]["event_type"], "order_blocked_missing_bar")
         self.assertEqual(repo.events[0]["candidate_status"], "blocked_data")
 
+    def test_leveraged_pending_order_is_cancelled_before_bar_lookup(self):
+        repo = Repo()
+        repo.pending = [{"id": 9, "run_id": 8, "ticker": "MVLL", "payload_json": {"max_entry": 10, "stop": 9}}]
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
+        service.book_id = "martin_range_bar_retest_execution_test"
+        counts = service.run_session(day=dt.date(2026, 10, 20), run_id=10,
+                                     candidates=[], source_on_time=False)
+        self.assertEqual(counts["cancelled"], 1)
+        self.assertEqual(repo.events[0]["event_type"], "order_cancelled")
+        self.assertEqual(repo.events[0]["candidate_status"], "cancelled")
+        self.assertEqual(repo.events[0]["payload"]["reason"], "leveraged_or_inverse_fund")
+
     def test_only_on_time_source_schedules_confirmed_retest(self):
         candidate = {"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9.0,
                      "max_entry": 10.0, "retrospective_source_scan": False}

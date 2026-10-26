@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import csv
+from functools import lru_cache
 from pathlib import Path
 import re
 from typing import TYPE_CHECKING, Iterable
@@ -19,6 +20,11 @@ _LEVERAGED_OR_INVERSE_NAME_PATTERN = re.compile(
     r"\b(?:[2-9](?:\.\d+)?X|DAILY\s+(?:BULL|BEAR|LONG|SHORT)|ULTRA(?:PRO|SHORT)?|LEVERAGED|INVERSE)\b",
     re.IGNORECASE,
 )
+
+# Confirmed leveraged/inverse funds omitted by the local ETF catalog. This is
+# deliberately separate from configurable/manual exclusions: manual includes
+# must never make leveraged products eligible for Martin paper trading.
+_LEVERAGED_OR_INVERSE_SYMBOLS = {"KORU", "SOXS", "INTW", "MVLL"}
 
 
 def excluded_tickers_path(config: AppConfig) -> Path:
@@ -86,6 +92,22 @@ def leveraged_or_inverse_catalog_symbols(catalog: Iterable[dict[str, object]]) -
         for item in catalog
         if normalize_ticker_symbol(str(item.get("ticker") or "")) and is_leveraged_or_inverse_fund_name(item.get("name"))
     }
+
+
+@lru_cache(maxsize=1)
+def leveraged_or_inverse_tickers() -> frozenset[str]:
+    symbols = set(_LEVERAGED_OR_INVERSE_SYMBOLS)
+    try:
+        from .etf_matcher import load_etf_catalog
+
+        symbols.update(leveraged_or_inverse_catalog_symbols(load_etf_catalog()))
+    except Exception:
+        pass
+    return frozenset(symbols)
+
+
+def is_leveraged_or_inverse_ticker(ticker: str) -> bool:
+    return normalize_ticker_symbol(ticker) in leveraged_or_inverse_tickers()
 
 
 def _load_ticker_file(path: Path) -> set[str]:

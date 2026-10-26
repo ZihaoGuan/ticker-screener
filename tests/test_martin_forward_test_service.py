@@ -11,6 +11,17 @@ from src.webapp.repositories.martin_forward_test_repository import MartinForward
 
 
 class MartinBenchmarkComparisonTests(unittest.TestCase):
+    def test_leveraged_and_inverse_catalog_symbols_are_blocked_but_benchmarks_are_not(self) -> None:
+        for ticker in ("KORU", "SOXS", "INTW", "MVLL"):
+            with self.subTest(ticker=ticker):
+                candidate = classify_candidate({"ticker": ticker}, 1)
+                self.assertEqual(candidate["status"], "blocked")
+                self.assertIn("leveraged_or_inverse_fund", candidate["reasons"])
+        for ticker in ("SPY", "QQQ", "TRLV", "ANDG"):
+            with self.subTest(ticker=ticker):
+                candidate = classify_candidate({"ticker": ticker}, 1)
+                self.assertNotIn("leveraged_or_inverse_fund", candidate["reasons"])
+
     def test_missing_account_market_session_and_latest_etf_bar_remain_gaps(self) -> None:
         history = [{"date": "2026-10-01", "account_equity": 100_000}, {"date": "2026-10-05", "account_equity": 102_000}]
         prices = [{"ticker": ticker, "trade_date": day, "close": close} for ticker, day, close in (
@@ -560,6 +571,19 @@ class MartinForwardTestLifecycleTest(unittest.TestCase):
         self.assertEqual({item["ticker"]: item["status"] for item in repo.candidates}, {"AAA": "cancelled", "BBB": "expired"})
         self.assertIn(("AAA", "order_cancelled", date2, None), repo.events)
         self.assertIn(("BBB", "order_expired", date2, None), repo.events)
+
+    def test_leveraged_pending_order_is_cancelled_before_bar_execution(self) -> None:
+        repo = _ForwardRepo()
+        date1, date2 = dt.date(2026, 1, 2), dt.date(2026, 1, 5)
+        repo.candidates.append({"id": 7, "run_id": 6, "strategy_id": "martin_daily_v1", "ticker": "MVLL",
+            "rank": 1, "status": "pending", "session_date": date1,
+            "payload_json": {"ticker": "MVLL", "limit_price": 10, "stop": 9}})
+        service = MartinForwardTestService(repo, bar_loader=lambda *_args, **_kwargs: {})
+        result = service.run_session(as_of_date=date2, snapshot=None)
+        self.assertEqual(repo.candidates[0]["status"], "cancelled")
+        self.assertIn(("MVLL", "order_cancelled", date2, None), repo.events)
+        self.assertEqual(repo.events[("MVLL", "order_cancelled", date2, None)]["reason"], "leveraged_or_inverse_fund")
+        self.assertEqual(result["cancelled"], 1)
 
     def test_entry_day_three_r_does_not_trim(self) -> None:
         repo = _ForwardRepo()

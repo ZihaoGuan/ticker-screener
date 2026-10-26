@@ -17,6 +17,7 @@ from scripts._screen_run_persistence import persist_screen_run_artifacts_if_conf
 from src.artifact_paths import build_screener_artifact_paths
 from src.config import load_app_config
 from src.market_data_access import load_many_ticker_windows, load_ticker_metadata_map, resolve_database_url
+from src.ticker_filters import is_leveraged_or_inverse_ticker
 from src.martin_bar_watchlist_screen import STRATEGY_ID, _has_recent_sessions, _valid_ohlcv, build_rank_context, evaluate_martin_bar_watchlist
 from src.webapp.config import load_webapp_config
 
@@ -62,7 +63,8 @@ def main() -> int:
             stored_tickers = [str(row[0]).upper() for row in cursor.fetchall()]
 
     known_etf_exclusions = sorted(set(stored_tickers) & {"SPY", "QQQ"})
-    tickers = [ticker for ticker in stored_tickers if ticker not in {"SPY", "QQQ"}]
+    tickers = [ticker for ticker in stored_tickers
+               if ticker not in {"SPY", "QQQ"} and not is_leveraged_or_inverse_ticker(ticker)]
 
     app_config = load_app_config()
     if app_config.benchmark_ticker.upper() != "SPY":

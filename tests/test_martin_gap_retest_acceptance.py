@@ -292,6 +292,27 @@ class GapRetestOrchestratorAcceptanceTests(unittest.TestCase):
                 service.run_session(as_of_date=day2, source_record=self.source(day2, 83), dry_run=False)
             self.assertEqual(before, (repo.runs, repo.candidates, repo.positions, repo.events))
 
+    def test_legacy_leveraged_pending_order_is_cancelled_without_filling(self):
+        repo = MemoryBookRepository()
+        day0, day1 = self.session_dates[-3:-1]
+        service = self.service(repo, self.frames())
+        with patch("src.webapp.services.martin_gap_retest_service.require_completed_session"), \
+             patch("src.webapp.services.martin_gap_retest_service.evaluate_gap_retest", side_effect=self.confirmed):
+            service.run_session(as_of_date=day0, source_record=self.source(day0, 81), dry_run=False)
+            self.assertEqual(repo.candidates[0]["status"], "pending")
+            # Simulate a previously saved leveraged order that predates this guard.
+            repo.candidates[0]["ticker"] = "MVLL"
+            repo.candidates[0]["payload_json"]["ticker"] = "MVLL"
+            service.bar_loader = self.frames({day1: {"MVLL": (100.0, 101.0, 99.0, 100.0)}})
+            result = service.run_session(as_of_date=day1, source_record=None, dry_run=False)
+
+        self.assertEqual(repo.candidates[0]["status"], "cancelled")
+        self.assertEqual(result["cancellations"], 1)
+        self.assertEqual(repo.positions, [])
+        event = next(event for event in repo.events if event["event_type"] == "order_cancelled")
+        self.assertEqual(event["ticker"], "MVLL")
+        self.assertEqual(event["payload"]["reason"], "leveraged_or_inverse_fund")
+
     def test_entry_day_stops_release_budget_before_fresh_confirmation(self):
         repo = MemoryBookRepository()
         day0, day1 = self.session_dates[-4:-2]

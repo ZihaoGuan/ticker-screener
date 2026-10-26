@@ -9,6 +9,7 @@ from typing import Any
 
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 from src.market_data_access import load_many_ticker_windows
+from src.ticker_filters import is_leveraged_or_inverse_ticker
 from src.trade_plan_policies import POLICY_FIELDS, STRUCTURAL_STOP_POLICY
 from src.webapp.services.martin_rotation import (ROTATION_STRATEGY_ID, ROTATION_POLICY_VERSION, ROTATION_LIMITS,
                                                 session_dates, valid_history, size_order, rotation_decision)
@@ -56,6 +57,8 @@ def classify_candidate(row: dict[str, Any], rank: int) -> dict[str, Any]:
     reasons: list[str] = []
     if not ticker:
         reasons.append("missing_ticker")
+    elif is_leveraged_or_inverse_ticker(ticker):
+        reasons.append("leveraged_or_inverse_fund")
     if market_cap is None or market_cap < 1_000_000_000:
         reasons.append("market_cap_below_1b_or_missing")
     if close is None or close < 5:
@@ -512,6 +515,13 @@ class MartinForwardTestService:
         # Pending orders are one-session orders, so the target session's exact bar settles them.
         filled_positions: list[dict[str, Any]] = []
         for order in pending:
+            if is_leveraged_or_inverse_ticker(str(order.get("ticker") or "")):
+                changed = self.repository.apply_event(run_id=run_id, position_id=None, ticker=order["ticker"],
+                    event_type="order_cancelled", event_date=as_of_date,
+                    payload={"reason": "leveraged_or_inverse_fund", "status": "cancelled"},
+                    candidate_id=order["id"], candidate_status="cancelled", strategy_id=self._book_id)
+                counts["cancelled"] += int(changed)
+                continue
             awaited_session = (order.get("payload_json") or {}).get("awaiting_session_date")
             if awaited_session and as_of_date.isoformat() > str(awaited_session):
                 counts["missing_bars"] += 1
