@@ -16,6 +16,8 @@ import sys
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 NY = ZoneInfo('America/New_York')
 
 
@@ -26,10 +28,10 @@ def digest(value):
 
 def session_starts(day, interval=15):
     import exchange_calendars as xcals
-    cal = xcals.get_calendar('XNYS', start=day, end=day)
-    if not len(cal.sessions):
+    cal = xcals.get_calendar('XNYS')
+    if not cal.is_session(day):
         return []
-    session = cal.sessions[0]
+    session = cal.date_to_session(day, direction='none')
     opened = cal.session_open(session).to_pydatetime().astimezone(NY)
     closed = cal.session_close(session).to_pydatetime().astimezone(NY)
     out = []

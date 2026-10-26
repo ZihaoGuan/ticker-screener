@@ -1,6 +1,9 @@
 import datetime as dt
 import importlib.util
+import sys
+import subprocess
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -15,6 +18,40 @@ class IntradayAuditTests(unittest.TestCase):
     day = dt.date(2026, 10, 23)
     symbol = 'NASDAQ:TEST'
     metadata = {'full_name': symbol}
+
+    def test_script_adds_repo_root_to_import_path_when_run_outside_repo(self):
+        script = str(SCRIPT)
+        root = str(SCRIPT.parents[1])
+        probe = (
+            'import runpy, sys; '
+            f'ns = runpy.run_path({script!r}); '
+            f'assert {root!r} in sys.path'
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            result = subprocess.run([sys.executable, '-c', probe], cwd=temp,
+                                    text=True, capture_output=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_session_starts_uses_calendar_without_empty_date_range(self):
+        class Calendar:
+            def is_session(self, day):
+                return True
+            def date_to_session(self, day, direction):
+                self.asserted_direction = direction
+                return day
+            def session_open(self, session):
+                return Timestamp(dt.datetime(2026, 10, 23, 13, 30, tzinfo=dt.timezone.utc))
+            def session_close(self, session):
+                return Timestamp(dt.datetime(2026, 10, 23, 20, 0, tzinfo=dt.timezone.utc))
+        class Timestamp:
+            def __init__(self, value): self.value = value
+            def to_pydatetime(self): return self.value
+        calendar = Calendar()
+        fake_xcals = types.SimpleNamespace(get_calendar=lambda name: calendar)
+        with patch.dict(sys.modules, {'exchange_calendars': fake_xcals}):
+            starts = audit.session_starts(self.day)
+        self.assertEqual(calendar.asserted_direction, 'none')
+        self.assertEqual(len(starts), 26)
 
     def bars(self, lows, *, opens=None):
         starts = list(range(1000, 1026))
