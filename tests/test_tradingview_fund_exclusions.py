@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -113,6 +114,13 @@ class TradingViewFundExclusionsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 refresh(root=root, fetch_page=lambda f, o, n: {"totalCount": 0, "data": []})
             self.assertEqual(target.read_text(), old)
+
+    def test_refresh_promotes_denylist_with_deploy_readable_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            refresh(root=root, fetch_page=page)
+            target = root / "config" / "tradingview_leveraged_inverse_etfs.txt"
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
 
     def test_process_reads_updated_denylist_and_manual_include_cannot_override(self):
         from src.config import AppConfig

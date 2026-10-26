@@ -139,6 +139,9 @@ def refresh(*, root: Path | None = None, fetch_page: Callable[[str, int, int], d
         dated.write_text(artifact_text, encoding="utf-8")
     fd, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=config)
     try:
+        # mkstemp creates files as 0600; the promoted config is read by the
+        # deploy user even when this refresh process runs as root.
+        os.fchmod(fd, 0o644)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(file_body)
             handle.flush()
