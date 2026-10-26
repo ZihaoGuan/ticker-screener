@@ -40,6 +40,10 @@ class RunServiceTests(unittest.TestCase):
         self.assertNotIn("--apply", command)
         applied = self.service.build_command("continue_martin_bar_retest", {"book_id": "martin_range_bar_retest_live", "apply": True})
         self.assertEqual(applied[-1], "--apply")
+        with_bars = self.service.build_command("continue_martin_bar_retest", {
+            "book_id": "martin_range_bar_retest_v2", "intraday_dir": "/tmp/frozen-bars", "apply": True})
+        self.assertEqual(with_bars[-5:], ["--book-id", "martin_range_bar_retest_v2", "--intraday-dir", "/tmp/frozen-bars", "--apply"])
+        self.assertEqual(with_bars[-1], "--apply")
         with self.assertRaisesRegex(ValueError, "must start with"):
             self.service.build_command("continue_martin_bar_retest", {"book_id": "martin_bar_retest_v1"})
 

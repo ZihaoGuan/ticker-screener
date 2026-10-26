@@ -167,7 +167,11 @@ class MartinForwardTestRepository:
             FROM martin_forward_candidates c JOIN martin_forward_runs r ON r.id=c.run_id
             WHERE c.status='pending' AND r.session_date < %s AND r.strategy_id=%s ORDER BY r.session_date,c.rank,c.id""", (before, strategy_id))
 
-    def pending_orders(self, *, strategy_id: str = "martin_daily_v1") -> list[dict[str, Any]]:
+    def pending_orders(self, *, strategy_id: str = "martin_daily_v1", before: Any = None) -> list[dict[str, Any]]:
+        if before is not None:
+            return self._rows("""SELECT c.ticker,c.payload_json FROM martin_forward_candidates c
+                JOIN martin_forward_runs r ON r.id=c.run_id WHERE c.status='pending' AND r.strategy_id=%s
+                AND r.session_date < %s ORDER BY c.rank,c.id""", (strategy_id, before))
         return self._rows("""SELECT c.ticker,c.payload_json FROM martin_forward_candidates c
             JOIN martin_forward_runs r ON r.id=c.run_id WHERE c.status='pending' AND r.strategy_id=%s ORDER BY c.rank,c.id""", (strategy_id,))
 
@@ -384,8 +388,8 @@ class MartinForwardTestRepository:
                         books[key]["rotation_limits"] = ROTATION_LIMITS
                 execution_books = self._fetch(cursor, """SELECT DISTINCT strategy_id FROM martin_forward_runs
                     WHERE position(%s in strategy_id)=1
-                    AND summary_json->>'execution_book_version'=%s
-                    ORDER BY strategy_id""", ("martin_range_bar_retest_", "martin_bar_retest_execution_v1"))
+                    AND summary_json->>'execution_book_version' IN (%s,%s)
+                    ORDER BY strategy_id""", ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2"))
                 for item in execution_books:
                     strategy_id = str(item["strategy_id"])
                     runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
@@ -398,7 +402,8 @@ class MartinForwardTestRepository:
                     events = self._fetch(cursor, "SELECT * FROM martin_forward_events WHERE strategy_id=%s ORDER BY event_date DESC,id DESC LIMIT 200", (strategy_id,))
                     book = _performance_context(strategy_id, runs, candidates, positions, events)
                     book["outstanding_orders"] = outstanding_orders
-                    book["execution_book_version"] = "martin_bar_retest_execution_v1"
+                    book["execution_book_version"] = ((runs[0].get("summary_json") or {}).get("execution_book_version")
+                        if runs else "martin_bar_retest_execution_v1")
                     books[strategy_id] = book
                 account = books.get("account")
                 for account in (account, books.get("rs_expanded_rotation"), books.get("gap_retest"),

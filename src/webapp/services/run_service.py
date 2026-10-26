@@ -393,6 +393,8 @@ class RunService:
             "scripts/continue_martin_bar_retest.py",
             supports_limit=False,
             fields=(RunField("book_id", "Execution Book ID", "text", placeholder="martin_range_bar_retest_…"),
+                    RunField("intraday_dir", "Frozen Intraday Bundle Directory", "text",
+                        help_text="For v2 books, freeze bars after the session and provide the audit bundle directory."),
                     RunField("apply", "Apply to Paper Book", "boolean", help_text="Defaults to a read-only no-write run.")),
             visible_in_runs=False,
         ),
@@ -3199,6 +3201,8 @@ class RunService:
             command.append("--apply")
         if action_id == "continue_martin_bar_retest":
             command.extend(["--book-id", str(normalized_options["book_id"])])
+            if normalized_options.get("intraday_dir"):
+                command.extend(["--intraday-dir", str(normalized_options["intraday_dir"])])
             if normalized_options.get("apply"):
                 command.append("--apply")
         if normalized_options.get("lookback_days") is not None:
@@ -3459,6 +3463,9 @@ class RunService:
             if not book_id.startswith("martin_range_bar_retest_"):
                 raise ValueError("Execution Book ID must start with martin_range_bar_retest_.")
             normalized["book_id"] = book_id
+            intraday_dir = str(options.get("intraday_dir") or "").strip()
+            if intraday_dir:
+                normalized["intraday_dir"] = intraday_dir
             normalized["apply"] = str(options.get("apply") or "").strip().lower() in {"1", "true", "yes", "on"}
 
         for key in (

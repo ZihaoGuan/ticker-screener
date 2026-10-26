@@ -409,7 +409,7 @@ def position_exit(position: dict[str, Any], bar: dict[str, Any]) -> tuple[str, f
         return "stop", stop * (1 - slip)
     high = _number(bar.get("high"))
     r = _number(position.get("initial_r")) or (entry - stop)
-    if high is not None and r > 0 and high >= entry + 3 * r and not position.get("trimmed"):
+    if high is not None and r > 0 and high >= entry + 3 * r and not position.get("trimmed") and not position.get("trim_3r_skipped"):
         return "trim_3r", entry + 3 * r
     return None
 

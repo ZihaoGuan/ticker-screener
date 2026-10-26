@@ -76,6 +76,10 @@ class IntradayAuditTests(unittest.TestCase):
 
     def test_entry_touch_before_stop(self):
         bars = self.bars([11.4, 10.4] + [11]*24)
+        self.assertEqual(self.classify(bars), 'stop_after_entry')
+
+    def test_entry_touch_without_later_stop_is_a_fill(self):
+        bars = self.bars([11.4] + [11]*25)
         self.assertEqual(self.classify(bars), 'entry_before_stop')
 
     def test_entry_and_stop_in_same_bar_is_ambiguous(self):
@@ -92,7 +96,21 @@ class IntradayAuditTests(unittest.TestCase):
 
     def test_substitute_feed_is_not_certified(self):
         bars = self.bars([11.4] + [11]*25)
-        self.assertEqual(self.classify(bars, metadata={'full_name':'BATS:TEST'}), 'feed_mismatch')
+        daily = {'open': 12, 'high': 13, 'low': 12, 'close': 12, 'volume': 2600}
+        self.assertEqual(self.classify(bars, metadata={'full_name':'BATS:TEST'}, daily=daily), 'feed_mismatch')
+
+    def test_bats_feed_is_accepted_when_covered_and_range_and_open_fill_agree(self):
+        bars = self.bars([11.4] + [11]*25)
+        daily = {'open': 12, 'high': 13, 'low': 11, 'close': 12, 'volume': 2600}
+        original = audit.session_starts
+        audit.session_starts = lambda _day, interval=15: list(range(1000, 1026))
+        try:
+            result = audit.classify(candles=bars, metadata={'full_name':'BATS:TEST'},
+                requested_symbol=self.symbol, day=self.day, entry=11.5, stop=10.5, daily=daily)
+        finally:
+            audit.session_starts = original
+        self.assertEqual(result['classification'], 'entry_before_stop')
+        self.assertFalse(result['feed_mismatch'])
 
     def test_missing_daily_bar_never_certifies_sequence(self):
         result = audit.classify(candles=self.bars([11.4] + [11]*25), metadata=self.metadata,

@@ -63,30 +63,27 @@ def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, ti
         # Intraday volume and daily volume can differ between feeds. Price disagreement is decisive.
         mismatch |= any(abs(float(aggregate_bar[k])-float(daily[k])) > max(0.02, abs(float(daily[k]))*0.0005)
                         for k in ('open','high','low','close'))
+    by_time = {int(x['time']): x for x in candles}
+    complete = bool(starts) and len(candles) == len(starts) and set(by_time) == set(starts)
+    if mismatch and actual and actual.startswith('BATS:') and daily and complete and aggregate_bar:
+        # Accept consolidated BATS only when its range is contained in stored daily prices
+        # and its opening cannot change whether this order filled at the open.
+        tol = max(0.02, abs(float(daily['close'])) * 0.0005)
+        range_ok = (aggregate_bar['high'] <= float(daily['high']) + tol and
+                    aggregate_bar['low'] >= float(daily['low']) - tol)
+        open_fill_same = (float(aggregate_bar['open']) <= entry) == (float(daily['open']) <= entry)
+        if range_ok and open_fill_same:
+            mismatch = False
     if mismatch: status = 'feed_mismatch'
+    elif not complete: status = 'missing_bars'
     else:
-        by_time = {int(x['time']): x for x in candles}
-        if not starts or any(t not in by_time for t in starts): status = 'missing_bars'
-        elif starts[0] in by_time and by_time[starts[0]]['open'] <= stop: status = 'stop_before_entry'
-        else:
-            status = 'missing_bars'
-            for index, t in enumerate(starts):
-                bar = by_time[t]
-                if index == 0 and bar['open'] <= entry:
-                    # Session-open fills are deliberately handled outside same-day retests.
-                    status = 'opening_fill'; break
-                if bar['open'] <= stop:
-                    status = 'stop_before_entry'; break
-                entry_hit, stop_hit = bar['low'] <= entry, bar['low'] <= stop
-                if entry_hit and stop_hit:
-                    status = 'same_bar_ambiguous'
-                    break
-                elif entry_hit:
-                    status = 'entry_before_stop'; break
-                elif stop_hit:
-                    status = 'stop_before_entry'; break
-                else:
-                    status = 'no_fill'
+        from src.webapp.services.martin_intraday_execution import evaluate_sequence
+        sequence = evaluate_sequence([by_time[t] for t in starts], entry=entry, stop=stop)
+        status = sequence['status']
+        if status == 'entry_before_stop' and sequence['bar_index'] == 0 and float(by_time[starts[0]]['open']) <= entry:
+            status = 'opening_fill'
+        elif status == 'no_fill':
+            status = 'no_fill'
     return {'classification':status, 'actual_feed':actual, 'requested_feed':requested_symbol,
             'intraday_ohlc':aggregate_bar, 'daily_ohlc':daily, 'expected_bar_count':len(starts),
             'received_bar_count':len(candles), 'feed_mismatch':bool(mismatch)}
@@ -148,6 +145,7 @@ def main(argv=None):
     ap.add_argument('--client-dir', required=True); ap.add_argument('--output-dir', required=True)
     ap.add_argument('--exchange', default='NASDAQ', help='requested TradingView exchange prefix')
     ap.add_argument('--one-minute', action='store_true')
+    ap.add_argument('--freeze-tickers', help='Comma-separated symbols to freeze for every XNYS session in range; creates replay bundles without requiring prior fills.')
     a=ap.parse_args(argv)
     if not a.book_id.startswith('martin_range_bar_retest_'): ap.error('--book-id must start with martin_range_bar_retest_')
     start,end=dt.date.fromisoformat(a.from_date),dt.date.fromisoformat(a.to_date)
@@ -161,12 +159,22 @@ def main(argv=None):
         raise RuntimeError('read_only_database_unavailable') from exc
     audit=[]
     try:
-        fills=load_fills(conn,a.book_id,start,end)
+        if a.freeze_tickers:
+            tickers = sorted({value.strip().upper() for value in a.freeze_tickers.split(',') if value.strip()})
+            fills = [(None, ticker, day, {}, {}) for day in __import__('scripts.replay_martin_bar_retest_range', fromlist=['xnys_sessions']).xnys_sessions(start, end)
+                     for ticker in tickers]
+        else:
+            fills=load_fills(conn,a.book_id,start,end)
         for eid,ticker,day,event,position in fills:
-            ticker=str(ticker).upper(); day=day.isoformat(); entry=float(event.get('price') or position.get('entry_price'))
-            stop=float(position.get('stop') or position.get('initial_stop'))
-            limit=float(position.get('limit_price') or position.get('max_entry') or entry)
-            if abs(entry-limit) > 0.011: continue
+            ticker=str(ticker).upper(); day=day.isoformat()
+            if a.freeze_tickers:
+                # Sentinel levels make this a feed/coverage freeze, not an execution outcome.
+                entry, stop, limit = 1e100, .01, None
+            else:
+                entry=float(event.get('price') or position.get('entry_price'))
+                stop=float(position.get('stop') or position.get('initial_stop'))
+                limit=float(position.get('limit_price') or position.get('max_entry') or entry)
+                if abs(entry-limit) > 0.011: continue
             symbol=f'{a.exchange}:{ticker}'; data=fetch_safely(a.client_dir,symbol,day,'15')
             if data is None:
                 audit.append({'event_id':eid,'book_id':a.book_id,'ticker':ticker,'date':day,'entry':entry,
@@ -184,7 +192,7 @@ def main(argv=None):
                          meta.get('timezone')=='America/New_York' and meta.get('currency_code')=='USD')
             if not settings_ok:
                 result['classification']='feed_mismatch'; result['feed_mismatch']=True
-            if a.one_minute and result['classification']=='same_bar_ambiguous':
+            if a.one_minute and (a.freeze_tickers or result['classification']=='same_bar_ambiguous'):
                 fine=fetch_safely(a.client_dir,symbol,day,'1')
                 if fine is None:
                     result['classification']='provider_unavailable'
@@ -196,12 +204,13 @@ def main(argv=None):
                                  entry=entry,stop=stop,daily=daily,timeframe='1') if fine is not None else None
                 if refined:
                     result['one_minute_refinement']=refined
-                    if refined['classification'] in ('entry_before_stop','stop_before_entry','feed_mismatch','missing_bars'):
+                    if refined['classification'] in ('entry_before_stop','stop_after_entry','opening_fill','stop_before_entry','feed_mismatch','missing_bars'):
                         result['classification']=refined['classification']
                     data['one_minute']=fine
             stem=f'{ticker}_{day}'
             candle_path=out/f'{stem}.json'; candle_path.write_text(json.dumps(data,sort_keys=True,indent=2,default=str)+'\n')
-            audit.append({'event_id':eid,'book_id':a.book_id,'ticker':ticker,'date':day,'entry':entry,'limit':limit,'stop':stop,
+            audit.append({'event_id':eid,'book_id':a.book_id,'ticker':ticker,'date':day,
+                          **({'intraday_bundle_only': True} if a.freeze_tickers else {'entry':entry,'limit':limit,'stop':stop}),
                           **result,'requested_symbol':symbol,'timeframe':'15m','adjustment':'splits','session':'regular',
                           'candle_file':candle_path.name,'candle_fingerprint':digest(data), 'daily_source':daily.get('source') if daily else None})
     finally: conn.close()

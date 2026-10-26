@@ -80,6 +80,58 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
                                        days[-1].date(), frame)
         self.assertTrue(scheduled[0]["exit_next_open"])
 
+    def test_v2_trims_one_third_while_v1_keeps_ten_percent(self):
+        day = dt.date(2026, 10, 20)
+        position = {"entry_price": 10, "stop": 9, "shares": 100, "remaining_shares": 100,
+            "initial_shares": 100, "initial_r_per_share": 1, "initial_r": 1, "exit_next_open": False}
+        bar = {"open": 10, "high": 13, "low": 9.5, "close": 12}
+        v1 = manage_position(position, bar, day)
+        v2 = manage_position(position, bar, day, management_version="martin_bar_retest_management_v2")
+        self.assertEqual(v1[2]["shares"], 10)
+        self.assertEqual(v1[1]["remaining_shares"], 90)
+        self.assertEqual(v2[2]["shares"], 33)
+        self.assertEqual(v2[1]["remaining_shares"], 67)
+        self.assertEqual(v2[2]["trim_fraction"], "1/3")
+        self.assertEqual(v2[2]["management_version"], "martin_bar_retest_management_v2")
+
+    def test_v2_floor_rounding_skips_trim_below_three_shares(self):
+        day = dt.date(2026, 10, 20)
+        bar = {"open": 10, "high": 13, "low": 9.5, "close": 12}
+        for shares in (1, 2):
+            position = {"entry_price": 10, "stop": 9, "shares": shares, "remaining_shares": shares,
+                "initial_shares": shares, "initial_r_per_share": 1, "initial_r": 1, "exit_next_open": False}
+            outcome = manage_position(position, bar, day, management_version="martin_bar_retest_management_v2")
+            self.assertEqual(outcome[0], "trim_3r_skipped")
+            self.assertEqual(outcome[1]["remaining_shares"], shares)
+            self.assertEqual(outcome[2]["shares"], 0)
+            self.assertEqual(outcome[2]["trim_share_rounding"], "floor")
+
+    def test_v2_small_position_records_trim_skip_only_once(self):
+        day = dt.date(2026, 10, 20)
+        position = {"entry_price": 10, "stop": 9, "shares": 2, "remaining_shares": 2,
+            "initial_shares": 2, "initial_r_per_share": 1, "initial_r": 1, "exit_next_open": False}
+        bar = {"open": 10, "high": 13, "low": 9.5, "close": 12}
+        skipped = manage_position(position, bar, day, management_version="martin_bar_retest_management_v2")
+        self.assertEqual(skipped[0], "trim_3r_skipped")
+        next_day = manage_position(skipped[1], bar, day + dt.timedelta(days=1),
+                                   management_version="martin_bar_retest_management_v2")
+        self.assertIsNone(next_day)
+
+    def test_v2_execution_persists_trim_fraction_and_management_version(self):
+        day = dt.date(2026, 10, 20)
+        frame = pd.DataFrame([{"Open": 10, "High": 13, "Low": 9.5, "Close": 12, "Volume": 1000}],
+                             index=pd.to_datetime([day.isoformat()]))
+        repo = Repo([{"id": 4, "ticker": "ABC", "payload_json": {"entry_price": 10, "stop": 9,
+            "shares": 100, "remaining_shares": 100, "initial_shares": 100,
+            "initial_r_per_share": 1, "initial_r": 1, "exit_next_open": False}}])
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {"ABC": frame})
+        service.book_id = "martin_range_bar_retest_v2_trim"
+        service.execution_version = "martin_bar_retest_execution_v2"
+        service.run_session(day=day, run_id=22, candidates=[], source_on_time=False)
+        event = next(item for item in repo.events if item["event_type"] == "trim_3r")
+        self.assertEqual(event["payload"]["trim_fraction"], "1/3")
+        self.assertEqual(event["payload"]["management_version"], "martin_bar_retest_management_v2")
+
     def test_service_persists_ema9_schedule_after_successful_trim(self):
         days = pd.date_range("2026-10-14", periods=9, freq="B")
         frame = pd.DataFrame([{ "Open": 12, "High": 12, "Low": 11, "Close": 12, "Volume": 1000}
@@ -116,6 +168,67 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
         self.assertEqual(counts["missing_bars"], 1)
         self.assertEqual(repo.events[0]["event_type"], "order_blocked_missing_bar")
         self.assertEqual(repo.events[0]["candidate_status"], "blocked_data")
+
+    def test_v2_missing_frozen_bundle_uses_daily_fallback_and_marks_session(self):
+        day = dt.date(2026, 10, 20)
+        frame = pd.DataFrame([{"Open": 9.8, "High": 10.2, "Low": 9.5, "Close": 10.0, "Volume": 1000}],
+                             index=pd.to_datetime([day.isoformat()]))
+        repo = LifecycleRepo()
+        repo.pending = [{"id": 9, "run_id": 8, "ticker": "ABC", "payload_json": {
+            "max_entry": 10, "limit_price": 10, "stop": 9, "shares": 10}}]
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {"ABC": frame})
+        service.book_id = "martin_range_bar_retest_v2_fallback"
+        service.execution_version = "martin_bar_retest_execution_v2"
+        counts = service.run_session(day=day, run_id=10, candidates=[], source_on_time=False)
+        self.assertEqual(counts["filled"], 1)
+        self.assertEqual(counts["intraday_fallbacks"], 1)
+        fill = next(event for event in repo.events if event["event_type"] == "order_filled")
+        self.assertEqual(fill["payload"]["intraday_execution"]["evidence_status"], "frozen_intraday_bundle_missing")
+
+    def test_v2_recorded_provider_failure_uses_daily_fallback(self):
+        day = dt.date(2026, 10, 20)
+        frame = pd.DataFrame([{"Open": 9.8, "High": 10.2, "Low": 9.5, "Close": 10.0, "Volume": 1000}],
+                             index=pd.to_datetime([day.isoformat()]))
+        repo = LifecycleRepo()
+        repo.pending = [{"id": 9, "run_id": 8, "ticker": "ABC", "payload_json": {
+            "max_entry": 10, "limit_price": 10, "stop": 9, "shares": 10}}]
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {"ABC": frame})
+        service.book_id = "martin_range_bar_retest_v2_provider_failure"
+        service.execution_version = "martin_bar_retest_execution_v2"
+        counts = service.run_session(day=day, run_id=10, candidates=[], source_on_time=False,
+            frozen_intraday={"ABC": {"freeze_error": "provider_unavailable", "audit_fingerprint": "frozen-manifest"}})
+        fill = next(event for event in repo.events if event["event_type"] == "order_filled")
+        self.assertEqual(counts["intraday_fallbacks"], 1)
+        self.assertEqual(fill["payload"]["intraday_execution"]["evidence_status"], "provider_unavailable")
+        self.assertEqual(fill["payload"]["intraday_execution"]["audit_fingerprint"], "frozen-manifest")
+
+    def test_v2_frozen_fill_persists_hash_and_feed_provenance(self):
+        day = dt.date(2026, 10, 20)
+        frame = pd.DataFrame([{"Open": 12, "High": 13, "Low": 10.5, "Close": 12, "Volume": 200}],
+                             index=pd.to_datetime([day.isoformat()]))
+        candles = [{"time": 1, "open": 12, "high": 13, "low": 10.5, "close": 12, "volume": 100},
+                   {"time": 2, "open": 12, "high": 13, "low": 10.5, "close": 12, "volume": 100}]
+        data = {"query": {"symbol": "NASDAQ:ABC", "timeframe": "15", "session": "regular",
+                "adjustment": "splits", "timezone": "America/New_York"},
+            "metadata": {"full_name": "BATS:ABC", "subsession_id": "regular",
+                "timezone": "America/New_York", "currency_code": "USD"}, "candles": candles}
+        repo = LifecycleRepo()
+        repo.pending = [{"id": 9, "run_id": 8, "ticker": "ABC", "payload_json": {
+            "max_entry": 11, "limit_price": 11, "stop": 10, "shares": 10}}]
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {"ABC": frame})
+        service.book_id = "martin_range_bar_retest_v2_frozen"
+        service.execution_version = "martin_bar_retest_execution_v2"
+        counts = service.run_session(day=day, run_id=10, candidates=[], source_on_time=False,
+            frozen_intraday={"ABC": {"data": data, "requested_symbol": "NASDAQ:ABC", "expected_starts": [1, 2],
+                "audit_fingerprint": "audit-hash", "candle_fingerprint": "candle-hash", "source_date": day.isoformat()}})
+        self.assertEqual(counts["filled"], 1)
+        position = repo.positions[0]["payload_json"]
+        self.assertEqual(position["entry_price"], 11)
+        self.assertEqual(position["intraday_execution"]["source_date"], day.isoformat())
+        fill = next(event for event in repo.events if event["event_type"] == "order_filled")
+        self.assertEqual(fill["payload"]["intraday_execution"]["candle_fingerprint"], "candle-hash")
+        self.assertEqual(fill["payload"]["intraday_execution"]["evidence_status"], "alternate_feed_supported")
+        self.assertTrue(fill["payload"]["intraday_execution"]["alternate_feed_supported"])
 
     def test_leveraged_pending_order_is_cancelled_before_bar_lookup(self):
         repo = Repo()

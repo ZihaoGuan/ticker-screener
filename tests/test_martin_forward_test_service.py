@@ -97,13 +97,21 @@ class MartinBenchmarkComparisonTests(unittest.TestCase):
 
 
 class MartinExecutionBookContextTests(unittest.TestCase):
+    def test_pending_orders_can_be_limited_to_orders_available_before_session(self) -> None:
+        repository = MartinForwardTestRepository(database_url="postgresql://unused")
+        with patch.object(repository, "_rows", return_value=[]) as rows:
+            repository.pending_orders(strategy_id="martin_range_bar_retest_v2", before=dt.date(2026, 10, 23))
+        query, params = rows.call_args.args
+        self.assertIn("r.session_date < %s", query)
+        self.assertEqual(params, ("martin_range_bar_retest_v2", dt.date(2026, 10, 23)))
+
     def test_context_discovers_only_versioned_execution_book_and_attributes_closed_trade_by_category(self) -> None:
         repository = MartinForwardTestRepository(database_url="postgresql://unused")
         connection = MagicMock()
         execution_id = "martin_range_bar_retest_replay_20261019"
         classification_only_id = "martin_range_bar_retest_classification"
         execution_runs = [{"id": 42, "session_date": dt.date(2026, 10, 23), "summary_json": {
-            "execution_book_version": "martin_bar_retest_execution_v1", "cumulative_r": 1.5,
+            "execution_book_version": "martin_bar_retest_execution_v2", "cumulative_r": 1.5,
             "r_drawdown": 0.0, "realized_pnl": 750.0, "realized_r": 1.5, "unrealized_pnl": 0.0, "unrealized_r": 0.0}}]
         closed_trade = {"id": 5, "strategy_id": execution_id, "ticker": "ABC", "status": "closed",
                         "closed_on": dt.date(2026, 10, 23), "payload_json": {"event_category": "gap_mover",
@@ -116,7 +124,7 @@ class MartinExecutionBookContextTests(unittest.TestCase):
                 self.assertIn("position(%s in strategy_id)=1", sql)
                 self.assertIn("execution_book_version", sql)
                 self.assertNotIn("%", sql.replace("%s", ""))
-                self.assertEqual(params, ("martin_range_bar_retest_", "martin_bar_retest_execution_v1"))
+                self.assertEqual(params, ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2"))
                 # The classification-only prefixed book has no version marker and is omitted.
                 return [{"strategy_id": execution_id}]
             if "FROM martin_forward_runs" in sql and params:
@@ -135,7 +143,7 @@ class MartinExecutionBookContextTests(unittest.TestCase):
         self.assertIn(execution_id, result["books"])
         self.assertNotIn(classification_only_id, result["books"])
         book = result["books"][execution_id]
-        self.assertEqual(book["execution_book_version"], "martin_bar_retest_execution_v1")
+        self.assertEqual(book["execution_book_version"], "martin_bar_retest_execution_v2")
         self.assertEqual(book["attribution"]["discovery_category"]["gap_mover"]["count"], 1)
         self.assertEqual(book["attribution"]["discovery_category"]["gap_mover"]["realized_pnl"], 750.0)
 
