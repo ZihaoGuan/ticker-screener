@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay saved Martin Bar Watchlist scans across the Oct 19-23, 2026 XNYS sessions."""
+"""Replay saved Martin Bar Watchlist scans across a completed XNYS date range."""
 from __future__ import annotations
 
 import argparse
@@ -15,17 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-FROM_DATE = dt.date(2026, 10, 19)
-TO_DATE = dt.date(2026, 10, 23)
 POLICY_ID = "martin_bar_retest_v1"
 SOURCE_ID = "martin_bar_watchlist_v1"
-EXPECTED_SOURCES = {
-    dt.date(2026, 10, 19): (7110, 45),
-    dt.date(2026, 10, 20): (7111, 79),
-    dt.date(2026, 10, 21): (7112, 85),
-    dt.date(2026, 10, 22): (7113, 137),
-    dt.date(2026, 10, 23): (7107, 96),
-}
 
 
 def xnys_sessions(start: dt.date, end: dt.date) -> list[dt.date]:
@@ -49,26 +40,22 @@ def publication_timing(day: dt.date, published_at: Any) -> tuple[bool, str]:
 def load_range_sources(history: Any, sessions: list[dt.date]) -> dict[dt.date, dict[str, Any]]:
     from scripts.run_martin_bar_retest import _load_source
 
-    expected_sessions = list(EXPECTED_SOURCES)
-    if sessions[:len(expected_sessions)] != expected_sessions:
-        raise ValueError("This replay requires all five XNYS sessions from 2026-10-19 through 2026-10-23.")
     sources = {}
     for day in sessions:
+        runs = history.list_runs(strategy_id=SOURCE_ID, start_date=day, end_date=day, limit=100)
+        matching = [run for run in runs if str(run.get("run_date") or "")[:10] == day.isoformat()]
+        if len(matching) > 1:
+            raise ValueError(f"Multiple persisted {SOURCE_ID} source runs exist for {day}; source selection is ambiguous.")
+        if not matching:
+            raise ValueError(f"Missing persisted source run for {day}.")
         source = _load_source(history, day)
-        expected = EXPECTED_SOURCES.get(day)
-        if source is None and expected:
-            raise ValueError(f"Missing persisted source run for {day} (expected run {expected[0]}).")
         if source is None:
-            continue  # Execution-only completed sessions can settle orders without a new scan.
-        if expected:
-            expected_id, expected_hits = expected
-            if int(source.get("source_run_id") or 0) != expected_id:
-                raise ValueError(f"Wrong persisted source run for {day}: expected {expected_id}, got {source.get('source_run_id')}.")
-            if int(source.get("hit_count") or 0) != expected_hits or len(source.get("hits") or []) != expected_hits:
-                raise ValueError(f"Source run {expected_id} hit count/provenance mismatch for {day}.")
+            raise ValueError(f"Missing persisted source run for {day}.")
+        if int(source.get("source_run_id") or 0) != int(matching[0].get("id") or 0):
+            raise ValueError(f"Loaded source run for {day} does not match the listed persisted run.")
         if source.get("strategy_id") != SOURCE_ID or source.get("rules_version") != SOURCE_ID:
             raise ValueError(f"Source run {source.get('source_run_id')} has invalid strategy or rules provenance.")
-        if int(source.get("hit_count") or 0) != len(source.get("hits") or []):
+        if source.get("hit_count") is None or int(source["hit_count"]) != len(source.get("hits") or []):
             raise ValueError(f"Source run {source.get('source_run_id')} hit count does not match loaded hits.")
         if not source.get("created_at") or not source.get("source_fingerprint"):
             raise ValueError(f"Source run {source.get('source_run_id')} is missing publication or fingerprint provenance.")
@@ -364,8 +351,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--simulate-backdated-buys", action="store_true",
         help="Allow confirmed signals from scans saved after next-session open to schedule hypothetical historical fills.")
     args = parser.parse_args(argv)
-    if args.from_date != FROM_DATE or args.to_date < TO_DATE:
-        parser.error("this replay requires --from-date 2026-10-19 and --to-date on or after 2026-10-23")
+    if args.to_date < args.from_date:
+        parser.error("--to-date must be on or after --from-date")
     if not args.book_id.startswith("martin_range_bar_retest_") or args.book_id == POLICY_ID:
         parser.error("--book-id must start with martin_range_bar_retest_ and be separate from the policy ID")
 

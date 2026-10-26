@@ -14,6 +14,8 @@ from scripts import replay_martin_bar_retest_range as replay
 from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
 
+SOURCE_DAYS = [dt.date(2026, 10, day) for day in range(19, 24)]
+
 
 class FakeRepo:
     def __init__(self):
@@ -309,7 +311,7 @@ class MartinBarRetestRangeTests(unittest.TestCase):
         published_at = "2026-10-25T00:00:00Z"
         with patch.dict(sys.modules, {"exchange_calendars": fake_exchange_calendars}):
             results = [replay.publication_timing(day, published_at)
-                       for day in replay.EXPECTED_SOURCES]
+                       for day in SOURCE_DAYS]
 
         self.assertEqual([retrospective for retrospective, _ in results],
                          [True, True, True, True, False])
@@ -349,29 +351,69 @@ class MartinBarRetestRangeTests(unittest.TestCase):
             MartinBarRetestService(repo).run_session(as_of_date=day, source_record=source,
                                                       policy_id="arbitrary_policy", book_id="range")
 
-    def test_saved_sources_require_exact_ids_and_classify_publication_timing(self):
-        dates = list(replay.EXPECTED_SOURCES)
-        sources = {day: {"source_run_id": rid, "hit_count": count, "hits": [{}] * count,
+    def test_saved_sources_require_provenance_and_classify_publication_timing(self):
+        dates = SOURCE_DAYS
+        sources = {day: {"source_run_id": index + 1, "hit_count": index, "hits": [{}] * index,
                          "strategy_id": replay.SOURCE_ID, "rules_version": replay.SOURCE_ID,
-                         "created_at": "2026-10-25T00:00:00Z", "source_fingerprint": f"fp-{rid}"}
-                   for day, (rid, count) in replay.EXPECTED_SOURCES.items()}
+                         "created_at": "2026-10-25T00:00:00Z", "source_fingerprint": f"fp-{index + 1}"}
+                   for index, day in enumerate(dates)}
+        class History:
+            def list_runs(self, **kwargs):
+                day = kwargs["start_date"]
+                source = sources.get(day)
+                return ([{"run_date": day.isoformat(), "id": source["source_run_id"]}] if source else [])
         with patch("scripts.run_martin_bar_retest._load_source", lambda _history, day: sources.get(day)), \
                 patch.object(replay, "publication_timing", side_effect=lambda day, _published:
                              (day != dates[-1], "published_after_next_open" if day != dates[-1] else "saved_before_next_open")):
-            result = replay.load_range_sources(object(), dates)
+            result = replay.load_range_sources(History(), dates)
             self.assertEqual(list(result), dates)
             self.assertFalse(result[dates[-1]]["replay_provenance"]["retrospective"])
             self.assertEqual(result[dates[-1]]["replay_provenance"]["source_mode"], "saved_before_next_open")
             del sources[dates[2]]
             with self.assertRaisesRegex(ValueError, "Missing persisted source"):
-                replay.load_range_sources(object(), dates)
+                replay.load_range_sources(History(), dates)
+
+    def test_general_historical_range_requires_one_persisted_source_per_session(self):
+        dates = [dt.date(2026, 9, 23) + dt.timedelta(days=index) for index in range(31)
+                 if (dt.date(2026, 9, 23) + dt.timedelta(days=index)).weekday() < 5]
+        source_rows = {day: {"source_run_id": index + 100, "hit_count": 0, "hits": [],
+                    "strategy_id": replay.SOURCE_ID, "rules_version": replay.SOURCE_ID,
+                    "created_at": "2026-10-25T00:00:00Z", "source_fingerprint": f"fp-{index}"}
+                       for index, day in enumerate(dates)}
+
+        class History:
+            duplicate = False
+            def list_runs(self, **kwargs):
+                day = kwargs["start_date"]
+                source = source_rows.get(day)
+                rows = ([{"run_date": day.isoformat(), "id": source["source_run_id"]}] if source else [])
+                return rows + rows if self.duplicate and rows else rows
+
+        history = History()
+        with patch.object(replay, "xnys_sessions", side_effect=lambda start, end: dates
+                          if (start, end) == (dt.date(2026, 9, 23), dt.date(2026, 10, 23)) else []), \
+                patch("scripts.run_martin_bar_retest._load_source", lambda _history, day: source_rows.get(day)), \
+                patch.object(replay, "publication_timing", return_value=(True, "published_after_next_open")):
+            sessions = replay.xnys_sessions(dt.date(2026, 9, 23), dt.date(2026, 10, 23))
+            self.assertEqual(len(sessions), 23)
+            loaded = replay.load_range_sources(history, sessions)
+            self.assertEqual(list(loaded), dates)
+            del source_rows[dates[4]]
+            with self.assertRaisesRegex(ValueError, "Missing persisted source"):
+                replay.load_range_sources(history, sessions)
+            source_rows[dates[4]] = {"source_run_id": 104, "hit_count": 0, "hits": [],
+                "strategy_id": replay.SOURCE_ID, "rules_version": replay.SOURCE_ID,
+                "created_at": "2026-10-25T00:00:00Z", "source_fingerprint": "fp-4"}
+            history.duplicate = True
+            with self.assertRaisesRegex(ValueError, "ambiguous"):
+                replay.load_range_sources(history, sessions)
 
     def test_actual_service_carries_watch_through_zero_hit_session(self):
-        days = list(replay.EXPECTED_SOURCES)
+        days = SOURCE_DAYS
         repo = FakeRepo()
         sessions_to_day = {day: days[:index + 1] for index, day in enumerate(days)}
         sources = {day: {"target_trading_date": day.isoformat(), "rules_version": replay.SOURCE_ID,
-                         "source_run_id": replay.EXPECTED_SOURCES[day][0],
+                         "source_run_id": index + 1,
                          "hits": ([{"ticker": "ABC", "discovery_categories": ["leader_30_session"]}]
                                   if index == 0 else [])}
                    for index, day in enumerate(days)}
@@ -388,8 +430,8 @@ class MartinBarRetestRangeTests(unittest.TestCase):
         self.assertTrue(all(record["strategy_id"] == "martin_range_bar_retest_carry" for record in repo.saved))
 
     def test_dry_run_rolls_back_and_failure_rolls_back_all(self):
-        days = list(replay.EXPECTED_SOURCES)
-        sources = {day: {"source_run_id": replay.EXPECTED_SOURCES[day][0]} for day in days}
+        days = SOURCE_DAYS
+        sources = {day: {"source_run_id": index + 1} for index, day in enumerate(days)}
         connection = Connection()
         with patch.object(replay, "check_empty_book", lambda *_: None), \
                 patch.object(replay, "run_range", lambda *_a, **_k: [{"date": d.isoformat()} for d in days]):
@@ -468,7 +510,7 @@ class MartinBarRetestRangeTests(unittest.TestCase):
             replay.check_empty_book(connection, "martin_range_bar_retest_test")
         self.assertEqual(connection.tables, ["martin_forward_runs", "martin_forward_positions"])
         with self.assertRaises(SystemExit):
-            replay.main(["--from-date", "2026-10-20", "--to-date", "2026-10-23", "--book-id", "martin_range_bar_retest_x"])
+            replay.main(["--from-date", "2026-10-24", "--to-date", "2026-10-23", "--book-id", "martin_range_bar_retest_x"])
         with self.assertRaises(SystemExit):
             replay.main(["--from-date", "2026-10-19", "--to-date", "2026-10-23", "--book-id", "martin_bar_retest_v1"])
 
