@@ -7387,6 +7387,7 @@ dialog.modal-backdrop:not([open]) {
 .martin-chart path.sector-series { stroke: #d99b56; } .martin-chart path.account-series { stroke: var(--accent); } .martin-chart path.daily-top5-series { stroke: #82b9e8; }
 .martin-comparison-chart .sector-legend::before, .martin-comparison-chart .account-legend::before, .martin-comparison-chart .daily-top5-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #d99b56; content: ""; }
 .martin-comparison-chart .account-legend::before { background: var(--accent); }
+.martin-comparison-chart .provisional-account-point { fill: #f59e0b; stroke: #fff; stroke-width: .35; }
 .martin-comparison-chart .daily-top5-legend::before { background: #82b9e8; }
 .martin-chart path.rs-expanded-series { stroke: #d1a4ee; stroke-dasharray: 5 3; }
 .martin-comparison-chart .rs-expanded-legend::before { display: inline-block; width: .65rem; height: .15rem; margin: 0 .35rem .15rem 0; background: #d1a4ee; content: ""; }

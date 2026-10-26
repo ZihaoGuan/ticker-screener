@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 from src.webapp.services.martin_forward_test_service import DAILY_TOP5_STRATEGY_ID, MartinForwardTestService, SECTOR_STRATEGY_ID, classify_candidate, order_outcome, position_exit, select_sector_candidates
-from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository, _benchmark_comparison, _closed_trade_metrics, _performance_context
+from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository, _benchmark_comparison, _closed_trade_metrics, _performance_context, _provisional_fallback_dates
 
 
 class MartinBenchmarkComparisonTests(unittest.TestCase):
@@ -94,6 +94,53 @@ class MartinBenchmarkComparisonTests(unittest.TestCase):
         self.assertIsNone(result["series"]["Account"][1]["value"])
         self.assertIsNone(result["series"]["SPY"][1]["value"])
         self.assertEqual(result["missing_dates"], ["2026-10-02"])
+
+    def test_provisional_fallback_date_is_in_primary_and_excluded_from_strict_series(self) -> None:
+        history = [{"date": day, "account_equity": equity} for day, equity in (
+            ("2026-10-01", 100_000), ("2026-10-02", 101_000), ("2026-10-05", 103_000))]
+        prices = [{"ticker": ticker, "trade_date": day, "close": close} for ticker, day, close in (
+            ("SPY", "2026-10-01", 10), ("QQQ", "2026-10-01", 20),
+            ("SPY", "2026-10-02", 11), ("QQQ", "2026-10-02", 21),
+            ("SPY", "2026-10-05", 12), ("QQQ", "2026-10-05", 22))]
+        result = _benchmark_comparison(history, prices, provisional_dates={"2026-10-02"})
+        self.assertEqual(result["provisional_dates"], ["2026-10-02"])
+        self.assertEqual(result["missing_dates"], [])
+        self.assertEqual(result["series"]["Account"][1]["value"], 101)
+        strict = result["strict_comparison"]
+        self.assertEqual(strict["baseline_date"], "2026-10-01")
+        self.assertNotIn("2026-10-02", [point["date"] for point in strict["series"]["Account"]])
+        self.assertEqual(strict["comparison_date"], "2026-10-05")
+
+    def test_provisional_date_still_missing_when_account_or_etf_evidence_is_absent(self) -> None:
+        history = [{"date": "2026-10-01", "account_equity": 100_000},
+                   {"date": "2026-10-02", "account_equity": 101_000}]
+        prices = [{"ticker": ticker, "trade_date": day, "close": 10} for ticker, day in (
+            ("SPY", "2026-10-01"), ("QQQ", "2026-10-01"), ("SPY", "2026-10-02"))]
+        result = _benchmark_comparison(history, prices, provisional_dates={"2026-10-02"})
+        self.assertEqual(result["provisional_dates"], [])
+        self.assertEqual(result["missing_dates"], ["2026-10-02"])
+
+    def test_provisional_detection_reads_persisted_execution_summary_shape(self) -> None:
+        runs = {
+            "2026-10-01": {"summary_json": {"partial": True, "intraday_fallback_count": 2,
+                "execution_actions": {"intraday_fallbacks": 2, "missing_bars": 0}}},
+            "2026-10-02": {"summary_json": {"partial": True, "intraday_fallback_count": 1,
+                "execution_actions": {"intraday_fallbacks": 1, "missing_bars": 1}}},
+        }
+        self.assertEqual(_provisional_fallback_dates(runs, "martin_bar_retest_execution_v3"), {"2026-10-01"})
+        self.assertEqual(_provisional_fallback_dates(runs, "martin_bar_retest_execution_v2"), set())
+
+    def test_strict_comparison_rebases_after_provisional_baseline(self) -> None:
+        history = [{"date": day, "account_equity": 100_000 + index * 1_000}
+                   for index, day in enumerate(("2026-10-01", "2026-10-02", "2026-10-05"))]
+        prices = [{"ticker": ticker, "trade_date": day, "close": close} for ticker, day, close in (
+            ("SPY", "2026-10-01", 10), ("QQQ", "2026-10-01", 20),
+            ("SPY", "2026-10-02", 11), ("QQQ", "2026-10-02", 21),
+            ("SPY", "2026-10-05", 12), ("QQQ", "2026-10-05", 22))]
+        result = _benchmark_comparison(history, prices, provisional_dates={"2026-10-01"})
+        strict = result["strict_comparison"]
+        self.assertEqual(strict["baseline_date"], "2026-10-02")
+        self.assertNotIn("2026-10-01", [point["date"] for point in strict["series"]["Account"]])
 
 
 class MartinExecutionBookContextTests(unittest.TestCase):

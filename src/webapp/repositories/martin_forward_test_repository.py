@@ -418,6 +418,10 @@ class MartinForwardTestRepository:
                     for run in reversed(account.get("runs", [])):
                         latest_run_by_date[str(run["session_date"])] = run
                     partial_dates = {day for day, run in latest_run_by_date.items() if (run.get("summary_json") or {}).get("partial")}
+                    # Intraday fallback is provisional evidence, but it does not
+                    # invalidate an otherwise persisted daily equity mark.
+                    provisional_dates = _provisional_fallback_dates(
+                        latest_run_by_date, account.get("execution_book_version"))
                     try:
                         with connection.transaction():
                             price_rows = self._fetch(cursor, """SELECT ticker,trade_date,close FROM daily_bars
@@ -426,7 +430,9 @@ class MartinForwardTestRepository:
                         if account.get("history_source") != "stored_session_marks":
                             account["benchmark_comparison"] = {"status": "unavailable", "reason": "Stored daily account equity marks are unavailable.", "basis": "price_return_close"}
                         else:
-                            account["benchmark_comparison"] = _benchmark_comparison(account["history"], price_rows, partial_dates)
+                            account["benchmark_comparison"] = _benchmark_comparison(
+                                account["history"], price_rows, partial_dates - provisional_dates,
+                                provisional_dates=provisional_dates)
                     except Exception:
                         account["benchmark_comparison"] = {"status": "unavailable", "reason": "Stored benchmark bars could not be read from the database.", "basis": "price_return_close"}
         return {"configured": True, "books": books, "comparison": _comparison_series(books)}
@@ -594,7 +600,10 @@ def _comparison_series(books: dict[str, dict[str, Any]]) -> dict[str, Any]:
 
 
 def _benchmark_comparison(history: list[dict[str, Any]], price_rows: list[dict[str, Any]],
-                          partial_dates: set[str] | None = None) -> dict[str, Any]:
+                          partial_dates: set[str] | None = None,
+                          provisional_dates: set[str] | None = None,
+                          include_strict: bool = True,
+                          excluded_dates: set[str] | None = None) -> dict[str, Any]:
     """Align account equity and stored ETF closes without filling missing sessions."""
     import math
 
@@ -614,9 +623,14 @@ def _benchmark_comparison(history: list[dict[str, Any]], price_rows: list[dict[s
     account_dates = sorted(account_by_date)
     if not account_dates:
         return {"status": "unavailable", "reason": "Account history is unavailable.", "basis": "price_return_close"}
-    baseline = account_dates[0]
-    dates = sorted(set(account_dates) | {day for day in by_date if baseline <= day <= account_dates[-1]})
+    excluded = excluded_dates or set()
+    eligible_account_dates = [day for day in account_dates if day not in excluded]
+    if not eligible_account_dates:
+        return {"status": "unavailable", "reason": "No strict account sessions remain after excluding provisional dates.", "basis": "price_return_close"}
+    baseline = eligible_account_dates[0]
+    dates = sorted((set(account_dates) | {day for day in by_date if baseline <= day <= account_dates[-1]}) - excluded)
     partial = partial_dates or set()
+    provisional = provisional_dates or set()
     baseline_equity = account_by_date.get(baseline)
     baseline_prices = by_date.get(baseline, {})
     missing = [ticker for ticker in ("SPY", "QQQ") if ticker not in baseline_prices]
@@ -647,7 +661,33 @@ def _benchmark_comparison(history: list[dict[str, Any]], price_rows: list[dict[s
             peaks[name] = max(peaks[name], rebased)
             series[name].append({"date": day, "value": rebased, "return_pct": rebased - 100, "drawdown_pct": (rebased / peaks[name] - 1) * 100})
     common_dates = [point["date"] for point in series["Account"] if point["value"] is not None]
-    return {"status": "available", "basis": "price_return_close", "baseline_date": baseline,
+    result = {"status": "available", "basis": "price_return_close", "baseline_date": baseline,
             "account_history_start": account_dates[0], "account_history_end": account_dates[-1], "included_sessions": len(dates) - len(missing_dates),
             "expected_sessions": len(dates), "missing_dates": missing_dates,
+            "provisional_dates": sorted(day for day in provisional if day in dates and day not in missing_dates),
             "comparison_date": common_dates[-1] if common_dates else baseline, "series": series}
+    if include_strict and provisional:
+        strict_history = [point for point in history if str(point.get("date") or "") not in provisional]
+        result["strict_comparison"] = _benchmark_comparison(
+            strict_history, price_rows, partial - provisional, include_strict=False,
+            excluded_dates=provisional)
+    return result
+
+
+def _provisional_fallback_dates(latest_runs: dict[str, dict[str, Any]], execution_book_version: str | None) -> set[str]:
+    """Find v3 runs partial only because execution used daily fallback."""
+    if execution_book_version != "martin_bar_retest_execution_v3":
+        return set()
+    provisional: set[str] = set()
+    for day, run in latest_runs.items():
+        summary = run.get("summary_json") or {}
+        actions = summary.get("execution_actions") or {}
+        fallback_count = summary.get("intraday_fallback_count", actions.get("intraday_fallbacks", 0))
+        missing_bars = actions.get("missing_bars", summary.get("missing_bars", 0))
+        try:
+            fallback_count, missing_bars = int(fallback_count or 0), int(missing_bars or 0)
+        except (TypeError, ValueError):
+            continue
+        if summary.get("partial") and missing_bars == 0 and fallback_count > 0:
+            provisional.add(day)
+    return provisional
