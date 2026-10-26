@@ -49,7 +49,7 @@ def aggregate(candles):
             'volume': sum(x.get('volume', 0) for x in candles)}
 
 
-def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, timeframe='15'):
+def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, timeframe='15', execution_version='martin_bar_retest_execution_v2'):
     actual = (metadata or {}).get('full_name') or (metadata or {}).get('pro_name')
     aggregate_bar = aggregate(candles)
     if daily is None:
@@ -63,6 +63,7 @@ def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, ti
         # Intraday volume and daily volume can differ between feeds. Price disagreement is decisive.
         mismatch |= any(abs(float(aggregate_bar[k])-float(daily[k])) > max(0.02, abs(float(daily[k]))*0.0005)
                         for k in ('open','high','low','close'))
+    feed_conflict = bool(mismatch)
     by_time = {int(x['time']): x for x in candles}
     complete = bool(starts) and len(candles) == len(starts) and set(by_time) == set(starts)
     if mismatch and actual and actual.startswith('BATS:') and daily and complete and aggregate_bar:
@@ -72,7 +73,7 @@ def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, ti
         range_ok = (aggregate_bar['high'] <= float(daily['high']) + tol and
                     aggregate_bar['low'] >= float(daily['low']) - tol)
         open_fill_same = (float(aggregate_bar['open']) <= entry) == (float(daily['open']) <= entry)
-        if range_ok and open_fill_same:
+        if range_ok and (open_fill_same or execution_version == 'martin_bar_retest_execution_v3'):
             mismatch = False
     if mismatch: status = 'feed_mismatch'
     elif not complete: status = 'missing_bars'
@@ -86,21 +87,24 @@ def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, ti
             status = 'no_fill'
     return {'classification':status, 'actual_feed':actual, 'requested_feed':requested_symbol,
             'intraday_ohlc':aggregate_bar, 'daily_ohlc':daily, 'expected_bar_count':len(starts),
-            'received_bar_count':len(candles), 'feed_mismatch':bool(mismatch)}
+            'received_bar_count':len(candles), 'feed_mismatch':bool(mismatch),
+            'feed_conflict':feed_conflict,
+            **({'feed_conflict_note':'Complete regular-session BATS lower-timeframe bars inside the daily envelope determine limit touch and stop order.'}
+               if feed_conflict and not mismatch and execution_version == 'martin_bar_retest_execution_v3' else {})}
 
 
-def fetch(client_dir, symbol, day, tf):
-    p = subprocess.run(['node', str(ROOT/'scripts/fetch_tradingview_intraday.mjs'), client_dir, symbol, day, tf],
+def fetch(client_dir, symbol, day, tf, *, resolve_symbols=False):
+    command = ['node', str(ROOT/'scripts/fetch_tradingview_intraday.mjs'), client_dir, symbol, day, tf,
+               'resolve' if resolve_symbols else 'legacy']
+    p = subprocess.run(command,
                        text=True, capture_output=True, check=False)
-    if p.returncode: raise RuntimeError('provider_fetch_failed')
     data = json.loads(p.stdout)
-    if data.get('error_code'): raise RuntimeError(data['error_code'])
     return data
 
 
-def fetch_safely(client_dir, symbol, day, tf):
+def fetch_safely(client_dir, symbol, day, tf, *, resolve_symbols=False):
     try:
-        return fetch(client_dir, symbol, day, tf)
+        return fetch(client_dir, symbol, day, tf, resolve_symbols=resolve_symbols)
     except Exception:
         # Provider and process errors may contain account or response details.
         return None
@@ -145,6 +149,7 @@ def main(argv=None):
     ap.add_argument('--client-dir', required=True); ap.add_argument('--output-dir', required=True)
     ap.add_argument('--exchange', default='NASDAQ', help='requested TradingView exchange prefix')
     ap.add_argument('--one-minute', action='store_true')
+    ap.add_argument('--execution-version', choices=('v2','v3'), default='v2')
     ap.add_argument('--freeze-tickers', help='Comma-separated symbols to freeze for every XNYS session in range; creates replay bundles without requiring prior fills.')
     a=ap.parse_args(argv)
     if not a.book_id.startswith('martin_range_bar_retest_'): ap.error('--book-id must start with martin_range_bar_retest_')
@@ -175,17 +180,26 @@ def main(argv=None):
                 stop=float(position.get('stop') or position.get('initial_stop'))
                 limit=float(position.get('limit_price') or position.get('max_entry') or entry)
                 if abs(entry-limit) > 0.011: continue
-            symbol=f'{a.exchange}:{ticker}'; data=fetch_safely(a.client_dir,symbol,day,'15')
-            if data is None:
+            symbol=f'{a.exchange}:{ticker}'; resolve_symbols=a.execution_version=='v3'
+            data=fetch_safely(a.client_dir,symbol,day,'15',resolve_symbols=resolve_symbols)
+            if data is None or data.get('error_code'):
+                resolution = (data or {}).get('symbol_resolution') or {'requested_symbol':symbol,
+                    'resolved_symbol':(data or {}).get('resolved_symbol'),
+                    'error_code':(data or {}).get('error_code') or 'provider_fetch_failed'}
                 audit.append({'event_id':eid,'book_id':a.book_id,'ticker':ticker,'date':day,'entry':entry,
                               'limit':limit,'stop':stop,'classification':'provider_unavailable',
-                              'requested_symbol':symbol,'timeframe':'15m','adjustment':'splits','session':'regular',
+                              'requested_symbol':symbol,'resolved_symbol':(data or {}).get('resolved_symbol'),
+                              'symbol_resolution':resolution,
+                              'provider_error_code':(data or {}).get('error_code') or 'provider_fetch_failed',
+                              'timeframe':'15m','adjustment':'splits','session':'regular',
                               'candle_file':None,'candle_fingerprint':None,
                               'daily_source':(load_daily(conn,ticker,day) or {}).get('source')})
                 continue
             candles=data.get('candles') or []; daily=load_daily(conn,ticker,day)
-            result=classify(candles=candles,metadata=data.get('metadata'),requested_symbol=symbol,day=day,
-                            entry=entry,stop=stop,daily=daily)
+            resolved_symbol=data.get('resolved_symbol') or symbol
+            result=classify(candles=candles,metadata=data.get('metadata'),requested_symbol=resolved_symbol,day=day,
+                            entry=entry,stop=stop,daily=daily,
+                            execution_version=f'martin_bar_retest_execution_{a.execution_version}')
             query=data.get('query') or {}; meta=data.get('metadata') or {}
             settings_ok=(query.get('session')=='regular' and query.get('adjustment')=='splits' and
                          query.get('timezone')=='America/New_York' and meta.get('subsession_id')=='regular' and
@@ -193,15 +207,16 @@ def main(argv=None):
             if not settings_ok:
                 result['classification']='feed_mismatch'; result['feed_mismatch']=True
             if a.one_minute and (a.freeze_tickers or result['classification']=='same_bar_ambiguous'):
-                fine=fetch_safely(a.client_dir,symbol,day,'1')
+                fine=fetch_safely(a.client_dir,symbol,day,'1',resolve_symbols=resolve_symbols)
                 if fine is None:
                     result['classification']='provider_unavailable'
                     result['one_minute_refinement']={'classification':'provider_unavailable'}
                     fine_candles=[]
                 else:
                     fine_candles=fine.get('candles') or []
-                refined=classify(candles=fine_candles,metadata=fine.get('metadata'),requested_symbol=symbol,day=day,
-                                 entry=entry,stop=stop,daily=daily,timeframe='1') if fine is not None else None
+                refined=classify(candles=fine_candles,metadata=fine.get('metadata'),requested_symbol=fine.get('resolved_symbol') or resolved_symbol,day=day,
+                                 entry=entry,stop=stop,daily=daily,timeframe='1',
+                                 execution_version=f'martin_bar_retest_execution_{a.execution_version}') if fine is not None else None
                 if refined:
                     result['one_minute_refinement']=refined
                     if refined['classification'] in ('entry_before_stop','stop_after_entry','opening_fill','stop_before_entry','feed_mismatch','missing_bars'):
@@ -211,12 +226,15 @@ def main(argv=None):
             candle_path=out/f'{stem}.json'; candle_path.write_text(json.dumps(data,sort_keys=True,indent=2,default=str)+'\n')
             audit.append({'event_id':eid,'book_id':a.book_id,'ticker':ticker,'date':day,
                           **({'intraday_bundle_only': True} if a.freeze_tickers else {'entry':entry,'limit':limit,'stop':stop}),
-                          **result,'requested_symbol':symbol,'timeframe':'15m','adjustment':'splits','session':'regular',
+                          **result,'requested_symbol':symbol,'resolved_symbol':data.get('resolved_symbol'),
+                          'symbol_resolution':data.get('symbol_resolution'),
+                          'timeframe':'15m','adjustment':'splits','session':'regular',
                           'candle_file':candle_path.name,'candle_fingerprint':digest(data), 'daily_source':daily.get('source') if daily else None})
     finally: conn.close()
     document={'schema':'martin_intraday_execution_audit_v1','created_at':dt.datetime.now(dt.timezone.utc).isoformat(),
               'read_only':True,'book_id':a.book_id,'from_date':start.isoformat(),'to_date':end.isoformat(),
-              'provider':'TradingView','records':audit}
+              'provider':'TradingView','execution_version':f'martin_bar_retest_execution_{a.execution_version}',
+              'records':audit}
     document['fingerprint']=digest(document)
     path=out/'audit.json'; path.write_text(json.dumps(document,sort_keys=True,indent=2,default=str)+'\n')
     print(json.dumps({'audit_file':str(path),'records':len(audit),'fingerprint':document['fingerprint']}))

@@ -42,25 +42,53 @@ def evaluate_sequence(bars: list[dict[str, Any]], *, entry: float, stop: float) 
 
 
 def evaluate_frozen_order(bundle: dict[str, Any], *, day: dt.date, requested_symbol: str,
-                          entry: float, stop: float, daily: dict[str, float]) -> dict[str, Any]:
+                          entry: float, stop: float, daily: dict[str, float],
+                          execution_version: str = "martin_bar_retest_execution_v2") -> dict[str, Any]:
+    if not isinstance(bundle, dict):
+        return {"status": "blocked_data", "reason": "frozen_intraday_invalid", "evidence_status": "frozen_intraday_invalid"}
     data = bundle.get("data") if isinstance(bundle.get("data"), dict) else bundle
+    if not isinstance(data, dict):
+        return {"status": "blocked_data", "reason": "frozen_intraday_invalid", "evidence_status": "frozen_intraday_invalid"}
     candles = data.get("candles") or []
-    metadata = data.get("metadata") or {}
-    query = data.get("query") or {}
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    query = data.get("query") if isinstance(data.get("query"), dict) else {}
+    original_requested_symbol = data.get("requested_symbol") or bundle.get("original_requested_symbol") or requested_symbol
+    requested_symbol = bundle.get("resolved_symbol") or data.get("resolved_symbol") or requested_symbol
     actual = metadata.get("full_name") or metadata.get("pro_name")
+    invalid_data = False
     starts = bundle.get("expected_starts")
-    if starts is None:
-        from scripts.audit_martin_intraday_execution import session_starts
-        starts = session_starts(day.isoformat(), int(bundle.get("interval_minutes") or 15))
-    starts = [int(value) for value in starts]
-    by_time = {int(row["time"]): row for row in candles}
+    try:
+        if starts is None:
+            from scripts.audit_martin_intraday_execution import session_starts
+            starts = session_starts(day.isoformat(), int(bundle.get("interval_minutes") or 15))
+        starts = [int(value) for value in starts]
+    except (TypeError, ValueError, OverflowError):
+        starts, invalid_data = [], True
+    by_time = {}
+    try:
+        for row in candles:
+            values = [float(row[key]) for key in ("open", "high", "low", "close", "volume")]
+            if (any(not math.isfinite(value) for value in values) or min(values[:4]) <= 0 or values[4] < 0 or
+                    not values[2] <= min(values[0], values[3]) <= max(values[0], values[3]) <= values[1]):
+                invalid_data = True
+                break
+            timestamp = int(row["time"])
+            if timestamp in by_time:
+                invalid_data = True
+                break
+            by_time[timestamp] = row
+    except (KeyError, TypeError, ValueError, OverflowError):
+        invalid_data = True
+    if invalid_data:
+        by_time = {}
     bars = [by_time[t] for t in starts if t in by_time]
     complete = bool(starts) and len(bars) == len(starts) and len(candles) == len(starts) and set(by_time) == set(starts)
-    aggregate = (None if not candles else {"open": candles[0]["open"],
-        "high": max(row["high"] for row in candles), "low": min(row["low"] for row in candles),
-        "close": candles[-1]["close"]})
+    aggregate = (None if not candles or invalid_data else {"open": float(candles[0]["open"]),
+        "high": max(float(row["high"]) for row in candles), "low": min(float(row["low"]) for row in candles),
+        "close": float(candles[-1]["close"])})
     mismatch = actual != requested_symbol
     alternate_feed_supported = False
+    feed_conflict = bool(mismatch)
     if not mismatch and aggregate:
         tolerance = max(.02, abs(float(daily["close"])) * .0005)
         mismatch = any(abs(float(aggregate[key]) - float(daily[key])) > tolerance
@@ -69,7 +97,8 @@ def evaluate_frozen_order(bundle: dict[str, Any], *, day: dt.date, requested_sym
         tolerance = max(.02, abs(float(daily["close"])) * .0005)
         range_ok = aggregate["high"] <= float(daily["high"]) + tolerance and aggregate["low"] >= float(daily["low"]) - tolerance
         open_fill_same = (float(aggregate["open"]) <= entry) == (float(daily["open"]) <= entry)
-        mismatch = not (range_ok and open_fill_same)
+        lower_timeframe_first = execution_version == "martin_bar_retest_execution_v3"
+        mismatch = not (range_ok and (open_fill_same or lower_timeframe_first))
         alternate_feed_supported = not mismatch
     settings_ok = (query.get("session") == "regular" and query.get("adjustment") == "splits" and
         query.get("timezone") == "America/New_York" and metadata.get("subsession_id") == "regular" and
@@ -77,6 +106,8 @@ def evaluate_frozen_order(bundle: dict[str, Any], *, day: dt.date, requested_sym
         str(query.get("timeframe")) == str(bundle.get("interval_minutes") or 15))
     result: dict[str, Any] = {"status": "missing_bars", "reason": None, "fill_price": None,
         "stop_price": None, "actual_feed": actual, "requested_feed": requested_symbol,
+        "original_requested_symbol": original_requested_symbol,
+        "resolved_symbol": bundle.get("resolved_symbol") or data.get("resolved_symbol") or requested_symbol,
         "expected_bar_count": len(starts), "received_bar_count": len(candles), "feed_mismatch": bool(mismatch),
         "bundle_fingerprint": fingerprint(bundle), "timeframe": "15m", "session": "regular",
         "adjustment": "splits", "query_timezone": query.get("timezone"),
@@ -87,6 +118,15 @@ def evaluate_frozen_order(bundle: dict[str, Any], *, day: dt.date, requested_sym
         "evidence_status": "alternate_feed_supported" if alternate_feed_supported else "exact_requested_feed" if actual == requested_symbol and not mismatch else "feed_unverified",
         "evidence_tier": "guarded_alternate" if alternate_feed_supported else "primary_exact" if actual == requested_symbol and not mismatch else "unverified",
         "alternate_feed_supported": alternate_feed_supported}
+    result["feed_conflict"] = feed_conflict
+    result["execution_version"] = execution_version
+    if alternate_feed_supported and feed_conflict:
+        result["feed_conflict_note"] = ("BATS intraday OHLC differs from the stored daily bar; complete regular-session "
+            "15m bars inside the daily envelope determine limit touch and stop order." if execution_version == "martin_bar_retest_execution_v3"
+            else "BATS intraday and stored daily opening prices disagree; v2 requires opening-fill agreement.")
+    if invalid_data:
+        result.update(status="blocked_data", reason="intraday_bar_invalid", evidence_status="intraday_bar_invalid")
+        return result
     if mismatch or not settings_ok:
         result.update(status="blocked_data", reason="intraday_feed_mismatch",
                       evidence_status="feed_mismatch" if mismatch else "intraday_settings_mismatch",
@@ -95,23 +135,14 @@ def evaluate_frozen_order(bundle: dict[str, Any], *, day: dt.date, requested_sym
     if not complete:
         result.update(status="blocked_data", reason="intraday_coverage_incomplete")
         return result
-    for bar in bars:
-        try:
-            values = [float(bar[key]) for key in ("open", "high", "low", "close", "volume")]
-        except (KeyError, TypeError, ValueError, OverflowError):
-            values = []
-        if (not values or any(not math.isfinite(value) for value in values) or
-                min(values[:4]) <= 0 or values[4] < 0 or
-                not values[2] <= min(values[0], values[3]) <= max(values[0], values[3]) <= values[1]):
-            result.update(status="blocked_data", reason="intraday_bar_invalid")
-            return result
     sequence = evaluate_sequence(bars, entry=entry, stop=stop)
     if sequence["status"] == "stop_before_entry":
         result.update(status="cancelled", reason="opened_at_or_below_stop")
     elif sequence["status"] == "same_bar_ambiguous":
         fine = data.get("one_minute")
         refined = evaluate_frozen_order({"data": fine, "expected_starts": bundle.get("expected_one_minute_starts"), "interval_minutes": 1},
-            day=day, requested_symbol=requested_symbol, entry=entry, stop=stop, daily=daily) if fine else data.get("one_minute_refinement")
+            day=day, requested_symbol=requested_symbol, entry=entry, stop=stop, daily=daily,
+            execution_version=execution_version) if fine else data.get("one_minute_refinement")
         result["one_minute_refinement"] = refined
         if refined and refined.get("status") in {"filled", "filled_stopped"}:
             provenance = {key: result[key] for key in ("audit_fingerprint", "candle_fingerprint", "source_date")}

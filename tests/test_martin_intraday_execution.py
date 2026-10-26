@@ -1,6 +1,8 @@
 import datetime as dt
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 from contextlib import nullcontext
 from types import ModuleType
@@ -30,6 +32,32 @@ class MartinIntradayExecutionTests(unittest.TestCase):
     day = dt.date(2026, 10, 23)
     daily = {"open": 12, "high": 13, "low": 9.8, "close": 12, "volume": 1000}
 
+    def test_symbol_resolution_requires_one_exact_us_stock_listing(self):
+        module = (Path(__file__).resolve().parents[1] / "scripts/tradingview_symbol_resolution.mjs").as_uri()
+        code = f"""
+            import assert from 'node:assert/strict';
+            import {{ exactUsStocks }} from {json.dumps(module)};
+            for (const ticker of ['ECO', 'GME', 'RXO']) {{
+              assert.deepEqual(exactUsStocks([{{symbol:ticker, exchange:'NYSE', type:'stock'}}], ticker), [`NYSE:${{ticker}}`]);
+              assert.deepEqual(exactUsStocks([{{symbol:ticker, exchange:'NYSE', type:'stock'}},
+                {{symbol:ticker, exchange:'NASDAQ', type:'stock'}}], ticker), [`NYSE:${{ticker}}`, `NASDAQ:${{ticker}}`]);
+            }}
+            assert.deepEqual(exactUsStocks([{{symbol:'ECO', exchange:'NYSE', type:'crypto'}}], 'ECO'), []);
+            assert.deepEqual(exactUsStocks([{{symbol:'ECON', exchange:'NYSE', type:'stock'}}], 'ECO'), []);
+        """
+        result = subprocess.run(["node", "--input-type=module", "-e", code], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_configured_tradingview_runtime_exports_search_markets(self):
+        client_dir = os.environ.get("TRADINGVIEW_CLIENT_DIR")
+        if not client_dir:
+            self.skipTest("TRADINGVIEW_CLIENT_DIR is not set")
+        entry = (Path(client_dir) / "dist/index.js").as_uri()
+        result = subprocess.run(["node", "--input-type=module", "-e",
+            f"const api = await import({json.dumps(entry)}); if (typeof api.searchMarkets !== 'function') process.exit(1);"],
+            text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def evaluate(self, bundle):
         return evaluate_frozen_order(bundle, day=self.day, requested_symbol="NASDAQ:ABC",
                                      entry=11, stop=10, daily=self.daily)
@@ -58,6 +86,36 @@ class MartinIntradayExecutionTests(unittest.TestCase):
         blocked = evaluate_frozen_order(feed([candle(1, 10.5)], full_name="BATS:ABC"), day=self.day,
             requested_symbol="NASDAQ:ABC", entry=11, stop=10, daily=outside)
         self.assertEqual(blocked["reason"], "intraday_feed_mismatch")
+
+    def test_v3_uses_complete_in_range_bats_bars_when_openings_conflict(self):
+        bars = [candle(1, 11.5, opening=12, high=12.5)]
+        daily = {"open": 10, "high": 13, "low": 9.8, "close": 12, "volume": 1000}
+        bundle = feed(bars, full_name="BATS:ABC")
+        v2 = evaluate_frozen_order(bundle, day=self.day, requested_symbol="NASDAQ:ABC",
+            entry=11, stop=9, daily=daily, execution_version="martin_bar_retest_execution_v2")
+        v3 = evaluate_frozen_order(bundle, day=self.day, requested_symbol="NASDAQ:ABC",
+            entry=11, stop=9, daily=daily, execution_version="martin_bar_retest_execution_v3")
+        self.assertEqual(v2["status"], "blocked_data")
+        self.assertEqual(v3["status"], "expired")
+        self.assertFalse(v3["feed_mismatch"])
+        self.assertTrue(v3["feed_conflict"])
+        self.assertIn("15m bars", v3["feed_conflict_note"])
+
+    def test_v3_rejects_bats_range_outside_daily_envelope(self):
+        daily = {"open": 12, "high": 13, "low": 11, "close": 12, "volume": 1000}
+        result = evaluate_frozen_order(feed([candle(1, 10.5)], full_name="BATS:ABC"),
+            day=self.day, requested_symbol="NASDAQ:ABC", entry=11, stop=10, daily=daily,
+            execution_version="martin_bar_retest_execution_v3")
+        self.assertEqual(result["status"], "blocked_data")
+        self.assertEqual(result["reason"], "intraday_feed_mismatch")
+
+    def test_v3_invalid_bar_is_blocked_for_daily_fallback(self):
+        invalid = {"time": 1, "open": 12, "high": 11, "low": 10, "close": 12, "volume": 100}
+        result = evaluate_frozen_order(feed([invalid], full_name="BATS:ABC"),
+            day=self.day, requested_symbol="NASDAQ:ABC", entry=11, stop=9, daily=self.daily,
+            execution_version="martin_bar_retest_execution_v3")
+        self.assertEqual(result["status"], "blocked_data")
+        self.assertEqual(result["reason"], "intraday_bar_invalid")
 
     def test_replay_loads_frozen_audit_bundle_by_ticker_and_date(self):
         with tempfile.TemporaryDirectory() as temporary:

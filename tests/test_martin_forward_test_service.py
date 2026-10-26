@@ -124,7 +124,7 @@ class MartinExecutionBookContextTests(unittest.TestCase):
                 self.assertIn("position(%s in strategy_id)=1", sql)
                 self.assertIn("execution_book_version", sql)
                 self.assertNotIn("%", sql.replace("%s", ""))
-                self.assertEqual(params, ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2"))
+                self.assertEqual(params, ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"))
                 # The classification-only prefixed book has no version marker and is omitted.
                 return [{"strategy_id": execution_id}]
             if "FROM martin_forward_runs" in sql and params:

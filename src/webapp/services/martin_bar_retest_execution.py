@@ -176,7 +176,8 @@ class MartinBarRetestExecutionService:
         frames = self.bar_loader(tickers, day, 320, database_url=self.database_url) if tickers else {}
         counts = {"filled": 0, "expired": 0, "cancelled": 0, "exited": 0, "trimmed": 0,
                   "missing_bars": 0, "scheduled": 0, "intraday_fallbacks": 0}
-        management_version = (MANAGEMENT_V2 if getattr(self, "execution_version", None) == "martin_bar_retest_execution_v2"
+        management_version = (MANAGEMENT_V2 if getattr(self, "execution_version", None) in {
+                                  "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"}
                               else MANAGEMENT_V1)
         closed_today: set[str] = set()
         for order in pending:
@@ -198,20 +199,25 @@ class MartinBarRetestExecutionService:
                 continue
             payload = order.get("payload_json") or {}
             intraday_evidence = None
-            if getattr(self, "execution_version", "martin_bar_retest_execution_v1") == "martin_bar_retest_execution_v2":
+            execution_version = getattr(self, "execution_version", "martin_bar_retest_execution_v1")
+            if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"}:
                 from src.webapp.services.martin_intraday_execution import evaluate_frozen_order
                 bundle = (frozen_intraday or {}).get(ticker)
                 if bundle is None or bundle.get("freeze_error"):
                     intraday_evidence = {"status": "fallback_daily",
                         "evidence_status": (bundle or {}).get("freeze_error") or "frozen_intraday_bundle_missing",
-                        "execution_version": "martin_bar_retest_execution_v2",
+                        "execution_version": execution_version,
+                        "requested_symbol": (bundle or {}).get("requested_symbol") or f"NASDAQ:{ticker}",
+                        "resolved_symbol": (bundle or {}).get("resolved_symbol"),
+                        "symbol_resolution": (bundle or {}).get("symbol_resolution"),
+                        "provider_error_code": (bundle or {}).get("provider_error_code"),
                         "audit_fingerprint": (bundle or {}).get("audit_fingerprint"),
                         "source_date": (bundle or {}).get("source_date")}
                 else:
                     intraday_evidence = evaluate_frozen_order(bundle, day=day,
                         requested_symbol=str(bundle.get("requested_symbol") or f"NASDAQ:{ticker}"),
                         entry=float(payload.get("limit_price") or payload.get("max_entry")),
-                        stop=float(payload["stop"]), daily=bar)
+                        stop=float(payload["stop"]), daily=bar, execution_version=execution_version)
                     if intraday_evidence["status"] == "blocked_data":
                         intraday_evidence["evidence_status"] = intraday_evidence.get("reason") or "frozen_intraday_invalid"
                         intraday_evidence["status"] = "fallback_daily"

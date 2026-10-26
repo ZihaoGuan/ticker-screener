@@ -394,7 +394,7 @@ class RunService:
             supports_limit=False,
             fields=(RunField("book_id", "Execution Book ID", "text", placeholder="martin_range_bar_retest_…"),
                     RunField("intraday_dir", "Frozen Intraday Bundle Directory", "text",
-                        help_text="For v2 books, freeze bars after the session and provide the audit bundle directory."),
+                        help_text="For v2/v3 books, freeze bars after the session and provide the audit bundle directory."),
                     RunField("apply", "Apply to Paper Book", "boolean", help_text="Defaults to a read-only no-write run.")),
             visible_in_runs=False,
         ),

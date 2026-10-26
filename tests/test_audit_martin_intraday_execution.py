@@ -112,6 +112,23 @@ class IntradayAuditTests(unittest.TestCase):
         self.assertEqual(result['classification'], 'entry_before_stop')
         self.assertFalse(result['feed_mismatch'])
 
+    def test_v3_bats_audit_uses_touch_sequence_when_daily_open_conflicts(self):
+        bars = self.bars([11.5] * 26, opens=[12] * 26)
+        daily = {'open': 10, 'high': 13, 'low': 9, 'close': 12, 'volume': 2600}
+        original = audit.session_starts
+        audit.session_starts = lambda _day, interval=15: list(range(1000, 1026))
+        try:
+            v2 = audit.classify(candles=bars, metadata={'full_name':'BATS:TEST'},
+                requested_symbol=self.symbol, day=self.day, entry=11, stop=9.5, daily=daily)
+            v3 = audit.classify(candles=bars, metadata={'full_name':'BATS:TEST'},
+                requested_symbol=self.symbol, day=self.day, entry=11, stop=9.5, daily=daily,
+                execution_version='martin_bar_retest_execution_v3')
+        finally:
+            audit.session_starts = original
+        self.assertEqual(v2['classification'], 'feed_mismatch')
+        self.assertEqual(v3['classification'], 'no_fill')
+        self.assertTrue(v3['feed_conflict'])
+
     def test_missing_daily_bar_never_certifies_sequence(self):
         result = audit.classify(candles=self.bars([11.4] + [11]*25), metadata=self.metadata,
             requested_symbol=self.symbol, day=self.day, entry=11.5, stop=10.5, daily=None)
@@ -150,6 +167,13 @@ class IntradayAuditTests(unittest.TestCase):
         with patch.object(audit, 'fetch', side_effect=RuntimeError('secret session token')):
             result = audit.fetch_safely('/client', self.symbol, self.day.isoformat(), '15')
         self.assertIsNone(result)
+
+    def test_symbol_resolution_flag_is_explicit_in_fetch_command(self):
+        with patch.object(audit.subprocess, 'run', return_value=types.SimpleNamespace(stdout='{}', returncode=0)) as run:
+            audit.fetch('/client', self.symbol, self.day.isoformat(), '15')
+            self.assertEqual(run.call_args.args[0][-1], 'legacy')
+            audit.fetch('/client', self.symbol, self.day.isoformat(), '15', resolve_symbols=True)
+            self.assertEqual(run.call_args.args[0][-1], 'resolve')
 
     def test_cli_requires_execution_book_prefix(self):
         with self.assertRaises(SystemExit) as raised:
