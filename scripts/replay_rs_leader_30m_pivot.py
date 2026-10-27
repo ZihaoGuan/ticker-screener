@@ -24,6 +24,8 @@ def main(argv=None):
     parser.add_argument("--intraday-dir", required=True,
                         help="Immutable 30m TradingView bundle directory. Invalid or absent bars block entry.")
     parser.add_argument("--apply", action="store_true", help="Commit the whole replay; default simulates then rolls back.")
+    parser.add_argument("--simulate-backdated-buys", action="store_true",
+                        help="Allow hypothetical entries from scans saved after the next-session open.")
     args = parser.parse_args(argv)
     if args.to_date < args.from_date:
         parser.error("--to-date must be on or after --from-date")
@@ -40,12 +42,20 @@ def main(argv=None):
     if not config.database_url:
         parser.error("TICKER_SCREENER_DATABASE_URL is required")
     sessions = xnys_sessions(args.from_date, args.to_date)
+    try:
+        audit = json.loads((Path(args.intraday_dir) / "audit.json").read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        parser.error(f"--intraday-dir requires a valid audit.json manifest: {exc}")
+    if bool(audit.get("simulate_backdated_buys", False)) != args.simulate_backdated_buys:
+        parser.error("freeze and replay --simulate-backdated-buys modes must match")
     history = ScreenerHistoryService(database_url=config.database_url, artifacts_dir=config.artifacts_dir,
         repository=HistoryRepository(database_url=config.database_url, artifacts_dir=config.artifacts_dir, read_only=True))
     sources = load_range_sources(history, sessions)
     for source in sources.values():
         source.setdefault("replay_provenance", {}).update({"execution_version": EXECUTION_VERSION,
-            "source_strategy_id": "martin_bar_watchlist_v1"})
+            "source_strategy_id": "martin_bar_watchlist_v1",
+            "simulate_backdated_buys": args.simulate_backdated_buys,
+            "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe"})
     exclusions = leveraged_or_inverse_provenance()
     token = set_replay_fund_exclusions(exclusions["symbols"])
     try:
@@ -58,7 +68,8 @@ def main(argv=None):
                         raise RuntimeError(f"Replay book {args.book_id} is currently locked.")
                 check_empty_book(connection, args.book_id)
                 results = execute_pivot_range(connection, sessions=sessions, sources=sources,
-                    book_id=args.book_id, database_url=config.database_url, intraday_dir=args.intraday_dir)
+                    book_id=args.book_id, database_url=config.database_url, intraday_dir=args.intraday_dir,
+                    simulate_backdated_buys=args.simulate_backdated_buys)
                 if args.apply:
                     connection.commit()
                 else:
@@ -71,6 +82,8 @@ def main(argv=None):
     print(json.dumps({"ready": True, "policy_id": POLICY_ID, "execution_version": EXECUTION_VERSION,
         "book_id": args.book_id, "from_date": args.from_date.isoformat(), "to_date": args.to_date.isoformat(),
         "mode": "apply" if args.apply else "dry_run_rolled_back", "saved": bool(args.apply),
+        "simulate_backdated_buys": args.simulate_backdated_buys,
+        "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
         "source_mode": "persisted_martin_bar_watchlist_v1_runs", "sessions": results}, indent=2, default=str))
     return 0
 

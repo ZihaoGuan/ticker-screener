@@ -25,6 +25,8 @@ def main(argv=None):
     parser.add_argument("--book-id", required=True)
     parser.add_argument("--client-dir", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--simulate-backdated-buys", action="store_true",
+                        help="Freeze bundles for hypothetical retrospective replay; must match replay mode.")
     args = parser.parse_args(argv)
     if args.to_date < args.from_date:
         parser.error("--to-date must be on or after --from-date")
@@ -56,7 +58,8 @@ def main(argv=None):
                 if str(hit.get("ticker") or "").strip() and set(hit.get("discovery_categories") or []).intersection(
                     {"leader_30_session", "potent_mover", "gap_mover"})})
             current_frames = load_many_ticker_windows(current_source_tickers, day, 260, database_url=config.database_url) if current_source_tickers else {}
-            candidates = candidates_from_saved_run(source, current_frames, day)
+            candidates = candidates_from_saved_run(source, current_frames, day,
+                simulate_backdated_buys=args.simulate_backdated_buys)
             # Entry on D uses a setup discovered on the preceding session D-1.
             tickers = sorted(prior_watch)
             for ticker in tickers:
@@ -95,6 +98,8 @@ def main(argv=None):
     manifest = {"schema": "rs_leader_30m_pivot_audit_v1", "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "read_only": True, "book_id": args.book_id, "from_date": args.from_date.isoformat(),
         "to_date": args.to_date.isoformat(), "provider": "TradingView", "timeframe": "30m",
+        "simulate_backdated_buys": args.simulate_backdated_buys,
+        "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
         "session": "regular", "adjustment": "splits", "records": records}
     manifest["fingerprint"] = digest(manifest)
     (out / "audit.json").write_text(json.dumps(manifest, sort_keys=True, indent=2, default=str) + "\n")

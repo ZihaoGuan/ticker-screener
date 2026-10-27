@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from src.webapp.services.rs_leader_30m_pivot import (evaluate_pivot_sequence, refine_pivot_ambiguity,
     load_frozen_30m_directory, support_decline_candidate)
@@ -70,6 +71,33 @@ class RSPivotTests(unittest.TestCase):
             path.write_text(json.dumps({"schema": "rs_leader_30m_pivot_audit_v1", "fingerprint": "bad"}))
             with self.assertRaisesRegex(ValueError, "fingerprint_mismatch"):
                 load_frozen_30m_directory(directory, "2026-01-02")
+
+    def test_retrospective_source_stays_blocked_by_default_and_is_hypothetical_when_enabled(self):
+        from src.webapp.services.rs_leader_30m_pivot import candidates_from_saved_run
+        source = {"strategy_id": "martin_bar_watchlist_v1", "rules_version": "martin_bar_watchlist_v1",
+            "target_trading_date": "2026-01-02", "created_at": "2026-01-05T00:00:00Z",
+            "source_run_id": 12, "source_fingerprint": "abc", "replay_provenance": {"retrospective": True},
+            "hits": [{"ticker": "ABC", "discovery_categories": ["leader_30_session"]}]}
+        with patch("src.webapp.services.rs_leader_30m_pivot.support_decline_candidate",
+                   return_value={"status": "eligible"}):
+            strict = candidates_from_saved_run(source, {}, "2026-01-02")
+            hypothetical = candidates_from_saved_run(source, {}, "2026-01-02", simulate_backdated_buys=True)
+        self.assertEqual(strict[0]["status"], "blocked_source")
+        self.assertEqual(hypothetical[0]["status"], "pending")
+        self.assertTrue(hypothetical[0]["backdated_buy_simulation"])
+        self.assertEqual(hypothetical[0]["fill_basis"], "hypothetical_backdated_simulation")
+
+    def test_frozen_manifest_requires_matching_backdated_mode(self):
+        from scripts.audit_martin_intraday_execution import digest
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = {"schema": "rs_leader_30m_pivot_audit_v1", "provider": "TradingView",
+                "timeframe": "30m", "session": "regular", "adjustment": "splits",
+                "book_id": "rs_leader_30m_pivot_replay_test", "simulate_backdated_buys": True,
+                "records": []}
+            manifest["fingerprint"] = digest(manifest)
+            (Path(directory) / "audit.json").write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "backdated_mode_mismatch"):
+                load_frozen_30m_directory(directory, "2026-01-02", simulate_backdated_buys=False)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_intraday_fetch_cli_accepts_30m_timeframe(self):

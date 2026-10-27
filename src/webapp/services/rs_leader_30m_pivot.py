@@ -247,7 +247,8 @@ def refine_pivot_ambiguity(bars_30m: list[dict[str, Any]], bars_1m: list[dict[st
     return ambiguous
 
 
-def load_frozen_30m_directory(directory: str | Path, day: Any, book_id: str | None = None) -> dict[str, dict[str, Any]]:
+def load_frozen_30m_directory(directory: str | Path, day: Any, book_id: str | None = None,
+                             simulate_backdated_buys: bool | None = None) -> dict[str, dict[str, Any]]:
     """Read only manifest-listed bundles and reject tampered, missing or wrong-timeframe evidence."""
     root = Path(directory)
     manifest_path = root / "audit.json"
@@ -258,6 +259,8 @@ def load_frozen_30m_directory(directory: str | Path, day: Any, book_id: str | No
         raise ValueError("frozen_30m_manifest_fingerprint_mismatch")
     if book_id and document.get("book_id") != book_id:
         raise ValueError("frozen_30m_book_id_mismatch")
+    if simulate_backdated_buys is not None and bool(document.get("simulate_backdated_buys", False)) != simulate_backdated_buys:
+        raise ValueError("frozen_30m_backdated_mode_mismatch")
     result = {}
     for item in document.get("records", []):
         if str(item.get("date"))[:10] != str(day)[:10]:
@@ -289,7 +292,8 @@ def management_metadata() -> dict[str, Any]:
             "runner_management": "existing_stop_and_ema9_logic"}
 
 
-def candidates_from_saved_run(source: dict[str, Any], frames: dict[str, Any], day: Any) -> list[dict[str, Any]]:
+def candidates_from_saved_run(source: dict[str, Any], frames: dict[str, Any], day: Any,
+                              simulate_backdated_buys: bool = False) -> list[dict[str, Any]]:
     """Build candidates directly from saved watchlist hits, without Bar Retest labels."""
     import datetime as dt
     session = day if isinstance(day, dt.date) else dt.date.fromisoformat(str(day)[:10])
@@ -318,15 +322,22 @@ def candidates_from_saved_run(source: dict[str, Any], frames: dict[str, Any], da
                        "discovery_categories": sorted(categories), "event_date": session.isoformat(),
                        "source_run_id": source.get("source_run_id"), "source_published_at": source.get("created_at"),
                        "source_fingerprint": source.get("source_fingerprint"),
-                       "earliest_trade_date": "next_XNYS_session"})
+                       "earliest_trade_date": "next_XNYS_session",
+                       "retrospective_source_scan": (source.get("replay_provenance") or {}).get("retrospective") is True,
+                       "backdated_buy_simulation": bool(simulate_backdated_buys and
+                           (source.get("replay_provenance") or {}).get("retrospective") is True),
+                       "fill_basis": "hypothetical_backdated_simulation" if simulate_backdated_buys and
+                           (source.get("replay_provenance") or {}).get("retrospective") is True else "forward_safe"})
         if (source.get("replay_provenance") or {}).get("retrospective") is True and result[-1]["status"] == "pending":
-            result[-1]["status"] = "blocked_source"
-            result[-1]["reasons"] = ["saved_scan_published_after_next_session_open"]
+            if not simulate_backdated_buys:
+                result[-1]["status"] = "blocked_source"
+                result[-1]["reasons"] = ["saved_scan_published_after_next_session_open"]
     return result
 
 
 def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[Any, dict[str, Any]],
-                        book_id: str, database_url: str, intraday_dir: str | Path) -> list[dict[str, Any]]:
+                        book_id: str, database_url: str, intraday_dir: str | Path,
+                        simulate_backdated_buys: bool = False) -> list[dict[str, Any]]:
     """Run a complete fresh-book replay; caller owns the transaction and rollback/commit."""
     import datetime as dt
     import hashlib
@@ -352,7 +363,8 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
         candidate_tickers = [str(x.get("ticker") or "").upper() for x in source.get("hits", [])]
         tickers = sorted({str(x["ticker"]).upper() for x in active_orders + positions} | set(candidate_tickers))
         frames = load_many_ticker_windows(tickers, day, 320, database_url=database_url) if tickers else {}
-        new_candidates = candidates_from_saved_run(source, frames, day)
+        new_candidates = candidates_from_saved_run(source, frames, day,
+            simulate_backdated_buys=simulate_backdated_buys)
         for rank, candidate in enumerate(new_candidates, 1):
             candidate["rank"] = rank
             candidate["setup"]["daily_bar_provenance"] = _json_safe(repo.daily_bar_replay_provenance(
@@ -363,7 +375,12 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             "execution_book_version": EXECUTION_VERSION, "session_date": day.isoformat(),
             "source_run_id": source.get("source_run_id"), "source_fingerprint": source.get("source_fingerprint"),
             "source_mode": (source.get("replay_provenance") or {}).get("source_mode"),
-            "replay_provenance": source.get("replay_provenance"), "fund_exclusions": {
+            "replay_provenance": source.get("replay_provenance"),
+            "simulate_backdated_buys": simulate_backdated_buys,
+            "backdated_buy_basis": "hypothetical_backdated_simulation" if simulate_backdated_buys and
+                (source.get("replay_provenance") or {}).get("retrospective") else "forward_safe",
+            "retrospective_source_scan": bool((source.get("replay_provenance") or {}).get("retrospective")),
+            "fund_exclusions": {
                 "version": exclusion["version"], "sha256": exclusion["sha256"]},
             "setup_rule": "daily_ema21_or_weekly_ema8_or_saved_gap_base; 3-12pct pullback; within 2pct above support",
             "thresholds_inferred": True}
@@ -372,7 +389,8 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
         actions = {"filled": 0, "cancelled": 0, "expired": 0, "blocked_data": 0,
                    "ambiguous": 0, "trimmed": 0, "exited": 0}
         try:
-            frozen = load_frozen_30m_directory(intraday_dir, day, book_id=book_id)
+            frozen = load_frozen_30m_directory(intraday_dir, day, book_id=book_id,
+                simulate_backdated_buys=simulate_backdated_buys)
             frozen_error = None
         except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
             frozen, frozen_error = {}, str(exc)
