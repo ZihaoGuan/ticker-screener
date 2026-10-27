@@ -387,9 +387,12 @@ class MartinForwardTestRepository:
                         books[key]["rotation_policy_version"] = ROTATION_POLICY_VERSION
                         books[key]["rotation_limits"] = ROTATION_LIMITS
                 execution_books = self._fetch(cursor, """SELECT DISTINCT strategy_id FROM martin_forward_runs
-                    WHERE position(%s in strategy_id)=1
-                    AND summary_json->>'execution_book_version' IN (%s,%s,%s)
-                    ORDER BY strategy_id""", ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"))
+                    WHERE (position(%s in strategy_id)=1
+                      AND summary_json->>'execution_book_version' IN (%s,%s,%s,%s))
+                       OR (position(%s in strategy_id)=1
+                      AND summary_json->>'execution_book_version'=%s)
+                    ORDER BY strategy_id""", ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4",
+                    "rs_leader_30m_pivot_replay_", "rs_leader_30m_pivot_execution_v1"))
                 for item in execution_books:
                     strategy_id = str(item["strategy_id"])
                     runs = self._fetch(cursor, "SELECT * FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 200", (strategy_id,))
@@ -409,7 +412,7 @@ class MartinForwardTestRepository:
                 for account in (account, books.get("rs_expanded_rotation"), books.get("gap_retest"),
                                 books.get("gap_retest_replay"), books.get("gap_retest_replay_v2"),
                                 books.get("gap_retest_replay_v3"), books.get("gap_retest_replay_v4"),
-                                *[book for key, book in books.items() if key.startswith("martin_range_bar_retest_")]):
+                                *[book for key, book in books.items() if key.startswith(("martin_range_bar_retest_", "rs_leader_30m_pivot_replay_"))]):
                     if not account or not account.get("history"):
                         continue
                     dates = [str(point.get("date") or "") for point in account["history"] if point.get("date")]
@@ -484,7 +487,7 @@ class MartinForwardTestRepository:
 
 def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidates: list[dict[str, Any]],
                          positions: list[dict[str, Any]], events: list[dict[str, Any]]) -> dict[str, Any]:
-    account_sized = strategy_id in ACCOUNT_STRATEGIES or strategy_id.startswith("martin_range_bar_retest_")
+    account_sized = strategy_id in ACCOUNT_STRATEGIES or strategy_id.startswith(("martin_range_bar_retest_", "rs_leader_30m_pivot_replay_"))
     closed = [row for row in positions if row.get("status") == "closed"]
     grouped: dict[str, dict[str, float]] = {}
     for row in closed:
@@ -518,7 +521,7 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
                                  ("selection_tier", payload.get("selection_tier") or "Unknown"),
                                  ("adr_suitability", payload.get("adr_suitability") or "Unknown"),
                                  ("exit_reason", payload.get("exit_reason") or payload.get("exit_type") or "Unknown"))
-        if strategy_id.startswith("martin_range_bar_retest_"):
+        if strategy_id.startswith(("martin_range_bar_retest_", "rs_leader_30m_pivot_replay_")):
             dimensions += (("discovery_category", payload.get("event_category") or payload.get("category") or "Unknown"),)
         for dimension, value in dimensions:
             stats = attribution.setdefault(dimension, {}).setdefault(str(value), {"count": 0, "realized_r": 0.0, "realized_pnl": 0.0})
@@ -528,13 +531,13 @@ def _performance_context(strategy_id: str, runs: list[dict[str, Any]], candidate
     marks = []
     for run in reversed(runs):
         summary = run.get("summary_json") or {}
-        if summary.get("cumulative_r") is not None or (strategy_id.startswith("martin_range_bar_retest_") and summary.get("mark_date")):
+        if summary.get("cumulative_r") is not None or (strategy_id.startswith(("martin_range_bar_retest_", "rs_leader_30m_pivot_replay_")) and summary.get("mark_date")):
             equity = summary.get("account_equity")
             marks.append({"date": str(run["session_date"]), "cumulative_r": summary.get("cumulative_r"),
                           "account_equity": equity,
                           "equity_drawdown_pct": summary.get("equity_drawdown_pct"), "r_drawdown": summary.get("r_drawdown")})
     has_account_marks = account_sized and bool(marks) and any(point.get("account_equity") is not None for point in marks)
-    execution_book = strategy_id.startswith("martin_range_bar_retest_")
+    execution_book = strategy_id.startswith(("martin_range_bar_retest_", "rs_leader_30m_pivot_replay_"))
     has_execution_marks = execution_book and any((run.get("summary_json") or {}).get("mark_date") for run in runs)
     if marks:
         history = marks
@@ -675,8 +678,8 @@ def _benchmark_comparison(history: list[dict[str, Any]], price_rows: list[dict[s
 
 
 def _provisional_fallback_dates(latest_runs: dict[str, dict[str, Any]], execution_book_version: str | None) -> set[str]:
-    """Find v3 runs partial only because execution used daily fallback."""
-    if execution_book_version != "martin_bar_retest_execution_v3":
+    """Find v3/v4 runs partial only because execution used daily fallback."""
+    if execution_book_version not in {"martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"}:
         return set()
     provisional: set[str] = set()
     for day, run in latest_runs.items():

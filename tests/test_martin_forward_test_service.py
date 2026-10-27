@@ -152,17 +152,24 @@ class MartinExecutionBookContextTests(unittest.TestCase):
         self.assertIn("r.session_date < %s", query)
         self.assertEqual(params, ("martin_range_bar_retest_v2", dt.date(2026, 10, 23)))
 
-    def test_context_discovers_only_versioned_execution_book_and_attributes_closed_trade_by_category(self) -> None:
+    def test_context_discovers_versioned_replay_books_and_attributes_closed_trade_by_category(self) -> None:
         repository = MartinForwardTestRepository(database_url="postgresql://unused")
         connection = MagicMock()
         execution_id = "martin_range_bar_retest_replay_20261019"
         classification_only_id = "martin_range_bar_retest_classification"
+        pivot_id = "rs_leader_30m_pivot_replay_20261019"
         execution_runs = [{"id": 42, "session_date": dt.date(2026, 10, 23), "summary_json": {
             "execution_book_version": "martin_bar_retest_execution_v2", "cumulative_r": 1.5,
             "r_drawdown": 0.0, "realized_pnl": 750.0, "realized_r": 1.5, "unrealized_pnl": 0.0, "unrealized_r": 0.0}}]
+        pivot_runs = [{"id": 43, "session_date": dt.date(2026, 10, 23), "summary_json": {
+            "execution_book_version": "rs_leader_30m_pivot_execution_v1", "cumulative_r": 0.5,
+            "r_drawdown": 0.0, "realized_pnl": 250.0, "realized_r": 0.5, "unrealized_pnl": 0.0, "unrealized_r": 0.0}}]
         closed_trade = {"id": 5, "strategy_id": execution_id, "ticker": "ABC", "status": "closed",
                         "closed_on": dt.date(2026, 10, 23), "payload_json": {"event_category": "gap_mover",
                         "realized_pnl": 750.0, "realized_r": 1.5, "exit_type": "trim_3r"}}
+        pivot_trade = {"id": 6, "strategy_id": pivot_id, "ticker": "XYZ", "status": "closed",
+                       "closed_on": dt.date(2026, 10, 23), "payload_json": {"event_category": "rs_leader_30m_pivot",
+                       "realized_pnl": 250.0, "realized_r": 0.5, "exit_type": "trim_3r"}}
         statements = []
 
         def fetch(_cursor, sql, params=()):
@@ -171,15 +178,16 @@ class MartinExecutionBookContextTests(unittest.TestCase):
                 self.assertIn("position(%s in strategy_id)=1", sql)
                 self.assertIn("execution_book_version", sql)
                 self.assertNotIn("%", sql.replace("%s", ""))
-                self.assertEqual(params, ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"))
-                # The classification-only prefixed book has no version marker and is omitted.
-                return [{"strategy_id": execution_id}]
+                self.assertEqual(params, ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4",
+                    "rs_leader_30m_pivot_replay_", "rs_leader_30m_pivot_execution_v1"))
+                # Classification-only books remain omitted; the pivot requires its own version marker.
+                return [{"strategy_id": execution_id}, {"strategy_id": pivot_id}]
             if "FROM martin_forward_runs" in sql and params:
-                return execution_runs if params == (execution_id,) else []
+                return {execution_id: execution_runs, pivot_id: pivot_runs}.get(params[0], [])
             if "FROM martin_forward_candidates" in sql:
                 return []
             if "FROM martin_forward_positions" in sql:
-                return [closed_trade]
+                return [pivot_trade] if params == (pivot_id,) else [closed_trade]
             if "FROM martin_forward_events" in sql:
                 return []
             return []
@@ -188,11 +196,15 @@ class MartinExecutionBookContextTests(unittest.TestCase):
             result = repository.context()
 
         self.assertIn(execution_id, result["books"])
+        self.assertIn(pivot_id, result["books"])
         self.assertNotIn(classification_only_id, result["books"])
         book = result["books"][execution_id]
         self.assertEqual(book["execution_book_version"], "martin_bar_retest_execution_v2")
         self.assertEqual(book["attribution"]["discovery_category"]["gap_mover"]["count"], 1)
         self.assertEqual(book["attribution"]["discovery_category"]["gap_mover"]["realized_pnl"], 750.0)
+        pivot = result["books"][pivot_id]
+        self.assertEqual(pivot["execution_book_version"], "rs_leader_30m_pivot_execution_v1")
+        self.assertEqual(pivot["attribution"]["discovery_category"]["rs_leader_30m_pivot"]["count"], 1)
 
     def test_missing_baseline_does_not_shift_and_empty_or_invalid_history_is_unavailable(self) -> None:
         history = [{"date": "2026-10-01", "account_equity": 100_000}, {"date": "2026-10-02", "account_equity": 101_000}]

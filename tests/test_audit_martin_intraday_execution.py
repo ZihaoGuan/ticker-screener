@@ -175,6 +175,54 @@ class IntradayAuditTests(unittest.TestCase):
             audit.fetch('/client', self.symbol, self.day.isoformat(), '15', resolve_symbols=True)
             self.assertEqual(run.call_args.args[0][-1], 'resolve')
 
+    def test_metadata_exchange_is_normalized_and_lookup_failure_retries_exact_us_exchange(self):
+        calls = []
+        def fetcher(_client, symbol, *_args, **_kwargs):
+            calls.append(symbol)
+            return {'error_code': 'SYMBOL_ERROR'} if len(calls) == 1 else {'candles': [], 'resolved_symbol': symbol}
+        result = audit.fetch_with_exchange_fallback('/client', 'BSBR', 'New York Stock Exchange',
+            self.day.isoformat(), '15', fetcher=fetcher)
+        self.assertEqual(calls[:2], ['NYSE:BSBR', 'NASDAQ:BSBR'])
+        self.assertEqual(result['exchange_lookup']['selected_symbol'], 'NASDAQ:BSBR')
+        self.assertTrue(result['exchange_lookup']['fallback_used'])
+
+    def test_valid_no_fill_does_not_retry_exchange(self):
+        calls = []
+        def fetcher(_client, symbol, *_args, **_kwargs):
+            calls.append(symbol)
+            return {'candles': [], 'classification': 'no_fill'}
+        audit.fetch_with_exchange_fallback('/client', 'SBS', 'NYSE', self.day.isoformat(), '15', fetcher=fetcher)
+        self.assertEqual(calls, ['NYSE:SBS'])
+
+    def test_incomplete_bars_do_not_retry_exchange(self):
+        calls = []
+        def fetcher(_client, symbol, *_args, **_kwargs):
+            calls.append(symbol)
+            return {'candles': [{'time': 1}], 'classification': 'missing_bars'}
+        audit.fetch_with_exchange_fallback('/client', 'SBS', 'NYSE', self.day.isoformat(), '15', fetcher=fetcher)
+        self.assertEqual(calls, ['NYSE:SBS'])
+
+    def test_conflicting_feed_does_not_retry_exchange(self):
+        calls = []
+        def fetcher(_client, symbol, *_args, **_kwargs):
+            calls.append(symbol)
+            return {'candles': [{'time': 1}], 'classification': 'feed_mismatch'}
+        audit.fetch_with_exchange_fallback('/client', 'SBS', 'NYSE', self.day.isoformat(), '15', fetcher=fetcher)
+        self.assertEqual(calls, ['NYSE:SBS'])
+
+    def test_non_lookup_failure_does_not_retry_exchange(self):
+        calls = []
+        def fetcher(_client, symbol, *_args, **_kwargs):
+            calls.append(symbol)
+            return {'error_code': 'TIMEOUT'}
+        result = audit.fetch_with_exchange_fallback('/client', 'SBS', 'NYSE', self.day.isoformat(), '15', fetcher=fetcher)
+        self.assertEqual(calls, ['NYSE:SBS'])
+        self.assertEqual(result['error_code'], 'TIMEOUT')
+
+    def test_exchange_aliases(self):
+        self.assertEqual(audit.normalize_exchange('NYSE'), 'NYSE')
+        self.assertEqual(audit.normalize_exchange('NASDAQGS'), 'NASDAQ')
+
     def test_cli_requires_execution_book_prefix(self):
         with self.assertRaises(SystemExit) as raised:
             audit.main(['--book-id','wrong','--from-date','2026-10-23','--to-date','2026-10-23',

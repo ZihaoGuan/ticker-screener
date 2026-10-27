@@ -97,7 +97,7 @@ def evaluate_frozen_order(bundle: dict[str, Any], *, day: dt.date, requested_sym
         tolerance = max(.02, abs(float(daily["close"])) * .0005)
         range_ok = aggregate["high"] <= float(daily["high"]) + tolerance and aggregate["low"] >= float(daily["low"]) - tolerance
         open_fill_same = (float(aggregate["open"]) <= entry) == (float(daily["open"]) <= entry)
-        lower_timeframe_first = execution_version == "martin_bar_retest_execution_v3"
+        lower_timeframe_first = execution_version in {"martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"}
         mismatch = not (range_ok and (open_fill_same or lower_timeframe_first))
         alternate_feed_supported = not mismatch
     settings_ok = (query.get("session") == "regular" and query.get("adjustment") == "splits" and
@@ -114,6 +114,7 @@ def evaluate_frozen_order(bundle: dict[str, Any], *, day: dt.date, requested_sym
         "audit_fingerprint": bundle.get("audit_fingerprint"),
         "candle_fingerprint": bundle.get("candle_fingerprint"),
         "source_date": bundle.get("source_date"),
+        "exchange_lookup": bundle.get("exchange_lookup") or data.get("exchange_lookup"),
         "feed_basis": "alternate_bats_supported" if alternate_feed_supported else "requested_feed_exact" if actual == requested_symbol and not mismatch else "unverified",
         "evidence_status": "alternate_feed_supported" if alternate_feed_supported else "exact_requested_feed" if actual == requested_symbol and not mismatch else "feed_unverified",
         "evidence_tier": "guarded_alternate" if alternate_feed_supported else "primary_exact" if actual == requested_symbol and not mismatch else "unverified",
@@ -122,7 +123,7 @@ def evaluate_frozen_order(bundle: dict[str, Any], *, day: dt.date, requested_sym
     result["execution_version"] = execution_version
     if alternate_feed_supported and feed_conflict:
         result["feed_conflict_note"] = ("BATS intraday OHLC differs from the stored daily bar; complete regular-session "
-            "15m bars inside the daily envelope determine limit touch and stop order." if execution_version == "martin_bar_retest_execution_v3"
+            "15m bars inside the daily envelope determine limit touch and stop order." if execution_version in {"martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"}
             else "BATS intraday and stored daily opening prices disagree; v2 requires opening-fill agreement.")
     if invalid_data:
         result.update(status="blocked_data", reason="intraday_bar_invalid", evidence_status="intraday_bar_invalid")

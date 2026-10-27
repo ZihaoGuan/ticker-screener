@@ -19,6 +19,49 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 NY = ZoneInfo('America/New_York')
+SUPPORTED_US_EXCHANGES = ('NYSE', 'NASDAQ', 'NYSEARCA', 'AMEX', 'NYSEAMERICAN', 'ARCA')
+
+
+def normalize_exchange(exchange, default='NASDAQ'):
+    value = str(exchange or '').strip().upper().replace(' ', '')
+    aliases = {'NYSE': 'NYSE', 'NEWYORKSTOCKEXCHANGE': 'NYSE', 'NASDAQ': 'NASDAQ',
+               'NASDAQGS': 'NASDAQ', 'NASDAQGM': 'NASDAQ', 'NASDAQCM': 'NASDAQ',
+               'NYSEARCA': 'NYSEARCA', 'ARCA': 'ARCA', 'AMEX': 'AMEX',
+               'NYSEAMERICAN': 'NYSEAMERICAN', 'AMERICAN': 'NYSEAMERICAN'}
+    return aliases.get(value, default)
+
+
+def fetch_with_exchange_fallback(client_dir, ticker, primary_exchange, day, tf, *, fetcher=None,
+                                 resolve_symbols=False):
+    """Try metadata's exchange first; only SYMBOL_ERROR permits exchange retries."""
+    fetcher = fetcher or fetch_safely
+    primary = f'{normalize_exchange(primary_exchange)}:{ticker}'
+    attempted = []
+    symbols = [primary] + [f'{exchange}:{ticker}' for exchange in SUPPORTED_US_EXCHANGES
+                           if f'{exchange}:{ticker}' != primary]
+    last = None
+    for symbol in symbols:
+        attempted.append(symbol)
+        try:
+            data = fetcher(client_dir, symbol, day, tf, resolve_symbols=resolve_symbols)
+        except TypeError:  # Keep simple injected fetchers usable in tests/callers.
+            data = fetcher(client_dir, symbol, day, tf)
+        last = data
+        if data and not data.get('error_code'):
+            data = dict(data)
+            data['exchange_lookup'] = {'attempted_symbols': attempted, 'selected_symbol':
+                data.get('resolved_symbol') or symbol, 'primary_symbol': primary,
+                'fallback_used': symbol != primary}
+            return data
+        code = (data or {}).get('error_code')
+        if code not in {'SYMBOL_ERROR', 'LOOKUP_FAILED'}:
+            break
+    if last is None:
+        last = {'error_code': 'provider_fetch_failed'}
+    last = dict(last)
+    last['exchange_lookup'] = {'attempted_symbols': attempted, 'selected_symbol': None,
+                               'primary_symbol': primary, 'fallback_used': len(attempted) > 1}
+    return last
 
 
 def digest(value):
@@ -73,7 +116,7 @@ def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, ti
         range_ok = (aggregate_bar['high'] <= float(daily['high']) + tol and
                     aggregate_bar['low'] >= float(daily['low']) - tol)
         open_fill_same = (float(aggregate_bar['open']) <= entry) == (float(daily['open']) <= entry)
-        if range_ok and (open_fill_same or execution_version == 'martin_bar_retest_execution_v3'):
+        if range_ok and (open_fill_same or execution_version in {'martin_bar_retest_execution_v3', 'martin_bar_retest_execution_v4'}):
             mismatch = False
     if mismatch: status = 'feed_mismatch'
     elif not complete: status = 'missing_bars'
@@ -90,7 +133,7 @@ def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, ti
             'received_bar_count':len(candles), 'feed_mismatch':bool(mismatch),
             'feed_conflict':feed_conflict,
             **({'feed_conflict_note':'Complete regular-session BATS lower-timeframe bars inside the daily envelope determine limit touch and stop order.'}
-               if feed_conflict and not mismatch and execution_version == 'martin_bar_retest_execution_v3' else {})}
+               if feed_conflict and not mismatch and execution_version in {'martin_bar_retest_execution_v3', 'martin_bar_retest_execution_v4'} else {})}
 
 
 def fetch(client_dir, symbol, day, tf, *, resolve_symbols=False):
@@ -143,13 +186,20 @@ def load_daily(conn, ticker, day):
         return ({k: float(v) for k,v in zip(('open','high','low','close','volume'), row[:5])} | {'source':row[5]}) if row else None
 
 
+def load_ticker_exchange(conn, ticker):
+    with conn.cursor() as cur:
+        cur.execute('SELECT exchange FROM ticker_metadata WHERE ticker=%s', (ticker,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
 def main(argv=None):
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--book-id', required=True); ap.add_argument('--from-date', required=True); ap.add_argument('--to-date', required=True)
     ap.add_argument('--client-dir', required=True); ap.add_argument('--output-dir', required=True)
     ap.add_argument('--exchange', default='NASDAQ', help='requested TradingView exchange prefix')
     ap.add_argument('--one-minute', action='store_true')
-    ap.add_argument('--execution-version', choices=('v2','v3'), default='v2')
+    ap.add_argument('--execution-version', choices=('v2','v3','v4'), default='v2')
     ap.add_argument('--freeze-tickers', help='Comma-separated symbols to freeze for every XNYS session in range; creates replay bundles without requiring prior fills.')
     a=ap.parse_args(argv)
     if not a.book_id.startswith('martin_range_bar_retest_'): ap.error('--book-id must start with martin_range_bar_retest_')
@@ -180,16 +230,17 @@ def main(argv=None):
                 stop=float(position.get('stop') or position.get('initial_stop'))
                 limit=float(position.get('limit_price') or position.get('max_entry') or entry)
                 if abs(entry-limit) > 0.011: continue
-            symbol=f'{a.exchange}:{ticker}'; resolve_symbols=a.execution_version=='v3'
-            data=fetch_safely(a.client_dir,symbol,day,'15',resolve_symbols=resolve_symbols)
+            exchange = load_ticker_exchange(conn, ticker)
+            symbol=f'{normalize_exchange(exchange, a.exchange)}:{ticker}'; resolve_symbols=a.execution_version in {'v3','v4'}
+            data=fetch_with_exchange_fallback(a.client_dir,ticker,exchange or a.exchange,day,'15',resolve_symbols=resolve_symbols)
             if data is None or data.get('error_code'):
                 resolution = (data or {}).get('symbol_resolution') or {'requested_symbol':symbol,
                     'resolved_symbol':(data or {}).get('resolved_symbol'),
                     'error_code':(data or {}).get('error_code') or 'provider_fetch_failed'}
                 audit.append({'event_id':eid,'book_id':a.book_id,'ticker':ticker,'date':day,'entry':entry,
-                              'limit':limit,'stop':stop,'classification':'provider_unavailable',
+                              'limit':limit,'stop':stop,'classification':'symbol_lookup_failed' if (data or {}).get('error_code') == 'SYMBOL_ERROR' else 'provider_unavailable',
                               'requested_symbol':symbol,'resolved_symbol':(data or {}).get('resolved_symbol'),
-                              'symbol_resolution':resolution,
+                              'symbol_resolution':resolution, 'exchange_lookup':(data or {}).get('exchange_lookup'),
                               'provider_error_code':(data or {}).get('error_code') or 'provider_fetch_failed',
                               'timeframe':'15m','adjustment':'splits','session':'regular',
                               'candle_file':None,'candle_fingerprint':None,
@@ -227,7 +278,7 @@ def main(argv=None):
             audit.append({'event_id':eid,'book_id':a.book_id,'ticker':ticker,'date':day,
                           **({'intraday_bundle_only': True} if a.freeze_tickers else {'entry':entry,'limit':limit,'stop':stop}),
                           **result,'requested_symbol':symbol,'resolved_symbol':data.get('resolved_symbol'),
-                          'symbol_resolution':data.get('symbol_resolution'),
+                          'symbol_resolution':data.get('symbol_resolution'), 'exchange_lookup':data.get('exchange_lookup'),
                           'timeframe':'15m','adjustment':'splits','session':'regular',
                           'candle_file':candle_path.name,'candle_fingerprint':digest(data), 'daily_source':daily.get('source') if daily else None})
     finally: conn.close()

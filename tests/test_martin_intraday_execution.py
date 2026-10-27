@@ -79,6 +79,10 @@ class MartinIntradayExecutionTests(unittest.TestCase):
         self.assertEqual(result["evidence_status"], "alternate_feed_supported")
         self.assertEqual(result["feed_basis"], "alternate_bats_supported")
         self.assertTrue(result["alternate_feed_supported"])
+        bundle = feed([candle(1, 9.8)])
+        bundle["exchange_lookup"] = {"attempted_symbols": ["NYSE:ABC"], "selected_symbol": "NYSE:ABC"}
+        exact_with_lookup = self.evaluate(bundle)
+        self.assertEqual(exact_with_lookup["exchange_lookup"]["selected_symbol"], "NYSE:ABC")
         exact = self.evaluate(feed([candle(1, 9.8)]))
         self.assertEqual(exact["evidence_status"], "exact_requested_feed")
         self.assertEqual(exact["evidence_tier"], "primary_exact")
@@ -185,6 +189,37 @@ class MartinIntradayExecutionTests(unittest.TestCase):
                 fetcher=lambda *_args: None)
         self.assertEqual(frozen["ABC"]["freeze_error"], "provider_unavailable")
         self.assertEqual(frozen["ABC"]["source_date"], self.day.isoformat())
+
+    def test_auto_freeze_uses_metadata_nyse_and_records_lookup_attempts(self):
+        class Connection:
+            def close(self): pass
+        fake_psycopg = ModuleType("psycopg")
+        fake_psycopg.connect = lambda *_args, **_kwargs: Connection()
+        calls = []
+        data = {"query": {"symbol": "NASDAQ:BSBR", "timeframe": "15", "session": "regular",
+                "adjustment": "splits", "timezone": "America/New_York"},
+            "metadata": {"full_name": "NASDAQ:BSBR", "subsession_id": "regular",
+                "timezone": "America/New_York", "currency_code": "USD"}, "candles": []}
+        def fetcher(_client, symbol, _day, _timeframe):
+            calls.append(symbol)
+            if len(calls) == 1:
+                return {"error_code": "SYMBOL_ERROR"}
+            return {**data, "resolved_symbol": symbol}
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.dict("sys.modules", {"psycopg": fake_psycopg}), \
+             patch.object(audit, "load_ticker_exchange", return_value="NYSE") as exchange_lookup, \
+             patch.object(audit, "load_daily", return_value=self.daily), \
+             patch.object(audit, "session_starts", return_value=[1]):
+            output, frozen = auto_freeze_book_intraday(book_id="martin_range_bar_retest_v2", day=self.day,
+                pending_orders=[{"ticker": "BSBR", "payload_json": {"max_entry": 10, "stop": 9}}],
+                database_url="unused", artifacts_dir=temporary, fetcher=fetcher)
+            self.assertEqual(exchange_lookup.call_args.args[1], "BSBR")
+            manifest = json.loads((output / "audit.json").read_text())
+        self.assertEqual(calls, ["NYSE:BSBR", "NASDAQ:BSBR"])
+        lookup = manifest["records"][0]["exchange_lookup"]
+        self.assertEqual(lookup["attempted_symbols"], calls)
+        self.assertEqual(lookup["selected_symbol"], "NASDAQ:BSBR")
+        self.assertEqual(frozen["BSBR"]["exchange_lookup"]["selected_symbol"], "NASDAQ:BSBR")
 
     def test_continuation_routes_v2_from_persisted_book_version(self):
         order = []

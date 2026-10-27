@@ -4,8 +4,8 @@ import path from 'node:path';
 import { exactUsStocks } from './tradingview_symbol_resolution.mjs';
 const [clientDir, symbol, day, timeframe='15', symbolMode='legacy'] = process.argv.slice(2);
 if (!clientDir || !/^[A-Z0-9._-]+:[A-Z0-9._-]+$/.test(symbol ?? '') ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(day ?? '') || !['15','1'].includes(timeframe) || !['legacy','resolve'].includes(symbolMode)) {
-  process.stderr.write('usage: node fetch_tradingview_intraday.mjs CLIENT_DIR EXCHANGE:SYMBOL YYYY-MM-DD [15|1] [legacy|resolve]\n');
+    !/^\d{4}-\d{2}-\d{2}$/.test(day ?? '') || !['30','15','1'].includes(timeframe) || !['legacy','resolve'].includes(symbolMode)) {
+  process.stderr.write('usage: node fetch_tradingview_intraday.mjs CLIENT_DIR EXCHANGE:SYMBOL YYYY-MM-DD [30|15|1] [legacy|resolve]\n');
   process.exit(64);
 }
 const load = file => import(pathToFileURL(path.join(clientDir, 'dist', file)).href);

@@ -116,6 +116,7 @@ def frozen_intraday_for(directory: str | Path | None, day: dt.date) -> dict[str,
             (data.get("metadata") or {}).get("full_name") or f"NASDAQ:{ticker}",
             "original_requested_symbol": data.get("requested_symbol"),
             "resolved_symbol": data.get("resolved_symbol"), "symbol_resolution": data.get("symbol_resolution"),
+            "exchange_lookup": record.get("exchange_lookup"),
             "audit_fingerprint": supplied_fingerprint, "candle_fingerprint": record["candle_fingerprint"],
             "source_date": record.get("date"), "source_file": path.name}
     for record in document.get("records", []):
@@ -125,6 +126,7 @@ def frozen_intraday_for(directory: str | Path | None, day: dt.date) -> dict[str,
                 "requested_symbol": record.get("requested_symbol"), "audit_fingerprint": supplied_fingerprint,
                 "resolved_symbol": record.get("resolved_symbol"),
                 "symbol_resolution": record.get("symbol_resolution"),
+                "exchange_lookup": record.get("exchange_lookup"),
                 "provider_error_code": record.get("provider_error_code"), "source_date": record.get("date")}
     return result
 
@@ -134,7 +136,8 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
                               client_dir: str | Path | None = None, daily_loader=None, fetcher=None,
                               execution_version: str = "martin_bar_retest_execution_v2") -> tuple[Path, dict[str, dict[str, Any]]]:
     """Freeze the next session's pending-order inputs before opening the write transaction."""
-    from scripts.audit_martin_intraday_execution import classify, digest, fetch_safely, load_daily
+    from scripts.audit_martin_intraday_execution import (classify, digest, fetch_safely, load_daily,
+        load_ticker_exchange, normalize_exchange, fetch_with_exchange_fallback)
     tickers: dict[str, list[dict[str, Any]]] = {}
     for row in pending_orders:
         ticker = str(row.get("ticker") or "").upper()
@@ -147,13 +150,14 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
                 levels = None
             tickers.setdefault(ticker, []).append(levels or {})
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    version_dir = "martin_intraday_execution_v3" if execution_version == "martin_bar_retest_execution_v3" else "martin_intraday_execution_v2"
+    version_dir = "martin_intraday_execution_v3" if execution_version in {
+        "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else "martin_intraday_execution_v2"
     output = Path(artifacts_dir) / version_dir / book_id / f"{day.isoformat()}_{stamp}"
     output.mkdir(parents=True, exist_ok=False)
     client_dir = str(client_dir or os.environ.get("TRADINGVIEW_CLIENT_DIR") or
                      "/opt/tradingview/node_modules/@mathieuc/tradingview")
     fetch_data = fetcher or fetch_safely
-    resolve_symbols = execution_version == "martin_bar_retest_execution_v3"
+    resolve_symbols = execution_version in {"martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"}
     connection = None
     if daily_loader is None:
         try:
@@ -165,9 +169,15 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
     records = []
     try:
         for ticker, orders in sorted(tickers.items()):
-            requested = f"NASDAQ:{ticker}"
-            data = (fetcher(client_dir, requested, day.isoformat(), "15") if fetcher else
-                    fetch_data(client_dir, requested, day.isoformat(), "15", resolve_symbols=resolve_symbols))
+            try:
+                exchange = load_ticker_exchange(connection, ticker) if connection is not None else None
+            except Exception:
+                exchange = None
+            requested = f"{normalize_exchange(exchange)}:{ticker}"
+            injected_fetcher = (lambda _client, symbol, date, timeframe, **_kwargs:
+                fetcher(client_dir, symbol, date, timeframe)) if fetcher else None
+            data = fetch_with_exchange_fallback(client_dir, ticker, exchange, day.isoformat(), "15",
+                fetcher=injected_fetcher or fetch_data, resolve_symbols=resolve_symbols)
             try:
                 daily = load_daily(connection, ticker, day) if connection is not None else (daily_loader(ticker, day) if daily_loader else None)
             except Exception:
@@ -179,7 +189,8 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
                 records.append({"ticker": ticker, "date": day.isoformat(), "requested_symbol": requested,
                     "resolved_symbol": (data or {}).get("resolved_symbol"), "symbol_resolution": resolution,
                     "provider_error_code": (data or {}).get("error_code") or "provider_fetch_failed",
-                    "classification": "provider_unavailable", "candle_file": None, "candle_fingerprint": None,
+                    "exchange_lookup": (data or {}).get("exchange_lookup"),
+                    "classification": "symbol_lookup_failed" if (data or {}).get("error_code") == "SYMBOL_ERROR" else "provider_unavailable", "candle_file": None, "candle_fingerprint": None,
                     "order_levels": orders, "daily_source": (daily or {}).get("source")})
                 continue
             candles = data.get("candles") or []
@@ -192,8 +203,10 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
                 evaluations = [{"classification": "provider_data_invalid"}]
             needs_one_minute = any(item.get("classification") == "same_bar_ambiguous" for item in evaluations)
             if needs_one_minute:
-                fine = (fetcher(client_dir, requested, day.isoformat(), "1") if fetcher else
-                        fetch_data(client_dir, requested, day.isoformat(), "1", resolve_symbols=resolve_symbols))
+                fine = fetch_with_exchange_fallback(client_dir, ticker,
+                    (data.get("exchange_lookup") or {}).get("selected_symbol", requested).split(":", 1)[0],
+                    day.isoformat(), "1", fetcher=injected_fetcher or fetch_data,
+                    resolve_symbols=resolve_symbols)
                 if fine is not None:
                     data["one_minute"] = fine
                 else:
@@ -202,6 +215,7 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
             path.write_text(json.dumps(data, sort_keys=True, indent=2, default=str) + "\n")
             records.append({"ticker": ticker, "date": day.isoformat(), "requested_symbol": requested,
                 "resolved_symbol": data.get("resolved_symbol"), "symbol_resolution": data.get("symbol_resolution"),
+                "exchange_lookup": data.get("exchange_lookup"),
                 "classification": "frozen", "order_evaluations": evaluations, "order_levels": orders,
                 "timeframe": "15m", "session": "regular", "adjustment": "splits",
                 "candle_file": path.name, "candle_fingerprint": digest(data),
@@ -233,7 +247,7 @@ def save_execution_only_run(repository: Any, *, book_id: str, day: dt.date,
                 "version": exclusion["version"], "sha256": exclusion["sha256"]}},
             **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
                 "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
-               if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"} else {})}, strategy_id=book_id)
+               if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else {})}, strategy_id=book_id)
 
 
 def book_performance(connection: Any, book_id: str) -> dict[str, Any]:
@@ -266,8 +280,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
     execution = MartinBarRetestExecutionService(repository, database_url=database_url)
     execution.book_id = book_id
     execution.execution_version = execution_version
-    if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"} and intraday_dir is None:
-        raise ValueError("Version 2/3 replay requires an --intraday-dir; individual missing bundles use daily fallback.")
+    if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} and intraday_dir is None:
+        raise ValueError("Version 2/3/4 replay requires an --intraday-dir; individual missing bundles use daily fallback.")
     results = []
     for day in sessions:
         source = sources.get(day)
@@ -284,7 +298,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             repository.set_run_metadata(run_id, {"execution_book_version": execution_version,
                 **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
-                   if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"} else {}),
+                   if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else {}),
                 "execution_only": True, "execution_actions": actions,
                 "simulate_backdated_buys": simulate_backdated_buys,
                 "backdated_buy_basis": None, "partial": marks["mark_coverage"]["status"] != "complete" or actions.get("intraday_fallbacks", 0) > 0,
@@ -313,7 +327,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             repository.set_run_metadata(result["run_id"], {"execution_book_version": execution_version,
                 **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
-                   if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"} else {}),
+                   if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else {}),
                 "execution_actions": actions, "execution_source_on_time": result.get("retrospective_source_scan") is False,
                 "simulate_backdated_buys": simulate_backdated_buys,
                 "backdated_buy_basis": "hypothetical_backdated_simulation" if simulate_backdated_buys and result.get("retrospective_source_scan") else "forward_safe",
@@ -399,7 +413,7 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
         raise ValueError("Continuation requires an existing execution book; historical replay must create a fresh book first.")
     version_rows = repository._rows("SELECT summary_json FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 1", (book_id,))
     version = (version_rows[0].get("summary_json") or {}).get("execution_book_version") if version_rows else None
-    if version not in {"martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"}:
+    if version not in {"martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"}:
         raise ValueError(f"Book {book_id} is not a versioned Martin Bar Retest execution book.")
     day = xnys_sessions(latest + dt.timedelta(days=1), latest + dt.timedelta(days=30))[0]
     prior_run = repository.session_run_id(book_id, day)
@@ -415,7 +429,7 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
                 "reason": "awaiting_next_completed_session"}
     intraday_source = None
     frozen_intraday: dict[str, dict[str, Any]] = {}
-    if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"}:
+    if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"}:
         if intraday_dir is None:
             from src.webapp.config import load_webapp_config
             intraday_dir, frozen_intraday = auto_freeze_book_intraday(book_id=book_id, day=day,
@@ -473,8 +487,8 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
             "execution_mode": "forward_continuation", "source_mode": mode,
             **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
                 "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
-               if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"} else {}),
-            "intraday_source": intraday_source, "intraday_bundle_dir": str(intraday_dir) if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"} else None,
+               if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else {}),
+            "intraday_source": intraday_source, "intraday_bundle_dir": str(intraday_dir) if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else None,
             "source_run_id": (source or {}).get("source_run_id"), "source_published_at": (source or {}).get("published_at"),
             "source_on_time": bool(result and result.get("retrospective_source_scan") is False),
             "execution_actions": action_counts, "partial": marks["mark_coverage"]["status"] != "complete" or action_counts.get("intraday_fallbacks", 0) > 0,
@@ -482,14 +496,14 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
             "intraday_fallback_count": action_counts.get("intraday_fallbacks", 0), **marks})
     return {"status": "complete", "book_id": book_id, "session_date": day.isoformat(), "source_mode": mode,
             "execution_actions": action_counts, "intraday_source": intraday_source,
-            "intraday_bundle_dir": str(intraday_dir) if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3"} else None, **marks}
+            "intraday_bundle_dir": str(intraday_dir) if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else None, **marks}
 
 
 def continue_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Continue an existing Martin Bar Retest execution book by one completed XNYS session.")
     parser.add_argument("--book-id", required=True)
     parser.add_argument("--apply", action="store_true", help="Execute and persist one continuation session.")
-    parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2/v3.")
+    parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2/v3/v4.")
     args = parser.parse_args(argv)
     if not args.book_id.startswith("martin_range_bar_retest_") or args.book_id == POLICY_ID:
         parser.error("--book-id must name an isolated martin_range_bar_retest_ execution book")
@@ -553,16 +567,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true", help="Commit the full session range atomically; default simulates then rolls back.")
     parser.add_argument("--simulate-backdated-buys", action="store_true",
         help="Allow confirmed signals from scans saved after next-session open to schedule hypothetical historical fills.")
-    parser.add_argument("--execution-version", choices=("v1", "v2", "v3"), default="v1",
+    parser.add_argument("--execution-version", choices=("v1", "v2", "v3", "v4"), default="v1",
         help="Isolated execution policy; v1 remains the default.")
-    parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2.")
+    parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2/v3/v4.")
     args = parser.parse_args(argv)
     if args.to_date < args.from_date:
         parser.error("--to-date must be on or after --from-date")
     if not args.book_id.startswith("martin_range_bar_retest_") or args.book_id == POLICY_ID:
         parser.error("--book-id must start with martin_range_bar_retest_ and be separate from the policy ID")
-    if args.execution_version in {"v2", "v3"} and not args.intraday_dir:
-        parser.error("--intraday-dir is required for v2/v3 frozen-bar execution")
+    if args.execution_version in {"v2", "v3", "v4"} and not args.intraday_dir:
+        parser.error("--intraday-dir is required for v2/v3/v4 frozen-bar execution")
 
     from src.webapp.config import load_webapp_config
     from src.webapp.repositories.history_repository import HistoryRepository
@@ -592,7 +606,7 @@ def main(argv: list[str] | None = None) -> int:
         "mode": "apply" if args.apply else "dry_run_rolled_back", "saved": bool(args.apply),
         "simulate_backdated_buys": args.simulate_backdated_buys,
         "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
-        "intraday_source": "frozen_tradingview_bundle" if args.execution_version in {"v2", "v3"} else None,
+        "intraday_source": "frozen_tradingview_bundle" if args.execution_version in {"v2", "v3", "v4"} else None,
         "source_mode": "saved_screen_runs_with_execution_only_sessions", "sessions": results}, indent=2, default=str))
     return 0
 

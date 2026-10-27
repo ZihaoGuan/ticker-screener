@@ -1,5 +1,6 @@
 import datetime as dt
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -182,6 +183,7 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
         counts = service.run_session(day=day, run_id=10, candidates=[], source_on_time=False)
         self.assertEqual(counts["filled"], 1)
         self.assertEqual(counts["intraday_fallbacks"], 1)
+        self.assertEqual(counts["intraday_fallback_reasons"], {"frozen_intraday_bundle_missing": 1})
         fill = next(event for event in repo.events if event["event_type"] == "order_filled")
         self.assertEqual(fill["payload"]["intraday_execution"]["evidence_status"], "frozen_intraday_bundle_missing")
 
@@ -196,11 +198,20 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
         service.book_id = "martin_range_bar_retest_v2_provider_failure"
         service.execution_version = "martin_bar_retest_execution_v2"
         counts = service.run_session(day=day, run_id=10, candidates=[], source_on_time=False,
-            frozen_intraday={"ABC": {"freeze_error": "provider_unavailable", "audit_fingerprint": "frozen-manifest"}})
+            frozen_intraday={"ABC": {"freeze_error": "provider_unavailable", "audit_fingerprint": "frozen-manifest",
+                "exchange_lookup": {"attempted_symbols": ["NYSE:ABC", "NASDAQ:ABC"], "selected_symbol": None}}})
         fill = next(event for event in repo.events if event["event_type"] == "order_filled")
         self.assertEqual(counts["intraday_fallbacks"], 1)
+        self.assertEqual(counts["intraday_fallback_reasons"], {"provider_unavailable": 1})
+        self.assertEqual(counts["intraday_fallback_details"], [{
+            "ticker": "ABC", "date": day.isoformat(), "requested_symbol": "NASDAQ:ABC",
+            "resolved_symbol": None, "evidence_status": "provider_unavailable",
+            "reason": "provider_unavailable",
+        }])
         self.assertEqual(fill["payload"]["intraday_execution"]["evidence_status"], "provider_unavailable")
         self.assertEqual(fill["payload"]["intraday_execution"]["audit_fingerprint"], "frozen-manifest")
+        self.assertEqual(fill["payload"]["intraday_execution"]["exchange_lookup"]["attempted_symbols"],
+            ["NYSE:ABC", "NASDAQ:ABC"])
 
     def test_v2_frozen_fill_persists_hash_and_feed_provenance(self):
         day = dt.date(2026, 10, 20)
@@ -219,7 +230,9 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
         service.book_id = "martin_range_bar_retest_v2_frozen"
         service.execution_version = "martin_bar_retest_execution_v2"
         counts = service.run_session(day=day, run_id=10, candidates=[], source_on_time=False,
-            frozen_intraday={"ABC": {"data": data, "requested_symbol": "NASDAQ:ABC", "expected_starts": [1, 2],
+            frozen_intraday={"ABC": {"data": data, "requested_symbol": "NASDAQ:ABC",
+                "exchange_lookup": {"attempted_symbols": ["NYSE:ABC", "NASDAQ:ABC"], "selected_symbol": "NASDAQ:ABC"},
+                "expected_starts": [1, 2],
                 "audit_fingerprint": "audit-hash", "candle_fingerprint": "candle-hash", "source_date": day.isoformat()}})
         self.assertEqual(counts["filled"], 1)
         position = repo.positions[0]["payload_json"]
@@ -229,6 +242,55 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
         self.assertEqual(fill["payload"]["intraday_execution"]["candle_fingerprint"], "candle-hash")
         self.assertEqual(fill["payload"]["intraday_execution"]["evidence_status"], "alternate_feed_supported")
         self.assertTrue(fill["payload"]["intraday_execution"]["alternate_feed_supported"])
+        self.assertEqual(fill["payload"]["intraday_execution"]["exchange_lookup"]["selected_symbol"], "NASDAQ:ABC")
+
+    def test_v4_expired_intraday_order_does_not_daily_fill(self):
+        self._assert_v4_intraday_terminal_is_authoritative("expired")
+
+    def test_v4_cancelled_intraday_order_does_not_daily_fill(self):
+        self._assert_v4_intraday_terminal_is_authoritative("cancelled")
+
+    def _assert_v4_intraday_terminal_is_authoritative(self, status):
+        day = dt.date(2026, 10, 20)
+        frame = pd.DataFrame([{"Open": 9.8, "High": 10.2, "Low": 9.5, "Close": 10.0, "Volume": 1000}],
+                             index=pd.to_datetime([day.isoformat()]))
+        repo = LifecycleRepo()
+        repo.pending = [{"id": 9, "run_id": 8, "ticker": "ABC", "payload_json": {
+            "max_entry": 10, "limit_price": 10, "stop": 9, "shares": 10}}]
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {"ABC": frame})
+        service.book_id = "martin_range_bar_retest_v4_terminal"
+        service.execution_version = "martin_bar_retest_execution_v4"
+        evidence = {"status": status, "reason": "intraday_terminal_test"}
+        with patch("src.webapp.services.martin_intraday_execution.evaluate_frozen_order", return_value=evidence):
+            counts = service.run_session(day=day, run_id=10, candidates=[], source_on_time=False,
+                frozen_intraday={"ABC": {"data": {}, "requested_symbol": "NASDAQ:ABC"}})
+        self.assertEqual(counts["filled"], 0)
+        self.assertEqual(counts[status], 1)
+        self.assertFalse(any(event["event_type"] == "order_filled" for event in repo.events))
+        terminal = next(event for event in repo.events if event["event_type"] == f"order_{status}")
+        self.assertEqual(terminal["payload"]["intraday_execution"]["status"], status)
+        self.assertEqual(counts["intraday_fallbacks"], 0)
+
+    def test_v4_missing_or_invalid_frozen_evidence_uses_daily_fallback_and_counts_it(self):
+        day = dt.date(2026, 10, 20)
+        frame = pd.DataFrame([{"Open": 9.8, "High": 10.2, "Low": 9.5, "Close": 10.0, "Volume": 1000}],
+                             index=pd.to_datetime([day.isoformat()]))
+        for bundle in (None, {"data": {}, "requested_symbol": "NASDAQ:ABC"}):
+            with self.subTest(bundle=bundle):
+                repo = LifecycleRepo()
+                repo.pending = [{"id": 9, "run_id": 8, "ticker": "ABC", "payload_json": {
+                    "max_entry": 10, "limit_price": 10, "stop": 9, "shares": 10}}]
+                service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {"ABC": frame})
+                service.book_id = "martin_range_bar_retest_v4_fallback"
+                service.execution_version = "martin_bar_retest_execution_v4"
+                invalid = {"status": "blocked_data", "reason": "invalid_fixture"}
+                with patch("src.webapp.services.martin_intraday_execution.evaluate_frozen_order", return_value=invalid):
+                    counts = service.run_session(day=day, run_id=10, candidates=[], source_on_time=False,
+                        frozen_intraday={} if bundle is None else {"ABC": bundle})
+                self.assertEqual(counts["filled"], 1)
+                self.assertEqual(counts["intraday_fallbacks"], 1)
+                fill = next(event for event in repo.events if event["event_type"] == "order_filled")
+                self.assertEqual(fill["payload"]["intraday_execution"]["status"], "fallback_daily")
 
     def test_leveraged_pending_order_is_cancelled_before_bar_lookup(self):
         repo = Repo()
