@@ -31,6 +31,7 @@ from src.webapp.services.ad_hoc_screen_service import AdHocScreenService
 from src.webapp.services.run_service import RunService
 from src.webapp.services.scheduled_job_service import ScheduledJobService
 from src.webapp.services.screener_history_service import ScreenerHistoryService
+from src.webapp.services.martin_bar_watchlist_history import build_follow_through_page
 from src.webapp.services.sector_leaderboard_service import SectorLeaderboardService
 from src.webapp.services.tiger_positions_service import TigerPositionsService
 from src.webapp.services.watchlist_service import WatchlistService
@@ -783,6 +784,23 @@ def screener_runs_data(
         "coverage": service.list_signal_cache_summary(start_date=start_date, end_date=end_date),
         "available_strategies": [{"id": item["id"], "label": item["label"]} for item in run_service.list_actions()],
     }
+    return JSONResponse(jsonable_encoder(payload))
+
+
+@router.get("/martin-bar-watchlist-follow-through", response_class=JSONResponse)
+def martin_bar_watchlist_follow_through(
+    run_id: int = Query(alias="runId", ge=1),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    service: ScreenerHistoryService = Depends(get_screener_history_service),
+    _: Principal = Depends(require_member_access),
+) -> JSONResponse:
+    try:
+        payload = build_follow_through_page(service.repository, run_id, limit=limit, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Unknown screener run: {run_id}")
     return JSONResponse(jsonable_encoder(payload))
 
 

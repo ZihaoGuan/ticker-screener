@@ -54,6 +54,7 @@ const ChartsPage = lazyPage(loadChartsPage, "ChartsPage");
 const PositionCalculatorPage = lazyPage(() => import("./pages/PositionCalculatorPage"), "PositionCalculatorPage");
 const EarningsPage = lazyPage(() => import("./pages/EarningsPage"), "EarningsPage");
 const ScannerBoardPage = lazyPage(() => import("./pages/ScannerBoardPage"), "ScannerBoardPage");
+const MartinBarWatchlistPage = lazyPage(() => import("./pages/MartinBarWatchlistPage"), "MartinBarWatchlistPage");
 const ScannerTopHitsPage = lazyPage(() => import("./pages/ScannerTopHitsPage"), "ScannerTopHitsPage");
 const ScannerResultPage = lazyPage(() => import("./pages/ScannerResultPage"), "ScannerResultPage");
 const SectorLeaderboardPage = lazyPage(() => import("./pages/SectorLeaderboardPage"), "SectorLeaderboardPage");
@@ -111,6 +112,7 @@ export default function App() {
             path="/scanner/top-hits"
             element={<ScannerTopHitsPage />}
           />
+          <Route path="/scanner/martin_bar_watchlist_v1" element={<MartinBarWatchlistPage />} />
           <Route
             path="/scanner/:scannerId"
             element={<ScannerResultPage />}

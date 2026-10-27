@@ -1328,6 +1328,49 @@ class HistoryRepository:
                     payload["hits"] = self._rows_to_dicts(cursor, cursor.fetchall())
         return payload
 
+    def list_daily_bars_after(self, tickers: list[str], after_date: dt.date, *, limit_per_ticker: int = 70) -> dict[str, list[dict[str, Any]]]:
+        normalized = sorted({str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()})
+        if not normalized:
+            return {}
+        connection = self._connect()
+        if connection is None:
+            return {}
+        sql = """
+            SELECT ticker, trade_date, open, high, low, close, source, split_factor
+            FROM (
+                SELECT ticker, trade_date, open, high, low, close, source, split_factor,
+                       ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY trade_date) AS session_number
+                FROM daily_bars WHERE ticker = ANY(%s) AND trade_date > %s
+            ) bars
+            WHERE session_number <= %s
+            ORDER BY ticker, trade_date
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (normalized, after_date, max(1, int(limit_per_ticker))))
+                rows = self._rows_to_dicts(cursor, cursor.fetchall())
+        result: dict[str, list[dict[str, Any]]] = {ticker: [] for ticker in normalized}
+        for row in rows:
+            result.setdefault(str(row["ticker"]), []).append(row)
+        return result
+
+    def list_passed_screen_run_hits(self, run_id: int, *, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        connection = self._connect()
+        if connection is None:
+            return []
+        sql = """
+            SELECT id, strategy_id, signal_date, ticker, passed, rank,
+                   metrics_json, reasons_json, hit_payload_json, created_at
+            FROM screen_run_hits
+            WHERE screen_run_id = %s AND passed = TRUE
+            ORDER BY signal_date DESC, rank NULLS LAST, ticker ASC
+            LIMIT %s OFFSET %s
+        """
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (run_id, max(1, int(limit)), max(0, int(offset))))
+                return self._rows_to_dicts(cursor, cursor.fetchall())
+
     def find_screen_run_by_watchlist_stem(self, stem: str, *, include_hits: bool = False, hit_limit: int = 5000) -> dict[str, Any] | None:
         normalized_stem = str(stem or "").strip()
         if not normalized_stem:

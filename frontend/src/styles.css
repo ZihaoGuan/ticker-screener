@@ -7428,3 +7428,16 @@ dialog.modal-backdrop:not([open]) {
   .martin-exclusions .martin-table-wrap td { padding: .55rem .35rem; }
   .martin-trade-plan { max-width: 100%; }
 }
+
+.martin-history-toolbar { display: grid; gap: 10px; }
+.martin-history-toolbar label { display: grid; gap: 6px; max-width: 520px; }
+.martin-history-toolbar label > span { font-weight: 600; }
+.martin-history-toolbar select { min-height: 40px; }
+.martin-history-toolbar p { margin: 0; }
+.martin-history-note { margin: 0; padding: 10px 12px; border: 1px solid rgba(245, 158, 11, .35); border-radius: 8px; color: #fcd34d; }
+.martin-history-table { min-width: 900px; }
+.martin-horizon-cell { min-width: 110px; }
+.martin-horizon-cell strong, .martin-horizon-cell span { display: block; }
+.martin-horizon-cell span { color: var(--text-muted, #a1a1aa); font-size: .82rem; }
+.martin-history-table details summary { cursor: pointer; color: var(--accent-cyan, #67e8f9); }
+.martin-detail-grid { display: grid; gap: 5px; min-width: 230px; padding: 8px 0; font-size: .82rem; }

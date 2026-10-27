@@ -50,7 +50,7 @@ export function ScannerBoardPage() {
     const lowerQuery = query.trim().toLowerCase();
     return cards.filter((card) => (family === "recommended" ? card.featured : family === "all" || card.family === family))
       .filter((card) => timeframe === "all" || card.timeframe.toLowerCase().includes(timeframe))
-      .filter((card) => freshness === "all" || card.freshness === freshness)
+      .filter((card) => (freshness === "current" && card.id === "martin_bar_watchlist_v1") || freshness === "all" || card.freshness === freshness)
       .filter((card) => !lowerQuery || `${card.label} ${card.description} ${card.preview_tickers.join(" ")}`.toLowerCase().includes(lowerQuery))
       .sort((left, right) => sort === "hits" ? right.entry_count - left.entry_count : sort === "fresh" ? right.sort_date.localeCompare(left.sort_date) : Number(right.featured) - Number(left.featured) || Number(right.has_results) - Number(left.has_results) || right.entry_count - left.entry_count);
   }, [cards, family, freshness, query, sort, timeframe]);
@@ -152,7 +152,7 @@ export function ScannerBoardPage() {
               </div>
               <div className="scanner-card-body">
                 <div className="scanner-card-heading"><h2>{card.label}</h2><strong>{formatCount(card.entry_count)} hits</strong></div>
-                <p className="scanner-card-description">{card.description}</p>
+                <p className="scanner-card-description">{card.id === "martin_bar_watchlist_v1" && card.freshness === "stale" ? "Historical saved runs · review original discovery reasons and subsequent price follow-through." : card.description}</p>
                 {hitCountPoints(card.hit_count_history) ? (
                   <div className="scanner-card-trend" aria-label={`Hit count over ${card.hit_count_history.length} persisted runs`}>
                     <svg viewBox="0 0 100 40" aria-hidden="true" preserveAspectRatio="none"><path className="scanner-trend-baseline" d="M0 36 H100" /><polyline className={`scanner-trend-line accent-${card.accent}`} points={hitCountPoints(card.hit_count_history)} /></svg>
@@ -180,12 +180,12 @@ export function ScannerBoardPage() {
                   <span className="eyebrow">Family</span>
                   <strong>{card.family}</strong>
                 </div>
-                <span className="scanner-card-cta">{card.available ? "Open list" : card.has_run ? "No matches" : "Unavailable"}</span>
+                <span className="scanner-card-cta">{card.id === "martin_bar_watchlist_v1" ? "Review history" : card.available ? "Open list" : card.has_run ? "No matches" : "Unavailable"}</span>
               </div>
             </>
           );
 
-          if (!card.available || !card.stem) {
+          if ((!card.available || !card.stem) && card.id !== "martin_bar_watchlist_v1") {
             return (
               <article key={card.id} className={`scanner-idea-card is-disabled accent-${card.accent}`}>
                 {content}

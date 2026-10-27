@@ -155,6 +155,14 @@ _MAX_OHLCV_RANGE_DAYS = 5 * 366
 _OHLCV_TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.-]{0,14}$")
 _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
     {
+        "id": "martin_bar_watchlist_v1",
+        "strategy_id": "martin_bar_watchlist_v1",
+        "label": "Martin Bar Watchlist V1",
+        "description": "Saved discovery hits with 5, 21, and 63 session price follow-through from the next session open.",
+        "timeframe": "Daily",
+        "accent": "amber",
+    },
+    {
         "id": "weekly_rs_new_high",
         "strategy_id": "weekly_rs_new_high",
         "label": "Weekly RS New High",
@@ -801,6 +809,7 @@ _SCANNER_BOARD_CONFIG: tuple[dict[str, str], ...] = (
 )
 
 _SCANNER_FEATURED_IDS = {
+    "martin_bar_watchlist_v1",
     "weekly_rs_new_high",
     "weekly_rs_before_price",
     "daily_rs_new_high",
