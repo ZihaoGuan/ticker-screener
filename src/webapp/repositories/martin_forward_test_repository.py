@@ -317,6 +317,12 @@ class MartinForwardTestRepository:
         connection = self._connect()
         if connection is None:
             return False
+        if position_payload is not None and close_position:
+            position_payload = {
+                **position_payload,
+                "status": "closed",
+                "closed_on": event_date.isoformat() if hasattr(event_date, "isoformat") else str(event_date),
+            }
         with connection:
             with connection.cursor() as cursor:
                 cursor.execute("""INSERT INTO martin_forward_events(strategy_id,run_id,position_id,ticker,event_type,event_date,payload_json)

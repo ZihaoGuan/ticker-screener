@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import datetime as dt
+import json
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -144,6 +145,62 @@ class MartinBenchmarkComparisonTests(unittest.TestCase):
 
 
 class MartinExecutionBookContextTests(unittest.TestCase):
+    def test_apply_event_persists_closed_position_status_and_date_in_payload(self) -> None:
+        class Cursor:
+            def __init__(self):
+                self.statements = []
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def execute(self, sql, params): self.statements.append((sql, params))
+            def fetchone(self): return (1,)
+
+        class Connection:
+            def __init__(self): self.db_cursor = Cursor()
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def cursor(self): return self.db_cursor
+
+        repository = MartinForwardTestRepository(database_url="postgresql://unused")
+        connection = Connection()
+        event_date = dt.date(2026, 10, 23)
+        original_payload = {"status": "open", "remaining_shares": 0}
+        with patch.object(repository, "_connect", return_value=connection):
+            self.assertTrue(repository.apply_event(
+                run_id=1, position_id=2, ticker="ABC", event_type="stop", event_date=event_date,
+                payload={"reason": "stop"}, position_payload=original_payload, close_position=True,
+                strategy_id="replay_book"))
+
+        update_params = next(params for sql, params in connection.db_cursor.statements if "UPDATE martin_forward_positions" in sql)
+        saved_payload = json.loads(update_params[0])
+        self.assertEqual(saved_payload["status"], "closed")
+        self.assertEqual(saved_payload["closed_on"], "2026-10-23")
+        self.assertEqual(saved_payload["remaining_shares"], 0)
+        self.assertEqual(original_payload, {"status": "open", "remaining_shares": 0})
+
+    def test_apply_event_does_not_rewrite_non_close_position_payload(self) -> None:
+        class Cursor:
+            def __init__(self): self.statements = []
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def execute(self, sql, params): self.statements.append((sql, params))
+            def fetchone(self): return (1,)
+        class Connection:
+            def __init__(self): self.db_cursor = Cursor()
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def cursor(self): return self.db_cursor
+
+        repository = MartinForwardTestRepository(database_url="postgresql://unused")
+        connection = Connection()
+        payload = {"status": "open", "remaining_shares": 12}
+        with patch.object(repository, "_connect", return_value=connection):
+            self.assertTrue(repository.apply_event(
+                run_id=1, position_id=2, ticker="ABC", event_type="trim", event_date=dt.date(2026, 10, 23),
+                payload={"reason": "trim"}, position_payload=payload, close_position=False))
+
+        update_params = next(params for sql, params in connection.db_cursor.statements if "UPDATE martin_forward_positions" in sql)
+        self.assertEqual(json.loads(update_params[0]), payload)
+
     def test_pending_orders_can_be_limited_to_orders_available_before_session(self) -> None:
         repository = MartinForwardTestRepository(database_url="postgresql://unused")
         with patch.object(repository, "_rows", return_value=[]) as rows:
