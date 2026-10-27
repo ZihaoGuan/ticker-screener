@@ -15,7 +15,8 @@ if str(ROOT) not in sys.path:
 from scripts.audit_martin_intraday_execution import (digest, fetch_safely,
     fetch_with_exchange_fallback, load_ticker_exchange, normalize_exchange, session_starts)
 from scripts.replay_martin_bar_retest_range import load_range_sources, xnys_sessions
-from src.webapp.services.rs_leader_30m_pivot import candidates_from_saved_run, evaluate_pivot_sequence
+from src.webapp.services.rs_leader_30m_pivot import candidates_from_saved_run, evaluate_pivot_sequence, frozen_30m_bars
+from src.webapp.services.martin_bar_retest_execution import bar_for
 
 
 def main(argv=None):
@@ -57,7 +58,8 @@ def main(argv=None):
             current_source_tickers = sorted({str(hit.get("ticker") or "").strip().upper() for hit in source.get("hits", [])
                 if str(hit.get("ticker") or "").strip() and set(hit.get("discovery_categories") or []).intersection(
                     {"leader_30_session", "potent_mover", "gap_mover"})})
-            current_frames = load_many_ticker_windows(current_source_tickers, day, 260, database_url=config.database_url) if current_source_tickers else {}
+            current_frames = load_many_ticker_windows(sorted(set(current_source_tickers) | set(prior_watch)), day, 260,
+                database_url=config.database_url) if current_source_tickers or prior_watch else {}
             candidates = candidates_from_saved_run(source, current_frames, day,
                 simulate_backdated_buys=args.simulate_backdated_buys)
             # Entry on D uses a setup discovered on the preceding session D-1.
@@ -67,8 +69,9 @@ def main(argv=None):
                 requested = f"{normalize_exchange(exchange)}:{ticker}"
                 data = fetch_with_exchange_fallback(args.client_dir, ticker, exchange, day.isoformat(), "30",
                     fetcher=fetch_safely)
+                data_metadata = (data or {}).get("metadata") or {}
                 base = {"ticker": ticker, "date": day.isoformat(), "requested_symbol": requested,
-                    "resolved_symbol": (data or {}).get("resolved_symbol"),
+                    "resolved_symbol": data_metadata.get("full_name") or data_metadata.get("pro_name") or (data or {}).get("resolved_symbol"),
                     "source_run_id": prior_watch[ticker].get("source_run_id"),
                     "source_fingerprint": prior_watch[ticker].get("source_fingerprint"),
                     "session_source_run_id": source.get("source_run_id"),
@@ -78,6 +81,25 @@ def main(argv=None):
                         "provider_error_code": (data or {}).get("error_code") or "provider_unavailable",
                         "candle_file": None, "candle_fingerprint": None,
                         "exchange_lookup": (data or {}).get("exchange_lookup")})
+                    continue
+                daily = bar_for(current_frames.get(ticker), day)
+                if daily is None:
+                    records.append({**base, "classification": "stored_daily_bar_missing", "candle_file": None,
+                        "candle_fingerprint": None, "exchange_lookup": data.get("exchange_lookup")})
+                    continue
+                bundle = {"manifest": {"schema": "rs_leader_30m_pivot_audit_v1", "provider": "TradingView",
+                    "timeframe": "30m", "session": "regular", "adjustment": "splits"},
+                    "record": base, "data": data}
+                # Build the authoritative manifest fields before validating; the 30m bars stay frozen as fetched.
+                try:
+                    manifest = {"schema": "rs_leader_30m_pivot_audit_v1", "provider": "TradingView",
+                        "timeframe": "30m", "session": "regular", "adjustment": "splits"}
+                    manifest["fingerprint"] = digest(manifest)
+                    bundle["manifest"] = manifest
+                    frozen_30m_bars(bundle, day, daily)
+                except (ValueError, KeyError, TypeError, OverflowError) as exc:
+                    records.append({**base, "classification": str(exc), "candle_file": None,
+                        "candle_fingerprint": None, "exchange_lookup": data.get("exchange_lookup")})
                     continue
                 expected = session_starts(day.isoformat(), 30)
                 candles = data.get("candles") or []

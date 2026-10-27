@@ -16,6 +16,54 @@ def bar(opening, high, low, close):
 
 
 class RSPivotTests(unittest.TestCase):
+    def _frozen_bundle(self, actual="BATS:ABC", *, high=10.9, low=9.1):
+        from scripts.audit_martin_intraday_execution import digest
+        day = "2026-01-05"
+        requested = "NASDAQ:ABC"
+        starts = [int((1767623400 + 1800 * i)) for i in range(13)]
+        candles = [dict({**bar(10, high, low, 10.1)}, time=stamp) for stamp in starts]
+        data = {"requested_symbol": actual, "resolved_symbol": actual,
+            "query": {"symbol": actual, "session": "regular", "adjustment": "splits",
+                "timezone": "America/New_York", "timeframe": "30"},
+            "metadata": {"full_name": actual, "subsession_id": "regular",
+                "timezone": "America/New_York", "currency_code": "USD"}, "candles": candles}
+        manifest = {"schema": "rs_leader_30m_pivot_audit_v1", "provider": "TradingView",
+            "timeframe": "30m", "session": "regular", "adjustment": "splits"}
+        manifest["fingerprint"] = digest(manifest)
+        record = {"ticker": "ABC", "requested_symbol": requested, "resolved_symbol": actual,
+            "timeframe": "30m", "session": "regular", "adjustment": "splits"}
+        return {"manifest": manifest, "record": record, "data": data}, day
+
+    def test_guarded_bats_requires_exact_ticker_complete_bars_and_daily_envelope(self):
+        from src.webapp.services.rs_leader_30m_pivot import _frozen_30m_evidence
+        from scripts import audit_martin_intraday_execution as audit
+        bundle, day = self._frozen_bundle()
+        with patch.object(audit, "session_starts", return_value=[1767623400 + 1800 * i for i in range(13)]):
+            bars, evidence = _frozen_30m_evidence(bundle, day, {"open": 10, "high": 11, "low": 9,
+                "close": 10.2, "volume": 1000})
+        self.assertEqual(len(bars), 13)
+        self.assertEqual(evidence["evidence_tier"], "guarded_alternate")
+        self.assertTrue(evidence["feed_conflict"])
+        outside, day = self._frozen_bundle(high=11.2)
+        with patch.object(audit, "session_starts", return_value=[1767623400 + 1800 * i for i in range(13)]):
+            with self.assertRaisesRegex(ValueError, "bats_outside_daily_envelope"):
+                _frozen_30m_evidence(outside, day, {"open": 10, "high": 11, "low": 9,
+                    "close": 10.2, "volume": 1000})
+        wrong, day = self._frozen_bundle(actual="BATS:OTHER")
+        with patch.object(audit, "session_starts", return_value=[1767623400 + 1800 * i for i in range(13)]):
+            with self.assertRaisesRegex(ValueError, "ticker_mismatch"):
+                _frozen_30m_evidence(wrong, day, {"open": 10, "high": 11, "low": 9,
+                    "close": 10.2, "volume": 1000})
+
+    def test_exact_requested_exchange_is_primary_evidence(self):
+        from src.webapp.services.rs_leader_30m_pivot import _frozen_30m_evidence
+        from scripts import audit_martin_intraday_execution as audit
+        bundle, day = self._frozen_bundle(actual="NASDAQ:ABC")
+        with patch.object(audit, "session_starts", return_value=[1767623400 + 1800 * i for i in range(13)]):
+            _, evidence = _frozen_30m_evidence(bundle, day)
+        self.assertEqual(evidence["evidence_tier"], "primary_exact")
+        self.assertFalse(evidence["feed_conflict"])
+
     @unittest.skipUnless(importlib.util.find_spec("pandas"), "pandas is not installed")
     def test_daily_support_decline_thresholds_are_explicit_and_inferred(self):
         import pandas as pd

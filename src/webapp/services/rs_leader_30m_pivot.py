@@ -137,7 +137,8 @@ def evaluate_pivot_sequence(bars: list[dict[str, Any]]) -> dict[str, Any]:
             "entry": entry, "stop": stop}
 
 
-def frozen_30m_bars(bundle: dict[str, Any], day: Any) -> list[dict[str, Any]]:
+def _frozen_30m_evidence(bundle: dict[str, Any], day: Any,
+                         daily: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Validate exact XNYS 30m coverage and freeze/query provenance before evaluation."""
     import datetime as dt
     from scripts.audit_martin_intraday_execution import digest, session_starts
@@ -160,15 +161,41 @@ def frozen_30m_bars(bundle: dict[str, Any], day: Any) -> list[dict[str, Any]]:
             metadata.get("subsession_id") != "regular" or metadata.get("timezone") != "America/New_York" or
             metadata.get("currency_code") != "USD"):
         raise ValueError("frozen_30m_query_settings_invalid")
-    requested = data.get("resolved_symbol") or data.get("requested_symbol") or query.get("symbol")
+    requested = record.get("requested_symbol") or data.get("requested_symbol")
     actual = metadata.get("full_name") or metadata.get("pro_name")
-    if not requested or actual != requested:
-        raise ValueError("frozen_30m_symbol_mismatch")
-    if str(actual).rsplit(":", 1)[-1].upper() != str(record.get("ticker") or "").upper():
+    ticker = str(record.get("ticker") or "").upper()
+    if not requested or not actual or str(actual).rsplit(":", 1)[-1].upper() != ticker:
         raise ValueError("frozen_30m_ticker_mismatch")
     if record.get("resolved_symbol") and record["resolved_symbol"] != actual:
         raise ValueError("frozen_30m_resolved_symbol_provenance_mismatch")
-    return frozen_intraday_bars(data, session, 30)
+    if query.get("symbol") != (data.get("requested_symbol") or record.get("requested_symbol")):
+        raise ValueError("frozen_30m_query_symbol_provenance_mismatch")
+    bars = frozen_intraday_bars(data, session, 30)
+    exact = actual == requested
+    evidence = {"actual_feed": actual, "requested_feed": requested,
+                "feed_basis": "requested_feed_exact" if exact else "unverified",
+                "evidence_tier": "primary_exact" if exact else "rejected",
+                "feed_conflict": not exact}
+    if not exact:
+        if not (str(actual).startswith("BATS:") and daily):
+            raise ValueError("frozen_30m_symbol_mismatch")
+        tolerance = max(.02, abs(float(daily["close"])) * .0005)
+        aggregate_high = max(float(row["high"]) for row in bars)
+        aggregate_low = min(float(row["low"]) for row in bars)
+        if aggregate_high > float(daily["high"]) + tolerance or aggregate_low < float(daily["low"]) - tolerance:
+            raise ValueError("frozen_30m_bats_outside_daily_envelope")
+        evidence.update(feed_basis="alternate_bats_supported", evidence_tier="guarded_alternate",
+                        evidence_status="alternate_feed_supported",
+                        feed_conflict_note="Complete regular-session BATS 30m bars inside the stored daily high/low envelope determine pivot and entry evidence.")
+    else:
+        evidence["evidence_status"] = "exact_requested_feed"
+    return bars, evidence
+
+
+def frozen_30m_bars(bundle: dict[str, Any], day: Any,
+                    daily: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Validate exact feed or guarded complete BATS evidence against the stored daily range."""
+    return _frozen_30m_evidence(bundle, day, daily)[0]
 
 
 def frozen_intraday_bars(data: dict[str, Any], session: Any, interval: int) -> list[dict[str, Any]]:
@@ -248,7 +275,8 @@ def refine_pivot_ambiguity(bars_30m: list[dict[str, Any]], bars_1m: list[dict[st
 
 
 def load_frozen_30m_directory(directory: str | Path, day: Any, book_id: str | None = None,
-                             simulate_backdated_buys: bool | None = None) -> dict[str, dict[str, Any]]:
+                             simulate_backdated_buys: bool | None = None,
+                             daily_bars: dict[str, dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
     """Read only manifest-listed bundles and reject tampered, missing or wrong-timeframe evidence."""
     root = Path(directory)
     manifest_path = root / "audit.json"
@@ -279,7 +307,7 @@ def load_frozen_30m_directory(directory: str | Path, day: Any, book_id: str | No
         if digest(data) != item.get("candle_fingerprint"):
             raise ValueError(f"frozen_30m_bundle_fingerprint_mismatch:{ticker}")
         bundle = {"manifest": {**document, "fingerprint": supplied}, "record": item, "data": data}
-        frozen_30m_bars(bundle, day)
+        frozen_30m_bars(bundle, day, (daily_bars or {}).get(ticker))
         result[ticker] = bundle
     return result
 
@@ -389,8 +417,10 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
         actions = {"filled": 0, "cancelled": 0, "expired": 0, "blocked_data": 0,
                    "ambiguous": 0, "trimmed": 0, "exited": 0}
         try:
+            from src.webapp.services.martin_bar_retest_execution import bar_for
+            daily_bars = {ticker: bar_for(frames.get(ticker), day) for ticker in tickers}
             frozen = load_frozen_30m_directory(intraday_dir, day, book_id=book_id,
-                simulate_backdated_buys=simulate_backdated_buys)
+                simulate_backdated_buys=simulate_backdated_buys, daily_bars=daily_bars)
             frozen_error = None
         except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
             frozen, frozen_error = {}, str(exc)
@@ -410,8 +440,10 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                     if (str(record.get("source_run_id")) != str(source_payload.get("source_run_id")) or
                             record.get("source_fingerprint") != source_payload.get("source_fingerprint")):
                         raise ValueError("frozen_30m_source_provenance_mismatch")
-                    bars = frozen_30m_bars(bundle, day)
+                    daily = daily_bars.get(ticker)
+                    bars, feed_evidence = _frozen_30m_evidence(bundle, day, daily)
                     result = evaluate_pivot_sequence(bars)
+                    result.update(feed_evidence)
                     fine = (bundle.get("data") or {}).get("one_minute")
                     if result.get("status") == "ambiguous" and fine:
                         try:
@@ -430,7 +462,14 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                         "exchange_lookup": record.get("exchange_lookup"),
                         "one_minute_fingerprint": digest(fine) if fine else None}
                 except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                    result = {"status": "blocked_data", "reason": str(exc)}
+                    data = (bundle or {}).get("data") or {}
+                    metadata = data.get("metadata") or {}
+                    actual = metadata.get("full_name") or metadata.get("pro_name")
+                    requested = (bundle or {}).get("record", {}).get("requested_symbol") or data.get("requested_symbol")
+                    result = {"status": "blocked_data", "reason": str(exc), "actual_feed": actual,
+                        "requested_feed": requested, "feed_basis": "unverified",
+                        "evidence_status": "feed_mismatch", "evidence_tier": "rejected",
+                        "feed_conflict": bool(actual and requested and actual != requested)}
             status = result["status"]
             if status not in {"filled", "filled_stopped"}:
                 event_type = "pivot_entry_" + status
