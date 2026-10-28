@@ -3,12 +3,45 @@ from __future__ import annotations
 import unittest
 import datetime as dt
 import json
+import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
 from src.webapp.services.martin_forward_test_service import DAILY_TOP5_STRATEGY_ID, MartinForwardTestService, SECTOR_STRATEGY_ID, classify_candidate, order_outcome, position_exit, select_sector_candidates
-from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository, _benchmark_comparison, _closed_trade_metrics, _performance_context, _provisional_fallback_dates
+from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository, _REQUIRED_FORWARD_SCHEMA_COLUMNS, _benchmark_comparison, _closed_trade_metrics, _performance_context, _provisional_fallback_dates
+
+
+class MartinRepositorySchemaTests(unittest.TestCase):
+    class FakeConnection:
+        def __init__(self, rows=()): self.rows, self.executions = rows, []
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def cursor(self): return self
+        def execute(self, sql, *_args): self.executions.append(sql)
+        def fetchall(self): return self.rows
+
+    def test_existing_schema_skips_ddl_for_a_fresh_repository_instance(self):
+        rows = [(table, column) for table, columns in _REQUIRED_FORWARD_SCHEMA_COLUMNS.items() for column in columns]
+        catalog_connection = self.FakeConnection(rows)
+        connect = MagicMock(return_value=catalog_connection)
+        with patch.dict(sys.modules, {"psycopg": SimpleNamespace(connect=connect)}):
+            MartinForwardTestRepository(database_url="postgresql://schema-ready-fresh-process").ensure_schema()
+        self.assertEqual(connect.call_count, 1)
+        self.assertIn("default_transaction_read_only=on", connect.call_args.kwargs["options"])
+        self.assertEqual(len(catalog_connection.executions), 1)
+        self.assertIn("information_schema.columns", catalog_connection.executions[0])
+
+    def test_missing_schema_applies_full_schema(self):
+        catalog_connection = self.FakeConnection()
+        ddl_connection = self.FakeConnection()
+        connect = MagicMock(side_effect=[catalog_connection, ddl_connection])
+        with patch.dict(sys.modules, {"psycopg": SimpleNamespace(connect=connect)}):
+            MartinForwardTestRepository(database_url="postgresql://schema-missing").ensure_schema()
+        self.assertEqual(connect.call_count, 2)
+        self.assertEqual(len(ddl_connection.executions), 1)
+        self.assertIn("CREATE TABLE IF NOT EXISTS martin_forward_runs", ddl_connection.executions[0])
 
 
 class MartinBenchmarkComparisonTests(unittest.TestCase):

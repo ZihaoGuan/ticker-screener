@@ -59,6 +59,9 @@ def main(argv=None):
     exclusions = leveraged_or_inverse_provenance()
     token = set_replay_fund_exclusions(exclusions["symbols"])
     try:
+        # Ensure DDL completes before the replay's repeatable-read transaction.
+        from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
+        MartinForwardTestRepository(database_url=config.database_url).ensure_schema()
         with psycopg.connect(config.database_url) as connection:
             try:
                 with connection.cursor() as cursor:

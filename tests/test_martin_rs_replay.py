@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from src.webapp.services.martin_rs_replay import (
-    _BorrowedConnection, choose_snapshot, prepare_replay, apply_replay, ensure_empty_book,
+    _BorrowedConnection, ReplayRepository, choose_snapshot, prepare_replay, apply_replay, ensure_empty_book,
 )
 from src.webapp.services.martin_forward_test_service import MartinForwardTestService, RS_EXPANDED_STRATEGY_ID
 from tests.test_martin_forward_test_service import _ForwardRepo
@@ -31,6 +31,11 @@ class Calendar:
 
 
 class ReplayTests(unittest.TestCase):
+    def test_replay_repository_uses_borrowed_transaction_without_schema_setup(self):
+        connection = object()
+        repository = ReplayRepository(connection)
+        self.assertIs(repository._connect(), repository.connection)
+
     def setUp(self):
         self.start, self.end = dt.date(2026, 10, 19), dt.date(2026, 10, 20)
         self.now = dt.datetime(2026, 10, 23, tzinfo=dt.timezone.utc)

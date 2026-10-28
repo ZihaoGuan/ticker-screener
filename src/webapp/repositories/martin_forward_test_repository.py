@@ -19,6 +19,16 @@ ACCOUNT_STRATEGIES = {"martin_daily_v1", "martin_rs_expanded_v1", ROTATION_STRAT
                       GAP_RETEST_REPLAY_STRATEGY_ID, GAP_RETEST_REPLAY_V2_STRATEGY_ID, GAP_RETEST_REPLAY_V3_STRATEGY_ID,
                       GAP_RETEST_REPLAY_V4_STRATEGY_ID}
 
+# Readiness probe for the schema objects used by replay and the ticker data it reads.
+_REQUIRED_FORWARD_SCHEMA_COLUMNS = {
+    "ticker_metadata": {"ticker"},
+    "daily_bars": {"ticker", "trade_date", "open", "high", "low", "close", "adj_close", "volume", "split_factor", "source"},
+    "martin_forward_runs": {"id", "strategy_id", "session_date", "source_run_id", "source_fingerprint", "summary_json"},
+    "martin_forward_candidates": {"id", "run_id", "ticker", "rank", "status", "reasons_json", "payload_json"},
+    "martin_forward_positions": {"id", "strategy_id", "ticker", "status", "opened_on", "closed_on", "payload_json"},
+    "martin_forward_events": {"id", "strategy_id", "run_id", "position_id", "ticker", "event_type", "event_date", "payload_json"},
+}
+
 
 def _json_default(value: Any) -> str:
     if isinstance(value, (dt.date, dt.datetime)):
@@ -134,13 +144,42 @@ class MartinForwardTestRepository:
             import psycopg
         except ImportError:
             return None
-        if not self._schema_ready and not self.read_only:
-            schema = Path(__file__).resolve().parents[3] / "sql" / "postgres_app_schema.sql"
-            with psycopg.connect(self.database_url) as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(schema.read_text(encoding="utf-8"))
-            self._schema_ready = True
+        if not self.read_only:
+            self.ensure_schema()
         return psycopg.connect(self.database_url, options="-c default_transaction_read_only=on") if self.read_only else psycopg.connect(self.database_url)
+
+    def ensure_schema(self) -> None:
+        """Apply the app schema on a separate connection before transactional work."""
+        if self._schema_ready or not self.database_url or self.read_only:
+            return
+        import psycopg
+        with psycopg.connect(self.database_url, options="-c default_transaction_read_only=on") as connection:
+            if self._forward_schema_is_ready(connection):
+                self._schema_ready = True
+                return
+        schema = Path(__file__).resolve().parents[3] / "sql" / "postgres_app_schema.sql"
+        sql = schema.read_text(encoding="utf-8")
+        with psycopg.connect(self.database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+        self._schema_ready = True
+
+    @staticmethod
+    def _forward_schema_is_ready(connection: Any) -> bool:
+        """Check replay-critical columns without taking relation locks or running DDL."""
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT table_name, column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = ANY(%s)
+            """, (list(_REQUIRED_FORWARD_SCHEMA_COLUMNS),))
+            rows = cursor.fetchall()
+        found: dict[str, set[str]] = {}
+        for table_name, column_name in rows:
+            found.setdefault(str(table_name), set()).add(str(column_name))
+        return all(required.issubset(found.get(table, set()))
+                   for table, required in _REQUIRED_FORWARD_SCHEMA_COLUMNS.items())
 
     def save_session(self, *, session_date: Any, source_run_id: int, fingerprint: str, candidates: list[dict[str, Any]], summary: dict[str, Any], strategy_id: str = "martin_daily_v1") -> int | None:
         connection = self._connect()

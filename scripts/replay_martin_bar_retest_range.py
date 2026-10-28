@@ -595,6 +595,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"ready": False, "book_id": args.book_id, "reason": "source_preflight_failed", "detail": str(exc)}))
         return 2
 
+    # Schema setup can take relation locks; do it before opening the long-lived
+    # repeatable-read replay transaction.
+    from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
+    MartinForwardTestRepository(database_url=config.database_url).ensure_schema()
+
     with psycopg.connect(config.database_url) as connection:
         results = execute_range(connection, sessions=sessions, sources=sources, book_id=args.book_id,
                                 database_url=config.database_url, apply=args.apply,
