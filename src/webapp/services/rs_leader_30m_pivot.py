@@ -10,6 +10,7 @@ from typing import Any
 
 POLICY_ID = "rs_leader_30m_pivot_v1"
 EXECUTION_VERSION = "rs_leader_30m_pivot_execution_v1"
+PRIORITY_VERSION = "rs_leader_30m_pivot_priority_v1"
 MANAGEMENT_VERSION = "rs_leader_30m_pivot_management_v1"
 STOP_BUFFER_PCT = 0.001
 
@@ -243,6 +244,7 @@ def refine_pivot_ambiguity(bars_30m: list[dict[str, Any]], bars_1m: list[dict[st
         return ambiguous
     filled = False
     fill_price = None
+    fill_time = None
     for bar in fine:
         opening, high, low = float(bar["open"]), float(bar["high"]), float(bar["low"])
         if not filled:
@@ -251,9 +253,12 @@ def refine_pivot_ambiguity(bars_30m: list[dict[str, Any]], bars_1m: list[dict[st
                         "pivot_index": pivot, "bar_index": index, "entry": entry, "stop": stop}
             if opening >= entry:
                 filled, fill_price = True, opening
+                fill_time = int(bar["time"])
                 if low <= stop:
                     return {"status": "filled_stopped", "reason": "one_minute_open_break_then_stop",
-                            "pivot_index": pivot, "bar_index": index, "entry": fill_price, "stop": stop,
+                            "pivot_index": pivot, "bar_index": index, "fill_time": fill_time,
+                            "fill_time_granularity": "1m",
+                            "entry": fill_price, "stop": stop,
                             "exit_price": stop * 0.999}
                 continue
             if high >= entry and low <= stop:
@@ -263,13 +268,17 @@ def refine_pivot_ambiguity(bars_30m: list[dict[str, Any]], bars_1m: list[dict[st
                         "pivot_index": pivot, "bar_index": index, "entry": entry, "stop": stop}
             if high >= entry:
                 filled, fill_price = True, entry
+                fill_time = int(bar["time"])
         elif opening <= stop or low <= stop:
             return {"status": "filled_stopped", "reason": "one_minute_stop_after_entry",
-                    "pivot_index": pivot, "bar_index": index, "entry": fill_price, "stop": stop,
+                    "pivot_index": pivot, "bar_index": index, "fill_time": fill_time,
+                    "fill_time_granularity": "1m", "entry": fill_price, "stop": stop,
                     "exit_price": (opening if opening <= stop else stop) * 0.999}
     if filled:
         return {"status": "filled", "reason": "one_minute_entry_order_resolved",
-                "pivot_index": pivot, "bar_index": index, "entry": fill_price, "stop": stop,
+                "pivot_index": pivot, "bar_index": index, "fill_time": fill_time,
+                "fill_time_granularity": "1m",
+                "entry": fill_price, "stop": stop,
                 "risk_per_share": fill_price - stop, "refined_with": "1m"}
     return ambiguous
 
@@ -344,9 +353,23 @@ def candidates_from_saved_run(source: dict[str, Any], frames: dict[str, Any], da
         except (TypeError, ValueError, OverflowError):
             saved = None
         setup = support_decline_candidate(frames.get(ticker), session, saved_support=saved)
+        try:
+            saved_adr = float(hit["adr14_pct"])
+            if not math.isfinite(saved_adr) or saved_adr <= 0:
+                saved_adr = None
+        except (KeyError, TypeError, ValueError, OverflowError):
+            saved_adr = None
+        try:
+            leader_rank = int(hit.get("leader_rank"))
+            if leader_rank <= 0:
+                leader_rank = None
+        except (TypeError, ValueError, OverflowError):
+            leader_rank = None
         result.append({"ticker": ticker, "status": "pending" if setup["status"] == "eligible" else setup["status"],
                        "reasons": [setup.get("reason")] if setup.get("reason") else [],
                        "setup": setup, "event_category": "rs_leader_30m_pivot",
+                       "priority_version": PRIORITY_VERSION, "priority_inputs": {
+                           "saved_adr14_pct": saved_adr, "leader_rank_30_session": leader_rank},
                        "discovery_categories": sorted(categories), "event_date": session.isoformat(),
                        "source_run_id": source.get("source_run_id"), "source_published_at": source.get("created_at"),
                        "source_fingerprint": source.get("source_fingerprint"),
@@ -360,7 +383,48 @@ def candidates_from_saved_run(source: dict[str, Any], frames: dict[str, Any], da
             if not simulate_backdated_buys:
                 result[-1]["status"] = "blocked_source"
                 result[-1]["reasons"] = ["saved_scan_published_after_next_session_open"]
+    result.sort(key=_pivot_priority_key)
     return result
+
+
+def _pivot_priority_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    inputs = item.get("priority_inputs") or {}
+    adr, leader_rank = inputs.get("saved_adr14_pct"), inputs.get("leader_rank_30_session")
+    return (-(float(adr) if adr is not None else -math.inf),
+            int(leader_rank) if leader_rank is not None else math.inf,
+            str(item.get("ticker") or "").upper())
+
+
+def _pivot_saved_priority_key(order: dict[str, Any]) -> tuple[Any, ...]:
+    payload = order.get("payload_json") or {}
+    priority = payload.get("priority_inputs") or {}
+    adr, leader_rank = priority.get("saved_adr14_pct"), priority.get("leader_rank_30_session")
+    return (-(float(adr) if adr is not None else -math.inf),
+            int(leader_rank) if leader_rank is not None else math.inf,
+            str(order.get("ticker") or "").upper())
+
+
+def _sort_pivot_evaluations(evaluated: list[tuple[dict[str, Any], dict[str, Any]]]
+                            ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    fills = [(order, result) for order, result in evaluated
+             if result.get("status") in {"filled", "filled_stopped"}]
+    others = [(order, result) for order, result in evaluated
+              if result.get("status") not in {"filled", "filled_stopped"}]
+    fills.sort(key=lambda pair: int(pair[1].get("bar_index", math.inf)))
+    ordered_fills = []
+    while fills:
+        bar_index = fills[0][1].get("bar_index")
+        same_bar = [pair for pair in fills if pair[1].get("bar_index") == bar_index]
+        fills = [pair for pair in fills if pair[1].get("bar_index") != bar_index]
+        if all(result.get("fill_time_granularity") == "1m" for _, result in same_bar):
+            same_bar.sort(key=lambda pair: (int(pair[1]["fill_time"]), _pivot_saved_priority_key(pair[0])))
+        else:
+            # Mixed 30m/1m evidence cannot establish sub-bar order; use saved priority.
+            same_bar.sort(key=lambda pair: _pivot_saved_priority_key(pair[0]))
+        ordered_fills.extend(same_bar)
+    others.sort(key=lambda pair: (str(pair[0].get("ticker") or "").upper(),
+                                  str(pair[1].get("status") or "")))
+    return ordered_fills + others
 
 
 def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[Any, dict[str, Any]],
@@ -372,7 +436,8 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
     import json
     from src.market_data_access import load_many_ticker_windows
     from src.ticker_filters import is_leveraged_or_inverse_ticker, leveraged_or_inverse_provenance
-    from src.webapp.services.martin_bar_retest_execution import (bar_for, manage_position, MANAGEMENT_V2, MAX_POSITIONS)
+    from src.webapp.services.martin_bar_retest_execution import (bar_for, manage_position, MANAGEMENT_V2,
+        MAX_POSITIONS, execution_account_limits)
     from src.webapp.services.martin_rotation import require_completed_session, size_order
     from src.webapp.services.martin_rs_replay import ReplayRepository
     from scripts.replay_martin_bar_retest_range import continuation_mark
@@ -411,7 +476,8 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             "fund_exclusions": {
                 "version": exclusion["version"], "sha256": exclusion["sha256"]},
             "setup_rule": "daily_ema21_or_weekly_ema8_or_saved_gap_base; 3-12pct pullback; within 2pct above support",
-            "thresholds_inferred": True}
+            "thresholds_inferred": True, "priority_version": PRIORITY_VERSION,
+            "priority_order": ["saved_adr14_pct_desc", "leader_rank_30_session_asc", "ticker_asc"]}
         run_id = repo.save_session(session_date=day, source_run_id=int(source.get("source_run_id") or 0),
             fingerprint=fingerprint, candidates=new_candidates, summary=summary, strategy_id=book_id)
         actions = {"filled": 0, "cancelled": 0, "expired": 0, "blocked_data": 0,
@@ -424,52 +490,60 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             frozen_error = None
         except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
             frozen, frozen_error = {}, str(exc)
-        for order in active_orders:
+        def evaluate_pending_order(order: dict[str, Any]) -> dict[str, Any]:
             ticker = str(order["ticker"]).upper()
+            payload = order.get("payload_json") or {}
             if is_leveraged_or_inverse_ticker(ticker):
-                result = {"status": "cancelled", "reason": "leveraged_or_inverse_fund"}
-            else:
-                bundle = frozen.get(ticker)
-                try:
-                    if bundle is None:
-                        raise ValueError(frozen_error or "frozen_30m_bundle_missing")
-                    if bundle.get("freeze_error"):
-                        raise ValueError(str(bundle["freeze_error"]))
-                    source_payload = order.get("payload_json") or {}
-                    record = bundle.get("record") or {}
-                    if (str(record.get("source_run_id")) != str(source_payload.get("source_run_id")) or
-                            record.get("source_fingerprint") != source_payload.get("source_fingerprint")):
-                        raise ValueError("frozen_30m_source_provenance_mismatch")
-                    daily = daily_bars.get(ticker)
-                    bars, feed_evidence = _frozen_30m_evidence(bundle, day, daily)
-                    result = evaluate_pivot_sequence(bars)
-                    result.update(feed_evidence)
-                    fine = (bundle.get("data") or {}).get("one_minute")
-                    if result.get("status") == "ambiguous" and fine:
-                        try:
-                            metadata = (bundle.get("data") or {}).get("metadata") or {}
-                            expected_symbol = metadata.get("full_name") or metadata.get("pro_name")
-                            result = refine_pivot_ambiguity(bars, frozen_one_minute_bars(fine, day, expected_symbol), result)
-                        except (ValueError, KeyError, TypeError, OverflowError):
-                            result["one_minute_refinement"] = "unavailable_or_invalid"
-                    result["intraday_provenance"] = {
-                        "manifest_fingerprint": (bundle.get("manifest") or {}).get("fingerprint"),
-                        "candle_fingerprint": record.get("candle_fingerprint"),
-                        "source_file": record.get("candle_file"), "source_date": record.get("date"),
-                        "timeframe": "30m", "session": "regular", "adjustment": "splits",
-                        "requested_symbol": record.get("requested_symbol"),
-                        "resolved_symbol": record.get("resolved_symbol"),
-                        "exchange_lookup": record.get("exchange_lookup"),
-                        "one_minute_fingerprint": digest(fine) if fine else None}
-                except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                    data = (bundle or {}).get("data") or {}
-                    metadata = data.get("metadata") or {}
-                    actual = metadata.get("full_name") or metadata.get("pro_name")
-                    requested = (bundle or {}).get("record", {}).get("requested_symbol") or data.get("requested_symbol")
-                    result = {"status": "blocked_data", "reason": str(exc), "actual_feed": actual,
-                        "requested_feed": requested, "feed_basis": "unverified",
-                        "evidence_status": "feed_mismatch", "evidence_tier": "rejected",
-                        "feed_conflict": bool(actual and requested and actual != requested)}
+                return {"status": "cancelled", "reason": "leveraged_or_inverse_fund"}
+            bundle = frozen.get(ticker)
+            try:
+                if bundle is None:
+                    raise ValueError(frozen_error or "frozen_30m_bundle_missing")
+                if bundle.get("freeze_error"):
+                    raise ValueError(str(bundle["freeze_error"]))
+                record = bundle.get("record") or {}
+                if (str(record.get("source_run_id")) != str(payload.get("source_run_id")) or
+                        record.get("source_fingerprint") != payload.get("source_fingerprint")):
+                    raise ValueError("frozen_30m_source_provenance_mismatch")
+                bars, feed_evidence = _frozen_30m_evidence(bundle, day, daily_bars.get(ticker))
+                result = evaluate_pivot_sequence(bars)
+                result.update(feed_evidence)
+                fine = (bundle.get("data") or {}).get("one_minute")
+                if result.get("status") == "ambiguous" and fine:
+                    try:
+                        metadata = (bundle.get("data") or {}).get("metadata") or {}
+                        expected_symbol = metadata.get("full_name") or metadata.get("pro_name")
+                        result = refine_pivot_ambiguity(bars, frozen_one_minute_bars(fine, day, expected_symbol), result)
+                    except (ValueError, KeyError, TypeError, OverflowError):
+                        result["one_minute_refinement"] = "unavailable_or_invalid"
+                if result.get("status") in {"filled", "filled_stopped"} and result.get("fill_time") is None:
+                    result["fill_time"] = int(bars[int(result["bar_index"])].get("time", result["bar_index"]))
+                    result["fill_time_granularity"] = "30m"
+                result["intraday_provenance"] = {
+                    "manifest_fingerprint": (bundle.get("manifest") or {}).get("fingerprint"),
+                    "candle_fingerprint": record.get("candle_fingerprint"),
+                    "source_file": record.get("candle_file"), "source_date": record.get("date"),
+                    "timeframe": "30m", "session": "regular", "adjustment": "splits",
+                    "requested_symbol": record.get("requested_symbol"),
+                    "resolved_symbol": record.get("resolved_symbol"),
+                    "exchange_lookup": record.get("exchange_lookup"),
+                    "one_minute_fingerprint": digest(fine) if fine else None}
+                return result
+            except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                data = (bundle or {}).get("data") or {}
+                metadata = data.get("metadata") or {}
+                actual = metadata.get("full_name") or metadata.get("pro_name")
+                requested = (bundle or {}).get("record", {}).get("requested_symbol") or data.get("requested_symbol")
+                return {"status": "blocked_data", "reason": str(exc), "actual_feed": actual,
+                    "requested_feed": requested, "feed_basis": "unverified",
+                    "evidence_status": "feed_mismatch", "evidence_tier": "rejected",
+                    "feed_conflict": bool(actual and requested and actual != requested)}
+
+        evaluated = [(order, evaluate_pending_order(order)) for order in active_orders]
+        evaluated = _sort_pivot_evaluations(evaluated)
+        # Evaluate each order once, including 1m refinement, before allocating slots.
+        for order, result in evaluated:
+            ticker = str(order["ticker"]).upper()
             status = result["status"]
             if status not in {"filled", "filled_stopped"}:
                 event_type = "pivot_entry_" + status
@@ -482,7 +556,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             plan = {**payload, "max_entry": result["entry"], "limit_price": result["entry"], "stop": result["stop"]}
             if len(repo.open_positions(strategy_id=book_id)) >= MAX_POSITIONS:
                 repo.apply_event(run_id=run_id, position_id=None, ticker=ticker, event_type="pivot_entry_blocked",
-                    event_date=day, payload={**result, "reason": "eight_open_positions_limit"},
+                    event_date=day, payload={**result, "reason": "ten_open_positions_limit"},
                     candidate_id=int(order["id"]), candidate_status="blocked_capacity", strategy_id=book_id)
                 actions["blocked_capacity"] = actions.get("blocked_capacity", 0) + 1
                 continue
@@ -538,8 +612,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             **management_metadata(), "partial": marks["mark_coverage"]["status"] != "complete",
             "intraday_evidence_partial": bool(actions["blocked_data"]),
             "intraday_blocked_count": actions["blocked_data"],
-            "execution_account_limits": {"base_equity": 100000, "risk_per_trade": 500,
-                "max_name_value": 20000, "max_committed_risk": 2500, "max_positions": 8}, **marks})
+            "execution_account_limits": execution_account_limits(), **marks})
         results.append({"date": day.isoformat(), "source_run_id": source.get("source_run_id"),
             "source_hit_count": len(source.get("hits") or []), "candidate_count": len(new_candidates),
             "candidate_status_counts": {state: sum(x["status"] == state for x in new_candidates)

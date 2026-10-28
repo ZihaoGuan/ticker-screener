@@ -15,9 +15,15 @@ BASE_EQUITY = 100_000.0
 RISK_PER_TRADE = 500.0
 MAX_NAME_VALUE = 20_000.0
 MAX_COMMITTED_RISK = 2_500.0
-MAX_POSITIONS = 8
+MAX_POSITIONS = 10
 MANAGEMENT_V1 = "martin_bar_retest_management_v1"
 MANAGEMENT_V2 = "martin_bar_retest_management_v2"
+
+
+def execution_account_limits() -> dict[str, float | int]:
+    return {"base_equity": BASE_EQUITY, "risk_per_trade": RISK_PER_TRADE,
+            "max_name_value": MAX_NAME_VALUE, "max_committed_risk": MAX_COMMITTED_RISK,
+            "max_positions": MAX_POSITIONS}
 
 
 def bar_for(frame: Any, day: dt.date) -> dict[str, float] | None:
@@ -91,6 +97,27 @@ def settle_intraday_order(payload: dict[str, Any], evidence: dict[str, Any], day
             execution_status="filled_then_stopped")
     return {"status": "filled", "price": price, "position": position,
             "same_day_stop": stopped, "event_date": day.isoformat()}
+
+
+def sizing_skip_reasons(candidate: dict[str, Any], budget: dict[str, Any]) -> list[str]:
+    limit, stop = float(candidate["max_entry"]), float(candidate["stop"])
+    if not 0 < stop < limit:
+        return ["invalid_entry_or_stop"]
+    risk_per_share = limit - stop
+    reasons = []
+    if float(budget.get("available_cash") or 0) < limit:
+        reasons.append("insufficient_available_cash")
+    if float(budget.get("available_risk") or 0) < risk_per_share:
+        reasons.append("insufficient_available_risk")
+    if RISK_PER_TRADE < risk_per_share:
+        reasons.append("per_trade_risk_limit")
+    if MAX_NAME_VALUE < limit:
+        reasons.append("max_name_value_limit")
+    if candidate.get("rs_tier") == "emerging":
+        adv = float((candidate.get("rs_exception_metrics") or {}).get("adv20_dollars") or 0)
+        if .001 * adv < limit:
+            reasons.append("emerging_liquidity_limit")
+    return reasons or ["minimum_order_size_unavailable"]
 
 
 def schedule_ema9_exit(position: dict[str, Any], bar: dict[str, float], day: dt.date,
@@ -344,10 +371,20 @@ class MartinBarRetestExecutionService:
             except (TypeError, ValueError):
                 continue
             if len(open_now) + len(orders_now) >= MAX_POSITIONS:
+                skip_reason = "ten_positions_or_orders_limit"
+                candidate.update({
+                    "status": "blocked_capacity", "reasons": [*(candidate.get("reasons") or []), skip_reason],
+                    "capacity_skip_reason": skip_reason, "capacity_skip_reasons": [skip_reason]})
+                self.repository.update_candidate(run_id, ticker, candidate)
                 continue
             budget = self.repository.account_state(book)
             shares = size_order({**candidate, "limit_price": limit}, budget)
             if not shares:
+                skip_reasons = sizing_skip_reasons(candidate, budget)
+                candidate.update({
+                    "status": "blocked_capacity", "reasons": [*(candidate.get("reasons") or []), *skip_reasons],
+                    "capacity_skip_reason": skip_reasons[0], "capacity_skip_reasons": skip_reasons})
+                self.repository.update_candidate(run_id, ticker, candidate)
                 continue
             payload = schedule_payload({**candidate, **({"backdated_simulation": True,
                 "source_reconstructed_later": True,

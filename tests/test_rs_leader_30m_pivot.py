@@ -134,7 +134,15 @@ class RSPivotTests(unittest.TestCase):
                      "entry": 10.5, "stop": 10.1}
         fine = [{**bar(10.3, 10.4, 10.2, 10.35), "time": 4600 + 60 * i} for i in range(30)]
         fine[1] = {**bar(10.4, 10.55, 10.3, 10.5), "time": 4660}
-        self.assertEqual(refine_pivot_ambiguity(bars, fine, ambiguous)["status"], "filled")
+        refined = refine_pivot_ambiguity(bars, fine, ambiguous)
+        self.assertEqual(refined["status"], "filled")
+        self.assertEqual(refined["fill_time"], 4660)
+        self.assertEqual(refined["fill_time_granularity"], "1m")
+        fine[2] = {**bar(10.4, 10.45, 10.0, 10.1), "time": 4720}
+        stopped = refine_pivot_ambiguity(bars, fine, ambiguous)
+        self.assertEqual(stopped["status"], "filled_stopped")
+        self.assertEqual(stopped["fill_time"], 4660)
+        self.assertEqual(stopped["fill_time_granularity"], "1m")
         fine[0] = {**bar(10.05, 10.2, 10, 10.1), "time": 4600}
         self.assertEqual(refine_pivot_ambiguity(bars, fine, ambiguous)["status"], "cancelled")
         fine[0] = {**bar(10.2, 10.6, 10, 10.2), "time": 4600}
@@ -164,6 +172,59 @@ class RSPivotTests(unittest.TestCase):
         self.assertEqual(hypothetical[0]["status"], "pending")
         self.assertTrue(hypothetical[0]["backdated_buy_simulation"])
         self.assertEqual(hypothetical[0]["fill_basis"], "hypothetical_backdated_simulation")
+
+    def test_saved_watchlist_priority_uses_adr_then_30_session_rank_then_ticker(self):
+        from src.webapp.services.rs_leader_30m_pivot import candidates_from_saved_run, PRIORITY_VERSION
+        source = {"strategy_id": "martin_bar_watchlist_v1", "rules_version": "martin_bar_watchlist_v1",
+            "target_trading_date": "2026-01-02", "source_run_id": 12, "source_fingerprint": "abc",
+            "hits": [
+                {"ticker": "ZZZ", "adr14_pct": 4, "leader_rank": 1, "discovery_categories": ["leader_30_session"]},
+                {"ticker": "BBB", "adr14_pct": 5, "leader_rank": 2, "discovery_categories": ["leader_30_session"]},
+                {"ticker": "AAA", "adr14_pct": 5, "leader_rank": 2, "discovery_categories": ["leader_30_session"]},
+            ]}
+        with patch("src.webapp.services.rs_leader_30m_pivot.support_decline_candidate",
+                   return_value={"status": "eligible"}):
+            candidates = candidates_from_saved_run(source, {}, "2026-01-02")
+        self.assertEqual([item["ticker"] for item in candidates], ["AAA", "BBB", "ZZZ"])
+        self.assertEqual(candidates[0]["priority_version"], PRIORITY_VERSION)
+        self.assertEqual(candidates[0]["priority_inputs"], {"saved_adr14_pct": 5.0,
+            "leader_rank_30_session": 2})
+
+    def test_pivot_fills_are_ordered_by_trigger_bar_before_priority_tie_break(self):
+        from src.webapp.services.rs_leader_30m_pivot import _sort_pivot_evaluations
+        later_high_priority = {"ticker": "AAA", "payload_json": {"priority_inputs": {
+            "saved_adr14_pct": 8, "leader_rank_30_session": 1}}}
+        earlier_lower_priority = {"ticker": "BBB", "payload_json": {"priority_inputs": {
+            "saved_adr14_pct": 3, "leader_rank_30_session": 20}}}
+        tied_high_priority = {"ticker": "CCC", "payload_json": {"priority_inputs": {
+            "saved_adr14_pct": 9, "leader_rank_30_session": 1}}}
+        evaluated = [(later_high_priority, {"status": "filled", "bar_index": 5}),
+                     (earlier_lower_priority, {"status": "filled", "bar_index": 2}),
+                     (tied_high_priority, {"status": "filled", "bar_index": 5})]
+        ordered = _sort_pivot_evaluations(evaluated)
+        self.assertEqual([order["ticker"] for order, _ in ordered], ["BBB", "CCC", "AAA"])
+
+    def test_refined_earlier_fill_gets_the_only_open_slot_before_later_fill(self):
+        from src.webapp.services.rs_leader_30m_pivot import refine_pivot_ambiguity, _sort_pivot_evaluations
+        bars = [bar(10.5, 10.6, 10.2, 10.3), bar(10.2, 10.5, 10.1, 10.4),
+                {**bar(10.15, 10.6, 9.7, 10.2), "time": 4600}]
+        ambiguous = {"status": "ambiguous", "pivot_index": 1, "bar_index": 2,
+                     "entry": 10.5, "stop": 10.1}
+        fine = [{**bar(10.3, 10.4, 10.2, 10.35), "time": 4600 + 60 * i} for i in range(30)]
+        fine[1] = {**bar(10.4, 10.55, 10.3, 10.5), "time": 4660}
+        refined = refine_pivot_ambiguity(bars, fine, ambiguous)
+        early = {"ticker": "EARLY", "payload_json": {"priority_inputs": {
+            "saved_adr14_pct": 2, "leader_rank_30_session": 20}}}
+        later = {"ticker": "LATER", "payload_json": {"priority_inputs": {
+            "saved_adr14_pct": 9, "leader_rank_30_session": 1}}}
+        evaluated = [(later, {"status": "filled", "bar_index": 3, "fill_time": 8200,
+                              "fill_time_granularity": "30m"}), (early, refined)]
+        ordered = _sort_pivot_evaluations(evaluated)
+        # One position slot remains; capacity goes to the earlier refined trigger.
+        available_slots = 1
+        allocated = [order["ticker"] for order, result in ordered
+                     if result["status"] in {"filled", "filled_stopped"}][:available_slots]
+        self.assertEqual(allocated, ["EARLY"])
 
     def test_frozen_manifest_requires_matching_backdated_mode(self):
         from scripts.audit_martin_intraday_execution import digest

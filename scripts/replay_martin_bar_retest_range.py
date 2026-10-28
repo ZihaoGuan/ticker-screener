@@ -282,7 +282,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
               execution_version: str = "martin_bar_retest_execution_v1",
               intraday_dir: str | Path | None = None) -> list[dict[str, Any]]:
     from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
-    from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService
+    from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService, execution_account_limits
     from src.webapp.services.martin_rs_replay import ReplayRepository
 
     repository = ReplayRepository(connection)
@@ -315,7 +315,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                 "simulate_backdated_buys": simulate_backdated_buys,
                 "backdated_buy_basis": None, "partial": marks["mark_coverage"]["status"] != "complete" or actions.get("intraday_fallbacks", 0) > 0,
                 "intraday_evidence_partial": actions.get("intraday_fallbacks", 0) > 0,
-                "intraday_fallback_count": actions.get("intraday_fallbacks", 0), **marks})
+                "intraday_fallback_count": actions.get("intraday_fallbacks", 0),
+                "execution_account_limits": execution_account_limits(), **marks})
             results.append({"date": day.isoformat(), "source_run_id": None, "source_hit_count": 0,
                 "new_event_count": 0, "active_event_count": 0, "zero_hit_day": None,
                 "retrospective_source_scan": None, "source_publication_timing": "no_scan_execution_only",
@@ -349,8 +350,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                 "intraday_evidence_partial": actions.get("intraday_fallbacks", 0) > 0,
                 "intraday_fallback_count": actions.get("intraday_fallbacks", 0),
                 **marks,
-                "category_cohorts": cohorts, "execution_account_limits": {"base_equity": 100000,
-                "risk_per_trade": 500, "max_name_value": 20000, "max_committed_risk": 2500, "max_positions": 8}})
+                "category_cohorts": cohorts, "execution_account_limits": execution_account_limits()})
         statuses = Counter(str(item.get("status") or "unknown") for item in result.get("candidates", []))
         reasons = Counter(str(reason) for item in result.get("candidates", [])
                           for reason in (item.get("reasons") or []))
@@ -418,7 +418,7 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
     """Apply exactly the next completed XNYS session to an existing execution book."""
     from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
     from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
-    from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService
+    from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService, execution_account_limits
     from src.webapp.services.martin_rotation import require_completed_session
     repository = MartinForwardTestRepository(database_url=database_url)
     latest = repository.latest_session_date(book_id)
@@ -506,7 +506,8 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
             "source_on_time": bool(result and result.get("retrospective_source_scan") is False),
             "execution_actions": action_counts, "partial": marks["mark_coverage"]["status"] != "complete" or action_counts.get("intraday_fallbacks", 0) > 0,
             "intraday_evidence_partial": action_counts.get("intraday_fallbacks", 0) > 0,
-            "intraday_fallback_count": action_counts.get("intraday_fallbacks", 0), **marks})
+            "intraday_fallback_count": action_counts.get("intraday_fallbacks", 0),
+            "execution_account_limits": execution_account_limits(), **marks})
     return {"status": "complete", "book_id": book_id, "session_date": day.isoformat(), "source_mode": mode,
             "execution_actions": action_counts, "intraday_source": intraday_source,
             "intraday_bundle_dir": str(intraday_dir) if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else None, **marks}

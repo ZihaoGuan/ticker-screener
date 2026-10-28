@@ -376,16 +376,71 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
         self.assertEqual(repo.positions[0]["payload_json"]["event_category"], "gap_mover")
         self.assertTrue(any(event["event_type"] == "order_filled" for event in repo.events))
 
-    def test_eight_positions_block_scheduling(self):
+    def test_ten_positions_block_scheduling(self):
         positions = [{"ticker": f"T{i}", "payload_json": {"entry_price": 10, "stop": 9,
-                      "remaining_shares": 100}} for i in range(8)]
+                      "remaining_shares": 100}} for i in range(10)]
         repo = Repo(positions)
         service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
         service.book_id = "martin_range_bar_retest_execution_test"
+        candidate = {"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9.0,
+                     "max_entry": 10.0}
         service.run_session(day=dt.date(2026, 10, 19), run_id=42,
-                            candidates=[{"ticker": "ABC", "rank": 1, "status": "confirmed",
-                                         "stop": 9.0, "max_entry": 10.0}], source_on_time=True)
-        self.assertEqual(repo.updated, [])
+                            candidates=[candidate], source_on_time=True)
+        self.assertEqual(repo.updated[0][2]["capacity_skip_reason"], "ten_positions_or_orders_limit")
+        self.assertEqual(candidate["status"], "blocked_capacity")
+
+    def test_tenth_position_can_be_scheduled(self):
+        positions = [{"ticker": f"T{i}", "payload_json": {"entry_price": 10, "stop": 9,
+                      "remaining_shares": 100}} for i in range(9)]
+        repo = Repo(positions)
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
+        service.book_id = "martin_range_bar_retest_execution_test"
+        candidate = {"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9.0,
+                     "max_entry": 10.0}
+        service.run_session(day=dt.date(2026, 10, 19), run_id=42,
+                            candidates=[candidate], source_on_time=True)
+        self.assertNotEqual(repo.updated[0][2].get("status"), "blocked_capacity")
+
+    def test_capacity_skip_is_saved_with_explicit_reason(self):
+        positions = [{"ticker": f"T{i}", "payload_json": {"entry_price": 10, "stop": 9,
+                      "remaining_shares": 100}} for i in range(10)]
+        repo = Repo(positions)
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
+        service.book_id = "martin_range_bar_retest_execution_test"
+        candidate = {"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9.0,
+                     "max_entry": 10.0}
+        service.run_session(day=dt.date(2026, 10, 19), run_id=42,
+                            candidates=[candidate], source_on_time=True)
+        self.assertEqual(repo.updated[0][2]["status"], "blocked_capacity")
+        self.assertEqual(repo.updated[0][2]["capacity_skip_reason"], "ten_positions_or_orders_limit")
+
+    def test_sizing_capacity_skip_distinguishes_cash_and_risk_and_keeps_source_fields(self):
+        class BudgetRepo(Repo):
+            def __init__(self, budget):
+                super().__init__()
+                self.budget = budget
+            def account_state(self, _book): return self.budget
+
+        candidate = {"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9.0,
+                     "max_entry": 10.0, "reasons": ["source_reason"], "source_run_id": 44,
+                     "source_fingerprint": "source-fp"}
+        cases = [({"available_cash": 0, "available_risk": 500}, "insufficient_available_cash"),
+                 ({"available_cash": 1000, "available_risk": 0}, "insufficient_available_risk")]
+        for budget, expected in cases:
+            repo = BudgetRepo(budget)
+            service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
+            service.book_id = "martin_range_bar_retest_execution_test"
+            candidate = {"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9.0,
+                         "max_entry": 10.0, "reasons": ["source_reason"], "source_run_id": 44,
+                         "source_fingerprint": "source-fp"}
+            service.run_session(day=dt.date(2026, 10, 19), run_id=42,
+                                candidates=[candidate], source_on_time=True)
+            saved = repo.updated[0][2]
+            self.assertEqual(candidate["status"], "blocked_capacity")
+            self.assertEqual(saved["capacity_skip_reasons"], [expected])
+            self.assertIn("source_reason", saved["reasons"])
+            self.assertEqual(saved["source_run_id"], 44)
+            self.assertEqual(saved["source_fingerprint"], "source-fp")
 
 
 if __name__ == "__main__":
