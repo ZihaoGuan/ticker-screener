@@ -463,13 +463,9 @@ class HistoryRepository:
         if connection is None:
             return None
         sql = """
-            WITH queue_lock AS (
-                SELECT pg_advisory_xact_lock(%s)
-            ),
-            candidate AS (
+            WITH candidate AS (
                 SELECT queued_job.id
                 FROM job_runs AS queued_job
-                CROSS JOIN queue_lock
                 WHERE queued_job.status = 'queued'
                   AND COALESCE(queued_job.request_payload->>'execution_mode', 'local') = 'remote'
                   AND (
@@ -513,6 +509,14 @@ class HistoryRepository:
                           AND COALESCE(running_job.request_payload->>'execution_mode', 'local') = 'remote'
                     ) < COALESCE(NULLIF(queued_job.request_payload->>'parallel_limit', '')::integer, 0)
                   )
+                  AND (
+                    COALESCE(queued_job.request_payload->>'action_id', '') NOT IN ('replay_martin_bar_retest_range', 'replay_rs_leader_30m_pivot')
+                    OR NOT EXISTS (
+                        SELECT 1 FROM job_runs AS replay_job
+                        WHERE replay_job.status = 'running'
+                          AND replay_job.request_payload->>'action_id' IN ('replay_martin_bar_retest_range', 'replay_rs_leader_30m_pivot')
+                    )
+                  )
                 ORDER BY COALESCE(NULLIF(queued_job.request_payload->>'queue_priority', '')::integer, 50) DESC,
                          queued_job.created_at ASC,
                          queued_job.id ASC
@@ -529,10 +533,10 @@ class HistoryRepository:
         """
         with connection:
             with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_xact_lock(%s)", (self._REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY,))
                 cursor.execute(
                     sql,
                     (
-                        self._REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY,
                         worker_name,
                         code_version,
                         list(worker_pools),

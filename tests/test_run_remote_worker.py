@@ -68,6 +68,29 @@ class _UnknownActionRunService(_FailingJobRunService):
 
 
 class RunRemoteWorkerTests(unittest.TestCase):
+    def test_replay_jsonl_progress_is_exposed_as_job_progress(self) -> None:
+        fields = module._replay_progress_fields(json.dumps({
+            "event": "session_complete", "session_index": 4, "session_total": 10, "date": "2026-10-23",
+            "counts": {"fills": 2},
+        }))
+        self.assertEqual(fields["progress_current"], 4)
+        self.assertEqual(fields["progress_total"], 10)
+        self.assertEqual(fields["progress_percent"], 40)
+        self.assertIn("2026-10-23", fields["progress_label"])
+        result = {"ready": True, "saved": True, "mode": "apply", "book_id": "demo",
+                  "from_date": "2026-10-01", "to_date": "2026-10-23",
+                  "sessions": [{"date": "2026-10-23", "execution_actions": {"filled": 2},
+                                "book_performance": {"account_equity": 101.0}}]}
+        self.assertEqual(module._replay_progress_fields(json.dumps(result))["replay_result"], result)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir) / "replay.log"
+            log_path.write_text('{"event":"replay_committed"}\n' + json.dumps(result, indent=2) + "\n")
+            compact = module._read_replay_result(log_path)
+            self.assertEqual(compact["session_count"], 1)
+            self.assertEqual(compact["aggregate_action_counts"], {"filled": 2})
+            self.assertEqual(compact["final_book_performance"], {"account_equity": 101.0})
+            self.assertNotIn("sessions", compact)
+
     def test_failed_split_job_keeps_partial_persistence_in_job_run_payload(self) -> None:
         from src.split_refresh_reporting import RESULT_PREFIX
         summary = {"version": 1, "ticker_results": [

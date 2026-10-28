@@ -49,6 +49,68 @@ def _now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _replay_progress_fields(line: str) -> dict[str, Any]:
+    try:
+        record = json.loads(line)
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(record, dict):
+        return {}
+    if record.get("event") in {"session_start", "session_complete", "replay_committed", "replay_rolled_back"}:
+        total = int(record.get("session_total") or 0)
+        current = int(record.get("session_index") or 0)
+        day = str(record.get("date") or "")
+        return {"replay_progress": record, "progress_current": current, "progress_total": total,
+                "progress_percent": round(current * 100 / total, 1) if total else None,
+                "progress_label": f"Replay {current}/{total}" + (f" · {day}" if day else "")}
+    if record.get("ready") is not None:
+        return {"replay_result": record, "progress_label": "Replay result received"}
+    return {}
+
+
+def _compact_replay_result(result: dict[str, Any]) -> dict[str, Any]:
+    compact = {key: result[key] for key in (
+        "ready", "saved", "mode", "book_id", "policy_id", "execution_version", "execution_policy_id",
+        "from_date", "to_date", "simulate_backdated_buys", "backdated_buy_basis",
+    ) if key in result}
+    sessions = result.get("sessions") if isinstance(result.get("sessions"), list) else []
+    compact["session_count"] = len(sessions)
+    if sessions and isinstance(sessions[-1], dict):
+        performance = sessions[-1].get("book_performance")
+        if isinstance(performance, dict):
+            compact["final_book_performance"] = performance
+    totals: dict[str, int | float] = {}
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        actions = session.get("execution_actions")
+        if not isinstance(actions, dict):
+            continue
+        for key, value in actions.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                totals[key] = totals.get(key, 0) + value
+    if totals:
+        compact["aggregate_action_counts"] = totals
+    return compact
+
+
+def _read_replay_result(log_path: Path) -> dict[str, Any] | None:
+    try:
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for index in range(len(lines) - 1, -1, -1):
+        if lines[index].strip() != "{":
+            continue
+        try:
+            result = json.loads("\n".join(lines[index:]))
+        except (ValueError, TypeError):
+            continue
+        if isinstance(result, dict) and result.get("ready") is not None:
+            return _compact_replay_result(result)
+    return None
+
+
 def _build_worker_env(run_service: RunService, options: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
     if options.get("market_data_source"):
@@ -239,6 +301,8 @@ def _run_claimed_job(
         log_handle.write(line)
         log_handle.flush()
         normalized_line = line.rstrip()
+        if action_id in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"}:
+            state.update(_replay_progress_fields(normalized_line))
         log_lines.append(normalized_line)
         log_lines = log_lines[-80:]
         progress = run_service._extract_progress(log_lines)
@@ -257,8 +321,19 @@ def _run_claimed_job(
                 "watchlist_file": str(artifact_state.get("watchlist_file") or ""),
                 "raw_results_file": str(artifact_state.get("raw_results_file") or ""),
                 "backtest_run_id": artifact_state.get("backtest_run_id"),
+                **({"replay_progress": state.get("replay_progress"), "replay_result": state.get("replay_result")}
+                   if action_id in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"} else {}),
             }
         )
+        if action_id in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"} and state.get("replay_progress"):
+            replay_progress = state["replay_progress"]
+            total = int(replay_progress.get("session_total") or 0)
+            current = int(replay_progress.get("session_index") or 0)
+            state["progress_current"] = current
+            state["progress_total"] = total
+            state["progress_percent"] = round(current * 100 / total, 1) if total else None
+            day = str(replay_progress.get("date") or "")
+            state["progress_label"] = f"Replay {current}/{total}" + (f" · {day}" if day else "")
         if publish:
             _publish_state(run_service, job_run_id=job_run_id, state=state)
 
@@ -303,6 +378,10 @@ def _run_claimed_job(
         process.stdout.close()
 
     finished_at = _now_iso()
+    if action_id in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"}:
+        replay_result = _read_replay_result(log_path)
+        if replay_result is not None:
+            state["replay_result"] = replay_result
     final_status = "cancelled" if cancel_requested else ("success" if process.returncode == 0 else "failed")
     if final_status == "success":
         state["progress_percent"] = 100

@@ -157,16 +157,21 @@ class HistoryRepositoryEnsureSchemaTests(unittest.TestCase):
                 worker_pools=("general",),
             )
 
-        sql, params = connection.executed_sql[0]
-        self.assertIn("pg_advisory_xact_lock", sql)
+        lock_sql, lock_params = connection.executed_sql[0]
+        sql, params = connection.executed_sql[1]
+        self.assertIn("pg_advisory_xact_lock", lock_sql)
+        self.assertEqual(lock_params, (repository._REMOTE_QUEUE_CLAIM_ADVISORY_LOCK_KEY,))
+        self.assertNotIn("pg_advisory_xact_lock", sql)
         self.assertIn("jsonb_array_elements_text", sql)
         self.assertIn("dependency_job_ids", sql)
         self.assertIn("parallel_limit", sql)
         self.assertIn("queue_priority", sql)
         self.assertIn("worker_pool", sql)
+        self.assertIn("replay_martin_bar_retest_range", sql)
+        self.assertIn("replay_rs_leader_30m_pivot", sql)
         self.assertIn("FOR UPDATE SKIP LOCKED", sql)
-        self.assertEqual(params[1:3], ("worker-a", "image-a"))
-        self.assertEqual(params[3:5], (["general"], ["general"]))
+        self.assertEqual(params[0:2], ("worker-a", "image-a"))
+        self.assertEqual(params[2:4], (["general"], ["general"]))
 
     def test_claim_scheduled_github_job_requires_successful_dependencies_and_no_prior_dispatch(self) -> None:
         connection = _FakeConnection(schema_checks=[])

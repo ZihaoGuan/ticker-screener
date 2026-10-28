@@ -47,6 +47,59 @@ class RunServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must start with"):
             self.service.build_command("continue_martin_bar_retest", {"book_id": "martin_bar_retest_v1"})
 
+    def test_replay_actions_validate_bundle_and_build_argv(self) -> None:
+        bundle = self.service.artifacts_dir / "frozen" / "bars"
+        bundle.mkdir(parents=True)
+        options = {"start_date": "2026-01-01", "end_date": "2026-01-02",
+                   "book_id": "martin_range_bar_retest_test", "execution_version": "v3",
+                   "intraday_dir": str(bundle), "simulate_backdated_buys": True}
+        command = self.service.build_command("replay_martin_bar_retest_range", options)
+        self.assertIn("--from-date", command)
+        self.assertIn("--execution-version", command)
+        self.assertIn(str(bundle.resolve()), command)
+        self.assertIn("--simulate-backdated-buys", command)
+        with self.assertRaisesRegex(ValueError, "inside the configured artifacts"):
+            self.service.build_command("replay_martin_bar_retest_range", {**options, "intraday_dir": "/tmp"})
+        with self.assertRaisesRegex(ValueError, "required"):
+            self.service.build_command("replay_rs_leader_30m_pivot", {
+                "start_date": "2026-01-01", "end_date": "2026-01-02",
+                "book_id": "rs_leader_30m_pivot_replay_test"})
+        self.assertEqual(self.service.execution_modes_for_action("replay_rs_leader_30m_pivot"), ("remote",))
+
+        rs_bundle = self.service.artifacts_dir / "frozen" / "rs-bars"
+        rs_bundle.mkdir(parents=True)
+        rs_command = self.service.build_command("replay_rs_leader_30m_pivot", {
+            "start_date": "2026-01-01", "end_date": "2026-01-02",
+            "book_id": "rs_leader_30m_pivot_replay_test", "execution_version": "v2",
+            "intraday_dir": str(rs_bundle), "apply": True,
+        })
+        self.assertIn("scripts/replay_rs_leader_30m_pivot.py", rs_command)
+        self.assertIn("--execution-version", rs_command)
+        self.assertIn("--intraday-dir", rs_command)
+        self.assertIn("--apply", rs_command)
+        self.assertNotIn("--start-date", rs_command)
+
+    def test_replay_launch_uses_existing_general_worker_queue(self) -> None:
+        captured_create: dict[str, object] = {}
+        captured_patch: dict[str, object] = {}
+        service = RunService(project_root=self.project_root, database_url="postgresql://queue-test", code_version="replay-sha")
+        service.history_repository.create_job_run = lambda **kwargs: captured_create.update(kwargs) or 903  # type: ignore[method-assign]
+        service.history_repository.patch_job_run_result = lambda job_run_id, **kwargs: captured_patch.update(  # type: ignore[method-assign]
+            {"job_run_id": job_run_id, "kwargs": kwargs}
+        )
+        job_id = service.launch("replay_martin_bar_retest_range", options={
+            "start_date": "2026-10-01", "end_date": "2026-10-02",
+            "book_id": "martin_range_bar_retest_queue_test", "execution_version": "v1",
+        })
+        payload = captured_create["request_payload"]
+        self.assertEqual(job_id, "remote-903")
+        self.assertEqual(payload["execution_mode"], "remote")
+        self.assertEqual(payload["worker_pool"], "general")
+        self.assertEqual(payload["queue_priority"], 20)
+        self.assertEqual(payload["code_version"], "replay-sha")
+        self.assertEqual(captured_patch["kwargs"]["result_payload_patch"]["code_version"], "replay-sha")
+        self.assertIn("--from-date", captured_patch["kwargs"]["result_payload_patch"]["command"])
+
     def test_update_progress_tracks_percent_and_success_count(self) -> None:
         job = {
             "success_count": 0,
@@ -335,8 +388,10 @@ class RunServiceTests(unittest.TestCase):
         actions = self.service.list_actions()
 
         self.assertTrue(actions)
-        self.assertTrue(all(item["execution_modes"][:2] == ["local", "remote"] for item in actions))
-        self.assertTrue(all(item["default_execution_mode"] == "local" for item in actions))
+        replay_ids = {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"}
+        self.assertTrue(all(item["execution_modes"] == ["remote"] for item in actions if item["id"] in replay_ids))
+        self.assertTrue(all(item["execution_modes"][:2] == ["local", "remote"] for item in actions if item["id"] not in replay_ids))
+        self.assertTrue(all(item["default_execution_mode"] == "remote" for item in actions if item["id"] in replay_ids))
 
     def test_list_actions_includes_finviz_smallover_sales_growth_trend_scanner(self) -> None:
         actions = {item["id"]: item for item in self.service.list_actions()}

@@ -398,6 +398,28 @@ class RunService:
                     RunField("apply", "Apply to Paper Book", "boolean", help_text="Defaults to a read-only no-write run.")),
             visible_in_runs=False,
         ),
+        "replay_martin_bar_retest_range": RunAction(
+            "replay_martin_bar_retest_range", "Replay Martin Bar Retest Range",
+            "scripts/replay_martin_bar_retest_range.py", supports_limit=False,
+            fields=(_start_date_field, _end_date_field,
+                    RunField("book_id", "Replay Book ID", "text"),
+                    RunField("execution_version", "Execution Version", "select", options=tuple((f"v{i}", f"v{i}") for i in range(1, 6))),
+                    RunField("intraday_dir", "Frozen Intraday Bundle Directory", "text"),
+                    RunField("apply", "Apply", "boolean"),
+                    RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean")),
+            visible_in_runs=True, execution_modes=("remote",),
+        ),
+        "replay_rs_leader_30m_pivot": RunAction(
+            "replay_rs_leader_30m_pivot", "Replay RS Leader 30m Pivot Range",
+            "scripts/replay_rs_leader_30m_pivot.py", supports_limit=False,
+            fields=(_start_date_field, _end_date_field,
+                    RunField("book_id", "Replay Book ID", "text"),
+                    RunField("execution_version", "Execution Version", "select", options=(("v1", "v1"), ("v2", "v2"))),
+                    RunField("intraday_dir", "Frozen 30m Bundle Directory", "text"),
+                    RunField("apply", "Apply", "boolean"),
+                    RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean")),
+            visible_in_runs=True, execution_modes=("remote",),
+        ),
         "rts_validation": RunAction(
             "rts_validation",
             "Validate Relative Trend Strength",
@@ -2579,7 +2601,7 @@ class RunService:
                 "command": " ".join([sys.executable, action.script_path, *action.extra_args]).strip(),
                 "supports_limit": action.supports_limit,
                 "execution_modes": list(self.execution_modes_for_action(action.action_id)),
-                "default_execution_mode": default_execution_mode,
+                "default_execution_mode": default_execution_mode if default_execution_mode in self.execution_modes_for_action(action.action_id) else self.execution_modes_for_action(action.action_id)[0],
                 "fields": [
                     {
                         "id": field.field_id,
@@ -2844,6 +2866,8 @@ class RunService:
             "code_version": self.code_version,
             "options": normalized,
         }
+        if action_id in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"} and queue_policy is None:
+            queue_policy = {"queue_priority": 20, "worker_pool": "general", "parallel_limit": 0}
         if queue_policy is not None:
             request_payload.update(self._normalize_queue_policy(queue_policy))
         initial_status = "queued" if execution_mode in {"remote", "github"} else "running"
@@ -3205,6 +3229,15 @@ class RunService:
                 command.extend(["--intraday-dir", str(normalized_options["intraday_dir"])])
             if normalized_options.get("apply"):
                 command.append("--apply")
+        if action_id in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"}:
+            command.extend(["--from-date", normalized_options["start_date"], "--to-date", normalized_options["end_date"],
+                            "--book-id", normalized_options["book_id"], "--execution-version", normalized_options["execution_version"]])
+            if normalized_options.get("intraday_dir"):
+                command.extend(["--intraday-dir", normalized_options["intraday_dir"]])
+            if normalized_options.get("apply"):
+                command.append("--apply")
+            if normalized_options.get("simulate_backdated_buys"):
+                command.append("--simulate-backdated-buys")
         if normalized_options.get("lookback_days") is not None:
             command.extend(["--lookback-days", str(normalized_options["lookback_days"])])
         if normalized_options.get("min_correlation") is not None:
@@ -3213,9 +3246,9 @@ class RunService:
             command.extend(["--source", str(normalized_options["source"])])
         if normalized_options.get("reference_date"):
             command.extend(["--reference-date", str(normalized_options["reference_date"])])
-        if normalized_options.get("start_date"):
+        if normalized_options.get("start_date") and action_id not in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"}:
             command.extend(["--start-date", str(normalized_options["start_date"])])
-        if normalized_options.get("end_date"):
+        if normalized_options.get("end_date") and action_id not in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"}:
             command.extend(["--end-date", str(normalized_options["end_date"])])
         if normalized_options.get("chunk_size") is not None:
             command.extend(["--chunk-size", str(normalized_options["chunk_size"])])
@@ -3467,6 +3500,44 @@ class RunService:
             if intraday_dir:
                 normalized["intraday_dir"] = intraday_dir
             normalized["apply"] = str(options.get("apply") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+        if action.action_id in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"}:
+            for key in ("start_date", "end_date"):
+                value = str(options.get(key) or "").strip()
+                if not value:
+                    raise ValueError(f"{key.replace('_', ' ').title()} is required.")
+                try:
+                    normalized[key] = dt.date.fromisoformat(value).isoformat()
+                except ValueError as exc:
+                    raise ValueError(f"{key.replace('_', ' ').title()} must be YYYY-MM-DD.") from exc
+            if normalized["end_date"] < normalized["start_date"]:
+                raise ValueError("End Date must be on or after Start Date.")
+            prefix = "martin_range_bar_retest_" if action.action_id == "replay_martin_bar_retest_range" else "rs_leader_30m_pivot_replay_"
+            book_id = str(options.get("book_id") or "").strip()
+            if not re.fullmatch(re.escape(prefix) + r"[A-Za-z0-9_-]{1,80}", book_id):
+                raise ValueError(f"Replay Book ID must start with {prefix} and contain only letters, numbers, underscores, and hyphens.")
+            normalized["book_id"] = book_id
+            version = str(options.get("execution_version") or "v1").strip().lower()
+            allowed_versions = {f"v{i}" for i in range(1, 6)} if action.action_id == "replay_martin_bar_retest_range" else {"v1", "v2"}
+            if version not in allowed_versions:
+                raise ValueError("Unsupported replay execution version.")
+            normalized["execution_version"] = version
+            normalized["apply"] = str(options.get("apply") or "").strip().lower() in {"1", "true", "yes", "on"}
+            normalized["simulate_backdated_buys"] = str(options.get("simulate_backdated_buys") or "").strip().lower() in {"1", "true", "yes", "on"}
+            bundle = str(options.get("intraday_dir") or "").strip()
+            needs_bundle = action.action_id == "replay_rs_leader_30m_pivot" or version != "v1"
+            if needs_bundle and not bundle:
+                raise ValueError("A frozen intraday bundle directory is required for this execution version.")
+            if bundle:
+                root = self.artifacts_dir.resolve()
+                candidate = Path(bundle).resolve()
+                try:
+                    candidate.relative_to(root)
+                except ValueError as exc:
+                    raise ValueError("Frozen bundle directory must be inside the configured artifacts directory.") from exc
+                if not candidate.is_dir():
+                    raise ValueError("Frozen bundle directory must exist on the shared worker artifact volume.")
+                normalized["intraday_dir"] = str(candidate)
 
         for key in (
             "include_sectors",
@@ -4019,6 +4090,8 @@ class RunService:
             "raw_results_file": job.get("raw_results_file"),
             "success_count": job.get("success_count"),
         }
+        if str(job.get("action_id") or "") in {"replay_martin_bar_retest_range", "replay_rs_leader_30m_pivot"}:
+            result_payload.update({"replay_progress": job.get("replay_progress"), "replay_result": job.get("replay_result")})
         artifact_path = str(job.get("summary_file") or job.get("watchlist_file") or "")
         self.history_repository.update_job_run(
             job.get("job_run_id"),
