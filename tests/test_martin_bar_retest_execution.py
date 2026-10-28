@@ -7,7 +7,7 @@ import pandas as pd
 from src.webapp.services.martin_bar_retest_execution import (
     MartinBarRetestExecutionService, bar_for, manage_position, schedule_ema9_exit, settle_order,
 )
-from src.webapp.services.martin_forward_test_service import order_outcome
+from src.webapp.services.martin_forward_test_service import order_outcome, position_exit
 from src.webapp.services.martin_rotation import account_budget, size_order
 
 
@@ -94,6 +94,30 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
         self.assertEqual(v2[1]["remaining_shares"], 67)
         self.assertEqual(v2[2]["trim_fraction"], "1/3")
         self.assertEqual(v2[2]["management_version"], "martin_bar_retest_management_v2")
+
+    def test_v3_moves_stop_to_breakeven_after_trim_and_stops_on_next_bar(self):
+        day = dt.date(2026, 10, 20)
+        position = {"entry_price": 10, "stop": 9, "original_stop": 9, "shares": 100,
+            "remaining_shares": 100, "initial_shares": 100, "initial_r_per_share": 1,
+            "initial_r": 1, "exit_next_open": False}
+        trim = manage_position(position, {"open": 12, "high": 13, "low": 11.5, "close": 12}, day,
+                               management_version="martin_bar_retest_management_v3")
+        self.assertEqual(trim[0], "trim_3r")
+        self.assertEqual(trim[1]["stop"], 10)
+        self.assertEqual(trim[2]["stop_move_effective"], "next_session")
+        self.assertIsNone(position_exit(position, {"open": 9.8, "low": 9.5, "high": 11}))
+        self.assertEqual(position_exit(trim[1], {"open": 10.1, "low": 9.9, "high": 11}), ("stop", 9.99))
+
+    def test_v3_gap_stop_uses_open_and_never_lowers_stop_above_entry(self):
+        day = dt.date(2026, 10, 20)
+        position = {"entry_price": 10, "stop": 11, "original_stop": 11, "shares": 100,
+            "remaining_shares": 100, "initial_shares": 100, "initial_r_per_share": 1,
+            "initial_r": 1, "exit_next_open": False}
+        trim = manage_position(position, {"open": 12, "high": 13, "low": 11.5, "close": 12}, day,
+                               management_version="martin_bar_retest_management_v3")
+        self.assertEqual(trim[0], "trim_3r")
+        self.assertEqual(trim[1]["stop"], 11)
+        self.assertEqual(position_exit(trim[1], {"open": 10.5, "low": 10, "high": 12}), ("gap_stop", 10.4895))
 
     def test_v2_floor_rounding_skips_trim_below_three_shares(self):
         day = dt.date(2026, 10, 20)

@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.replay_martin_bar_retest_range import check_empty_book, load_range_sources, xnys_sessions
-from src.webapp.services.rs_leader_30m_pivot import EXECUTION_VERSION, POLICY_ID, execute_pivot_range
+from src.webapp.services.rs_leader_30m_pivot import EXECUTION_VERSION, EXECUTION_VERSION_V2, POLICY_ID, execute_pivot_range
 
 
 def validate_bundle_book_id(audit: dict, book_id: str) -> None:
@@ -31,6 +31,8 @@ def main(argv=None):
     parser.add_argument("--apply", action="store_true", help="Commit the whole replay; default simulates then rolls back.")
     parser.add_argument("--simulate-backdated-buys", action="store_true",
                         help="Allow hypothetical entries from scans saved after the next-session open.")
+    parser.add_argument("--execution-version", choices=("v1", "v2"), default="v1",
+                        help="v2 moves the runner stop to breakeven after the first one-third 3R trim.")
     args = parser.parse_args(argv)
     if args.to_date < args.from_date:
         parser.error("--to-date must be on or after --from-date")
@@ -57,11 +59,12 @@ def main(argv=None):
         parser.error(str(exc))
     if bool(audit.get("simulate_backdated_buys", False)) != args.simulate_backdated_buys:
         parser.error("freeze and replay --simulate-backdated-buys modes must match")
+    execution_version = EXECUTION_VERSION_V2 if args.execution_version == "v2" else EXECUTION_VERSION
     history = ScreenerHistoryService(database_url=config.database_url, artifacts_dir=config.artifacts_dir,
         repository=HistoryRepository(database_url=config.database_url, artifacts_dir=config.artifacts_dir, read_only=True))
     sources = load_range_sources(history, sessions)
     for source in sources.values():
-        source.setdefault("replay_provenance", {}).update({"execution_version": EXECUTION_VERSION,
+        source.setdefault("replay_provenance", {}).update({"execution_version": execution_version,
             "source_strategy_id": "martin_bar_watchlist_v1",
             "simulate_backdated_buys": args.simulate_backdated_buys,
             "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe"})
@@ -81,7 +84,7 @@ def main(argv=None):
                 check_empty_book(connection, args.book_id)
                 results = execute_pivot_range(connection, sessions=sessions, sources=sources,
                     book_id=args.book_id, database_url=config.database_url, intraday_dir=args.intraday_dir,
-                    simulate_backdated_buys=args.simulate_backdated_buys)
+                    simulate_backdated_buys=args.simulate_backdated_buys, execution_version=execution_version)
                 if args.apply:
                     connection.commit()
                 else:
@@ -91,7 +94,7 @@ def main(argv=None):
                 raise
     finally:
         reset_replay_fund_exclusions(token)
-    print(json.dumps({"ready": True, "policy_id": POLICY_ID, "execution_version": EXECUTION_VERSION,
+    print(json.dumps({"ready": True, "policy_id": POLICY_ID, "execution_version": execution_version,
         "book_id": args.book_id, "from_date": args.from_date.isoformat(), "to_date": args.to_date.isoformat(),
         "mode": "apply" if args.apply else "dry_run_rolled_back", "saved": bool(args.apply),
         "simulate_backdated_buys": args.simulate_backdated_buys,

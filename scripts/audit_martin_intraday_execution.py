@@ -116,7 +116,7 @@ def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, ti
         range_ok = (aggregate_bar['high'] <= float(daily['high']) + tol and
                     aggregate_bar['low'] >= float(daily['low']) - tol)
         open_fill_same = (float(aggregate_bar['open']) <= entry) == (float(daily['open']) <= entry)
-        if range_ok and (open_fill_same or execution_version in {'martin_bar_retest_execution_v3', 'martin_bar_retest_execution_v4'}):
+        if range_ok and (open_fill_same or execution_version in {'martin_bar_retest_execution_v3', 'martin_bar_retest_execution_v4', 'martin_bar_retest_execution_v5'}):
             mismatch = False
     if mismatch: status = 'feed_mismatch'
     elif not complete: status = 'missing_bars'
@@ -133,7 +133,7 @@ def classify(*, candles, metadata, requested_symbol, day, entry, stop, daily, ti
             'received_bar_count':len(candles), 'feed_mismatch':bool(mismatch),
             'feed_conflict':feed_conflict,
             **({'feed_conflict_note':'Complete regular-session BATS lower-timeframe bars inside the daily envelope determine limit touch and stop order.'}
-               if feed_conflict and not mismatch and execution_version in {'martin_bar_retest_execution_v3', 'martin_bar_retest_execution_v4'} else {})}
+               if feed_conflict and not mismatch and execution_version in {'martin_bar_retest_execution_v3', 'martin_bar_retest_execution_v4', 'martin_bar_retest_execution_v5'} else {})}
 
 
 def fetch(client_dir, symbol, day, tf, *, resolve_symbols=False):

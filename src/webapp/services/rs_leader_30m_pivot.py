@@ -10,8 +10,10 @@ from typing import Any
 
 POLICY_ID = "rs_leader_30m_pivot_v1"
 EXECUTION_VERSION = "rs_leader_30m_pivot_execution_v1"
+EXECUTION_VERSION_V2 = "rs_leader_30m_pivot_execution_v2"
 PRIORITY_VERSION = "rs_leader_30m_pivot_priority_v1"
 MANAGEMENT_VERSION = "rs_leader_30m_pivot_management_v1"
+MANAGEMENT_VERSION_V2 = "rs_leader_30m_pivot_management_v2"
 STOP_BUFFER_PCT = 0.001
 
 
@@ -321,12 +323,12 @@ def load_frozen_30m_directory(directory: str | Path, day: Any, book_id: str | No
     return result
 
 
-def management_metadata() -> dict[str, Any]:
-    return {"execution_management_version": MANAGEMENT_VERSION, "trim_fraction": "1/3",
+def management_metadata(version: str = MANAGEMENT_VERSION) -> dict[str, Any]:
+    return {"execution_management_version": version, "trim_fraction": "1/3",
             "trim_share_rounding": "floor", "trim_target_r": 3,
             "additional_partial_trims": False,
             "stop_under_pivot_low_buffer_pct": STOP_BUFFER_PCT,
-            "runner_management": "existing_stop_and_ema9_logic"}
+            "runner_management": "breakeven_stop_after_first_trim_and_ema9_logic" if version == MANAGEMENT_VERSION_V2 else "existing_stop_and_ema9_logic"}
 
 
 def candidates_from_saved_run(source: dict[str, Any], frames: dict[str, Any], day: Any,
@@ -429,15 +431,20 @@ def _sort_pivot_evaluations(evaluated: list[tuple[dict[str, Any], dict[str, Any]
 
 def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[Any, dict[str, Any]],
                         book_id: str, database_url: str, intraday_dir: str | Path,
-                        simulate_backdated_buys: bool = False) -> list[dict[str, Any]]:
+                        simulate_backdated_buys: bool = False,
+                        execution_version: str = EXECUTION_VERSION) -> list[dict[str, Any]]:
     """Run a complete fresh-book replay; caller owns the transaction and rollback/commit."""
     import datetime as dt
     import hashlib
     import json
     from src.market_data_access import load_many_ticker_windows
     from src.ticker_filters import is_leveraged_or_inverse_ticker, leveraged_or_inverse_provenance
-    from src.webapp.services.martin_bar_retest_execution import (bar_for, manage_position, MANAGEMENT_V2,
+    from src.webapp.services.martin_bar_retest_execution import (bar_for, manage_position, MANAGEMENT_V2, MANAGEMENT_V3,
         MAX_POSITIONS, execution_account_limits)
+    if execution_version not in {EXECUTION_VERSION, EXECUTION_VERSION_V2}:
+        raise ValueError("Unsupported RS Leader 30m Pivot execution version")
+    management_version = MANAGEMENT_V3 if execution_version == EXECUTION_VERSION_V2 else MANAGEMENT_V2
+    pivot_management_version = MANAGEMENT_VERSION_V2 if execution_version == EXECUTION_VERSION_V2 else MANAGEMENT_VERSION
     from src.webapp.services.martin_rotation import require_completed_session, size_order
     from src.webapp.services.martin_rs_replay import ReplayRepository
     from scripts.replay_martin_bar_retest_range import continuation_mark
@@ -465,7 +472,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
         fingerprint = hashlib.sha256(json.dumps({"source": source.get("source_fingerprint"), "date": day.isoformat(),
             "policy": POLICY_ID, "candidates": new_candidates}, sort_keys=True, default=str).encode()).hexdigest()
         summary = {"strategy_id": POLICY_ID, "book_id": book_id, "rule_version": POLICY_ID,
-            "execution_book_version": EXECUTION_VERSION, "session_date": day.isoformat(),
+            "execution_book_version": execution_version, "session_date": day.isoformat(),
             "source_run_id": source.get("source_run_id"), "source_fingerprint": source.get("source_fingerprint"),
             "source_mode": (source.get("replay_provenance") or {}).get("source_mode"),
             "replay_provenance": source.get("replay_provenance"),
@@ -575,10 +582,10 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                 "initial_shares": shares, "remaining_shares": shares, "realized_pnl": 0.0,
                 "realized_r": 0.0, "holding_sessions": 0, "trimmed": False,
                 "opened_on": day.isoformat(), "execution_status": status,
-                "intraday_execution": result, "execution_management_version": MANAGEMENT_VERSION}
+                "intraday_execution": result, "execution_management_version": pivot_management_version}
             position_id = repo.fill_order(candidate_id=int(order["id"]), run_id=int(order["run_id"]),
                 ticker=ticker, event_date=day, position_payload=position,
-                event_payload={**result, "shares": shares, **management_metadata()}, strategy_id=book_id)
+                event_payload={**result, "shares": shares, **management_metadata(pivot_management_version)}, strategy_id=book_id)
             if position_id is None:
                 continue
             actions["filled"] += 1
@@ -599,17 +606,17 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             if bar is None or position_row.get("opened_on") == day:
                 continue
             outcome = manage_position(position_row.get("payload_json") or {}, bar, day,
-                frames.get(ticker), management_version=MANAGEMENT_V2)
+                frames.get(ticker), management_version=management_version)
             if outcome:
                 event_type, updated, event = outcome
                 closed = event_type not in {"trim_3r", "trim_3r_skipped", "ema9_exit_scheduled"}
                 repo.apply_event(run_id=run_id, position_id=int(position_row["id"]), ticker=ticker,
-                    event_type=event_type, event_date=day, payload={**event, **management_metadata()},
+                    event_type=event_type, event_date=day, payload={**event, **management_metadata(pivot_management_version)},
                     position_payload=updated, close_position=closed, strategy_id=book_id)
                 actions["trimmed" if event_type == "trim_3r" else "exited"] += int(closed or event_type == "trim_3r")
         marks = continuation_mark(repo, book_id, day, database_url)
         repo.set_run_metadata(run_id, {**summary, "execution_actions": actions,
-            **management_metadata(), "partial": marks["mark_coverage"]["status"] != "complete",
+            **management_metadata(pivot_management_version), "partial": marks["mark_coverage"]["status"] != "complete",
             "intraday_evidence_partial": bool(actions["blocked_data"]),
             "intraday_blocked_count": actions["blocked_data"],
             "execution_account_limits": execution_account_limits(), **marks})

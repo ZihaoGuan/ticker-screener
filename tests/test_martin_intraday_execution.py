@@ -225,9 +225,10 @@ class MartinIntradayExecutionTests(unittest.TestCase):
         order = []
         class Repository:
             instance = None
+            version = "martin_bar_retest_execution_v2"
             def __init__(self, **_kwargs): self.__class__.instance = self; self.metadata = None
             def latest_session_date(self, _book): return dt.date(2026, 10, 22)
-            def _rows(self, *_args): return [{"summary_json": {"execution_book_version": "martin_bar_retest_execution_v2"}}]
+            def _rows(self, *_args): return [{"summary_json": {"execution_book_version": self.version}}]
             def session_run_id(self, *_args): return None
             def pending_orders(self, **_kwargs): return [{"ticker": "ABC", "payload_json": {"max_entry": 10, "stop": 9}}]
             def atomic_session(self, *_args): order.append("atomic"); return nullcontext()
@@ -235,13 +236,15 @@ class MartinIntradayExecutionTests(unittest.TestCase):
 
         class Executor:
             instance = None
-            def __init__(self, *_args, **_kwargs): self.__class__.instance = self
+            instances = []
+            def __init__(self, *_args, **_kwargs): self.__class__.instance = self; self.instances.append(self)
             def run_session(self, **kwargs): self.kwargs = kwargs; return {"missing_bars": 0, "intraday_fallbacks": 0}
 
         modules = {
             "src.webapp.repositories.martin_forward_test_repository": {"MartinForwardTestRepository": Repository},
             "src.webapp.services.martin_bar_retest_service": {"MartinBarRetestService": object},
-            "src.webapp.services.martin_bar_retest_execution": {"MartinBarRetestExecutionService": Executor},
+            "src.webapp.services.martin_bar_retest_execution": {"MartinBarRetestExecutionService": Executor,
+                "execution_account_limits": lambda: {}},
             "src.webapp.services.martin_rotation": {"require_completed_session": lambda _day: None},
             "src.webapp.config": {"load_webapp_config": lambda: type("Config", (), {"artifacts_dir": "/artifacts"})()},
             "scripts.run_martin_bar_retest": {"_load_source": lambda *_args: None},
@@ -259,11 +262,15 @@ class MartinIntradayExecutionTests(unittest.TestCase):
                         side_effect=lambda **_kwargs: (order.append("freeze") or Path(temporary), {})):
                 result = continue_book(book_id="martin_range_bar_retest_v2", database_url="unused",
                     history=object())
-        self.assertEqual(result["status"], "complete")
-        self.assertEqual(Executor.instance.execution_version, "martin_bar_retest_execution_v2")
+                self.assertEqual(result["status"], "complete")
+                self.assertEqual(Executor.instance.execution_version, "martin_bar_retest_execution_v2")
+                self.assertEqual(Repository.instance.metadata["execution_management_version"], "martin_bar_retest_management_v2")
+                Repository.version = "martin_bar_retest_execution_v5"
+                continue_book(book_id="martin_range_bar_retest_v5", database_url="unused", history=object())
+        self.assertEqual(Executor.instance.execution_version, "martin_bar_retest_execution_v5")
         self.assertEqual(Executor.instance.kwargs["frozen_intraday"], {})
-        self.assertEqual(order, ["freeze", "atomic"])
-        self.assertEqual(Repository.instance.metadata["execution_management_version"], "martin_bar_retest_management_v2")
+        self.assertEqual(order, ["freeze", "atomic", "freeze", "atomic"])
+        self.assertEqual(Repository.instance.metadata["execution_management_version"], "martin_bar_retest_management_v3")
         self.assertEqual(Repository.instance.metadata["trim_fraction"], "1/3")
 
 

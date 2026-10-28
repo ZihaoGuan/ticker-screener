@@ -268,8 +268,8 @@ class MartinExecutionBookContextTests(unittest.TestCase):
                 self.assertIn("position(%s in strategy_id)=1", sql)
                 self.assertIn("execution_book_version", sql)
                 self.assertNotIn("%", sql.replace("%s", ""))
-                self.assertEqual(params, ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4",
-                    "rs_leader_30m_pivot_replay_", "rs_leader_30m_pivot_execution_v1"))
+                self.assertEqual(params, ("martin_range_bar_retest_", "martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5",
+                    "rs_leader_30m_pivot_replay_", "rs_leader_30m_pivot_execution_v1", "rs_leader_30m_pivot_execution_v2"))
                 # Classification-only books remain omitted; the pivot requires its own version marker.
                 return [{"strategy_id": execution_id}, {"strategy_id": pivot_id}]
             if "FROM martin_forward_runs" in sql and params:

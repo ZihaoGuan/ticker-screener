@@ -18,6 +18,7 @@ MAX_COMMITTED_RISK = 2_500.0
 MAX_POSITIONS = 10
 MANAGEMENT_V1 = "martin_bar_retest_management_v1"
 MANAGEMENT_V2 = "martin_bar_retest_management_v2"
+MANAGEMENT_V3 = "martin_bar_retest_management_v3"
 
 
 def execution_account_limits() -> dict[str, float | int]:
@@ -149,7 +150,7 @@ def manage_position(position: dict[str, Any], bar: dict[str, float], day: dt.dat
     if kind == "trim_3r":
         if allow_trim:
             shares = int(position.get("remaining_shares") or 0)
-            v2_trim = management_version == MANAGEMENT_V2
+            v2_trim = management_version in {MANAGEMENT_V2, MANAGEMENT_V3}
             trim = shares // 3 if v2_trim else int(shares * .10)
             if trim:
                 pnl = (float(price) - float(position["entry_price"])) * trim
@@ -161,16 +162,22 @@ def manage_position(position: dict[str, Any], bar: dict[str, float], day: dt.dat
                            "holding_sessions": int(position.get("holding_sessions") or 0) + int(position.get("last_managed_date") != day.isoformat())}
                 event = {"price": float(price), "shares": trim, "realized_pnl": pnl}
                 if v2_trim:
-                    updated.update(management_version=MANAGEMENT_V2, trim_fraction="1/3", trim_share_rounding="floor")
-                    event.update(trim_fraction="1/3", trim_share_rounding="floor", management_version=MANAGEMENT_V2)
+                    updated.update(management_version=management_version, trim_fraction="1/3", trim_share_rounding="floor")
+                    event.update(trim_fraction="1/3", trim_share_rounding="floor", management_version=management_version)
+                if management_version == MANAGEMENT_V3:
+                    old_stop = float(position.get("stop", position.get("original_stop", position["entry_price"])))
+                    new_stop = max(old_stop, float(position["entry_price"]))
+                    updated.update(stop=new_stop, breakeven_stop=new_stop, breakeven_stop_set_on=day.isoformat(),
+                                   stop_effective_next_session=True)
+                    event.update(stop_moved_to=new_stop, stop_move_effective="next_session")
                 return kind, updated, event
             if v2_trim:
                 updated = {**position, "trim_3r_skipped": True, "trim_3r_skipped_on": day.isoformat(),
-                    "management_version": MANAGEMENT_V2, "trim_fraction": "1/3", "trim_share_rounding": "floor",
+                    "management_version": management_version, "trim_fraction": "1/3", "trim_share_rounding": "floor",
                     "last_managed_date": day.isoformat()}
                 return "trim_3r_skipped", updated, {"price": float(price), "shares": 0,
                     "reason": "floor_rounding_below_one_share", "trim_fraction": "1/3",
-                    "trim_share_rounding": "floor", "management_version": MANAGEMENT_V2}
+                    "trim_share_rounding": "floor", "management_version": management_version}
         scheduled = schedule_ema9_exit(position, bar, day, frame)
         return ("ema9_exit_scheduled", *scheduled) if scheduled else None
     shares = int(position.get("remaining_shares") or 0)
@@ -205,7 +212,8 @@ class MartinBarRetestExecutionService:
                   "missing_bars": 0, "scheduled": 0, "intraday_fallbacks": 0}
         fallback_reasons: dict[str, int] = {}
         fallback_details: list[dict[str, Any]] = []
-        management_version = (MANAGEMENT_V2 if getattr(self, "execution_version", None) in {
+        management_version = (MANAGEMENT_V3 if getattr(self, "execution_version", None) == "martin_bar_retest_execution_v5"
+                              else MANAGEMENT_V2 if getattr(self, "execution_version", None) in {
                                   "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3",
                                   "martin_bar_retest_execution_v4"}
                               else MANAGEMENT_V1)
@@ -231,7 +239,7 @@ class MartinBarRetestExecutionService:
             intraday_evidence = None
             execution_version = getattr(self, "execution_version", "martin_bar_retest_execution_v1")
             if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3",
-                                     "martin_bar_retest_execution_v4"}:
+                                     "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"}:
                 from src.webapp.services.martin_intraday_execution import evaluate_frozen_order
                 bundle = (frozen_intraday or {}).get(ticker)
                 if bundle is None or bundle.get("freeze_error"):
@@ -266,7 +274,7 @@ class MartinBarRetestExecutionService:
                         "evidence_status": reason,
                         "reason": intraday_evidence.get("reason") or reason,
                     })
-            authoritative_terminal = (execution_version == "martin_bar_retest_execution_v4" and
+            authoritative_terminal = (execution_version in {"martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} and
                 intraday_evidence and intraday_evidence["status"] in {"expired", "cancelled"})
             if authoritative_terminal:
                 outcome = {"status": intraday_evidence["status"],
@@ -289,8 +297,8 @@ class MartinBarRetestExecutionService:
                 event_date=day, position_payload=position, event_payload={"price": outcome["price"],
                 "shares": position["shares"], "same_day_stop": outcome["same_day_stop"],
                 **({"intraday_execution": intraday_evidence} if intraday_evidence else {}),
-                **({"management_version": MANAGEMENT_V2, "trim_fraction": "1/3", "trim_share_rounding": "floor"}
-                   if management_version == MANAGEMENT_V2 else {}),
+                **({"management_version": management_version, "trim_fraction": "1/3", "trim_share_rounding": "floor"}
+                   if management_version in {MANAGEMENT_V2, MANAGEMENT_V3} else {}),
                 **({"backdated_simulation": True, "source_reconstructed_later": True,
                    "fill_basis": "hypothetical_backdated_simulation"}
                   if position.get("backdated_simulation") else {})}, strategy_id=book)
@@ -303,7 +311,8 @@ class MartinBarRetestExecutionService:
                     event_date=day, payload={"price": position["exit_price"], "reason": "same_day_stop",
                     "realized_pnl": position["realized_pnl"],
                     **({"intraday_execution": intraday_evidence} if intraday_evidence else {}),
-                    **({"management_version": MANAGEMENT_V2} if management_version == MANAGEMENT_V2 else {})},
+                    **({"management_version": management_version}
+                       if management_version in {MANAGEMENT_V2, MANAGEMENT_V3} else {})},
                     position_payload=position, close_position=True, strategy_id=book)
                 counts["exited"] += 1
                 closed_today.add(ticker)
@@ -312,9 +321,9 @@ class MartinBarRetestExecutionService:
                     management_version=management_version)
                 if scheduled:
                     kind, updated, event = scheduled
-                    if management_version == MANAGEMENT_V2:
-                        updated.setdefault("management_version", MANAGEMENT_V2)
-                        event.setdefault("management_version", MANAGEMENT_V2)
+                    if management_version in {MANAGEMENT_V2, MANAGEMENT_V3}:
+                        updated.setdefault("management_version", management_version)
+                        event.setdefault("management_version", management_version)
                     self.repository.apply_event(run_id=run_id, position_id=position_id, ticker=ticker,
                         event_type=kind, event_date=day, payload=event, position_payload=updated, strategy_id=book)
         for row in positions:
@@ -329,9 +338,9 @@ class MartinBarRetestExecutionService:
             outcome = manage_position(position, bar, day, frames.get(ticker), management_version=management_version)
             if outcome:
                 kind, updated, event = outcome
-                if management_version == MANAGEMENT_V2:
-                    updated.setdefault("management_version", MANAGEMENT_V2)
-                    event.setdefault("management_version", MANAGEMENT_V2)
+                if management_version in {MANAGEMENT_V2, MANAGEMENT_V3}:
+                    updated.setdefault("management_version", management_version)
+                    event.setdefault("management_version", management_version)
                 closed = kind not in {"trim_3r", "trim_3r_skipped", "ema9_exit_scheduled"}
                 self.repository.apply_event(run_id=run_id, position_id=int(row["id"]), ticker=ticker,
                     event_type=kind, event_date=day, payload=event, position_payload=updated,
@@ -344,9 +353,9 @@ class MartinBarRetestExecutionService:
                     scheduled = schedule_ema9_exit(updated, bar, day, frames.get(ticker))
                     if scheduled:
                         exit_payload, exit_event = scheduled
-                        if management_version == MANAGEMENT_V2:
-                            exit_payload.setdefault("management_version", MANAGEMENT_V2)
-                            exit_event.setdefault("management_version", MANAGEMENT_V2)
+                        if management_version in {MANAGEMENT_V2, MANAGEMENT_V3}:
+                            exit_payload.setdefault("management_version", management_version)
+                            exit_event.setdefault("management_version", management_version)
                         self.repository.apply_event(run_id=run_id, position_id=int(row["id"]), ticker=ticker,
                             event_type="ema9_exit_scheduled", event_date=day, payload=exit_event,
                             position_payload=exit_payload, strategy_id=book)
@@ -389,8 +398,8 @@ class MartinBarRetestExecutionService:
             payload = schedule_payload({**candidate, **({"backdated_simulation": True,
                 "source_reconstructed_later": True,
                 "fill_basis": "hypothetical_backdated_simulation"} if backdated else {})}, day=day, shares=shares)
-            if management_version == MANAGEMENT_V2:
-                payload.update(management_version=MANAGEMENT_V2, trim_fraction="1/3", trim_share_rounding="floor")
+            if management_version in {MANAGEMENT_V2, MANAGEMENT_V3}:
+                payload.update(management_version=management_version, trim_fraction="1/3", trim_share_rounding="floor")
             self.repository.update_candidate(run_id, ticker, payload)
             held_names.add(ticker)
             orders_now.append({"ticker": ticker, "payload_json": payload})

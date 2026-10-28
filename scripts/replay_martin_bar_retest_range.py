@@ -151,13 +151,13 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
             tickers.setdefault(ticker, []).append(levels or {})
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     version_dir = "martin_intraday_execution_v3" if execution_version in {
-        "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else "martin_intraday_execution_v2"
+        "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else "martin_intraday_execution_v2"
     output = Path(artifacts_dir) / version_dir / book_id / f"{day.isoformat()}_{stamp}"
     output.mkdir(parents=True, exist_ok=False)
     client_dir = str(client_dir or os.environ.get("TRADINGVIEW_CLIENT_DIR") or
                      "/opt/tradingview/node_modules/@mathieuc/tradingview")
     fetch_data = fetcher or fetch_safely
-    resolve_symbols = execution_version in {"martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"}
+    resolve_symbols = execution_version in {"martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"}
     connection = None
     if daily_loader is None:
         try:
@@ -245,9 +245,9 @@ def save_execution_only_run(repository: Any, *, book_id: str, day: dt.date,
             "source_run_id": None, "source_mode": "execution_only_no_saved_scan", "zero_hit_day": None,
             "execution_mode": "historical_replay", "replay_provenance": {"fund_exclusions": {
                 "version": exclusion["version"], "sha256": exclusion["sha256"]}},
-            **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
+            **({"execution_management_version": ("martin_bar_retest_management_v3" if execution_version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                 "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
-               if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else {})}, strategy_id=book_id)
+               if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else {})}, strategy_id=book_id)
 
 
 def book_performance(connection: Any, book_id: str, final_mark: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -290,7 +290,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
     execution = MartinBarRetestExecutionService(repository, database_url=database_url)
     execution.book_id = book_id
     execution.execution_version = execution_version
-    if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} and intraday_dir is None:
+    if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} and intraday_dir is None:
         raise ValueError("Version 2/3/4 replay requires an --intraday-dir; individual missing bundles use daily fallback.")
     results = []
     final_mark = None
@@ -308,9 +308,9 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             marks = continuation_mark(repository, book_id, day, database_url)
             final_mark = marks
             repository.set_run_metadata(run_id, {"execution_book_version": execution_version,
-                **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
+                **({"execution_management_version": ("martin_bar_retest_management_v3" if execution_version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
-                   if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else {}),
+                   if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else {}),
                 "execution_only": True, "execution_actions": actions,
                 "simulate_backdated_buys": simulate_backdated_buys,
                 "backdated_buy_basis": None, "partial": marks["mark_coverage"]["status"] != "complete" or actions.get("intraday_fallbacks", 0) > 0,
@@ -339,9 +339,9 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             marks = continuation_mark(repository, book_id, day, database_url)
             final_mark = marks
             repository.set_run_metadata(result["run_id"], {"execution_book_version": execution_version,
-                **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
+                **({"execution_management_version": ("martin_bar_retest_management_v3" if execution_version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
-                   if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else {}),
+                   if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else {}),
                 "execution_actions": actions, "execution_source_on_time": result.get("retrospective_source_scan") is False,
                 "simulate_backdated_buys": simulate_backdated_buys,
                 "backdated_buy_basis": "hypothetical_backdated_simulation" if simulate_backdated_buys and result.get("retrospective_source_scan") else "forward_safe",
@@ -426,7 +426,7 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
         raise ValueError("Continuation requires an existing execution book; historical replay must create a fresh book first.")
     version_rows = repository._rows("SELECT summary_json FROM martin_forward_runs WHERE strategy_id=%s ORDER BY session_date DESC,id DESC LIMIT 1", (book_id,))
     version = (version_rows[0].get("summary_json") or {}).get("execution_book_version") if version_rows else None
-    if version not in {"martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"}:
+    if version not in {"martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"}:
         raise ValueError(f"Book {book_id} is not a versioned Martin Bar Retest execution book.")
     day = xnys_sessions(latest + dt.timedelta(days=1), latest + dt.timedelta(days=30))[0]
     prior_run = repository.session_run_id(book_id, day)
@@ -442,7 +442,7 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
                 "reason": "awaiting_next_completed_session"}
     intraday_source = None
     frozen_intraday: dict[str, dict[str, Any]] = {}
-    if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"}:
+    if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"}:
         if intraday_dir is None:
             from src.webapp.config import load_webapp_config
             intraday_dir, frozen_intraday = auto_freeze_book_intraday(book_id=book_id, day=day,
@@ -498,10 +498,10 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
                 marks[key] = None
         repository.set_run_metadata(run_id, {"execution_book_version": version,
             "execution_mode": "forward_continuation", "source_mode": mode,
-            **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
+            **({"execution_management_version": ("martin_bar_retest_management_v3" if version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                 "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
-               if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else {}),
-            "intraday_source": intraday_source, "intraday_bundle_dir": str(intraday_dir) if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else None,
+               if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else {}),
+            "intraday_source": intraday_source, "intraday_bundle_dir": str(intraday_dir) if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else None,
             "source_run_id": (source or {}).get("source_run_id"), "source_published_at": (source or {}).get("published_at"),
             "source_on_time": bool(result and result.get("retrospective_source_scan") is False),
             "execution_actions": action_counts, "partial": marks["mark_coverage"]["status"] != "complete" or action_counts.get("intraday_fallbacks", 0) > 0,
@@ -510,7 +510,7 @@ def continue_book(*, book_id: str, database_url: str, history: Any,
             "execution_account_limits": execution_account_limits(), **marks})
     return {"status": "complete", "book_id": book_id, "session_date": day.isoformat(), "source_mode": mode,
             "execution_actions": action_counts, "intraday_source": intraday_source,
-            "intraday_bundle_dir": str(intraday_dir) if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else None, **marks}
+            "intraday_bundle_dir": str(intraday_dir) if version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else None, **marks}
 
 
 def continue_main(argv: list[str] | None = None) -> int:
@@ -581,16 +581,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true", help="Commit the full session range atomically; default simulates then rolls back.")
     parser.add_argument("--simulate-backdated-buys", action="store_true",
         help="Allow confirmed signals from scans saved after next-session open to schedule hypothetical historical fills.")
-    parser.add_argument("--execution-version", choices=("v1", "v2", "v3", "v4"), default="v1",
+    parser.add_argument("--execution-version", choices=("v1", "v2", "v3", "v4", "v5"), default="v1",
         help="Isolated execution policy; v1 remains the default.")
-    parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2/v3/v4.")
+    parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2/v3/v4/v5.")
     args = parser.parse_args(argv)
     if args.to_date < args.from_date:
         parser.error("--to-date must be on or after --from-date")
     if not args.book_id.startswith("martin_range_bar_retest_") or args.book_id == POLICY_ID:
         parser.error("--book-id must start with martin_range_bar_retest_ and be separate from the policy ID")
-    if args.execution_version in {"v2", "v3", "v4"} and not args.intraday_dir:
-        parser.error("--intraday-dir is required for v2/v3/v4 frozen-bar execution")
+    if args.execution_version in {"v2", "v3", "v4", "v5"} and not args.intraday_dir:
+        parser.error("--intraday-dir is required for v2/v3/v4/v5 frozen-bar execution")
 
     from src.webapp.config import load_webapp_config
     from src.webapp.repositories.history_repository import HistoryRepository
@@ -625,7 +625,7 @@ def main(argv: list[str] | None = None) -> int:
         "mode": "apply" if args.apply else "dry_run_rolled_back", "saved": bool(args.apply),
         "simulate_backdated_buys": args.simulate_backdated_buys,
         "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
-        "intraday_source": "frozen_tradingview_bundle" if args.execution_version in {"v2", "v3", "v4"} else None,
+        "intraday_source": "frozen_tradingview_bundle" if args.execution_version in {"v2", "v3", "v4", "v5"} else None,
         "source_mode": "saved_screen_runs_with_execution_only_sessions", "sessions": results}, indent=2, default=str))
     return 0
 
