@@ -200,7 +200,8 @@ class MartinBarRetestExecutionService:
 
     def run_session(self, *, day: dt.date, run_id: int | None, candidates: list[dict[str, Any]],
                     source_on_time: bool, simulate_backdated_buys: bool = False,
-                    frozen_intraday: dict[str, dict[str, Any]] | None = None) -> dict[str, int]:
+                    frozen_intraday: dict[str, dict[str, Any]] | None = None,
+                    require_frozen_intraday: bool = False) -> dict[str, int]:
         book = getattr(self, "book_id", None) or "martin_range_bar_retest_v1"
         pending = self.repository.pending_candidates(before=day, strategy_id=book)
         positions = self.repository.open_positions(strategy_id=book)
@@ -208,7 +209,7 @@ class MartinBarRetestExecutionService:
         ordered = sorted(candidates, key=lambda x: (int(x.get("rank") or 10**9), x["ticker"]))
         tickers = sorted({str(x["ticker"]).upper() for x in pending + positions + ordered})
         frames = self.bar_loader(tickers, day, 320, database_url=self.database_url) if tickers else {}
-        counts = {"filled": 0, "expired": 0, "cancelled": 0, "exited": 0, "trimmed": 0,
+        counts = {"filled": 0, "expired": 0, "cancelled": 0, "blocked_data": 0, "exited": 0, "trimmed": 0,
                   "missing_bars": 0, "scheduled": 0, "intraday_fallbacks": 0}
         fallback_reasons: dict[str, int] = {}
         fallback_details: list[dict[str, Any]] = []
@@ -243,7 +244,7 @@ class MartinBarRetestExecutionService:
                 from src.webapp.services.martin_intraday_execution import evaluate_frozen_order
                 bundle = (frozen_intraday or {}).get(ticker)
                 if bundle is None or bundle.get("freeze_error"):
-                    intraday_evidence = {"status": "fallback_daily",
+                    intraday_evidence = {"status": "blocked_data" if require_frozen_intraday else "fallback_daily",
                         "evidence_status": (bundle or {}).get("freeze_error") or "frozen_intraday_bundle_missing",
                         "execution_version": execution_version,
                         "requested_symbol": (bundle or {}).get("requested_symbol") or f"NASDAQ:{ticker}",
@@ -262,7 +263,8 @@ class MartinBarRetestExecutionService:
                         (bundle.get("data") or {}).get("exchange_lookup"))
                     if intraday_evidence["status"] == "blocked_data":
                         intraday_evidence["evidence_status"] = intraday_evidence.get("reason") or "frozen_intraday_invalid"
-                        intraday_evidence["status"] = "fallback_daily"
+                        if not require_frozen_intraday:
+                            intraday_evidence["status"] = "fallback_daily"
                 if intraday_evidence["status"] == "fallback_daily":
                     counts["intraday_fallbacks"] += 1
                     reason = str(intraday_evidence.get("evidence_status") or "unknown")
@@ -279,6 +281,9 @@ class MartinBarRetestExecutionService:
             if authoritative_terminal:
                 outcome = {"status": intraday_evidence["status"],
                     "reason": intraday_evidence.get("reason"), "event_date": day.isoformat()}
+            elif intraday_evidence and intraday_evidence["status"] == "blocked_data":
+                outcome = {"status": "blocked_data", "reason": intraday_evidence.get("evidence_status"),
+                    "event_date": day.isoformat()}
             elif intraday_evidence and intraday_evidence["status"] in {"filled", "filled_stopped"}:
                 outcome = settle_intraday_order(payload, intraday_evidence, day)
             else:

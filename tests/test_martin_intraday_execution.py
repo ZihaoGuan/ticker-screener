@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -8,11 +9,13 @@ from contextlib import nullcontext
 from types import ModuleType
 import unittest
 from unittest.mock import patch
+from contextlib import redirect_stderr
 
 from src.webapp.services.martin_intraday_execution import evaluate_frozen_order, fingerprint
 from scripts import audit_martin_intraday_execution as audit
 from scripts.replay_martin_bar_retest_range import (
     auto_freeze_book_intraday, continue_book, frozen_intraday_for, main as replay_main,
+    _auto_freeze_missing_pairs,
 )
 
 
@@ -158,6 +161,14 @@ class MartinIntradayExecutionTests(unittest.TestCase):
                 "--book-id", "martin_range_bar_retest_v2", "--execution-version", "v2"])
         self.assertEqual(raised.exception.code, 2)
 
+    def test_replay_cli_accepts_auto_freeze_missing_option(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            replay_main(["--from-date", "2026-10-20", "--to-date", "2026-10-23",
+                "--book-id", "invalid", "--auto-freeze-missing"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("must start with", stderr.getvalue())
+
     def test_auto_freeze_writes_durable_bundle_and_fetches_one_minute_for_ambiguity(self):
         calls = []
         data15 = {"query": {"symbol": "NASDAQ:ABC", "timeframe": "15", "session": "regular",
@@ -189,6 +200,75 @@ class MartinIntradayExecutionTests(unittest.TestCase):
                 fetcher=lambda *_args: None)
         self.assertEqual(frozen["ABC"]["freeze_error"], "provider_unavailable")
         self.assertEqual(frozen["ABC"]["source_date"], self.day.isoformat())
+
+    def test_auto_freeze_missing_pairs_fetches_only_missing_tickers_and_reuses_valid_cache(self):
+        calls = []
+        data = {"requested_symbol": "NASDAQ:ABC", "resolved_symbol": "NASDAQ:ABC",
+            "query": {"symbol": "NASDAQ:ABC", "timeframe": "15", "session": "regular",
+                "adjustment": "splits", "timezone": "America/New_York"},
+            "metadata": {"full_name": "NASDAQ:ABC", "subsession_id": "regular",
+                "timezone": "America/New_York", "currency_code": "USD"},
+            "candles": [candle(1, 10)]}
+        def fetcher(*_args):
+            calls.append(1)
+            return data
+        daily = {"open": 12, "high": 13, "low": 10, "close": 12, "volume": 100}
+        rows = [{"ticker": "ABC", "payload_json": {"max_entry": 10, "stop": 9}},
+                {"ticker": "XYZ", "payload_json": {"max_entry": 10, "stop": 9}}]
+        with tempfile.TemporaryDirectory() as temporary, patch.object(audit, "session_starts", return_value=[1]):
+            supplied = {"XYZ": {"data": {"candles": [candle(1, 10)]}, "source_date": self.day.isoformat()}}
+            supplied_before = json.dumps(supplied, sort_keys=True)
+            first = _auto_freeze_missing_pairs(book_id="martin_range_bar_retest_test", day=self.day,
+                pending_orders=rows, supplied=supplied, database_url="unused", artifacts_dir=temporary,
+                execution_version="martin_bar_retest_execution_v4", fetcher=fetcher, daily_loader=lambda *_: daily)
+            second = _auto_freeze_missing_pairs(book_id="martin_range_bar_retest_test", day=self.day,
+                pending_orders=rows, supplied=supplied, database_url="unused", artifacts_dir=temporary,
+                execution_version="martin_bar_retest_execution_v4", fetcher=fetcher, daily_loader=lambda *_: daily)
+        self.assertEqual(calls, [1])
+        self.assertEqual(json.dumps(supplied, sort_keys=True), supplied_before)
+        self.assertIn("XYZ", first)
+        self.assertIn("ABC", second)
+
+    def test_supplied_valid_bundle_has_priority_over_cached_overlay(self):
+        supplied_bundle = {"data": {"source": "supplied"}}
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / "martin_intraday_execution_v3" / "book" / f"{self.day}_cached"
+            cache.mkdir(parents=True)
+            with patch("scripts.replay_martin_bar_retest_range.frozen_intraday_for",
+                       return_value={"ABC": {"data": {"source": "cached"}}}), \
+                 patch("scripts.replay_martin_bar_retest_range.auto_freeze_book_intraday") as fetch:
+                merged = _auto_freeze_missing_pairs(book_id="book", day=self.day,
+                    pending_orders=[{"ticker": "ABC"}], supplied={"ABC": supplied_bundle},
+                    database_url="unused", artifacts_dir=temporary,
+                    execution_version="martin_bar_retest_execution_v4")
+        self.assertIs(merged["ABC"], supplied_bundle)
+        fetch.assert_not_called()
+
+    def test_supplied_failed_or_rejected_bundle_is_refetched(self):
+        rows = [{"ticker": "ABC"}]
+        for unusable in ({"freeze_error": "provider_unavailable"},
+                         {"data": {"candles": []}, "classification": "feed_mismatch"}):
+            with self.subTest(unusable=unusable), tempfile.TemporaryDirectory() as temporary:
+                fetched = {"data": {"source": "fresh"}}
+                with patch("scripts.replay_martin_bar_retest_range.auto_freeze_book_intraday",
+                           return_value=(Path(temporary), {"ABC": fetched})) as fetch:
+                    merged = _auto_freeze_missing_pairs(book_id="book", day=self.day,
+                        pending_orders=rows, supplied={"ABC": unusable}, database_url="unused",
+                        artifacts_dir=temporary, execution_version="martin_bar_retest_execution_v4")
+                self.assertIs(merged["ABC"], fetched)
+                self.assertEqual(fetch.call_args.kwargs["pending_orders"], rows)
+
+    def test_auto_freeze_rejects_incomplete_provider_feed(self):
+        data = {"query": {"symbol": "NASDAQ:ABC", "timeframe": "15", "session": "regular",
+                "adjustment": "splits", "timezone": "America/New_York"},
+            "metadata": {"full_name": "NASDAQ:ABC", "subsession_id": "regular",
+                "timezone": "America/New_York", "currency_code": "USD"}, "candles": []}
+        with tempfile.TemporaryDirectory() as temporary, patch.object(audit, "session_starts", return_value=[1]):
+            _output, frozen = auto_freeze_book_intraday(book_id="martin_range_bar_retest_test", day=self.day,
+                pending_orders=[{"ticker": "ABC", "payload_json": {"max_entry": 10, "stop": 9}}],
+                database_url="unused", artifacts_dir=temporary,
+                daily_loader=lambda *_args: self.daily, fetcher=lambda *_args: data)
+        self.assertEqual(frozen["ABC"]["freeze_error"], "missing_bars")
 
     def test_auto_freeze_uses_metadata_nyse_and_records_lookup_attempts(self):
         class Connection:

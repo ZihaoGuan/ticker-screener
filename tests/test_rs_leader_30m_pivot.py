@@ -16,6 +16,15 @@ def bar(opening, high, low, close):
 
 
 class RSPivotTests(unittest.TestCase):
+    def test_auto_freeze_only_cli_help_and_missing_input_audit(self):
+        from scripts.replay_rs_leader_30m_pivot import load_replay_audit
+        import sys
+        result = subprocess.run([sys.executable, "scripts/replay_rs_leader_30m_pivot.py", "--help"],
+            capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--auto-freeze-missing", result.stdout)
+        self.assertIsNone(load_replay_audit(None, "rs_leader_30m_pivot_replay_test", False))
+
     def test_replay_rejects_frozen_bundle_for_different_book_id(self):
         from scripts.replay_rs_leader_30m_pivot import validate_bundle_book_id
         with self.assertRaisesRegex(ValueError, "frozen_30m_book_id_mismatch"):
@@ -93,6 +102,76 @@ class RSPivotTests(unittest.TestCase):
             _, evidence = _frozen_30m_evidence(bundle, day)
         self.assertEqual(evidence["evidence_tier"], "primary_exact")
         self.assertFalse(evidence["feed_conflict"])
+
+    def test_auto_freeze_missing_caches_valid_source_bound_overlay(self):
+        from src.webapp.services.rs_leader_30m_pivot import auto_freeze_missing_pivot
+        from scripts import audit_martin_intraday_execution as audit
+        import tempfile
+        import sys
+        from types import SimpleNamespace
+        bundle, day = self._frozen_bundle(actual="NASDAQ:ABC")
+        data = bundle["data"]
+        data["requested_symbol"] = data["resolved_symbol"] = "NASDAQ:ABC"
+        data["query"]["symbol"] = "NASDAQ:ABC"
+        order = {"ticker": "ABC", "payload_json": {"source_run_id": 17, "source_fingerprint": "src-fp"}}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"psycopg": SimpleNamespace(connect=lambda *a, **k: __import__("contextlib").nullcontext(object()))}), \
+                patch.object(audit, "session_starts", return_value=[1767623400 + 1800 * i for i in range(13)]), \
+                patch.object(audit, "load_ticker_exchange", return_value="NASDAQ"), \
+                patch.object(audit, "fetch_with_exchange_fallback", return_value=data) as fetch:
+            first = auto_freeze_missing_pivot(artifacts_dir=tmp,
+                book_id="rs_leader_30m_pivot_replay_test", day=day, order=order,
+                daily={"open": 10, "high": 11, "low": 9, "close": 10.2}, database_url="unused")
+            second = auto_freeze_missing_pivot(artifacts_dir=tmp,
+                book_id="rs_leader_30m_pivot_replay_test", day=day, order=order,
+                daily={"open": 10, "high": 11, "low": 9, "close": 10.2}, database_url="unused")
+            self.assertEqual(fetch.call_count, 1)
+            self.assertEqual(first["record"]["source_run_id"], 17)
+            self.assertEqual(first["record"]["source_fingerprint"], "src-fp")
+            self.assertEqual(first["manifest"]["fingerprint"], second["manifest"]["fingerprint"])
+
+    def test_auto_freeze_missing_rejected_fetch_is_not_cached(self):
+        from src.webapp.services.rs_leader_30m_pivot import auto_freeze_missing_pivot
+        from scripts import audit_martin_intraday_execution as audit
+        import tempfile
+        import sys
+        from types import SimpleNamespace
+        order = {"ticker": "ABC", "payload_json": {"source_run_id": 17, "source_fingerprint": "src-fp"}}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"psycopg": SimpleNamespace(connect=lambda *a, **k: __import__("contextlib").nullcontext(object()))}), \
+                patch.object(audit, "load_ticker_exchange", return_value="NASDAQ"), \
+                patch.object(audit, "fetch_with_exchange_fallback", return_value={"error_code": "SYMBOL_ERROR"}):
+            result = auto_freeze_missing_pivot(artifacts_dir=tmp,
+                book_id="rs_leader_30m_pivot_replay_test", day="2026-01-05", order=order,
+                daily={"open": 10, "high": 11, "low": 9, "close": 10.2}, database_url="unused")
+            self.assertIsNone(result)
+            self.assertFalse(list(Path(tmp).rglob("audit.json")))
+
+    def test_auto_freeze_missing_recovers_incomplete_overlay(self):
+        from src.webapp.services.rs_leader_30m_pivot import auto_freeze_missing_pivot
+        from scripts import audit_martin_intraday_execution as audit
+        import tempfile
+        import sys
+        from types import SimpleNamespace
+        from scripts.audit_martin_intraday_execution import digest
+        bundle, day = self._frozen_bundle(actual="NASDAQ:ABC")
+        data = bundle["data"]
+        data["requested_symbol"] = data["resolved_symbol"] = "NASDAQ:ABC"
+        data["query"]["symbol"] = "NASDAQ:ABC"
+        order = {"ticker": "ABC", "payload_json": {"source_run_id": 17, "source_fingerprint": "src-fp"}}
+        book_id = "rs_leader_30m_pivot_replay_test"
+        key = digest({"book_id": book_id, "date": day, "ticker": "ABC", "source_run_id": 17,
+            "source_fingerprint": "src-fp", "simulate_backdated_buys": False})
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"psycopg": SimpleNamespace(connect=lambda *a, **k: __import__("contextlib").nullcontext(object()))}), \
+                patch.object(audit, "session_starts", return_value=[1767623400 + 1800 * i for i in range(13)]), \
+                patch.object(audit, "load_ticker_exchange", return_value="NASDAQ"), \
+                patch.object(audit, "fetch_with_exchange_fallback", return_value=data) as fetch:
+            cache = Path(tmp) / "rs_leader_30m_pivot_auto_freeze" / book_id / key
+            cache.mkdir(parents=True)
+            (cache / "partial.json").write_text("partial")
+            result = auto_freeze_missing_pivot(artifacts_dir=tmp, book_id=book_id, day=day,
+                order=order, daily={"open": 10, "high": 11, "low": 9, "close": 10.2}, database_url="unused")
+            self.assertIsNotNone(result)
+            self.assertEqual(fetch.call_count, 1)
+            self.assertEqual(len(list(cache.parent.glob(f"{key}.incomplete-*"))), 1)
 
     @unittest.skipUnless(importlib.util.find_spec("pandas"), "pandas is not installed")
     def test_daily_support_decline_thresholds_are_explicit_and_inferred(self):

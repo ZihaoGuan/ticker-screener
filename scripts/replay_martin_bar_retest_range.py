@@ -161,6 +161,7 @@ def frozen_intraday_for(directory: str | Path | None, day: dt.date) -> dict[str,
             "original_requested_symbol": data.get("requested_symbol"),
             "resolved_symbol": data.get("resolved_symbol"), "symbol_resolution": data.get("symbol_resolution"),
             "exchange_lookup": record.get("exchange_lookup"),
+            "classification": record.get("classification"),
             "audit_fingerprint": supplied_fingerprint, "candle_fingerprint": record["candle_fingerprint"],
             "source_date": record.get("date"), "source_file": path.name}
     for record in document.get("records", []):
@@ -255,6 +256,17 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
                     data["one_minute"] = fine
                 else:
                     data["one_minute_refinement"] = {"classification": "provider_unavailable"}
+            rejected = next((str(item.get("classification")) for item in evaluations
+                if item.get("classification") in {"feed_mismatch", "missing_bars", "provider_data_invalid",
+                    "invalid_intraday_bar", "duplicate_intraday_timestamp"}), None)
+            if rejected:
+                records.append({"ticker": ticker, "date": day.isoformat(), "requested_symbol": requested,
+                    "resolved_symbol": data.get("resolved_symbol"), "symbol_resolution": data.get("symbol_resolution"),
+                    "exchange_lookup": data.get("exchange_lookup"), "classification": rejected,
+                    "provider_error_code": rejected, "candle_file": None, "candle_fingerprint": None,
+                    "order_evaluations": evaluations, "order_levels": orders,
+                    "daily_source": (daily or {}).get("source")})
+                continue
             path = output / f"{ticker}_{day.isoformat()}.json"
             path.write_text(json.dumps(data, sort_keys=True, indent=2, default=str) + "\n")
             records.append({"ticker": ticker, "date": day.isoformat(), "requested_symbol": requested,
@@ -274,6 +286,34 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
     manifest["fingerprint"] = digest(manifest)
     (output / "audit.json").write_text(json.dumps(manifest, sort_keys=True, indent=2, default=str) + "\n")
     return output, frozen_intraday_for(output, day)
+
+
+def _auto_freeze_missing_pairs(*, book_id: str, day: dt.date, pending_orders: list[dict[str, Any]],
+                               supplied: dict[str, dict[str, Any]], database_url: str,
+                               artifacts_dir: str | Path, execution_version: str, fetcher=None,
+                               daily_loader=None) -> dict[str, dict[str, Any]]:
+    version_dir = "martin_intraday_execution_v3" if execution_version in {
+        "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else "martin_intraday_execution_v2"
+    def valid(bundle: dict[str, Any] | None) -> bool:
+        return bool(bundle and bundle.get("data") and not bundle.get("freeze_error") and
+                    bundle.get("classification", "frozen") == "frozen")
+
+    cached: dict[str, dict[str, Any]] = {}
+    for path in sorted((Path(artifacts_dir) / version_dir / book_id).glob(f"{day.isoformat()}_*")):
+        cached.update({ticker: bundle for ticker, bundle in frozen_intraday_for(path, day).items()
+                       if valid(bundle)})
+    tickers = {str(row.get("ticker") or "").upper() for row in pending_orders}
+    merged = {ticker: supplied[ticker] if valid(supplied.get(ticker)) else cached[ticker]
+              for ticker in tickers if valid(supplied.get(ticker)) or ticker in cached}
+    missing = tickers - set(merged)
+    if missing:
+        orders = [row for row in pending_orders if str(row.get("ticker") or "").upper() in missing]
+        # shortcut: provider I/O runs inside the range transaction; split prefetch from simulation if transaction duration becomes a problem.
+        _path, fetched = auto_freeze_book_intraday(book_id=book_id, day=day, pending_orders=orders,
+            database_url=database_url, artifacts_dir=artifacts_dir, execution_version=execution_version,
+            fetcher=fetcher, daily_loader=daily_loader)
+        merged.update(fetched)
+    return merged
 
 
 def save_execution_only_run(repository: Any, *, book_id: str, day: dt.date,
@@ -325,17 +365,22 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
               exclusion_provenance: dict[str, Any] | None = None,
               execution_version: str = "martin_bar_retest_execution_v1",
               intraday_dir: str | Path | None = None,
+              auto_freeze_missing: bool = False, artifacts_dir: str | Path | None = None,
               progress: ReplayProgress | None = None) -> list[dict[str, Any]]:
     from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
     from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService, execution_account_limits
     from src.webapp.services.martin_rs_replay import ReplayRepository
+
+    if auto_freeze_missing and artifacts_dir is None:
+        raise ValueError("auto-freeze-missing requires an artifacts directory")
 
     repository = ReplayRepository(connection)
     service = MartinBarRetestService(repository, database_url=database_url)
     execution = MartinBarRetestExecutionService(repository, database_url=database_url)
     execution.book_id = book_id
     execution.execution_version = execution_version
-    if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} and intraday_dir is None:
+    if (execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"}
+            and intraday_dir is None and not auto_freeze_missing):
         raise ValueError("Version 2/3/4 replay requires an --intraday-dir; individual missing bundles use daily fallback.")
     results = []
     final_mark = None
@@ -343,13 +388,17 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
         if progress:
             progress.emit(event="session_start", day=day)
         source = sources.get(day)
+        frozen = frozen_intraday_for(intraday_dir, day)
         if source is None:
             from src.webapp.services.martin_rotation import require_completed_session
             require_completed_session(day)
             run_id = save_execution_only_run(repository, book_id=book_id, day=day,
                                              exclusion_provenance=exclusion_provenance, execution_version=execution_version)
             actions = execution.run_session(day=day, run_id=run_id, candidates=[], source_on_time=False,
-                frozen_intraday=frozen_intraday_for(intraday_dir, day))
+                frozen_intraday=_auto_freeze_missing_pairs(book_id=book_id, day=day,
+                    pending_orders=repository.pending_orders(strategy_id=book_id, before=day), supplied=frozen,
+                    database_url=database_url, artifacts_dir=artifacts_dir, execution_version=execution_version)
+                    if auto_freeze_missing else frozen, require_frozen_intraday=auto_freeze_missing)
             if actions["missing_bars"]:
                 raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
             marks = continuation_mark(repository, book_id, day, database_url)
@@ -379,7 +428,12 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
         actions = execution.run_session(day=day, run_id=result.get("run_id"), candidates=result.get("candidates", []),
                                         source_on_time=result.get("retrospective_source_scan") is False,
                                         simulate_backdated_buys=simulate_backdated_buys,
-                                        frozen_intraday=frozen_intraday_for(intraday_dir, day))
+                                        frozen_intraday=_auto_freeze_missing_pairs(book_id=book_id, day=day,
+                                            pending_orders=repository.pending_orders(strategy_id=book_id, before=day),
+                                            supplied=frozen, database_url=database_url, artifacts_dir=artifacts_dir,
+                                            execution_version=execution_version)
+                                            if auto_freeze_missing else frozen,
+                                        require_frozen_intraday=auto_freeze_missing)
         if actions["missing_bars"]:
             raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
         cohorts = {category: sum(item.get("event_category") == category for item in result.get("candidates", []))
@@ -596,6 +650,7 @@ def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.
                   book_id: str, database_url: str, apply: bool, simulate_backdated_buys: bool = False,
                   execution_version: str = "martin_bar_retest_execution_v1",
                   intraday_dir: str | Path | None = None,
+                  auto_freeze_missing: bool = False, artifacts_dir: str | Path | None = None,
                   progress: ReplayProgress | None = None) -> list[dict[str, Any]]:
     from src.ticker_filters import leveraged_or_inverse_provenance, set_replay_fund_exclusions, reset_replay_fund_exclusions
     exclusion_provenance = leveraged_or_inverse_provenance()
@@ -613,7 +668,8 @@ def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.
         results = run_range(connection, sessions=sessions, sources=sources, book_id=book_id,
                             database_url=database_url, simulate_backdated_buys=simulate_backdated_buys,
                             exclusion_provenance=exclusion_provenance, execution_version=execution_version,
-                            intraday_dir=intraday_dir, progress=progress)
+                            intraday_dir=intraday_dir, auto_freeze_missing=auto_freeze_missing,
+                            artifacts_dir=artifacts_dir, progress=progress)
         if apply:
             connection.commit()
         else:
@@ -639,13 +695,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--execution-version", choices=("v1", "v2", "v3", "v4", "v5"), default="v1",
         help="Isolated execution policy; v1 remains the default.")
     parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2/v3/v4/v5.")
+    parser.add_argument("--auto-freeze-missing", action="store_true",
+        help="Fetch only pending ticker-session pairs absent from the supplied bundle and block unresolved evidence.")
     args = parser.parse_args(argv)
     if args.to_date < args.from_date:
         parser.error("--to-date must be on or after --from-date")
     if not args.book_id.startswith("martin_range_bar_retest_") or args.book_id == POLICY_ID:
         parser.error("--book-id must start with martin_range_bar_retest_ and be separate from the policy ID")
-    if args.execution_version in {"v2", "v3", "v4", "v5"} and not args.intraday_dir:
+    if args.execution_version in {"v2", "v3", "v4", "v5"} and not args.intraday_dir and not args.auto_freeze_missing:
         parser.error("--intraday-dir is required for v2/v3/v4/v5 frozen-bar execution")
+    if args.auto_freeze_missing and args.execution_version == "v1":
+        parser.error("--auto-freeze-missing requires execution version v2, v3, v4, or v5")
 
     from src.webapp.config import load_webapp_config
     from src.webapp.repositories.history_repository import HistoryRepository
@@ -675,13 +735,15 @@ def main(argv: list[str] | None = None) -> int:
                                 database_url=config.database_url, apply=args.apply,
                                 simulate_backdated_buys=args.simulate_backdated_buys,
                                 execution_version=f"martin_bar_retest_execution_{args.execution_version}",
-                                intraday_dir=args.intraday_dir, progress=progress)
+                                intraday_dir=args.intraday_dir, auto_freeze_missing=args.auto_freeze_missing,
+                                artifacts_dir=config.artifacts_dir, progress=progress)
     print(json.dumps({"ready": True, "policy_id": POLICY_ID, "execution_policy_id": f"martin_bar_retest_execution_{args.execution_version}", "book_id": args.book_id,
         "from_date": args.from_date.isoformat(), "to_date": args.to_date.isoformat(),
         "mode": "apply" if args.apply else "dry_run_rolled_back", "saved": bool(args.apply),
         "simulate_backdated_buys": args.simulate_backdated_buys,
         "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
         "intraday_source": "frozen_tradingview_bundle" if args.execution_version in {"v2", "v3", "v4", "v5"} else None,
+        "auto_freeze_missing": args.auto_freeze_missing,
         "source_mode": "saved_screen_runs_with_execution_only_sessions", "sessions": results}, indent=2, default=str))
     return 0
 

@@ -21,13 +21,26 @@ def validate_bundle_book_id(audit: dict, book_id: str) -> None:
         raise ValueError(f"frozen_30m_book_id_mismatch: bundle={audit.get('book_id')!r} replay={book_id!r}")
 
 
+def load_replay_audit(intraday_dir: str | None, book_id: str, simulate_backdated_buys: bool) -> dict | None:
+    """Validate supplied freeze metadata; auto-freeze-only replay has no input audit."""
+    if intraday_dir is None:
+        return None
+    audit = json.loads((Path(intraday_dir) / "audit.json").read_text())
+    validate_bundle_book_id(audit, book_id)
+    if bool(audit.get("simulate_backdated_buys", False)) != simulate_backdated_buys:
+        raise ValueError("freeze and replay --simulate-backdated-buys modes must match")
+    return audit
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--from-date", required=True, type=dt.date.fromisoformat)
     parser.add_argument("--to-date", required=True, type=dt.date.fromisoformat)
     parser.add_argument("--book-id", required=True)
-    parser.add_argument("--intraday-dir", required=True,
+    parser.add_argument("--intraday-dir",
                         help="Immutable 30m TradingView bundle directory. Invalid or absent bars block entry.")
+    parser.add_argument("--auto-freeze-missing", action="store_true",
+                        help="Fetch and cache only missing active pending ticker-date evidence.")
     parser.add_argument("--apply", action="store_true", help="Commit the whole replay; default simulates then rolls back.")
     parser.add_argument("--simulate-backdated-buys", action="store_true",
                         help="Allow hypothetical entries from scans saved after the next-session open.")
@@ -38,7 +51,9 @@ def main(argv=None):
         parser.error("--to-date must be on or after --from-date")
     if not args.book_id.startswith("rs_leader_30m_pivot_replay_"):
         parser.error("--book-id must start with rs_leader_30m_pivot_replay_")
-    if not Path(args.intraday_dir).is_dir():
+    if args.intraday_dir is None and not args.auto_freeze_missing:
+        parser.error("--intraday-dir is required unless --auto-freeze-missing is enabled")
+    if args.intraday_dir is not None and not Path(args.intraday_dir).is_dir():
         parser.error("--intraday-dir must be an existing frozen 30m bundle directory")
     from src.webapp.config import load_webapp_config
     from src.webapp.repositories.history_repository import HistoryRepository
@@ -51,15 +66,9 @@ def main(argv=None):
     sessions = xnys_sessions(args.from_date, args.to_date)
     progress = ReplayProgress(total=len(sessions), apply=args.apply)
     try:
-        audit = json.loads((Path(args.intraday_dir) / "audit.json").read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        parser.error(f"--intraday-dir requires a valid audit.json manifest: {exc}")
-    try:
-        validate_bundle_book_id(audit, args.book_id)
-    except ValueError as exc:
-        parser.error(str(exc))
-    if bool(audit.get("simulate_backdated_buys", False)) != args.simulate_backdated_buys:
-        parser.error("freeze and replay --simulate-backdated-buys modes must match")
+        load_replay_audit(args.intraday_dir, args.book_id, args.simulate_backdated_buys)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        parser.error(f"--intraday-dir requires a valid compatible audit.json manifest: {exc}")
     execution_version = EXECUTION_VERSION_V2 if args.execution_version == "v2" else EXECUTION_VERSION
     history = ScreenerHistoryService(database_url=config.database_url, artifacts_dir=config.artifacts_dir,
         repository=HistoryRepository(database_url=config.database_url, artifacts_dir=config.artifacts_dir, read_only=True))
@@ -86,6 +95,7 @@ def main(argv=None):
                 results = execute_pivot_range(connection, sessions=sessions, sources=sources,
                     book_id=args.book_id, database_url=config.database_url, intraday_dir=args.intraday_dir,
                     simulate_backdated_buys=args.simulate_backdated_buys, execution_version=execution_version,
+                    auto_freeze_missing=args.auto_freeze_missing, artifacts_dir=config.artifacts_dir,
                     progress_callback=lambda event, day, counts: (progress.emit(event=event, day=day)
                         if event == "session_start" else progress.session_done(day, counts)))
                 if args.apply:

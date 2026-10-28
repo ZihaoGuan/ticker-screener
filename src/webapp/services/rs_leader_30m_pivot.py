@@ -323,6 +323,84 @@ def load_frozen_30m_directory(directory: str | Path, day: Any, book_id: str | No
     return result
 
 
+def auto_freeze_missing_pivot(*, artifacts_dir: str | Path, book_id: str,
+                              day: Any, order: dict[str, Any], daily: dict[str, Any] | None,
+                              database_url: str, simulate_backdated_buys: bool = False) -> dict[str, Any] | None:
+    """Fetch one missing pending pair and cache its validated immutable evidence."""
+    import datetime as dt
+    import json
+    import os
+    import uuid
+    from pathlib import Path
+    from scripts.audit_martin_intraday_execution import (digest, fetch_safely,
+        fetch_with_exchange_fallback, load_ticker_exchange, normalize_exchange)
+
+    ticker = str(order.get("ticker") or "").upper()
+    payload = order.get("payload_json") or {}
+    source_id, source_fp = payload.get("source_run_id"), payload.get("source_fingerprint")
+    if not ticker or not source_id or not source_fp or daily is None:
+        return None
+    day_text = str(day)[:10]
+    key = digest({"book_id": book_id, "date": day_text, "ticker": ticker,
+                  "source_run_id": source_id, "source_fingerprint": source_fp,
+                  "simulate_backdated_buys": simulate_backdated_buys})
+    cache = Path(artifacts_dir) / "rs_leader_30m_pivot_auto_freeze" / book_id / key
+    if cache.exists():
+        try:
+            if not cache.is_dir():
+                raise ValueError("auto_freeze_cache_not_directory")
+            found = load_frozen_30m_directory(cache, day, book_id=book_id,
+                simulate_backdated_buys=simulate_backdated_buys, daily_bars={ticker: daily}).get(ticker)
+            if (found and str(found["record"].get("source_run_id")) == str(source_id) and
+                    found["record"].get("source_fingerprint") == source_fp):
+                return found
+            raise ValueError("auto_freeze_cache_pair_missing")
+        except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError):
+            # A crash may leave the directory before its manifest is published.
+            # Preserve it for diagnosis, then let this attempt rebuild the cache.
+            quarantine = cache.with_name(f"{cache.name}.incomplete-{uuid.uuid4().hex}")
+            os.replace(cache, quarantine)
+    import psycopg
+    with psycopg.connect(database_url, options="-c default_transaction_read_only=on -c statement_timeout=60000") as lookup:
+        exchange = load_ticker_exchange(lookup, ticker)
+    requested = f"{normalize_exchange(exchange)}:{ticker}"
+    client_dir = __import__("os").environ.get("TRADINGVIEW_CLIENT_DIR") or "/opt/tradingview/node_modules/@mathieuc/tradingview"
+    data = fetch_with_exchange_fallback(client_dir, ticker, exchange, day_text, "30", fetcher=fetch_safely)
+    if not data or data.get("error_code"):
+        return None
+    metadata = data.get("metadata") or {}
+    record = {"ticker": ticker, "date": day_text, "requested_symbol": requested,
+        "resolved_symbol": metadata.get("full_name") or metadata.get("pro_name") or data.get("resolved_symbol"),
+        "source_run_id": source_id, "source_fingerprint": source_fp,
+        "timeframe": "30m", "session": "regular", "adjustment": "splits",
+        "exchange_lookup": data.get("exchange_lookup")}
+    manifest = {"schema": "rs_leader_30m_pivot_audit_v1", "provider": "TradingView",
+        "timeframe": "30m", "session": "regular", "adjustment": "splits"}
+    manifest["fingerprint"] = digest(manifest)
+    bundle = {"manifest": manifest, "record": record, "data": data}
+    try:
+        frozen_30m_bars(bundle, day, daily)
+    except (ValueError, KeyError, TypeError, OverflowError):
+        return None
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    staging = cache.with_name(f"{cache.name}.staging-{uuid.uuid4().hex}")
+    staging.mkdir(exist_ok=False)
+    filename = f"{ticker}_{day_text}.json"
+    (staging / filename).write_text(json.dumps(data, sort_keys=True, indent=2, default=str) + "\n")
+    record.update(classification="frozen", candle_file=filename, candle_fingerprint=digest(data))
+    document = {"schema": "rs_leader_30m_pivot_audit_v1", "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "read_only": True, "book_id": book_id, "from_date": day_text, "to_date": day_text,
+        "provider": "TradingView", "timeframe": "30m", "session": "regular", "adjustment": "splits",
+        "simulate_backdated_buys": simulate_backdated_buys,
+        "backdated_buy_basis": "hypothetical_backdated_simulation" if simulate_backdated_buys else "forward_safe",
+        "auto_freeze_overlay": True, "records": [record]}
+    document["fingerprint"] = digest(document)
+    (staging / "audit.json").write_text(json.dumps(document, sort_keys=True, indent=2, default=str) + "\n")
+    os.rename(staging, cache)
+    return load_frozen_30m_directory(cache, day, book_id=book_id,
+        simulate_backdated_buys=simulate_backdated_buys, daily_bars={ticker: daily}).get(ticker)
+
+
 def management_metadata(version: str = MANAGEMENT_VERSION) -> dict[str, Any]:
     return {"execution_management_version": version, "trim_fraction": "1/3",
             "trim_share_rounding": "floor", "trim_target_r": 3,
@@ -433,6 +511,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                         book_id: str, database_url: str, intraday_dir: str | Path,
                         simulate_backdated_buys: bool = False,
                         execution_version: str = EXECUTION_VERSION,
+                        auto_freeze_missing: bool = False, artifacts_dir: str | Path | None = None,
                         progress_callback=None) -> list[dict[str, Any]]:
     """Run a complete fresh-book replay; caller owns the transaction and rollback/commit."""
     import datetime as dt
@@ -492,14 +571,29 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             fingerprint=fingerprint, candidates=new_candidates, summary=summary, strategy_id=book_id)
         actions = {"filled": 0, "cancelled": 0, "expired": 0, "blocked_data": 0,
                    "ambiguous": 0, "trimmed": 0, "exited": 0}
-        try:
-            from src.webapp.services.martin_bar_retest_execution import bar_for
-            daily_bars = {ticker: bar_for(frames.get(ticker), day) for ticker in tickers}
-            frozen = load_frozen_30m_directory(intraday_dir, day, book_id=book_id,
-                simulate_backdated_buys=simulate_backdated_buys, daily_bars=daily_bars)
-            frozen_error = None
-        except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
-            frozen, frozen_error = {}, str(exc)
+        from src.webapp.services.martin_bar_retest_execution import bar_for
+        daily_bars = {ticker: bar_for(frames.get(ticker), day) for ticker in tickers}
+        if intraday_dir is None and auto_freeze_missing:
+            frozen, frozen_error = {}, None
+        else:
+            try:
+                frozen = load_frozen_30m_directory(intraday_dir, day, book_id=book_id,
+                    simulate_backdated_buys=simulate_backdated_buys, daily_bars=daily_bars)
+                frozen_error = None
+            except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                frozen, frozen_error = {}, str(exc)
+        if auto_freeze_missing and artifacts_dir is not None and frozen_error is None:
+            for order in active_orders:
+                ticker = str(order.get("ticker") or "").upper()
+                if ticker not in frozen or frozen[ticker].get("freeze_error"):
+                    try:
+                        overlay = auto_freeze_missing_pivot(artifacts_dir=artifacts_dir,
+                            book_id=book_id, day=day, order=order, daily=daily_bars.get(ticker),
+                            database_url=database_url, simulate_backdated_buys=simulate_backdated_buys)
+                    except Exception:
+                        overlay = None
+                    if overlay is not None:
+                        frozen[ticker] = overlay
         def evaluate_pending_order(order: dict[str, Any]) -> dict[str, Any]:
             ticker = str(order["ticker"]).upper()
             payload = order.get("payload_json") or {}

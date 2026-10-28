@@ -405,6 +405,7 @@ class RunService:
                     RunField("book_id", "Replay Book ID", "text"),
                     RunField("execution_version", "Execution Version", "select", options=tuple((f"v{i}", f"v{i}") for i in range(1, 6))),
                     RunField("intraday_dir", "Frozen Intraday Bundle Directory", "text"),
+                    RunField("auto_freeze_missing", "Auto Freeze Missing Intraday Data", "boolean"),
                     RunField("apply", "Apply", "boolean"),
                     RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean")),
             visible_in_runs=True, execution_modes=("remote",),
@@ -416,6 +417,7 @@ class RunService:
                     RunField("book_id", "Replay Book ID", "text"),
                     RunField("execution_version", "Execution Version", "select", options=(("v1", "v1"), ("v2", "v2"))),
                     RunField("intraday_dir", "Frozen 30m Bundle Directory", "text"),
+                    RunField("auto_freeze_missing", "Auto Freeze Missing Intraday Data", "boolean"),
                     RunField("apply", "Apply", "boolean"),
                     RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean")),
             visible_in_runs=True, execution_modes=("remote",),
@@ -3234,6 +3236,8 @@ class RunService:
                             "--book-id", normalized_options["book_id"], "--execution-version", normalized_options["execution_version"]])
             if normalized_options.get("intraday_dir"):
                 command.extend(["--intraday-dir", normalized_options["intraday_dir"]])
+            if normalized_options.get("auto_freeze_missing"):
+                command.append("--auto-freeze-missing")
             if normalized_options.get("apply"):
                 command.append("--apply")
             if normalized_options.get("simulate_backdated_buys"):
@@ -3524,9 +3528,12 @@ class RunService:
             normalized["execution_version"] = version
             normalized["apply"] = str(options.get("apply") or "").strip().lower() in {"1", "true", "yes", "on"}
             normalized["simulate_backdated_buys"] = str(options.get("simulate_backdated_buys") or "").strip().lower() in {"1", "true", "yes", "on"}
+            normalized["auto_freeze_missing"] = str(options.get("auto_freeze_missing") or "").strip().lower() in {"1", "true", "yes", "on"}
+            if action.action_id == "replay_martin_bar_retest_range" and version == "v1" and normalized["auto_freeze_missing"]:
+                raise ValueError("Auto-freeze-missing requires a Martin Bar Retest execution version above v1.")
             bundle = str(options.get("intraday_dir") or "").strip()
             needs_bundle = action.action_id == "replay_rs_leader_30m_pivot" or version != "v1"
-            if needs_bundle and not bundle:
+            if needs_bundle and not bundle and not normalized["auto_freeze_missing"]:
                 raise ValueError("A frozen intraday bundle directory is required for this execution version.")
             if bundle:
                 root = self.artifacts_dir.resolve()

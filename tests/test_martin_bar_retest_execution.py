@@ -211,6 +211,23 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
         fill = next(event for event in repo.events if event["event_type"] == "order_filled")
         self.assertEqual(fill["payload"]["intraday_execution"]["evidence_status"], "frozen_intraday_bundle_missing")
 
+    def test_auto_freeze_mode_blocks_daily_fallback_for_missing_bundle(self):
+        day = dt.date(2026, 10, 20)
+        frame = pd.DataFrame([{"Open": 9.8, "High": 10.2, "Low": 9.5, "Close": 10.0, "Volume": 1000}],
+                             index=pd.to_datetime([day.isoformat()]))
+        repo = LifecycleRepo()
+        repo.pending = [{"id": 9, "run_id": 8, "ticker": "ABC", "payload_json": {
+            "max_entry": 10, "limit_price": 10, "stop": 9, "shares": 10}}]
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {"ABC": frame})
+        service.book_id = "martin_range_bar_retest_v2_strict"
+        service.execution_version = "martin_bar_retest_execution_v4"
+        counts = service.run_session(day=day, run_id=10, candidates=[], source_on_time=False,
+            require_frozen_intraday=True)
+        self.assertEqual(counts["blocked_data"], 1)
+        self.assertEqual(counts["filled"], 0)
+        event = next(event for event in repo.events if event["event_type"] == "order_blocked_data")
+        self.assertEqual(event["candidate_status"], "blocked_data")
+
     def test_v2_recorded_provider_failure_uses_daily_fallback(self):
         day = dt.date(2026, 10, 20)
         frame = pd.DataFrame([{"Open": 9.8, "High": 10.2, "Low": 9.5, "Close": 10.0, "Volume": 1000}],

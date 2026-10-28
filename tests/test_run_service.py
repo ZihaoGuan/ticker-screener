@@ -79,6 +79,33 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("--apply", rs_command)
         self.assertNotIn("--start-date", rs_command)
 
+    def test_replay_actions_allow_auto_freeze_without_bundle(self) -> None:
+        cases = (
+            ("replay_martin_bar_retest_range", "martin_range_bar_retest_auto", "v3"),
+            ("replay_rs_leader_30m_pivot", "rs_leader_30m_pivot_replay_auto", "v2"),
+            ("replay_rs_leader_30m_pivot", "rs_leader_30m_pivot_replay_auto_v1", "v1"),
+        )
+        for action_id, book_id, version in cases:
+            with self.subTest(action_id=action_id):
+                options = {
+                    "start_date": "2026-01-01", "end_date": "2026-01-02",
+                    "book_id": book_id, "execution_version": version,
+                    "auto_freeze_missing": "true",
+                }
+                command = self.service.build_command(action_id, options)
+                self.assertIn("--auto-freeze-missing", command)
+                self.assertNotIn("--intraday-dir", command)
+
+                with self.assertRaisesRegex(ValueError, "required"):
+                    self.service.build_command(action_id, {**options, "auto_freeze_missing": False})
+
+        with self.assertRaisesRegex(ValueError, "above v1"):
+            self.service.build_command("replay_martin_bar_retest_range", {
+                "start_date": "2026-01-01", "end_date": "2026-01-02",
+                "book_id": "martin_range_bar_retest_v1_auto", "execution_version": "v1",
+                "auto_freeze_missing": True,
+            })
+
     def test_replay_launch_uses_existing_general_worker_queue(self) -> None:
         captured_create: dict[str, object] = {}
         captured_patch: dict[str, object] = {}
