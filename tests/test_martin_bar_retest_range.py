@@ -84,6 +84,44 @@ class PerformanceConnection:
 
 
 class MartinBarRetestRangeTests(unittest.TestCase):
+    def test_progress_is_flushed_structured_and_dry_run_is_provisional(self):
+        class FlushTrackingStream(io.StringIO):
+            flushes = 0
+            def flush(self):
+                self.flushes += 1
+                super().flush()
+        stream = FlushTrackingStream()
+        with patch("scripts.replay_martin_bar_retest_range.time.monotonic", side_effect=[10.0, 12.0, 14.0]):
+            progress = replay.ReplayProgress(total=2, apply=False, stream=stream)
+            day = dt.date(2026, 10, 19)
+            progress.emit(event="session_start", day=day)
+            progress.session_done(day, {"candidate_count": 3, "filled": 1})
+        lines = [json.loads(line) for line in stream.getvalue().splitlines()]
+        self.assertEqual([line["event"] for line in lines], ["session_start", "session_complete"])
+        self.assertEqual(lines[0]["date"], day.isoformat())
+        self.assertEqual(lines[1]["session_index"], 1)
+        self.assertEqual(lines[1]["eta_seconds"], 4.0)
+        self.assertEqual(lines[1]["counts"], {"candidate_count": 3, "filled": 1})
+        self.assertTrue(all(line["status"] == "provisional" and not line["committed"] for line in lines))
+        self.assertEqual(stream.flushes, 2)
+
+    def test_progress_stream_failure_disables_logging_without_raising(self):
+        class BrokenStream:
+            writes = 0
+            def write(self, _value):
+                self.writes += 1
+                raise BrokenPipeError("closed stderr")
+            def flush(self):
+                raise AssertionError("flush must not run after failed write")
+        stream = BrokenStream()
+        progress = replay.ReplayProgress(total=1, apply=True, stream=stream)
+        day = dt.date(2026, 10, 19)
+        progress.emit(event="session_start", day=day)
+        progress.session_done(day, {"filled": 1})
+        progress.finish()
+        self.assertFalse(progress.enabled)
+        self.assertEqual(stream.writes, 1)
+
     def test_run_range_uses_replay_repository_with_outer_transaction(self):
         from unittest.mock import patch
 

@@ -432,7 +432,8 @@ def _sort_pivot_evaluations(evaluated: list[tuple[dict[str, Any], dict[str, Any]
 def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[Any, dict[str, Any]],
                         book_id: str, database_url: str, intraday_dir: str | Path,
                         simulate_backdated_buys: bool = False,
-                        execution_version: str = EXECUTION_VERSION) -> list[dict[str, Any]]:
+                        execution_version: str = EXECUTION_VERSION,
+                        progress_callback=None) -> list[dict[str, Any]]:
     """Run a complete fresh-book replay; caller owns the transaction and rollback/commit."""
     import datetime as dt
     import hashlib
@@ -454,6 +455,8 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
     exclusion = leveraged_or_inverse_provenance()
     results = []
     for day in sessions:
+        if progress_callback:
+            progress_callback("session_start", day, {})
         require_completed_session(day)
         source = sources.get(day)
         if source is None:
@@ -624,4 +627,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             "source_hit_count": len(source.get("hits") or []), "candidate_count": len(new_candidates),
             "candidate_status_counts": {state: sum(x["status"] == state for x in new_candidates)
                 for state in sorted({x["status"] for x in new_candidates})}, "execution_actions": actions})
+        if progress_callback:
+            progress_callback("session_complete", day, {"candidate_count": len(new_candidates),
+                "source_hit_count": len(source.get("hits") or []), **actions})
     return results

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.replay_martin_bar_retest_range import check_empty_book, load_range_sources, xnys_sessions
+from scripts.replay_martin_bar_retest_range import ReplayProgress, check_empty_book, load_range_sources, xnys_sessions
 from src.webapp.services.rs_leader_30m_pivot import EXECUTION_VERSION, EXECUTION_VERSION_V2, POLICY_ID, execute_pivot_range
 
 
@@ -49,6 +49,7 @@ def main(argv=None):
     if not config.database_url:
         parser.error("TICKER_SCREENER_DATABASE_URL is required")
     sessions = xnys_sessions(args.from_date, args.to_date)
+    progress = ReplayProgress(total=len(sessions), apply=args.apply)
     try:
         audit = json.loads((Path(args.intraday_dir) / "audit.json").read_text())
     except (OSError, json.JSONDecodeError) as exc:
@@ -84,11 +85,14 @@ def main(argv=None):
                 check_empty_book(connection, args.book_id)
                 results = execute_pivot_range(connection, sessions=sessions, sources=sources,
                     book_id=args.book_id, database_url=config.database_url, intraday_dir=args.intraday_dir,
-                    simulate_backdated_buys=args.simulate_backdated_buys, execution_version=execution_version)
+                    simulate_backdated_buys=args.simulate_backdated_buys, execution_version=execution_version,
+                    progress_callback=lambda event, day, counts: (progress.emit(event=event, day=day)
+                        if event == "session_start" else progress.session_done(day, counts)))
                 if args.apply:
                     connection.commit()
                 else:
                     connection.rollback()
+                progress.finish()
             except Exception:
                 connection.rollback()
                 raise

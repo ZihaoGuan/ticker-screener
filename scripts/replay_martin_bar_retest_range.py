@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,6 +19,49 @@ if str(ROOT) not in sys.path:
 
 POLICY_ID = "martin_bar_retest_v1"
 SOURCE_ID = "martin_bar_watchlist_v1"
+
+
+class ReplayProgress:
+    """Emit machine-readable progress to stderr without changing replay output."""
+    def __init__(self, *, total: int, apply: bool, stream=None):
+        self.total = total
+        self.apply = apply
+        self.stream = stream or sys.stderr
+        self.started = time.monotonic()
+        self.completed = 0
+        self.enabled = True
+
+    def _write(self, record: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        try:
+            self.stream.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+            self.stream.flush()
+        except OSError:
+            # Telemetry must never affect replay transaction outcome.
+            self.enabled = False
+
+    def emit(self, *, event: str, day: dt.date | None = None, counts: dict[str, Any] | None = None):
+        elapsed = max(0.0, time.monotonic() - self.started)
+        average = elapsed / self.completed if self.completed else None
+        remaining = max(0, self.total - self.completed)
+        record = {"event": event, "session_index": self.completed + (1 if event == "session_start" else 0),
+            "session_total": self.total, "date": day.isoformat() if day else None,
+            "elapsed_seconds": round(elapsed, 1),
+            "eta_seconds": round(average * remaining, 1) if average is not None else None,
+            "status": "provisional", "committed": False, "counts": counts or {}}
+        self._write(record)
+
+    def session_done(self, day: dt.date, counts: dict[str, Any]):
+        self.completed += 1
+        self.emit(event="session_complete", day=day, counts=counts)
+
+    def finish(self):
+        self._write({"event": "replay_committed" if self.apply else "replay_rolled_back",
+            "session_index": self.completed, "session_total": self.total,
+            "elapsed_seconds": round(max(0.0, time.monotonic() - self.started), 1),
+            "status": "committed" if self.apply else "rolled_back", "committed": self.apply,
+            "counts": {}})
 
 
 def xnys_sessions(start: dt.date, end: dt.date) -> list[dt.date]:
@@ -280,7 +324,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
               book_id: str, database_url: str, simulate_backdated_buys: bool = False,
               exclusion_provenance: dict[str, Any] | None = None,
               execution_version: str = "martin_bar_retest_execution_v1",
-              intraday_dir: str | Path | None = None) -> list[dict[str, Any]]:
+              intraday_dir: str | Path | None = None,
+              progress: ReplayProgress | None = None) -> list[dict[str, Any]]:
     from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
     from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService, execution_account_limits
     from src.webapp.services.martin_rs_replay import ReplayRepository
@@ -295,6 +340,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
     results = []
     final_mark = None
     for day in sessions:
+        if progress:
+            progress.emit(event="session_start", day=day)
         source = sources.get(day)
         if source is None:
             from src.webapp.services.martin_rotation import require_completed_session
@@ -322,6 +369,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                 "retrospective_source_scan": None, "source_publication_timing": "no_scan_execution_only",
                 "execution_actions": actions, "category_cohorts": {}, "candidate_status_counts": {},
                 "reason_counts": {}, "candidate_count": 0, "status": "execution_only"})
+            if progress:
+                progress.session_done(day, {"candidate_count": 0, **actions})
             continue
         result = service.run_session(as_of_date=day, source_record=source, dry_run=False,
                                      policy_id=POLICY_ID, book_id=book_id)
@@ -369,6 +418,9 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                         "category_cohorts": cohorts,
                         "candidate_count": len(result.get("candidates", [])),
                         "status": "complete"})
+        if progress:
+            progress.session_done(day, {"candidate_count": len(result.get("candidates", [])),
+                "source_hit_count": result.get("source_hit_count", 0), **actions})
     if results:
         results[-1]["book_performance"] = book_performance(connection, book_id, final_mark)
     return results
@@ -543,7 +595,8 @@ def continue_main(argv: list[str] | None = None) -> int:
 def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date, dict[str, Any]],
                   book_id: str, database_url: str, apply: bool, simulate_backdated_buys: bool = False,
                   execution_version: str = "martin_bar_retest_execution_v1",
-                  intraday_dir: str | Path | None = None) -> list[dict[str, Any]]:
+                  intraday_dir: str | Path | None = None,
+                  progress: ReplayProgress | None = None) -> list[dict[str, Any]]:
     from src.ticker_filters import leveraged_or_inverse_provenance, set_replay_fund_exclusions, reset_replay_fund_exclusions
     exclusion_provenance = leveraged_or_inverse_provenance()
     for source in sources.values():
@@ -560,11 +613,13 @@ def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.
         results = run_range(connection, sessions=sessions, sources=sources, book_id=book_id,
                             database_url=database_url, simulate_backdated_buys=simulate_backdated_buys,
                             exclusion_provenance=exclusion_provenance, execution_version=execution_version,
-                            intraday_dir=intraday_dir)
+                            intraday_dir=intraday_dir, progress=progress)
         if apply:
             connection.commit()
         else:
             connection.rollback()
+        if progress:
+            progress.finish()
         return results
     except Exception:
         connection.rollback()
@@ -603,6 +658,7 @@ def main(argv: list[str] | None = None) -> int:
     sessions = xnys_sessions(args.from_date, args.to_date)
     history = ScreenerHistoryService(database_url=config.database_url, artifacts_dir=config.artifacts_dir,
         repository=HistoryRepository(database_url=config.database_url, artifacts_dir=config.artifacts_dir, read_only=True))
+    progress = ReplayProgress(total=len(sessions), apply=args.apply)
     try:
         sources = load_range_sources(history, sessions)
     except Exception as exc:
@@ -619,7 +675,7 @@ def main(argv: list[str] | None = None) -> int:
                                 database_url=config.database_url, apply=args.apply,
                                 simulate_backdated_buys=args.simulate_backdated_buys,
                                 execution_version=f"martin_bar_retest_execution_{args.execution_version}",
-                                intraday_dir=args.intraday_dir)
+                                intraday_dir=args.intraday_dir, progress=progress)
     print(json.dumps({"ready": True, "policy_id": POLICY_ID, "execution_policy_id": f"martin_bar_retest_execution_{args.execution_version}", "book_id": args.book_id,
         "from_date": args.from_date.isoformat(), "to_date": args.to_date.isoformat(),
         "mode": "apply" if args.apply else "dry_run_rolled_back", "saved": bool(args.apply),
