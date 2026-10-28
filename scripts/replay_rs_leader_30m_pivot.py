@@ -16,6 +16,11 @@ from scripts.replay_martin_bar_retest_range import check_empty_book, load_range_
 from src.webapp.services.rs_leader_30m_pivot import EXECUTION_VERSION, POLICY_ID, execute_pivot_range
 
 
+def validate_bundle_book_id(audit: dict, book_id: str) -> None:
+    if audit.get("book_id") != book_id:
+        raise ValueError(f"frozen_30m_book_id_mismatch: bundle={audit.get('book_id')!r} replay={book_id!r}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--from-date", required=True, type=dt.date.fromisoformat)
@@ -46,6 +51,10 @@ def main(argv=None):
         audit = json.loads((Path(args.intraday_dir) / "audit.json").read_text())
     except (OSError, json.JSONDecodeError) as exc:
         parser.error(f"--intraday-dir requires a valid audit.json manifest: {exc}")
+    try:
+        validate_bundle_book_id(audit, args.book_id)
+    except ValueError as exc:
+        parser.error(str(exc))
     if bool(audit.get("simulate_backdated_buys", False)) != args.simulate_backdated_buys:
         parser.error("freeze and replay --simulate-backdated-buys modes must match")
     history = ScreenerHistoryService(database_url=config.database_url, artifacts_dir=config.artifacts_dir,

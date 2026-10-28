@@ -234,6 +234,31 @@ class MartinBarRetestRangeTests(unittest.TestCase):
         self.assertEqual(performance["closed_positions"], 1)
         self.assertEqual(performance["open_tickers"], ["ABC"])
 
+    def test_book_performance_includes_final_total_pnl_and_account_return(self):
+        connection = PerformanceConnection([])
+        mark = {"realized_pnl": 250, "unrealized_pnl": 750,
+                "mark_coverage": {"open_positions": 1, "marked_positions": 1,
+                                  "missing_tickers": [], "status": "complete"}}
+
+        performance = replay.book_performance(connection, "martin_range_bar_retest_test", mark)
+
+        self.assertEqual(performance["final_unrealized_pnl"], 750)
+        self.assertEqual(performance["total_pnl"], 1000)
+        self.assertEqual(performance["account_return_pct"], 1.0)
+
+    def test_book_performance_with_missing_final_mark_does_not_fabricate_total_or_return(self):
+        connection = PerformanceConnection([])
+        coverage = {"open_positions": 2, "marked_positions": 1,
+                    "missing_tickers": ["MISS"], "status": "partial"}
+        mark = {"realized_pnl": 250, "unrealized_pnl": None, "mark_coverage": coverage}
+
+        performance = replay.book_performance(connection, "martin_range_bar_retest_test", mark)
+
+        self.assertIsNone(performance["final_unrealized_pnl"])
+        self.assertIsNone(performance["total_pnl"])
+        self.assertIsNone(performance["account_return_pct"])
+        self.assertEqual(performance["mark_coverage"], coverage)
+
     def test_service_repository_save_serializes_datetime_fields_as_iso8601(self):
         day = dt.date(2026, 10, 19)
         published_at = dt.datetime(2026, 10, 20, 13, 30, tzinfo=dt.timezone.utc)

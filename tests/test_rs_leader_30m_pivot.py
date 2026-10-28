@@ -16,6 +16,36 @@ def bar(opening, high, low, close):
 
 
 class RSPivotTests(unittest.TestCase):
+    def test_replay_rejects_frozen_bundle_for_different_book_id(self):
+        from scripts.replay_rs_leader_30m_pivot import validate_bundle_book_id
+        with self.assertRaisesRegex(ValueError, "frozen_30m_book_id_mismatch"):
+            validate_bundle_book_id({"book_id": "old"}, "new")
+
+    def test_bundle_rebind_copies_verified_candle_bytes_and_keeps_source_unchanged(self):
+        from scripts.rebind_rs_leader_30m_pivot_bundle import rebind_bundle
+        from scripts.audit_martin_intraday_execution import digest
+        with tempfile.TemporaryDirectory() as tmp:
+            source, destination = Path(tmp) / "source", Path(tmp) / "copy"
+            source.mkdir()
+            candle = b'{"candles": []}\n'
+            (source / "abc.json").write_bytes(candle)
+            manifest = {"schema": "rs_leader_30m_pivot_audit_v1", "book_id": "old",
+                        "records": [{"ticker": "ABC", "candle_file": "abc.json",
+                                     "candle_fingerprint": digest({"candles": []})}]}
+            manifest["fingerprint"] = digest(manifest)
+            original = json.dumps(manifest, sort_keys=True)
+            (source / "audit.json").write_text(json.dumps(manifest))
+            rebind_bundle(source, destination, "rs_leader_30m_pivot_replay_new")
+            copied = json.loads((destination / "audit.json").read_text())
+            supplied = copied.pop("fingerprint")
+            self.assertEqual(copied["book_id"], "rs_leader_30m_pivot_replay_new")
+            self.assertEqual(supplied, digest(copied))
+            self.assertEqual((destination / "abc.json").read_bytes(), candle)
+            self.assertEqual(json.dumps(json.loads((source / "audit.json").read_text()), sort_keys=True), original)
+            (source / "abc.json").write_text('{"candles": [1]}')
+            with self.assertRaisesRegex(ValueError, "bundle_fingerprint_mismatch"):
+                rebind_bundle(source, Path(tmp) / "badcopy", "rs_leader_30m_pivot_replay_other")
+
     def _frozen_bundle(self, actual="BATS:ABC", *, high=10.9, low=9.1):
         from scripts.audit_martin_intraday_execution import digest
         day = "2026-01-05"

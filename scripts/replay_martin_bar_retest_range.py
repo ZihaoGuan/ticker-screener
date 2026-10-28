@@ -250,7 +250,7 @@ def save_execution_only_run(repository: Any, *, book_id: str, day: dt.date,
                if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} else {})}, strategy_id=book_id)
 
 
-def book_performance(connection: Any, book_id: str) -> dict[str, Any]:
+def book_performance(connection: Any, book_id: str, final_mark: dict[str, Any] | None = None) -> dict[str, Any]:
     with connection.cursor() as cursor:
         cursor.execute("SELECT status,ticker,payload_json FROM martin_forward_positions WHERE strategy_id=%s", (book_id,))
         rows = cursor.fetchall()
@@ -259,11 +259,21 @@ def book_performance(connection: Any, book_id: str) -> dict[str, Any]:
     for position in positions:
         category = str(position.get("event_category") or position.get("category") or "unknown")
         fills_by_category[category] = fills_by_category.get(category, 0) + 1
-    return {"open_positions": sum(row["status"] == "open" for row in positions),
+    performance = {"open_positions": sum(row["status"] == "open" for row in positions),
             "open_tickers": sorted(str(row.get("ticker") or "").upper() for row in positions if row["status"] == "open"),
             "closed_positions": sum(row["status"] == "closed" for row in positions),
             "realized_pnl": sum(float(row.get("realized_pnl") or 0) for row in positions),
             "fills_by_discovery_category": fills_by_category}
+    if final_mark is not None:
+        coverage = final_mark.get("mark_coverage") or {"status": "unavailable"}
+        complete = coverage.get("status") == "complete"
+        realized = float(final_mark.get("realized_pnl") or 0)
+        unrealized = final_mark.get("unrealized_pnl") if complete else None
+        performance.update({"final_unrealized_pnl": unrealized,
+            "total_pnl": realized + float(unrealized) if unrealized is not None else None,
+            "account_return_pct": (realized + float(unrealized)) / 100000.0 * 100 if unrealized is not None else None,
+            "mark_coverage": coverage})
+    return performance
 
 
 def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date, dict[str, Any]],
@@ -283,6 +293,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
     if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4"} and intraday_dir is None:
         raise ValueError("Version 2/3/4 replay requires an --intraday-dir; individual missing bundles use daily fallback.")
     results = []
+    final_mark = None
     for day in sessions:
         source = sources.get(day)
         if source is None:
@@ -295,6 +306,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             if actions["missing_bars"]:
                 raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
             marks = continuation_mark(repository, book_id, day, database_url)
+            final_mark = marks
             repository.set_run_metadata(run_id, {"execution_book_version": execution_version,
                 **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
@@ -324,6 +336,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                    for category in sorted({str(item.get("event_category") or "unknown") for item in result.get("candidates", [])})}
         if result.get("run_id") is not None:
             marks = continuation_mark(repository, book_id, day, database_url)
+            final_mark = marks
             repository.set_run_metadata(result["run_id"], {"execution_book_version": execution_version,
                 **({"execution_management_version": "martin_bar_retest_management_v2", "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
@@ -357,7 +370,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                         "candidate_count": len(result.get("candidates", [])),
                         "status": "complete"})
     if results:
-        results[-1]["book_performance"] = book_performance(connection, book_id)
+        results[-1]["book_performance"] = book_performance(connection, book_id, final_mark)
     return results
 
 
