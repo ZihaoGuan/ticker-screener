@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import type { MartinForwardBook, MartinForwardResponse, MartinForwardRow } from "../lib/types";
+import { groupMartinActivity, martinActivityActions } from "../lib/martinActivity";
 
-type View = "today" | "positions" | "performance";
-const views: View[] = ["today", "positions", "performance"];
+type View = "overview" | "today" | "positions" | "performance";
+const views: View[] = ["overview", "today", "positions", "performance"];
 const bookLabels = { account: "Account book", sector_opportunity: "Sector opportunity", daily_top5: "Daily Top 5", rs_expanded: "RS Expanded · experimental", rs_expanded_rotation: "RS Expanded · 8 + Rotation", gap_retest_replay_v4: "Daily Gap Retest · experimental" } as const;
 const isExecutionVersion = (version?: string) => ["martin_bar_retest_execution_v1", "martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"].includes(version ?? "");
 const isPivotVersion = (version?: string) => ["rs_leader_30m_pivot_execution_v1", "rs_leader_30m_pivot_execution_v2"].includes(version ?? "");
@@ -12,7 +13,7 @@ const isKnownExecutionBook = (book?: MartinForwardBook) => isExecutionVersion(bo
 
 function MartinForwardPage({ executionOnly = false }: { executionOnly?: boolean }) {
   const [params, setParams] = useSearchParams();
-  const view = views.includes(params.get("view") as View) ? params.get("view") as View : "today";
+  const view = views.includes(params.get("view") as View) ? params.get("view") as View : "overview";
   const requestedBook = params.get("book");
   const bookKey = executionOnly ? (requestedBook && isExecutionBookKey(requestedBook) ? requestedBook : "bar_retest_execution") : requestedBook === "bar_retest_execution" ? requestedBook : requestedBook === "sector_opportunity" || requestedBook === "daily_top5" || requestedBook === "rs_expanded" || requestedBook === "rs_expanded_rotation" || requestedBook === "gap_retest_replay_v4" ? requestedBook
     : requestedBook === "gap_retest" || requestedBook === "gap_retest_replay" || requestedBook === "gap_retest_replay_v2" || requestedBook === "gap_retest_replay_v3" ? "gap_retest_replay_v4" : "account";
@@ -95,9 +96,10 @@ function MartinForwardPage({ executionOnly = false }: { executionOnly?: boolean 
               const next = views[nextIndex];
               setQuery("view", next);
               document.getElementById(`martin-tab-${next}`)?.focus();
-            }}>{item === "today" ? "Today" : item === "positions" ? "Positions" : "Performance"}</button>)}
+            }}>{item === "overview" ? "Overview" : item === "today" ? "Today" : item === "positions" ? "Positions" : "Performance"}</button>)}
         </nav>
         {summary.partial ? <section className="martin-inline-state" role="status">{Number(executionActions.intraday_fallbacks ?? 0) > 0 ? <><p>Daily conservative settlement was used for {format(executionActions.intraday_fallbacks)} order(s) because frozen intraday evidence could not be used. {formatIntradayFallbackReasons(object(executionActions.intraday_fallback_reasons ?? summary.intraday_fallback_reasons))}</p><IntradayFallbackDetails rows={Array.isArray(executionActions.intraday_fallback_details) ? executionActions.intraday_fallback_details as Record<string, unknown>[] : []} /></> : <p>Partial session: market bars were unavailable for {format(executionActions.missing_bars)} pending orders or open positions.</p>}</section> : null}
+        {view === "overview" ? <Overview book={book!} executionBook={executionBook} pivotBook={pivotBook} /> : null}
         {view === "today" ? <Today key={activeBookKey} book={book!} bookLabel={executionLabel(activeBookKey)} candidates={candidateRows} outstandingOrders={(book?.outstanding_orders ?? []).map(unpack)} attention={attention} executionBook={executionBook} /> : null}
         {view === "positions" ? <Positions positions={positionRows} filter={filter} setFilter={setFilter} expanded={expanded} setExpanded={setExpanded} /> : null}
         {view === "performance" ? <Performance book={book!} books={data.books} /> : null}
@@ -115,6 +117,43 @@ function MartinForwardPage({ executionOnly = false }: { executionOnly?: boolean 
 
 export default function MartinForwardTestPage() { return <MartinForwardPage />; }
 export function BarRetestExecutionPage() { return <MartinForwardPage executionOnly />; }
+
+function Overview({ book, executionBook, pivotBook }: { book: MartinForwardBook; executionBook: boolean; pivotBook: boolean }) {
+  const metrics = book.metrics;
+  const primary = [["Cumulative R", metrics.cumulative_r == null ? null : `${format(metrics.cumulative_r)} R`], ["Realized P&L", metrics.realized_pnl == null ? null : formatCurrency(metrics.realized_pnl)], ["Closed trades", metrics.closed_count], ["Win rate", metrics.win_rate_pct == null ? null : `${format(metrics.win_rate_pct)}%`]];
+  const groupedEvents = groupMartinActivity(book.positions, book.events);
+  const activity = book.positions.map((position, index) => ({ position, row: unpack(position), events: groupedEvents[index], key: String(position.id ?? `${position.ticker ?? "unknown"}-${index}`), ticker: String(position.ticker ?? "—").toUpperCase(), status: position.status }));
+  const executionUnavailable = executionBook && book.history_source !== "stored_session_marks";
+  const hasBenchmark = book.benchmark_comparison?.status === "available";
+  const markedHistory = book.history.filter((point) => point.account_equity != null);
+  const currentEquity = markedHistory[markedHistory.length - 1]?.account_equity;
+  const pnl = (value: unknown) => value == null ? "Unavailable" : formatCurrency(value);
+  return <div className="martin-view martin-overview">
+    {Number(metrics.closed_count ?? 0) < 20 ? <p className="martin-inline-state" role="note">Early sample: fewer than 20 closed trades. Performance metrics are preliminary.</p> : null}
+    {executionUnavailable ? <p className="martin-inline-state" role="status">{book.history_source === "stored_session_marks_partial" ? "Daily marks exist, but at least one open position lacked a same-date Close; portfolio equity and cumulative R are unavailable for that session." : "Daily portfolio marks are unavailable for this legacy book. Equity, unrealized P&L, drawdown, and benchmark coverage are not reconstructed from current positions."}</p> : null}
+    <section className="martin-metrics martin-metrics-primary" aria-label="Saved performance metrics">{primary.map(([label, value]) => <div className="martin-metric" key={String(label)}><span>{label}</span><strong>{format(value)}</strong></div>)}</section>
+    {executionBook && metrics.mark_coverage ? <p className="martin-inline-state" role="status">Daily mark coverage: {metrics.mark_coverage.marked_positions}/{metrics.mark_coverage.open_positions} open positions · {metrics.mark_coverage.status}{metrics.mark_coverage.missing_tickers?.length ? ` · missing ${metrics.mark_coverage.missing_tickers.join(", ")}` : ""}</p> : null}
+    <div className="martin-overview-grid">{hasBenchmark ? <BenchmarkComparison compact comparison={book.benchmark_comparison} label={pivotBook ? "RS Leader 30m Pivot" : executionBook ? "Bar Retest execution" : "Account"} /> : <section className="martin-panel"><h2>Saved account history</h2>{executionBook ? <p className="martin-empty">{book.benchmark_comparison?.reason || "Stored account and benchmark history is unavailable."}</p> : <HistoryChart points={book.history} field="account_equity" />}{currentEquity == null ? null : <p className="martin-panel-copy">Latest saved account equity: {formatCurrency(currentEquity)}.</p>}</section>}
+    <section className="martin-panel martin-activity"><h2>Trade activity</h2>
+      {!activity.length ? <p className="martin-empty">No saved positions or executions yet.</p> : <div className="martin-activity-list">{activity.map(({ key, ticker, row, status, events }) => {
+        const state = status === "open" ? "Open" : status === "closed" ? "Closed" : "Status unavailable";
+        const realized = row.realized_pnl;
+        const unrealized = row.unrealized_pnl ?? row.marked_pnl;
+        return <article className="martin-activity-position" key={key}>
+          <div className="martin-activity-heading"><strong>{ticker}</strong><span>{state}</span><span>{row.remaining_shares == null ? "Remaining shares unavailable" : `${format(row.remaining_shares)} shares remaining`}</span>
+            <span className={typeof realized === "number" ? realized >= 0 ? "martin-result-positive" : "martin-result-negative" : ""}>Realized {pnl(realized)}</span>
+            {status === "open" ? <span className={typeof unrealized === "number" ? unrealized >= 0 ? "martin-result-positive" : "martin-result-negative" : ""}>Unrealized {pnl(unrealized)}</span> : null}</div>
+          {events.length ? <ol className="martin-activity-events">{events.map((event, index) => {
+            const action = martinActivityActions[String(event.event_type)];
+            const payload = object(event.payload_json);
+            const amount = payload.price == null ? "Price unavailable" : `at ${formatPrice(payload.price)}`;
+            return <li key={`${event.event_date}-${event.event_type}-${index}`}><span className={`martin-action martin-action-${action.direction}`}>{action.label}</span><time dateTime={String(event.event_date ?? "")}>{format(event.event_date)}</time><span>{amount}</span>{payload.shares == null ? null : <span>{format(payload.shares)} shares</span>}</li>;
+          })}</ol> : <p className="martin-empty">No recognized execution events are linked to this position.</p>}
+        </article>;
+      })}</div>}
+    </section></div>
+  </div>;
+}
 
 function Today({ book, bookLabel, candidates, outstandingOrders, attention, executionBook = false }: { book: MartinForwardBook; bookLabel: string; candidates: MartinForwardRow[]; outstandingOrders: MartinForwardRow[]; attention: MartinForwardRow[]; executionBook?: boolean }) {
   type LifecycleGroup = "selected" | "watch" | "pending" | "waiting" | "blocked" | "open" | "closed" | "all";
@@ -235,7 +274,7 @@ function RotationOverview({ book }: { book: MartinForwardBook }) {
   </section>;
 }
 
-function BenchmarkComparison({ comparison, label = "Account" }: { comparison: MartinForwardBook["benchmark_comparison"]; label?: string }) {
+function BenchmarkComparison({ comparison, label = "Account", compact = false }: { comparison: MartinForwardBook["benchmark_comparison"]; label?: string; compact?: boolean }) {
   if (!comparison || comparison.status !== "available" || !comparison.series) {
     return <section className="martin-panel"><h2>{label} vs SPY and QQQ</h2><p className="martin-empty">{comparison?.reason || "Stored account and benchmark history is unavailable."}</p></section>;
   }
@@ -254,6 +293,16 @@ function BenchmarkComparison({ comparison, label = "Account" }: { comparison: Ma
   const accountReturn = atDate("Account")?.return_pct;
   const delta = (name: "SPY" | "QQQ") => accountReturn == null || atDate(name)?.return_pct == null ? "—" : `${accountReturn - atDate(name)!.return_pct! >= 0 ? "+" : ""}${format(accountReturn - atDate(name)!.return_pct!)} pp`;
   const rangeEnd = dates[dates.length - 1];
+  if (compact) return <section className="martin-panel martin-overview-chart">
+    <h2>{label} vs SPY and QQQ</h2>
+    <p className="martin-panel-copy">Persisted simulated NAV and ETF Close returns, rebased to 100 on {comparison.baseline_date}; ETF distributions are excluded.</p>
+    {!values.length || !dates.length ? <p className="martin-empty">No complete saved benchmark marks are available.</p> : <div className="martin-chart-block"><div className="martin-chart martin-comparison-chart" role="img" aria-label={`${label} simulated NAV and SPY/QQQ Close returns rebased to 100 from ${comparison.baseline_date} to ${rangeEnd}; missing sessions are gaps${comparison.provisional_dates?.length ? `; provisional account marks: ${comparison.provisional_dates.join(", ")}` : ""}`}>
+      <div className="martin-chart-scale"><span>{format(high)}</span><span>{format(low)}</span></div>
+      <svg viewBox="0 0 100 40" preserveAspectRatio="none">{names.map((name, index) => <path key={name} className={["account-series", "sector-series", "daily-top5-series"][index]} d={pathFor(name)} />)}{comparison.provisional_dates?.map((day) => { const index = dates.indexOf(day); const value = comparison.series!.Account.find((item) => item.date === day)?.value; return value == null || index < 0 ? null : <circle key={day} className="provisional-account-point" cx={(index / Math.max(dates.length - 1, 1)) * 100} cy={35 - ((value - low) / span) * 30} r="1.2" />; })}</svg>
+      <div><span>{comparison.baseline_date}</span>{names.map((name, index) => <span key={name} className={["account-legend", "sector-legend", "daily-top5-legend"][index]}>{name}</span>)}<span>{rangeEnd}</span></div>
+    </div></div>}
+    <p className="martin-panel-copy">{comparison.included_sessions} of {comparison.expected_sessions} sampled sessions have valid values. Gaps can hide deeper drawdowns.{comparison.provisional_dates?.length ? ` Provisional daily-fallback account marks are included on ${comparison.provisional_dates.join(", ")}; this sample is preliminary.` : ""}</p>
+  </section>;
   return <section className="martin-panel">
     <h2>{label} vs SPY and QQQ</h2>
     <p className="martin-panel-copy">Rebased to 100 on {comparison.baseline_date}. {label} return uses persisted simulated NAV (cash plus realized and open P&amp;L); SPY and QQQ use stored Close price returns, excluding distributions. Max drawdown starts at this common baseline.</p>
