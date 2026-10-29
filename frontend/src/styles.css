@@ -7376,6 +7376,9 @@ dialog.modal-backdrop:not([open]) {
 .martin-result-negative { color: #f28b82 !important; }
 .martin-activity-events time, .martin-activity-events li > span:not(.martin-action) { overflow-wrap: anywhere; }
 .martin-position-compact { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; padding: .85rem 0; }
+.martin-position-sort { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0; }
+.martin-position-sort button { min-height: 36px; padding: .35rem .55rem; border: 1px solid var(--border); border-radius: .4rem; background: transparent; color: inherit; cursor: pointer; }
+.martin-position-sort button[aria-pressed="true"] { border-color: var(--accent, #22c55e); }
 .martin-position-compact > :first-child { min-width: 4rem; }
 .martin-position-compact > span { color: var(--muted); font-size: .88rem; }
 .martin-position-compact button, .martin-table-wrap button, .martin-panel-heading button, .martin-audit button { min-height: 44px; padding: .45rem .7rem; border: 1px solid var(--border); border-radius: .4rem; background: transparent; color: inherit; cursor: pointer; }

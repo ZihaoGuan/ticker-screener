@@ -202,11 +202,51 @@ function FragmentRow({ row, expanded, onToggle, gapBook = false, executionBook =
 
 function TodayPositions({ rows, group }: { rows: MartinForwardRow[]; group: "open" | "closed" }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  return rows.length ? <div className="martin-position-list">{rows.map((raw, index) => { const row = unpack(raw), key = String(raw.id ?? raw.ticker ?? index); return <article className="martin-position" key={key}><div className="martin-position-compact"><strong>{String(raw.ticker ?? "—")}</strong><span>{statusLabel(String(raw.status ?? "Unknown"))}</span><span>Entry {formatPrice(row.entry_price)}</span><span>Remaining {format(row.remaining_shares)} shares</span><span>Stop {formatPrice(row.stop)}</span><span>Realized {format(row.realized_r)} R · {formatCurrency(row.realized_pnl)}</span><span>Scheduled exit {row.exit_next_open ? "Next open" : "—"}</span><button type="button" aria-expanded={expanded === key} onClick={() => setExpanded(expanded === key ? null : key)}>{expanded === key ? "Hide details" : "Details"}</button></div>{expanded === key ? <dl className="martin-details">{["selection_date", "order_date", "entry_policy_version", "opened_on", "initial_shares", "holding_sessions", "exit_price", "exit_type", "exit_next_open"].map((field) => <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{format(row[field])}</dd></div>)}</dl> : null}</article>; })}</div> : <p className="martin-empty">{group === "open" ? "No simulated entries have filled yet. Pending orders are evaluated against the next completed session." : "No simulated positions have closed yet."}</p>;
+  const [sort, setSort] = useState<PositionSort | null>(null);
+  const sortedRows = sortPositions(rows, sort);
+  return rows.length ? <><PositionSortControls sort={sort} onSort={setSort} /><div className="martin-position-list">{sortedRows.map((raw, index) => { const row = unpack(raw), key = String(raw.id ?? raw.ticker ?? index); return <article className="martin-position" key={key}><div className="martin-position-compact"><strong>{String(raw.ticker ?? "—")}</strong><span>{statusLabel(String(raw.status ?? "Unknown"))}</span><span>Opened {format(row.opened_on ?? row.selection_date)}</span>{row.closed_on != null ? <span>Closed {format(row.closed_on)}</span> : null}<span>Entry {formatPrice(row.entry_price)}</span><span>Remaining {format(row.remaining_shares)} shares</span><span>Stop {formatPrice(row.stop)}</span><span>Realized {format(row.realized_r)} R · {formatCurrency(row.realized_pnl)}</span>{row.unrealized_pnl != null ? <span>Unrealized P&amp;L {formatCurrency(row.unrealized_pnl)}</span> : null}{row.marked_pnl != null ? <span>Marked P&amp;L {formatCurrency(row.marked_pnl)}</span> : null}<span>Scheduled exit {row.exit_next_open ? "Next open" : "—"}</span><button type="button" aria-expanded={expanded === key} onClick={() => setExpanded(expanded === key ? null : key)}>{expanded === key ? "Hide details" : "Details"}</button></div>{expanded === key ? <dl className="martin-details">{["selection_date", "order_date", "entry_policy_version", "opened_on", "closed_on", "initial_shares", "holding_sessions", "exit_price", "exit_type", "exit_next_open", "unrealized_pnl", "marked_pnl"].map((field) => <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{format(row[field])}</dd></div>)}</dl> : null}</article>; })}</div></> : <p className="martin-empty">{group === "open" ? "No simulated entries have filled yet. Pending orders are evaluated against the next completed session." : "No simulated positions have closed yet."}</p>;
+}
+
+type PositionSortKey = "ticker" | "opened_on" | "closed_on" | "entry_price" | "remaining_shares" | "stop" | "realized_r" | "realized_pnl" | "unrealized_pnl" | "marked_pnl" | "holding_sessions";
+type PositionSort = { key: PositionSortKey; direction: "asc" | "desc" };
+const positionSortLabels: Record<PositionSortKey, string> = { ticker: "Ticker", opened_on: "Opened", closed_on: "Closed", entry_price: "Entry", remaining_shares: "Shares", stop: "Stop", realized_r: "Realized R", realized_pnl: "Realized P&L", unrealized_pnl: "Unrealized P&L", marked_pnl: "Marked P&L", holding_sessions: "Holding sessions" };
+
+function PositionSortControls({ sort, onSort }: { sort: PositionSort | null; onSort: (sort: PositionSort) => void }) {
+  return <div className="martin-position-sort" aria-label="Sort positions">{(Object.keys(positionSortLabels) as PositionSortKey[]).map((key) => <button type="button" key={key} aria-pressed={sort?.key === key} onClick={() => onSort({ key, direction: sort?.key === key && sort.direction === "asc" ? "desc" : "asc" })}>Sort by {positionSortLabels[key]}{sort?.key === key ? sort.direction === "asc" ? " ↑" : " ↓" : ""}</button>)}</div>;
+}
+
+function sortPositions(rows: MartinForwardRow[], sort: PositionSort | null) {
+  if (!sort) return rows;
+  return [...rows].sort((leftRaw, rightRaw) => {
+    const left = unpack(leftRaw), right = unpack(rightRaw);
+    const value = (row: MartinForwardRow, unpacked: MartinForwardRow) => {
+      if (sort.key === "ticker") return row.ticker;
+      if (sort.key === "opened_on") return unpacked.opened_on ?? unpacked.selection_date;
+      if (sort.key === "closed_on") return unpacked.closed_on ?? unpacked.exit_date;
+      return unpacked[sort.key];
+    };
+    const a = value(leftRaw, left), b = value(rightRaw, right);
+    const numericKey = !["ticker", "opened_on", "closed_on"].includes(sort.key);
+    const number = (item: unknown) => item == null || item === "" || !Number.isFinite(Number(item)) ? null : Number(item);
+    const date = (item: unknown) => item == null || item === "" || !Number.isFinite(Date.parse(String(item))) ? null : Date.parse(String(item));
+    const aNumber = numericKey ? number(a) : sort.key === "ticker" ? null : date(a);
+    const bNumber = numericKey ? number(b) : sort.key === "ticker" ? null : date(b);
+    const aMissing = aNumber == null && (numericKey || sort.key !== "ticker") || a == null || a === "";
+    const bMissing = bNumber == null && (numericKey || sort.key !== "ticker") || b == null || b === "";
+    if (aMissing !== bMissing) return aMissing ? 1 : -1;
+    let comparison = 0;
+    if (!aMissing && !bMissing) {
+      comparison = sort.key === "ticker" ? String(a).localeCompare(String(b)) : Number(aNumber) - Number(bNumber);
+      if (sort.direction === "desc") comparison *= -1;
+    }
+    return comparison;
+  });
 }
 
 function Positions({ positions, filter, setFilter, expanded, setExpanded }: { positions: MartinForwardRow[]; filter: string; setFilter: (value: string) => void; expanded: string | null; setExpanded: (value: string | null) => void }) {
+  const [sort, setSort] = useState<PositionSort | null>(null);
   const rows = positions.filter((row) => filter === "all" || (filter === "closed" ? row.status === "closed" : filter === "needs_action" ? row.status === "open" && Boolean(unpack(row).exit_next_open) : row.status === "open"));
+  const sortedRows = sortPositions(rows, sort);
   const openCount = positions.filter((row) => row.status === "open").length;
   const needsActionCount = positions.filter((row) => row.status === "open" && Boolean(unpack(row).exit_next_open)).length;
   const closedCount = positions.filter((row) => row.status === "closed").length;
@@ -214,10 +254,10 @@ function Positions({ positions, filter, setFilter, expanded, setExpanded }: { po
   return <div className="martin-view"><section className="martin-lifecycle" aria-label="Position summary">{[["Open", openCount], ["Needs action", needsActionCount], ["Closed", closedCount], ["Closed R", realizedR]].map(([label, value]) => <div key={String(label)}><span>{label}</span><strong>{format(value)}</strong></div>)}</section>
     <section className="martin-panel"><div className="martin-panel-heading"><div><h2>Positions</h2><p>Realized results and remaining exposure by position</p></div>
     <label>Show <select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="open">Open</option><option value="needs_action">Needs action</option><option value="closed">Closed</option><option value="all">All</option></select></label></div>
-    {!rows.length ? <p className="martin-empty">No positions match this filter.</p> : <div className="martin-position-list">{rows.map((raw, index) => { const row = unpack(raw); const key = String(raw.id ?? index); return <article className="martin-position" key={key}>
-      <button type="button" className="martin-position-summary" aria-expanded={expanded === key} onClick={() => setExpanded(expanded === key ? null : key)}><strong>{String(raw.ticker)}</strong><span>{statusLabel(String(raw.status))}</span><span>Entry {formatPrice(row.entry_price)}</span><span>Remaining {format(row.remaining_shares)}</span><span>Stop {formatPrice(row.stop)}</span><span>Realized {format(row.realized_r)} R · {formatCurrency(row.realized_pnl)}</span><span>Exit {row.exit_next_open ? "Next open" : "—"}</span></button>
-      {expanded === key ? <dl className="martin-details">{["selection_date", "order_date", "entry_policy_version", "stop_policy_version", "management_policy_version", "entry_price", "initial_stop", "stop", "initial_r_per_share", "initial_dollar_risk", "initial_shares", "remaining_shares", "trim_history", "realized_pnl", "unrealized_pnl", "marked_pnl", "holding_sessions", "exit_price", "exit_next_open", "scheduled_exit_reason", "exit_type"].map((field) => <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{format(row[field])}</dd></div>)}</dl> : null}
-    </article>; })}</div>}
+    {!rows.length ? <p className="martin-empty">No positions match this filter.</p> : <><PositionSortControls sort={sort} onSort={setSort} /><div className="martin-position-list">{sortedRows.map((raw, index) => { const row = unpack(raw); const key = String(raw.id ?? index); return <article className="martin-position" key={key}>
+      <button type="button" className="martin-position-summary" aria-expanded={expanded === key} onClick={() => setExpanded(expanded === key ? null : key)}><strong>{String(raw.ticker)}</strong><span>{statusLabel(String(raw.status))}</span><span>Opened {format(row.opened_on ?? row.selection_date)}</span>{row.closed_on != null ? <span>Closed {format(row.closed_on)}</span> : null}<span>Entry {formatPrice(row.entry_price)}</span><span>Remaining {format(row.remaining_shares)}</span><span>Stop {formatPrice(row.stop)}</span><span>Realized {format(row.realized_r)} R · {formatCurrency(row.realized_pnl)}</span>{row.unrealized_pnl != null ? <span>Unrealized P&amp;L {formatCurrency(row.unrealized_pnl)}</span> : null}{row.marked_pnl != null ? <span>Marked P&amp;L {formatCurrency(row.marked_pnl)}</span> : null}<span>Exit {row.exit_next_open ? "Next open" : "—"}</span></button>
+      {expanded === key ? <dl className="martin-details">{["selection_date", "opened_on", "closed_on", "exit_date", "order_date", "entry_policy_version", "stop_policy_version", "management_policy_version", "entry_price", "initial_stop", "stop", "initial_r_per_share", "initial_dollar_risk", "initial_shares", "remaining_shares", "trim_history", "realized_pnl", "unrealized_pnl", "marked_pnl", "holding_sessions", "exit_price", "exit_next_open", "scheduled_exit_reason", "exit_type"].map((field) => <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{format(row[field])}</dd></div>)}</dl> : null}
+    </article>; })}</div></>}
     </section></div>;
 }
 
