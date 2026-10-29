@@ -52,12 +52,15 @@ class RunServiceTests(unittest.TestCase):
         bundle.mkdir(parents=True)
         options = {"start_date": "2026-01-01", "end_date": "2026-01-02",
                    "book_id": "martin_range_bar_retest_test", "execution_version": "v3",
-                   "intraday_dir": str(bundle), "simulate_backdated_buys": True}
+                   "intraday_dir": str(bundle), "simulate_backdated_buys": True,
+                   "earnings_policy": "retrospective_v1"}
         command = self.service.build_command("replay_martin_bar_retest_range", options)
         self.assertIn("--from-date", command)
         self.assertIn("--execution-version", command)
         self.assertIn(str(bundle.resolve()), command)
         self.assertIn("--simulate-backdated-buys", command)
+        self.assertIn("--earnings-policy", command)
+        self.assertIn("retrospective_v1", command)
         with self.assertRaisesRegex(ValueError, "inside the configured artifacts"):
             self.service.build_command("replay_martin_bar_retest_range", {**options, "intraday_dir": "/tmp"})
         with self.assertRaisesRegex(ValueError, "required"):

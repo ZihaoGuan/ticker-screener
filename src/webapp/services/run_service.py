@@ -407,7 +407,8 @@ class RunService:
                     RunField("intraday_dir", "Frozen Intraday Bundle Directory", "text"),
                     RunField("auto_freeze_missing", "Auto Freeze Missing Intraday Data", "boolean"),
                     RunField("apply", "Apply", "boolean"),
-                    RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean")),
+                    RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean"),
+                    RunField("earnings_policy", "Earnings Policy", "select", options=(("baseline", "baseline"), ("retrospective_v1", "retrospective_v1")))),
             visible_in_runs=True, execution_modes=("remote",),
         ),
         "replay_rs_leader_30m_pivot": RunAction(
@@ -419,7 +420,8 @@ class RunService:
                     RunField("intraday_dir", "Frozen 30m Bundle Directory", "text"),
                     RunField("auto_freeze_missing", "Auto Freeze Missing Intraday Data", "boolean"),
                     RunField("apply", "Apply", "boolean"),
-                    RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean")),
+                    RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean"),
+                    RunField("earnings_policy", "Earnings Policy", "select", options=(("baseline", "baseline"), ("retrospective_v1", "retrospective_v1")))),
             visible_in_runs=True, execution_modes=("remote",),
         ),
         "rts_validation": RunAction(
@@ -3242,6 +3244,8 @@ class RunService:
                 command.append("--apply")
             if normalized_options.get("simulate_backdated_buys"):
                 command.append("--simulate-backdated-buys")
+            if normalized_options.get("earnings_policy"):
+                command.extend(["--earnings-policy", normalized_options["earnings_policy"]])
         if normalized_options.get("lookback_days") is not None:
             command.extend(["--lookback-days", str(normalized_options["lookback_days"])])
         if normalized_options.get("min_correlation") is not None:
@@ -3528,6 +3532,10 @@ class RunService:
             normalized["execution_version"] = version
             normalized["apply"] = str(options.get("apply") or "").strip().lower() in {"1", "true", "yes", "on"}
             normalized["simulate_backdated_buys"] = str(options.get("simulate_backdated_buys") or "").strip().lower() in {"1", "true", "yes", "on"}
+            earnings_policy = str(options.get("earnings_policy") or "baseline").strip().lower()
+            if earnings_policy not in {"baseline", "retrospective_v1"}:
+                raise ValueError("Unsupported replay earnings policy.")
+            normalized["earnings_policy"] = earnings_policy
             normalized["auto_freeze_missing"] = str(options.get("auto_freeze_missing") or "").strip().lower() in {"1", "true", "yes", "on"}
             if action.action_id == "replay_martin_bar_retest_range" and version == "v1" and normalized["auto_freeze_missing"]:
                 raise ValueError("Auto-freeze-missing requires a Martin Bar Retest execution version above v1.")

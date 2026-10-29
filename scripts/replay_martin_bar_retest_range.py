@@ -364,6 +364,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
               book_id: str, database_url: str, simulate_backdated_buys: bool = False,
               exclusion_provenance: dict[str, Any] | None = None,
               execution_version: str = "martin_bar_retest_execution_v1",
+              earnings_policy: str = "baseline",
               intraday_dir: str | Path | None = None,
               auto_freeze_missing: bool = False, artifacts_dir: str | Path | None = None,
               progress: ReplayProgress | None = None) -> list[dict[str, Any]]:
@@ -379,6 +380,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
     execution = MartinBarRetestExecutionService(repository, database_url=database_url)
     execution.book_id = book_id
     execution.execution_version = execution_version
+    execution.earnings_policy = earnings_policy
     if (execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"}
             and intraday_dir is None and not auto_freeze_missing):
         raise ValueError("Version 2/3/4 replay requires an --intraday-dir; individual missing bundles use daily fallback.")
@@ -404,6 +406,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             marks = continuation_mark(repository, book_id, day, database_url)
             final_mark = marks
             repository.set_run_metadata(run_id, {"execution_book_version": execution_version,
+                "earnings_policy": earnings_policy,
                 **({"execution_management_version": ("martin_bar_retest_management_v3" if execution_version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
                    if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else {}),
@@ -442,6 +445,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             marks = continuation_mark(repository, book_id, day, database_url)
             final_mark = marks
             repository.set_run_metadata(result["run_id"], {"execution_book_version": execution_version,
+                "earnings_policy": earnings_policy,
                 **({"execution_management_version": ("martin_bar_retest_management_v3" if execution_version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
                    if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else {}),
@@ -649,6 +653,7 @@ def continue_main(argv: list[str] | None = None) -> int:
 def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date, dict[str, Any]],
                   book_id: str, database_url: str, apply: bool, simulate_backdated_buys: bool = False,
                   execution_version: str = "martin_bar_retest_execution_v1",
+                  earnings_policy: str = "baseline",
                   intraday_dir: str | Path | None = None,
                   auto_freeze_missing: bool = False, artifacts_dir: str | Path | None = None,
                   progress: ReplayProgress | None = None) -> list[dict[str, Any]]:
@@ -668,6 +673,7 @@ def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.
         results = run_range(connection, sessions=sessions, sources=sources, book_id=book_id,
                             database_url=database_url, simulate_backdated_buys=simulate_backdated_buys,
                             exclusion_provenance=exclusion_provenance, execution_version=execution_version,
+                            earnings_policy=earnings_policy,
                             intraday_dir=intraday_dir, auto_freeze_missing=auto_freeze_missing,
                             artifacts_dir=artifacts_dir, progress=progress)
         if apply:
@@ -694,6 +700,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Allow confirmed signals from scans saved after next-session open to schedule hypothetical historical fills.")
     parser.add_argument("--execution-version", choices=("v1", "v2", "v3", "v4", "v5"), default="v1",
         help="Isolated execution policy; v1 remains the default.")
+    parser.add_argument("--earnings-policy", choices=("baseline", "retrospective_v1"), default="baseline",
+        help="retrospective_v1 uses recorded earnings dates as hindsight experiment data and blocks unknown dates.")
     parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2/v3/v4/v5.")
     parser.add_argument("--auto-freeze-missing", action="store_true",
         help="Fetch only pending ticker-session pairs absent from the supplied bundle and block unresolved evidence.")
@@ -735,6 +743,7 @@ def main(argv: list[str] | None = None) -> int:
                                 database_url=config.database_url, apply=args.apply,
                                 simulate_backdated_buys=args.simulate_backdated_buys,
                                 execution_version=f"martin_bar_retest_execution_{args.execution_version}",
+                                earnings_policy=args.earnings_policy,
                                 intraday_dir=args.intraday_dir, auto_freeze_missing=args.auto_freeze_missing,
                                 artifacts_dir=config.artifacts_dir, progress=progress)
     print(json.dumps({"ready": True, "policy_id": POLICY_ID, "execution_policy_id": f"martin_bar_retest_execution_{args.execution_version}", "book_id": args.book_id,
@@ -743,7 +752,7 @@ def main(argv: list[str] | None = None) -> int:
         "simulate_backdated_buys": args.simulate_backdated_buys,
         "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
         "intraday_source": "frozen_tradingview_bundle" if args.execution_version in {"v2", "v3", "v4", "v5"} else None,
-        "auto_freeze_missing": args.auto_freeze_missing,
+        "auto_freeze_missing": args.auto_freeze_missing, "earnings_policy": args.earnings_policy,
         "source_mode": "saved_screen_runs_with_execution_only_sessions", "sessions": results}, indent=2, default=str))
     return 0
 

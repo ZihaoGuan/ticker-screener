@@ -46,6 +46,8 @@ def main(argv=None):
                         help="Allow hypothetical entries from scans saved after the next-session open.")
     parser.add_argument("--execution-version", choices=("v1", "v2"), default="v1",
                         help="v2 moves the runner stop to breakeven after the first one-third 3R trim.")
+    parser.add_argument("--earnings-policy", choices=("baseline", "retrospective_v1"), default="baseline",
+                        help="retrospective_v1 uses recorded earnings dates as hindsight experiment data and blocks unknown dates.")
     args = parser.parse_args(argv)
     if args.to_date < args.from_date:
         parser.error("--to-date must be on or after --from-date")
@@ -95,6 +97,7 @@ def main(argv=None):
                 results = execute_pivot_range(connection, sessions=sessions, sources=sources,
                     book_id=args.book_id, database_url=config.database_url, intraday_dir=args.intraday_dir,
                     simulate_backdated_buys=args.simulate_backdated_buys, execution_version=execution_version,
+                    earnings_policy=args.earnings_policy,
                     auto_freeze_missing=args.auto_freeze_missing, artifacts_dir=config.artifacts_dir,
                     progress_callback=lambda event, day, counts: (progress.emit(event=event, day=day)
                         if event == "session_start" else progress.session_done(day, counts)))
@@ -113,6 +116,7 @@ def main(argv=None):
         "mode": "apply" if args.apply else "dry_run_rolled_back", "saved": bool(args.apply),
         "simulate_backdated_buys": args.simulate_backdated_buys,
         "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
+        "earnings_policy": args.earnings_policy,
         "source_mode": "persisted_martin_bar_watchlist_v1_runs", "sessions": results}, indent=2, default=str))
     return 0
 
