@@ -46,8 +46,8 @@ def main(argv=None):
                         help="Allow hypothetical entries from scans saved after the next-session open.")
     parser.add_argument("--execution-version", choices=("v1", "v2"), default="v1",
                         help="v2 moves the runner stop to breakeven after the first one-third 3R trim.")
-    parser.add_argument("--earnings-policy", choices=("baseline", "retrospective_v1"), default="baseline",
-                        help="retrospective_v1 uses recorded earnings dates as hindsight experiment data and blocks unknown dates.")
+    parser.add_argument("--earnings-policy", choices=("baseline", "retrospective_v1", "retrospective_holdings_v2"), default="baseline",
+                        help="retrospective_holdings_v2 blocks entries within 3 sessions and exits next open below max(15%%, ADR14); uses recorded earnings dates")
     args = parser.parse_args(argv)
     if args.to_date < args.from_date:
         parser.error("--to-date must be on or after --from-date")
@@ -74,7 +74,7 @@ def main(argv=None):
     execution_version = EXECUTION_VERSION_V2 if args.execution_version == "v2" else EXECUTION_VERSION
     history = ScreenerHistoryService(database_url=config.database_url, artifacts_dir=config.artifacts_dir,
         repository=HistoryRepository(database_url=config.database_url, artifacts_dir=config.artifacts_dir, read_only=True))
-    sources = load_range_sources(history, sessions)
+    sources = load_range_sources(history, sessions, lambda phase, seconds: progress.add_timing(phase, seconds))
     for source in sources.values():
         source.setdefault("replay_provenance", {}).update({"execution_version": execution_version,
             "source_strategy_id": "martin_bar_watchlist_v1",
@@ -99,8 +99,8 @@ def main(argv=None):
                     simulate_backdated_buys=args.simulate_backdated_buys, execution_version=execution_version,
                     earnings_policy=args.earnings_policy,
                     auto_freeze_missing=args.auto_freeze_missing, artifacts_dir=config.artifacts_dir,
-                    progress_callback=lambda event, day, counts: (progress.emit(event=event, day=day)
-                        if event == "session_start" else progress.session_done(day, counts)))
+                    progress_callback=lambda event, day, counts, timings=None: (progress.emit(event=event, day=day)
+                        if event == "session_start" else progress.session_done(day, counts, timings)))
                 if args.apply:
                     connection.commit()
                 else:
@@ -117,7 +117,8 @@ def main(argv=None):
         "simulate_backdated_buys": args.simulate_backdated_buys,
         "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
         "earnings_policy": args.earnings_policy,
-        "source_mode": "persisted_martin_bar_watchlist_v1_runs", "sessions": results}, indent=2, default=str))
+        "source_mode": "persisted_martin_bar_watchlist_v1_runs", "timings_seconds": progress.phase_totals,
+        "sessions": results}, indent=2, default=str))
     return 0
 
 

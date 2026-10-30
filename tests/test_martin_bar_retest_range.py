@@ -95,13 +95,15 @@ class MartinBarRetestRangeTests(unittest.TestCase):
             progress = replay.ReplayProgress(total=2, apply=False, stream=stream)
             day = dt.date(2026, 10, 19)
             progress.emit(event="session_start", day=day)
-            progress.session_done(day, {"candidate_count": 3, "filled": 1})
+            progress.session_done(day, {"candidate_count": 3, "filled": 1}, {"execution_logic": 1.25})
         lines = [json.loads(line) for line in stream.getvalue().splitlines()]
         self.assertEqual([line["event"] for line in lines], ["session_start", "session_complete"])
         self.assertEqual(lines[0]["date"], day.isoformat())
         self.assertEqual(lines[1]["session_index"], 1)
         self.assertEqual(lines[1]["eta_seconds"], 4.0)
         self.assertEqual(lines[1]["counts"], {"candidate_count": 3, "filled": 1})
+        self.assertEqual(lines[1]["timings_seconds"], {"execution_logic": 1.25})
+        self.assertEqual(lines[1]["phase_totals_seconds"], {"execution_logic": 1.25})
         self.assertTrue(all(line["status"] == "provisional" and not line["committed"] for line in lines))
         self.assertEqual(stream.flushes, 2)
 

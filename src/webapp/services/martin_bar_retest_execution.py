@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import time
 from typing import Any
 
 from src.ticker_filters import is_leveraged_or_inverse_ticker
@@ -211,9 +212,13 @@ class MartinBarRetestExecutionService:
         frames = self.bar_loader(tickers, day, 320, database_url=self.database_url) if tickers else {}
         earnings_policy = getattr(self, "earnings_policy", "baseline")
         earnings_events = {}
-        if earnings_policy == "retrospective_v1":
+        if earnings_policy in {"retrospective_v1", "retrospective_holdings_v2"}:
             from src.webapp.services.earnings_risk import load_earnings
+            earnings_started = time.perf_counter()
             earnings_events = load_earnings(self.repository._connect(), set(tickers), day)
+            timing_callback = getattr(self, "timing_callback", None)
+            if timing_callback:
+                timing_callback("earnings_load", time.perf_counter() - earnings_started)
         counts = {"filled": 0, "expired": 0, "cancelled": 0, "blocked_data": 0, "exited": 0, "trimmed": 0,
                   "missing_bars": 0, "scheduled": 0, "intraday_fallbacks": 0}
         fallback_reasons: dict[str, int] = {}
@@ -226,9 +231,10 @@ class MartinBarRetestExecutionService:
         closed_today: set[str] = set()
         for order in pending:
             ticker = str(order["ticker"]).upper()
-            if earnings_policy == "retrospective_v1":
-                from src.webapp.services.earnings_risk import entry_decision
-                decision = entry_decision(earnings_events.get(ticker), day)
+            if earnings_policy in {"retrospective_v1", "retrospective_holdings_v2"}:
+                from src.webapp.services.earnings_risk import entry_decision, HOLDINGS_POLICY, POLICY
+                decision = entry_decision(earnings_events.get(ticker), day,
+                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY)
                 if not decision["allowed"]:
                     self.repository.apply_event(run_id=run_id, position_id=None, ticker=ticker,
                         event_type="order_blocked_earnings", event_date=day,
@@ -384,7 +390,96 @@ class MartinBarRetestExecutionService:
                     position = {**position, "earnings_half_trim_scheduled": None}
             elif earnings_policy == "retrospective_v1" and earnings_events.get(ticker) is None:
                 position = {**position, "earnings_risk": {"status": "unknown", "evidence_mode": "earnings_risk_retrospective_v1", "retrospective_lookup": True}}
+            earnings_open_due = False
+            if earnings_policy == "retrospective_holdings_v2" and position.get("earnings_holdings_scheduled"):
+                from src.webapp.services.earnings_risk import sessions_to_event
+                scheduled = position["earnings_holdings_scheduled"]
+                earnings_date = dt.date.fromisoformat(scheduled["earnings_date"])
+                expected_distance = 0 if str(scheduled.get("session_timing") or "").lower() in {"after_market", "amc", "after-market"} else 1
+                earnings_open_due = sessions_to_event(day, earnings_date) == expected_distance
             outcome = manage_position(position, bar, day, frames.get(ticker), management_version=management_version)
+            if (earnings_policy == "retrospective_holdings_v2" and outcome and outcome[0] == "ema9_exit"
+                    and float(bar["open"]) <= float(position.get("stop") or position.get("initial_stop") or 0)):
+                stop = float(position.get("stop") or position.get("initial_stop") or 0)
+                price = float(bar["open"]) * .999 if float(bar["open"]) <= stop else stop * .999
+                shares = int(position.get("remaining_shares") or 0)
+                pnl = (price - float(position["entry_price"])) * shares
+                risk = float(position.get("initial_r_per_share") or 0) * int(position.get("initial_shares") or shares or 1)
+                outcome = ("gap_stop" if float(bar["open"]) <= stop else "stop",
+                    {**position, "remaining_shares": 0, "closed_on": day.isoformat(),
+                     "exit_price": price,
+                     "exit_type": "gap_stop" if float(bar["open"]) <= stop else "stop",
+                     "realized_pnl": float(position.get("realized_pnl") or 0) + pnl,
+                     "realized_r": (float(position.get("realized_pnl") or 0) + pnl) / risk if risk else 0,
+                     "exit_next_open": False},
+                    {"price": price, "realized_pnl": pnl, "reason": "stop_precedence_over_scheduled_exit"})
+            if (earnings_open_due and float(bar["open"]) <=
+                    float(position.get("stop") or position.get("initial_stop") or 0) and
+                    (outcome is None or outcome[0] != "gap_stop")):
+                stop = float(position.get("stop") or position.get("initial_stop") or 0)
+                price = float(bar["open"]) * .999
+                shares = int(position.get("remaining_shares") or 0)
+                pnl = (price - float(position["entry_price"])) * shares
+                risk = float(position.get("initial_r_per_share") or 0) * int(position.get("initial_shares") or shares or 1)
+                outcome = ("gap_stop", {**position, "remaining_shares": 0, "closed_on": day.isoformat(),
+                    "exit_price": price, "exit_type": "gap_stop",
+                    "realized_pnl": float(position.get("realized_pnl") or 0) + pnl,
+                    "realized_r": (float(position.get("realized_pnl") or 0) + pnl) / risk if risk else 0,
+                    "exit_next_open": False}, {"price": price, "realized_pnl": pnl,
+                    "reason": "gap_stop_precedence_over_earnings_sale"})
+            if (earnings_open_due and not position.get("exit_next_open") and
+                    float(bar["open"]) > float(position.get("stop") or position.get("initial_stop") or 0)):
+                outcome = None
+            if outcome is None and earnings_policy == "retrospective_holdings_v2":
+                from src.webapp.services.earnings_risk import adr14_pct, holdings_decision, sessions_to_event
+                event = earnings_events.get(ticker)
+                scheduled = position.get("earnings_holdings_scheduled")
+                decision = scheduled
+                if scheduled:
+                    earnings_date = dt.date.fromisoformat(scheduled["earnings_date"])
+                    expected_distance = 0 if str(scheduled.get("session_timing") or "").lower() in {"after_market", "amc", "after-market"} else 1
+                    if sessions_to_event(day, earnings_date) == expected_distance:
+                        shares = int(position.get("remaining_shares") or 0)
+                        sell_shares = shares
+                        if sell_shares:
+                            price = float(bar["open"]) * .999
+                            pnl = (price - float(position["entry_price"])) * sell_shares
+                            initial_risk = float(position.get("initial_r_per_share") or 0) * int(position.get("initial_shares") or shares or 1)
+                            updated = {**position, "remaining_shares": shares - sell_shares,
+                                "realized_pnl": float(position.get("realized_pnl") or 0) + pnl,
+                                "realized_r": float(position.get("realized_r") or 0) + (pnl / initial_risk if initial_risk else 0),
+                                "earnings_holdings_scheduled": None, "earnings_holdings_decision": scheduled,
+                                "last_managed_date": day.isoformat()}
+                            closing = True
+                            if closing:
+                                updated.update(status="closed", closed_on=day.isoformat(), exit_price=price,
+                                    exit_type="earnings_exit", exit_next_open=False)
+                            self.repository.apply_event(run_id=run_id, position_id=int(row["id"]), ticker=ticker,
+                                event_type="earnings_exit", event_date=day,
+                                payload={**scheduled, "price": price, "shares": sell_shares, "realized_pnl": pnl,
+                                    "fill_basis": "next_session_open", "stop_precedence": "open_gap_stop_first"},
+                                position_payload=updated, close_position=closing, strategy_id=book)
+                            if closing:
+                                counts["exited"] += 1
+                                closed_today.add(ticker)
+                            else:
+                                counts["trimmed"] += 1
+                            continue
+                    elif sessions_to_event(day, earnings_date) < expected_distance:
+                        position = {**position, "earnings_holdings_scheduled": None}
+                if not position.get("earnings_holdings_scheduled"):
+                    decision = holdings_decision(event, day, float(position.get("entry_price") or 0),
+                        float(bar["close"]), adr14_pct(frames.get(ticker), day))
+                    if decision:
+                        position = {**position, "earnings_holdings_decision": decision}
+                        if decision.get("action") == "exit_all":
+                            position["earnings_holdings_scheduled"] = decision
+                            self.repository.apply_event(run_id=run_id, position_id=int(row["id"]), ticker=ticker,
+                                event_type="earnings_exit_scheduled",
+                                event_date=day, payload=decision, position_payload=position, strategy_id=book)
+                            continue
+                elif decision and decision.get("status", "").startswith("unknown"):
+                    position = {**position, "earnings_holdings_decision": decision}
             if earnings_policy == "retrospective_v1":
                 from src.webapp.services.earnings_risk import adr14_pct, weak_cushion_trim
                 event = earnings_events.get(ticker)
@@ -428,9 +523,10 @@ class MartinBarRetestExecutionService:
         held_names = {str(x["ticker"]).upper() for x in open_now + orders_now}
         for candidate in ordered:
             ticker = str(candidate["ticker"]).upper()
-            if earnings_policy == "retrospective_v1":
-                from src.webapp.services.earnings_risk import entry_decision
-                decision = entry_decision(earnings_events.get(ticker), day)
+            if earnings_policy in {"retrospective_v1", "retrospective_holdings_v2"}:
+                from src.webapp.services.earnings_risk import entry_decision, HOLDINGS_POLICY, POLICY
+                decision = entry_decision(earnings_events.get(ticker), day,
+                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY)
                 candidate["earnings_risk"] = decision
                 if candidate.get("status") == "confirmed" and not decision["allowed"]:
                     candidate.update(status="blocked_earnings", reasons=[*(candidate.get("reasons") or []), decision["reason"]])

@@ -408,7 +408,7 @@ class RunService:
                     RunField("auto_freeze_missing", "Auto Freeze Missing Intraday Data", "boolean"),
                     RunField("apply", "Apply", "boolean"),
                     RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean"),
-                    RunField("earnings_policy", "Earnings Policy", "select", options=(("baseline", "baseline"), ("retrospective_v1", "retrospective_v1")))),
+                    RunField("earnings_policy", "Earnings Policy", "select", options=(("baseline", "Baseline"), ("retrospective_v1", "Retrospective v1"), ("retrospective_holdings_v2", "Holdings v2: block entries within 3 sessions; exit below max(15%, ADR14)")))),
             visible_in_runs=True, execution_modes=("remote",),
         ),
         "replay_rs_leader_30m_pivot": RunAction(
@@ -421,7 +421,7 @@ class RunService:
                     RunField("auto_freeze_missing", "Auto Freeze Missing Intraday Data", "boolean"),
                     RunField("apply", "Apply", "boolean"),
                     RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean"),
-                    RunField("earnings_policy", "Earnings Policy", "select", options=(("baseline", "baseline"), ("retrospective_v1", "retrospective_v1")))),
+                    RunField("earnings_policy", "Earnings Policy", "select", options=(("baseline", "Baseline"), ("retrospective_v1", "Retrospective v1"), ("retrospective_holdings_v2", "Holdings v2: block entries within 3 sessions; exit below max(15%, ADR14)")))),
             visible_in_runs=True, execution_modes=("remote",),
         ),
         "rts_validation": RunAction(
@@ -3533,7 +3533,7 @@ class RunService:
             normalized["apply"] = str(options.get("apply") or "").strip().lower() in {"1", "true", "yes", "on"}
             normalized["simulate_backdated_buys"] = str(options.get("simulate_backdated_buys") or "").strip().lower() in {"1", "true", "yes", "on"}
             earnings_policy = str(options.get("earnings_policy") or "baseline").strip().lower()
-            if earnings_policy not in {"baseline", "retrospective_v1"}:
+            if earnings_policy not in {"baseline", "retrospective_v1", "retrospective_holdings_v2"}:
                 raise ValueError("Unsupported replay earnings policy.")
             normalized["earnings_policy"] = earnings_policy
             normalized["auto_freeze_missing"] = str(options.get("auto_freeze_missing") or "").strip().lower() in {"1", "true", "yes", "on"}

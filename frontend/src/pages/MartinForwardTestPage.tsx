@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import type { MartinForwardBook, MartinForwardResponse, MartinForwardRow } from "../lib/types";
 import { groupMartinActivity, martinActivityActions } from "../lib/martinActivity";
+import { estimateMartinGapStress } from "../lib/martinGapStress";
 
 type View = "overview" | "today" | "positions" | "performance";
 const views: View[] = ["overview", "today", "positions", "performance"];
@@ -101,7 +102,7 @@ function MartinForwardPage({ executionOnly = false }: { executionOnly?: boolean 
         {summary.partial ? <section className="martin-inline-state" role="status">{Number(executionActions.intraday_fallbacks ?? 0) > 0 ? <><p>Daily conservative settlement was used for {format(executionActions.intraday_fallbacks)} order(s) because frozen intraday evidence could not be used. {formatIntradayFallbackReasons(object(executionActions.intraday_fallback_reasons ?? summary.intraday_fallback_reasons))}</p><IntradayFallbackDetails rows={Array.isArray(executionActions.intraday_fallback_details) ? executionActions.intraday_fallback_details as Record<string, unknown>[] : []} /></> : <p>Partial session: market bars were unavailable for {format(executionActions.missing_bars)} pending orders or open positions.</p>}</section> : null}
         {view === "overview" ? <Overview book={book!} executionBook={executionBook} pivotBook={pivotBook} /> : null}
         {view === "today" ? <Today key={activeBookKey} book={book!} bookLabel={executionLabel(activeBookKey)} candidates={candidateRows} outstandingOrders={(book?.outstanding_orders ?? []).map(unpack)} attention={attention} executionBook={executionBook} /> : null}
-        {view === "positions" ? <Positions positions={positionRows} filter={filter} setFilter={setFilter} expanded={expanded} setExpanded={setExpanded} /> : null}
+        {view === "positions" ? <Positions positions={positionRows} accountEquity={book?.metrics.account_equity} filter={filter} setFilter={setFilter} expanded={expanded} setExpanded={setExpanded} /> : null}
         {view === "performance" ? <Performance book={book!} books={data.books} /> : null}
         <details className="martin-audit"><summary>Data &amp; audit</summary>
           <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(JSON.stringify({ session: latest, candidates: book!.candidates, positions: book!.positions, events: book!.events, metrics: book!.metrics, history: book!.history, attribution: book!.attribution }, null, 2)); setCopyMessage("Session data copied."); } catch { setCopyMessage("Copy failed. Select the raw JSON below to copy it."); } }}>{copyMessage ? "Copy again" : "Copy session JSON"}</button>{copyMessage ? <span role="status"> {copyMessage}</span> : null}
@@ -243,7 +244,7 @@ function sortPositions(rows: MartinForwardRow[], sort: PositionSort | null) {
   });
 }
 
-function Positions({ positions, filter, setFilter, expanded, setExpanded }: { positions: MartinForwardRow[]; filter: string; setFilter: (value: string) => void; expanded: string | null; setExpanded: (value: string | null) => void }) {
+function Positions({ positions, accountEquity, filter, setFilter, expanded, setExpanded }: { positions: MartinForwardRow[]; accountEquity?: number | null; filter: string; setFilter: (value: string) => void; expanded: string | null; setExpanded: (value: string | null) => void }) {
   const [sort, setSort] = useState<PositionSort | null>(null);
   const rows = positions.filter((row) => filter === "all" || (filter === "closed" ? row.status === "closed" : filter === "needs_action" ? row.status === "open" && Boolean(unpack(row).exit_next_open) : row.status === "open"));
   const sortedRows = sortPositions(rows, sort);
@@ -256,9 +257,21 @@ function Positions({ positions, filter, setFilter, expanded, setExpanded }: { po
     <label>Show <select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="open">Open</option><option value="needs_action">Needs action</option><option value="closed">Closed</option><option value="all">All</option></select></label></div>
     {!rows.length ? <p className="martin-empty">No positions match this filter.</p> : <><PositionSortControls sort={sort} onSort={setSort} /><div className="martin-position-list">{sortedRows.map((raw, index) => { const row = unpack(raw); const key = String(raw.id ?? index); return <article className="martin-position" key={key}>
       <button type="button" className="martin-position-summary" aria-expanded={expanded === key} onClick={() => setExpanded(expanded === key ? null : key)}><strong>{String(raw.ticker)}</strong><span>{statusLabel(String(raw.status))}</span><span>Opened {format(row.opened_on ?? row.selection_date)}</span>{row.closed_on != null ? <span>Closed {format(row.closed_on)}</span> : null}<span>Entry {formatPrice(row.entry_price)}</span><span>Remaining {format(row.remaining_shares)}</span><span>Stop {formatPrice(row.stop)}</span><span>Realized {format(row.realized_r)} R · {formatCurrency(row.realized_pnl)}</span>{row.unrealized_pnl != null ? <span>Unrealized P&amp;L {formatCurrency(row.unrealized_pnl)}</span> : null}{row.marked_pnl != null ? <span>Marked P&amp;L {formatCurrency(row.marked_pnl)}</span> : null}<span>Exit {row.exit_next_open ? "Next open" : "—"}</span></button>
-      {expanded === key ? <dl className="martin-details">{["selection_date", "opened_on", "closed_on", "exit_date", "order_date", "entry_policy_version", "stop_policy_version", "management_policy_version", "entry_price", "initial_stop", "stop", "initial_r_per_share", "initial_dollar_risk", "initial_shares", "remaining_shares", "trim_history", "realized_pnl", "unrealized_pnl", "marked_pnl", "holding_sessions", "exit_price", "exit_next_open", "scheduled_exit_reason", "exit_type"].map((field) => <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{format(row[field])}</dd></div>)}</dl> : null}
+      {expanded === key ? <><dl className="martin-details">{["selection_date", "opened_on", "closed_on", "exit_date", "order_date", "entry_policy_version", "stop_policy_version", "management_policy_version", "entry_price", "initial_stop", "stop", "initial_r_per_share", "initial_dollar_risk", "initial_shares", "remaining_shares", "trim_history", "realized_pnl", "unrealized_pnl", "marked_pnl", "holding_sessions", "exit_price", "exit_next_open", "scheduled_exit_reason", "exit_type", "earnings_holdings_decision", "earnings_holdings_scheduled"].map((field) => <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{format(row[field])}</dd></div>)}</dl>{raw.status === "open" ? <GapStressDetail row={row} accountEquity={accountEquity} /> : null}</> : null}
     </article>; })}</div></>}
     </section></div>;
+}
+
+function GapStressDetail({ row, accountEquity }: { row: MartinForwardRow; accountEquity?: number | null }) {
+  const estimate = estimateMartinGapStress(row, accountEquity);
+  const equityLabel = estimate.equity_basis === "current_book"
+    ? `current book equity ${formatCurrency(estimate.equity)}`
+    : "$100,000 fixed base equity (current book equity unavailable)";
+  if (estimate.status !== "available") {
+    return <p className="martin-panel-copy">Adverse gap stress unavailable: {estimate.reason === "current_mark_unavailable" ? "a current position mark is unavailable" : "remaining share count is unavailable"}. Equity denominator: {equityLabel}.</p>;
+  }
+  const markBasis = estimate.mark_basis === "unrealized_pnl" ? "derived from saved unrealized P&L" : "saved latest mark";
+  return <p className="martin-panel-copy">Adverse gap stress from {formatPrice(estimate.mark_price)} ({markBasis}) across remaining shares, using {equityLabel}: {estimate.scenarios?.map((scenario) => `${scenario.gap_pct}% ${formatCurrency(-scenario.loss_dollars)} (${format(scenario.equity_pct)}% equity)`).join(" · ")}. Informational estimate only; no automatic position cap.</p>;
 }
 
 function Performance({ book, books }: { book: MartinForwardBook; books: MartinForwardResponse["books"] }) {

@@ -1,6 +1,9 @@
 export const martinActivityActions: Record<string, { label: string; direction: "buy" | "sell" }> = {
   order_filled: { label: "Buy", direction: "buy" }, trim_3r: { label: "Trim", direction: "sell" },
   earnings_half_trim: { label: "Earnings trim", direction: "sell" },
+  earnings_exit: { label: "Earnings exit", direction: "sell" },
+  earnings_exit_scheduled: { label: "Earnings exit scheduled", direction: "sell" },
+  earnings_half_trim_scheduled: { label: "Earnings trim scheduled", direction: "sell" },
   stop: { label: "Stop exit", direction: "sell" }, gap_stop: { label: "Gap stop exit", direction: "sell" },
   ema9_exit: { label: "EMA9 exit", direction: "sell" }, rotation_exit: { label: "Rotation exit", direction: "sell" },
 };

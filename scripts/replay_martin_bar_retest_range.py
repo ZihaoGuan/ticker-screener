@@ -30,6 +30,7 @@ class ReplayProgress:
         self.started = time.monotonic()
         self.completed = 0
         self.enabled = True
+        self.phase_totals: dict[str, float] = {}
 
     def _write(self, record: dict[str, Any]) -> None:
         if not self.enabled:
@@ -41,7 +42,14 @@ class ReplayProgress:
             # Telemetry must never affect replay transaction outcome.
             self.enabled = False
 
-    def emit(self, *, event: str, day: dt.date | None = None, counts: dict[str, Any] | None = None):
+    def add_timing(self, phase: str, seconds: float) -> None:
+        self.phase_totals[phase] = self.phase_totals.get(phase, 0.0) + max(0.0, seconds)
+
+    def emit(self, *, event: str, day: dt.date | None = None, counts: dict[str, Any] | None = None,
+             timings: dict[str, float] | None = None):
+        if event == "session_complete":
+            for phase, seconds in (timings or {}).items():
+                self.add_timing(phase, seconds)
         elapsed = max(0.0, time.monotonic() - self.started)
         average = elapsed / self.completed if self.completed else None
         remaining = max(0, self.total - self.completed)
@@ -49,17 +57,20 @@ class ReplayProgress:
             "session_total": self.total, "date": day.isoformat() if day else None,
             "elapsed_seconds": round(elapsed, 1),
             "eta_seconds": round(average * remaining, 1) if average is not None else None,
-            "status": "provisional", "committed": False, "counts": counts or {}}
+            "status": "provisional", "committed": False, "counts": counts or {},
+            "timings_seconds": {key: round(value, 3) for key, value in (timings or {}).items()},
+            "phase_totals_seconds": {key: round(value, 3) for key, value in self.phase_totals.items()}}
         self._write(record)
 
-    def session_done(self, day: dt.date, counts: dict[str, Any]):
+    def session_done(self, day: dt.date, counts: dict[str, Any], timings: dict[str, float] | None = None):
         self.completed += 1
-        self.emit(event="session_complete", day=day, counts=counts)
+        self.emit(event="session_complete", day=day, counts=counts, timings=timings)
 
     def finish(self):
         self._write({"event": "replay_committed" if self.apply else "replay_rolled_back",
             "session_index": self.completed, "session_total": self.total,
             "elapsed_seconds": round(max(0.0, time.monotonic() - self.started), 1),
+            "phase_totals_seconds": {key: round(value, 3) for key, value in self.phase_totals.items()},
             "status": "committed" if self.apply else "rolled_back", "committed": self.apply,
             "counts": {}})
 
@@ -82,11 +93,12 @@ def publication_timing(day: dt.date, published_at: Any) -> tuple[bool, str]:
     return retrospective, ("published_after_next_open" if retrospective else "saved_before_next_open")
 
 
-def load_range_sources(history: Any, sessions: list[dt.date]) -> dict[dt.date, dict[str, Any]]:
+def load_range_sources(history: Any, sessions: list[dt.date], timing_callback=None) -> dict[dt.date, dict[str, Any]]:
     from scripts.run_martin_bar_retest import _load_source
 
     sources = {}
     for day in sessions:
+        started = time.perf_counter()
         runs = history.list_runs(strategy_id=SOURCE_ID, start_date=day, end_date=day, limit=100)
         matching = [run for run in runs if str(run.get("run_date") or "")[:10] == day.isoformat()]
         if len(matching) > 1:
@@ -114,6 +126,8 @@ def load_range_sources(history: Any, sessions: list[dt.date]) -> dict[dt.date, d
             "limitation": "Saved screen run used as historical input; the creation timestamp does not prove point-in-time universe or data availability.",
         }
         sources[day] = source
+        if timing_callback:
+            timing_callback("history_load", time.perf_counter() - started)
     return sources
 
 
@@ -387,25 +401,39 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
     results = []
     final_mark = None
     for day in sessions:
+        timings: dict[str, float] = {}
+        execution.timing_callback = lambda phase, seconds: timings.__setitem__(phase,
+            timings.get(phase, 0.0) + max(0.0, seconds))
+        def timed(phase, started):
+            elapsed = time.perf_counter() - started
+            if phase == "execution_logic":
+                elapsed = max(0.0, elapsed - timings.get("earnings_load", 0.0))
+            timings[phase] = timings.get(phase, 0.0) + elapsed
         if progress:
             progress.emit(event="session_start", day=day)
         source = sources.get(day)
+        phase_started = time.perf_counter()
         frozen = frozen_intraday_for(intraday_dir, day)
+        timed("intraday_cache_load_and_validation", phase_started)
         if source is None:
             from src.webapp.services.martin_rotation import require_completed_session
             require_completed_session(day)
             run_id = save_execution_only_run(repository, book_id=book_id, day=day,
                                              exclusion_provenance=exclusion_provenance, execution_version=execution_version)
-            actions = execution.run_session(day=day, run_id=run_id, candidates=[], source_on_time=False,
-                frozen_intraday=_auto_freeze_missing_pairs(book_id=book_id, day=day,
+            phase_started = time.perf_counter()
+            auto_frozen = _auto_freeze_missing_pairs(book_id=book_id, day=day,
                     pending_orders=repository.pending_orders(strategy_id=book_id, before=day), supplied=frozen,
-                    database_url=database_url, artifacts_dir=artifacts_dir, execution_version=execution_version)
-                    if auto_freeze_missing else frozen, require_frozen_intraday=auto_freeze_missing)
+                    database_url=database_url, artifacts_dir=artifacts_dir, execution_version=execution_version) if auto_freeze_missing else frozen
+            timed("intraday_auto_freeze", phase_started)
+            phase_started = time.perf_counter()
+            actions = execution.run_session(day=day, run_id=run_id, candidates=[], source_on_time=False,
+                frozen_intraday=auto_frozen, require_frozen_intraday=auto_freeze_missing)
+            timed("execution_logic", phase_started)
             if actions["missing_bars"]:
                 raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
-            marks = continuation_mark(repository, book_id, day, database_url)
+            phase_started = time.perf_counter(); marks = continuation_mark(repository, book_id, day, database_url); timed("daily_history_load_and_mark", phase_started)
             final_mark = marks
-            repository.set_run_metadata(run_id, {"execution_book_version": execution_version,
+            phase_started = time.perf_counter(); repository.set_run_metadata(run_id, {"execution_book_version": execution_version,
                 "earnings_policy": earnings_policy,
                 **({"execution_management_version": ("martin_bar_retest_management_v3" if execution_version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
@@ -415,36 +443,44 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                 "backdated_buy_basis": None, "partial": marks["mark_coverage"]["status"] != "complete" or actions.get("intraday_fallbacks", 0) > 0,
                 "intraday_evidence_partial": actions.get("intraday_fallbacks", 0) > 0,
                 "intraday_fallback_count": actions.get("intraday_fallbacks", 0),
-                "execution_account_limits": execution_account_limits(), **marks})
+                "execution_account_limits": execution_account_limits(), **marks}); timed("persistence", phase_started)
             results.append({"date": day.isoformat(), "source_run_id": None, "source_hit_count": 0,
                 "new_event_count": 0, "active_event_count": 0, "zero_hit_day": None,
                 "retrospective_source_scan": None, "source_publication_timing": "no_scan_execution_only",
                 "execution_actions": actions, "category_cohorts": {}, "candidate_status_counts": {},
-                "reason_counts": {}, "candidate_count": 0, "status": "execution_only"})
+                "reason_counts": {}, "candidate_count": 0, "status": "execution_only",
+                "timings_seconds": {key: round(value, 3) for key, value in timings.items()}})
             if progress:
-                progress.session_done(day, {"candidate_count": 0, **actions})
+                progress.completed += 1
+                progress.emit(event="session_complete", day=day, counts={"candidate_count": 0, **actions}, timings=timings)
             continue
+        phase_started = time.perf_counter()
         result = service.run_session(as_of_date=day, source_record=source, dry_run=False,
                                      policy_id=POLICY_ID, book_id=book_id)
+        timed("daily_history_load_and_candidate_logic", phase_started)
         if result.get("status") in {"missing_source", "blocked_source"} or result.get("skipped"):
             raise ValueError(f"Replay blocked or duplicated on {day}: {result.get('reason') or result.get('status')}.")
+        phase_started = time.perf_counter()
+        auto_frozen = _auto_freeze_missing_pairs(book_id=book_id, day=day,
+                                            pending_orders=repository.pending_orders(strategy_id=book_id, before=day),
+                                            supplied=frozen, database_url=database_url, artifacts_dir=artifacts_dir,
+                                            execution_version=execution_version) if auto_freeze_missing else frozen
+        timed("intraday_auto_freeze", phase_started)
+        phase_started = time.perf_counter()
         actions = execution.run_session(day=day, run_id=result.get("run_id"), candidates=result.get("candidates", []),
                                         source_on_time=result.get("retrospective_source_scan") is False,
                                         simulate_backdated_buys=simulate_backdated_buys,
-                                        frozen_intraday=_auto_freeze_missing_pairs(book_id=book_id, day=day,
-                                            pending_orders=repository.pending_orders(strategy_id=book_id, before=day),
-                                            supplied=frozen, database_url=database_url, artifacts_dir=artifacts_dir,
-                                            execution_version=execution_version)
-                                            if auto_freeze_missing else frozen,
+                                        frozen_intraday=auto_frozen,
                                         require_frozen_intraday=auto_freeze_missing)
+        timed("execution_logic", phase_started)
         if actions["missing_bars"]:
             raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
         cohorts = {category: sum(item.get("event_category") == category for item in result.get("candidates", []))
                    for category in sorted({str(item.get("event_category") or "unknown") for item in result.get("candidates", [])})}
         if result.get("run_id") is not None:
-            marks = continuation_mark(repository, book_id, day, database_url)
+            phase_started = time.perf_counter(); marks = continuation_mark(repository, book_id, day, database_url); timed("daily_history_load_and_mark", phase_started)
             final_mark = marks
-            repository.set_run_metadata(result["run_id"], {"execution_book_version": execution_version,
+            phase_started = time.perf_counter(); repository.set_run_metadata(result["run_id"], {"execution_book_version": execution_version,
                 "earnings_policy": earnings_policy,
                 **({"execution_management_version": ("martin_bar_retest_management_v3" if execution_version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
@@ -457,7 +493,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                 "intraday_evidence_partial": actions.get("intraday_fallbacks", 0) > 0,
                 "intraday_fallback_count": actions.get("intraday_fallbacks", 0),
                 **marks,
-                "category_cohorts": cohorts, "execution_account_limits": execution_account_limits()})
+                "category_cohorts": cohorts, "execution_account_limits": execution_account_limits()}); timed("persistence", phase_started)
         statuses = Counter(str(item.get("status") or "unknown") for item in result.get("candidates", []))
         reasons = Counter(str(reason) for item in result.get("candidates", [])
                           for reason in (item.get("reasons") or []))
@@ -475,10 +511,12 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                         "execution_actions": actions,
                         "category_cohorts": cohorts,
                         "candidate_count": len(result.get("candidates", [])),
+                        "timings_seconds": {key: round(value, 3) for key, value in timings.items()},
                         "status": "complete"})
         if progress:
-            progress.session_done(day, {"candidate_count": len(result.get("candidates", [])),
-                "source_hit_count": result.get("source_hit_count", 0), **actions})
+            progress.completed += 1
+            progress.emit(event="session_complete", day=day, counts={"candidate_count": len(result.get("candidates", [])),
+                "source_hit_count": result.get("source_hit_count", 0), **actions}, timings=timings)
     if results:
         results[-1]["book_performance"] = book_performance(connection, book_id, final_mark)
     return results
@@ -700,8 +738,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Allow confirmed signals from scans saved after next-session open to schedule hypothetical historical fills.")
     parser.add_argument("--execution-version", choices=("v1", "v2", "v3", "v4", "v5"), default="v1",
         help="Isolated execution policy; v1 remains the default.")
-    parser.add_argument("--earnings-policy", choices=("baseline", "retrospective_v1"), default="baseline",
-        help="retrospective_v1 uses recorded earnings dates as hindsight experiment data and blocks unknown dates.")
+    parser.add_argument("--earnings-policy", choices=("baseline", "retrospective_v1", "retrospective_holdings_v2"), default="baseline",
+        help="retrospective_holdings_v2 blocks entries within 3 sessions and exits next open below max(15%%, ADR14); uses recorded earnings dates")
     parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2/v3/v4/v5.")
     parser.add_argument("--auto-freeze-missing", action="store_true",
         help="Fetch only pending ticker-session pairs absent from the supplied bundle and block unresolved evidence.")
@@ -728,7 +766,7 @@ def main(argv: list[str] | None = None) -> int:
         repository=HistoryRepository(database_url=config.database_url, artifacts_dir=config.artifacts_dir, read_only=True))
     progress = ReplayProgress(total=len(sessions), apply=args.apply)
     try:
-        sources = load_range_sources(history, sessions)
+        sources = load_range_sources(history, sessions, lambda phase, seconds: progress.add_timing(phase, seconds))
     except Exception as exc:
         print(json.dumps({"ready": False, "book_id": args.book_id, "reason": "source_preflight_failed", "detail": str(exc)}))
         return 2
@@ -753,7 +791,8 @@ def main(argv: list[str] | None = None) -> int:
         "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
         "intraday_source": "frozen_tradingview_bundle" if args.execution_version in {"v2", "v3", "v4", "v5"} else None,
         "auto_freeze_missing": args.auto_freeze_missing, "earnings_policy": args.earnings_policy,
-        "source_mode": "saved_screen_runs_with_execution_only_sessions", "sessions": results}, indent=2, default=str))
+        "source_mode": "saved_screen_runs_with_execution_only_sessions", "timings_seconds": progress.phase_totals,
+        "sessions": results}, indent=2, default=str))
     return 0
 
 
