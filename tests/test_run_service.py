@@ -61,12 +61,22 @@ class RunServiceTests(unittest.TestCase):
         self.assertIn("--simulate-backdated-buys", command)
         self.assertIn("--earnings-policy", command)
         self.assertIn("retrospective_v1", command)
+        overlay_command = self.service.build_command("replay_martin_bar_retest_range", {
+            **options, "execution_version": "v5", "earnings_policy": "retrospective_holdings_v2",
+            "market_risk_overlay": "qqq_bearish_half_risk_v1"})
+        self.assertIn("--market-risk-overlay", overlay_command)
+        self.assertIn("qqq_bearish_half_risk_v1", overlay_command)
         with self.assertRaisesRegex(ValueError, "inside the configured artifacts"):
             self.service.build_command("replay_martin_bar_retest_range", {**options, "intraday_dir": "/tmp"})
         with self.assertRaisesRegex(ValueError, "required"):
             self.service.build_command("replay_rs_leader_30m_pivot", {
                 "start_date": "2026-01-01", "end_date": "2026-01-02",
                 "book_id": "rs_leader_30m_pivot_replay_test"})
+        with self.assertRaisesRegex(ValueError, "only for Martin Bar Retest"):
+            self.service.build_command("replay_rs_leader_30m_pivot", {
+                "start_date": "2026-01-01", "end_date": "2026-01-02",
+                "book_id": "rs_leader_30m_pivot_replay_test", "execution_version": "v1",
+                "market_risk_overlay": "qqq_bearish_half_risk_v1"})
         self.assertEqual(self.service.execution_modes_for_action("replay_rs_leader_30m_pivot"), ("remote",))
 
         rs_bundle = self.service.artifacts_dir / "frozen" / "rs-bars"

@@ -81,6 +81,36 @@ def xnys_sessions(start: dt.date, end: dt.date) -> list[dt.date]:
     return [label.date() for label in calendar.sessions_in_range(start.isoformat(), end.isoformat())]
 
 
+BEAR_OVERLAY = "qqq_bearish_half_risk_v1"
+
+
+def qqq_risk_state(frame: Any, day: dt.date) -> dict[str, Any]:
+    """Assess the prior completed XNYS session; missing expected bars fail closed."""
+    required = xnys_sessions(day - dt.timedelta(days=70), day - dt.timedelta(days=1))[-25:]
+    base = {"policy": BEAR_OVERLAY, "effective_session": day.isoformat(), "benchmark": "QQQ",
+            "prior_session": required[-1].isoformat() if required else None, "source": "daily_bars"}
+    if len(required) != 25 or frame is None:
+        return {**base, "status": "unassessable", "reason": "qqq_history_unavailable"}
+    closes = []
+    for session in required:
+        from src.webapp.services.martin_bar_retest_execution import bar_for
+        bar = bar_for(frame, session)
+        if bar is None:
+            return {**base, "status": "unassessable", "reason": "qqq_daily_bar_missing_or_invalid",
+                    "missing_session": session.isoformat()}
+        closes.append(bar["close"])
+    close = closes[-1]
+    sma10, sma20 = sum(closes[-10:]) / 10, sum(closes[-20:]) / 20
+    sma10_prior5, sma20_prior5 = sum(closes[-15:-5]) / 10, sum(closes[-25:-5]) / 20
+    active = close < sma10 < sma20 and sma10 < sma10_prior5 and sma20 < sma20_prior5
+    return {**base, "status": "active" if active else "inactive", "reason": None, "close": close,
+            "sma10": sma10, "sma20": sma20, "sma10_five_sessions_prior": sma10_prior5,
+            "sma20_five_sessions_prior": sma20_prior5, "observations": 25,
+            "benchmark_data_fingerprint": hashlib.sha256(json.dumps(
+                [[session.isoformat(), value] for session, value in zip(required, closes)],
+                separators=(",", ":")).encode()).hexdigest()}
+
+
 def publication_timing(day: dt.date, published_at: Any) -> tuple[bool, str]:
     import exchange_calendars as xcals
     import pandas as pd
@@ -379,6 +409,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
               exclusion_provenance: dict[str, Any] | None = None,
               execution_version: str = "martin_bar_retest_execution_v1",
               earnings_policy: str = "baseline",
+              market_risk_overlay: str = "none",
               intraday_dir: str | Path | None = None,
               auto_freeze_missing: bool = False, artifacts_dir: str | Path | None = None,
               progress: ReplayProgress | None = None) -> list[dict[str, Any]]:
@@ -395,12 +426,25 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
     execution.book_id = book_id
     execution.execution_version = execution_version
     execution.earnings_policy = earnings_policy
+    if market_risk_overlay not in {"none", BEAR_OVERLAY}:
+        raise ValueError("Unsupported market risk overlay.")
+    overlay_states: dict[dt.date, dict[str, Any]] = {}
+    if market_risk_overlay == BEAR_OVERLAY and sessions:
+        from src.market_data_access import load_many_ticker_windows
+        prior = xnys_sessions(sessions[0] - dt.timedelta(days=70), sessions[-1] - dt.timedelta(days=1))
+        as_of = sessions[-1] - dt.timedelta(days=1)
+        frame = load_many_ticker_windows(["QQQ"], as_of, len(sessions) + 40, database_url=database_url,
+            start_date=prior[0] if prior else sessions[0] - dt.timedelta(days=70)).get("QQQ")
+        overlay_states = {day: qqq_risk_state(frame, day) for day in sessions}
     if (execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"}
             and intraday_dir is None and not auto_freeze_missing):
         raise ValueError("Version 2/3/4 replay requires an --intraday-dir; individual missing bundles use daily fallback.")
     results = []
     final_mark = None
     for day in sessions:
+        risk_state = overlay_states.get(day)
+        execution.risk_overlay_state = risk_state
+        execution.risk_per_trade = 250.0 if risk_state and risk_state["status"] == "active" else 500.0
         timings: dict[str, float] = {}
         execution.timing_callback = lambda phase, seconds: timings.__setitem__(phase,
             timings.get(phase, 0.0) + max(0.0, seconds))
@@ -435,6 +479,10 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             final_mark = marks
             phase_started = time.perf_counter(); repository.set_run_metadata(run_id, {"execution_book_version": execution_version,
                 "earnings_policy": earnings_policy,
+                **({"market_risk_overlay": risk_state, "market_risk_overlay_policy": market_risk_overlay,
+                    "risk_per_trade": execution.risk_per_trade,
+                    "pending_order_resize_policy": "resize_down_only_no_upsize_after_recovery",
+                    "unassessable_policy": "block_new_entries_cancel_pending_orders"} if risk_state else {}),
                 **({"execution_management_version": ("martin_bar_retest_management_v3" if execution_version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
                    if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else {}),
@@ -447,7 +495,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             results.append({"date": day.isoformat(), "source_run_id": None, "source_hit_count": 0,
                 "new_event_count": 0, "active_event_count": 0, "zero_hit_day": None,
                 "retrospective_source_scan": None, "source_publication_timing": "no_scan_execution_only",
-                "execution_actions": actions, "category_cohorts": {}, "candidate_status_counts": {},
+                "execution_actions": actions, **({"market_risk_overlay": risk_state} if risk_state else {}),
+                "category_cohorts": {}, "candidate_status_counts": {},
                 "reason_counts": {}, "candidate_count": 0, "status": "execution_only",
                 "timings_seconds": {key: round(value, 3) for key, value in timings.items()}})
             if progress:
@@ -482,6 +531,10 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             final_mark = marks
             phase_started = time.perf_counter(); repository.set_run_metadata(result["run_id"], {"execution_book_version": execution_version,
                 "earnings_policy": earnings_policy,
+                **({"market_risk_overlay": risk_state, "market_risk_overlay_policy": market_risk_overlay,
+                    "risk_per_trade": execution.risk_per_trade,
+                    "pending_order_resize_policy": "resize_down_only_no_upsize_after_recovery",
+                    "unassessable_policy": "block_new_entries_cancel_pending_orders"} if risk_state else {}),
                 **({"execution_management_version": ("martin_bar_retest_management_v3" if execution_version == "martin_bar_retest_execution_v5" else "martin_bar_retest_management_v2"), "trim_fraction": "1/3",
                     "trim_share_rounding": "floor", "trim_target_r": 3, "additional_partial_trims": False}
                    if execution_version in {"martin_bar_retest_execution_v2", "martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"} else {}),
@@ -509,6 +562,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                         "source_publication_timing": source["replay_provenance"]["source_mode"],
                         "candidate_status_counts": dict(statuses), "reason_counts": dict(reasons),
                         "execution_actions": actions,
+                        **({"market_risk_overlay": risk_state} if risk_state else {}),
                         "category_cohorts": cohorts,
                         "candidate_count": len(result.get("candidates", [])),
                         "timings_seconds": {key: round(value, 3) for key, value in timings.items()},
@@ -692,6 +746,7 @@ def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.
                   book_id: str, database_url: str, apply: bool, simulate_backdated_buys: bool = False,
                   execution_version: str = "martin_bar_retest_execution_v1",
                   earnings_policy: str = "baseline",
+                  market_risk_overlay: str = "none",
                   intraday_dir: str | Path | None = None,
                   auto_freeze_missing: bool = False, artifacts_dir: str | Path | None = None,
                   progress: ReplayProgress | None = None) -> list[dict[str, Any]]:
@@ -712,6 +767,7 @@ def execute_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.
                             database_url=database_url, simulate_backdated_buys=simulate_backdated_buys,
                             exclusion_provenance=exclusion_provenance, execution_version=execution_version,
                             earnings_policy=earnings_policy,
+                            market_risk_overlay=market_risk_overlay,
                             intraday_dir=intraday_dir, auto_freeze_missing=auto_freeze_missing,
                             artifacts_dir=artifacts_dir, progress=progress)
         if apply:
@@ -740,6 +796,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Isolated execution policy; v1 remains the default.")
     parser.add_argument("--earnings-policy", choices=("baseline", "retrospective_v1", "retrospective_holdings_v2"), default="baseline",
         help="retrospective_holdings_v2 blocks entries within 3 sessions and exits next open below max(15%%, ADR14); uses recorded earnings dates")
+    parser.add_argument("--market-risk-overlay", choices=("none", BEAR_OVERLAY), default="none",
+        help="Optional QQQ bearish regime halves new-entry risk and fails closed when benchmark data is missing.")
     parser.add_argument("--intraday-dir", help="Directory of immutable audit JSON bundles required by v2/v3/v4/v5.")
     parser.add_argument("--auto-freeze-missing", action="store_true",
         help="Fetch only pending ticker-session pairs absent from the supplied bundle and block unresolved evidence.")
@@ -782,6 +840,7 @@ def main(argv: list[str] | None = None) -> int:
                                 simulate_backdated_buys=args.simulate_backdated_buys,
                                 execution_version=f"martin_bar_retest_execution_{args.execution_version}",
                                 earnings_policy=args.earnings_policy,
+                                market_risk_overlay=args.market_risk_overlay,
                                 intraday_dir=args.intraday_dir, auto_freeze_missing=args.auto_freeze_missing,
                                 artifacts_dir=config.artifacts_dir, progress=progress)
     print(json.dumps({"ready": True, "policy_id": POLICY_ID, "execution_policy_id": f"martin_bar_retest_execution_{args.execution_version}", "book_id": args.book_id,
@@ -791,6 +850,7 @@ def main(argv: list[str] | None = None) -> int:
         "backdated_buy_basis": "hypothetical_backdated_simulation" if args.simulate_backdated_buys else "forward_safe",
         "intraday_source": "frozen_tradingview_bundle" if args.execution_version in {"v2", "v3", "v4", "v5"} else None,
         "auto_freeze_missing": args.auto_freeze_missing, "earnings_policy": args.earnings_policy,
+        "market_risk_overlay": args.market_risk_overlay,
         "source_mode": "saved_screen_runs_with_execution_only_sessions", "timings_seconds": progress.phase_totals,
         "sessions": results}, indent=2, default=str))
     return 0

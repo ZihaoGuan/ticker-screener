@@ -10,6 +10,8 @@ import types
 import unittest
 from unittest.mock import patch
 
+import pandas as pd
+
 from scripts import replay_martin_bar_retest_range as replay
 from src.webapp.services.martin_bar_retest_service import MartinBarRetestService
 from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository
@@ -84,6 +86,37 @@ class PerformanceConnection:
 
 
 class MartinBarRetestRangeTests(unittest.TestCase):
+    def test_qqq_overlay_uses_previous_xnys_session_and_strict_bear_conditions(self):
+        day = dt.date(2026, 11, 27)  # Friday after Thanksgiving; Wednesday is the prior session.
+        sessions = [stamp.date() for stamp in pd.bdate_range(end="2026-11-25", periods=25)]
+        values = list(range(125, 100, -1))
+        frame = pd.DataFrame({"Open": values, "High": [value + 1 for value in values],
+                              "Low": [value - 1 for value in values], "Close": values,
+                              "Volume": [1000] * 25}, index=pd.to_datetime(sessions))
+        with patch.object(replay, "xnys_sessions", return_value=sessions):
+            state = replay.qqq_risk_state(frame, day)
+        self.assertEqual(state["status"], "active")
+        self.assertEqual(state["prior_session"], "2026-11-25")
+        flat = pd.DataFrame({"Open": [100.0] * 25, "High": [101.0] * 25,
+                             "Low": [99.0] * 25, "Close": [100.0] * 25,
+                             "Volume": [1000] * 25}, index=pd.to_datetime(sessions))
+        with patch.object(replay, "xnys_sessions", return_value=sessions):
+            self.assertEqual(replay.qqq_risk_state(flat, day)["status"], "inactive")
+
+    def test_qqq_overlay_missing_or_incomplete_history_fails_closed(self):
+        day = dt.date(2026, 10, 30)
+        sessions = [stamp.date() for stamp in pd.bdate_range(end="2026-10-29", periods=25)]
+        values = list(range(125, 100, -1))
+        frame = pd.DataFrame({"Open": values, "High": [value + 1 for value in values],
+                              "Low": [value - 1 for value in values], "Close": values,
+                              "Volume": [1000] * 25}, index=pd.to_datetime(sessions))
+        with patch.object(replay, "xnys_sessions", return_value=sessions):
+            self.assertEqual(replay.qqq_risk_state(None, day)["status"], "unassessable")
+            incomplete = frame.drop(pd.Timestamp(sessions[7]))
+            result = replay.qqq_risk_state(incomplete, day)
+        self.assertEqual(result["status"], "unassessable")
+        self.assertEqual(result["missing_session"], sessions[7].isoformat())
+
     def test_progress_is_flushed_structured_and_dry_run_is_provisional(self):
         class FlushTrackingStream(io.StringIO):
             flushes = 0

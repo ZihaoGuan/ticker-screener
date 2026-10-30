@@ -43,6 +43,50 @@ class LifecycleRepo(Repo):
 
 
 class MartinBarRetestExecutionTests(unittest.TestCase):
+    def test_pending_order_is_resized_before_bearish_session_fill(self):
+        day = dt.date(2026, 10, 29)
+        order = {"id": 7, "run_id": 1, "ticker": "ABC", "status": "pending", "rank": 1,
+                 "payload_json": {"status": "pending", "limit_price": 10, "max_entry": 10,
+                                  "stop": 9, "shares": 500, "risk_dollars": 500}}
+        class PendingRepo(LifecycleRepo):
+            def __init__(self):
+                super().__init__(); self.pending = [order]
+            def pending_orders(self, **_kwargs): return self.pending
+        frame = pd.DataFrame([{"Open": 9.8, "High": 10, "Low": 9.5, "Close": 9.9, "Volume": 1000}],
+                             index=pd.to_datetime([day]))
+        repo = PendingRepo()
+        execution = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {"ABC": frame})
+        execution.execution_version = "martin_bar_retest_execution_v1"
+        execution.risk_overlay_state = {"policy": "qqq_bearish_half_risk_v1", "status": "active"}
+        execution.risk_per_trade = 250
+        execution.run_session(day=day, run_id=2, candidates=[], source_on_time=True)
+        self.assertEqual(repo.updated[0][2]["status"], "pending")
+        self.assertEqual(repo.updated[0][2]["shares"], 250)
+        self.assertEqual(repo.positions[0]["payload_json"]["initial_shares"], 250)
+        self.assertLessEqual(repo.positions[0]["payload_json"]["risk_dollars"], 250)
+
+    def test_sizing_risk_budget_keeps_default_and_halves_overlay_entry(self):
+        candidate = {"limit_price": 10, "stop": 9}
+        budget = {"available_cash": 10000, "available_risk": 10000}
+        self.assertEqual(size_order(candidate, budget), 500)
+        self.assertEqual(size_order(candidate, budget, risk_budget=250), 250)
+
+    def test_unassessable_benchmark_cancels_reservations_and_blocks_new_entries(self):
+        pending = {"id": 8, "run_id": 1, "ticker": "OLD", "payload_json":
+                   {"status": "pending", "shares": 100, "limit_price": 10, "stop": 9}}
+        class PendingRepo(Repo):
+            def __init__(self): super().__init__(); self.pending = [pending]
+            def pending_orders(self, **_kwargs): return self.pending
+        repo = PendingRepo()
+        execution = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
+        execution.risk_overlay_state = {"policy": "qqq_bearish_half_risk_v1", "status": "unassessable",
+                                         "reason": "qqq_daily_bar_missing_or_invalid"}
+        candidate = {"ticker": "NEW", "status": "confirmed", "rank": 1, "max_entry": 10, "stop": 9}
+        execution.run_session(day=dt.date(2026, 10, 29), run_id=2, candidates=[candidate], source_on_time=True)
+        self.assertEqual(repo.events[0]["payload"]["reason"], "qqq_market_risk_unassessable")
+        self.assertEqual(repo.updated[-1][2]["status"], "blocked_market_risk")
+        self.assertIn("qqq_market_risk_unassessable", repo.updated[-1][2]["reasons"])
+
     def test_gap_open_at_or_below_stop_cancels_order(self):
         result = order_outcome({"stop": 9, "limit_price": 10}, {"open": 8, "low": 7})
         self.assertEqual(result, ("cancelled", None, "opened_at_or_below_stop"))

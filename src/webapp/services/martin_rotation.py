@@ -77,11 +77,12 @@ def account_budget(positions: list[dict], orders: list[dict], realized_pnl: floa
             "available_risk": max(0.0, 2_500.0 - risk)}
 
 
-def size_order(candidate: dict, budget: dict[str, float], *, price: float | None = None) -> int:
+def size_order(candidate: dict, budget: dict[str, float], *, price: float | None = None,
+               risk_budget: float = 500.0) -> int:
     limit, stop = float(price if price is not None else candidate["limit_price"]), float(candidate["stop"])
     if not 0 < stop < limit:
         return 0
-    shares = min(int(500 / (limit - stop)), int(20_000 / limit), int(max(0.0, budget["available_cash"]) / limit),
+    shares = min(int(risk_budget / (limit - stop)), int(20_000 / limit), int(max(0.0, budget["available_cash"]) / limit),
                  int(max(0.0, budget["available_risk"]) / (limit - stop)))
     if candidate.get("rs_tier") == "emerging":
         shares = min(shares, int(.001 * float((candidate.get("rs_exception_metrics") or {}).get("adv20_dollars") or 0) / limit))

@@ -408,7 +408,10 @@ class RunService:
                     RunField("auto_freeze_missing", "Auto Freeze Missing Intraday Data", "boolean"),
                     RunField("apply", "Apply", "boolean"),
                     RunField("simulate_backdated_buys", "Simulate Backdated Buys", "boolean"),
-                    RunField("earnings_policy", "Earnings Policy", "select", options=(("baseline", "Baseline"), ("retrospective_v1", "Retrospective v1"), ("retrospective_holdings_v2", "Holdings v2: block entries within 3 sessions; exit below max(15%, ADR14)")))),
+                    RunField("earnings_policy", "Earnings Policy", "select", options=(("baseline", "Baseline"), ("retrospective_v1", "Retrospective v1"), ("retrospective_holdings_v2", "Holdings v2: block entries within 3 sessions; exit below max(15%, ADR14)"))),
+                    RunField("market_risk_overlay", "Market Risk Overlay", "select",
+                        options=(("none", "None"), ("qqq_bearish_half_risk_v1", "QQQ bearish: half risk")),
+                        help_text="Uses the prior completed XNYS session. Missing QQQ coverage blocks new entries and cancels pending orders; a pending order reduced during a bearish session is not upsized after recovery.")),
             visible_in_runs=True, execution_modes=("remote",),
         ),
         "replay_rs_leader_30m_pivot": RunAction(
@@ -3246,6 +3249,8 @@ class RunService:
                 command.append("--simulate-backdated-buys")
             if normalized_options.get("earnings_policy"):
                 command.extend(["--earnings-policy", normalized_options["earnings_policy"]])
+            if normalized_options.get("market_risk_overlay") and action_id == "replay_martin_bar_retest_range":
+                command.extend(["--market-risk-overlay", normalized_options["market_risk_overlay"]])
         if normalized_options.get("lookback_days") is not None:
             command.extend(["--lookback-days", str(normalized_options["lookback_days"])])
         if normalized_options.get("min_correlation") is not None:
@@ -3536,6 +3541,12 @@ class RunService:
             if earnings_policy not in {"baseline", "retrospective_v1", "retrospective_holdings_v2"}:
                 raise ValueError("Unsupported replay earnings policy.")
             normalized["earnings_policy"] = earnings_policy
+            market_risk_overlay = str(options.get("market_risk_overlay") or "none").strip().lower()
+            if market_risk_overlay not in {"none", "qqq_bearish_half_risk_v1"}:
+                raise ValueError("Unsupported market risk overlay.")
+            if action.action_id == "replay_rs_leader_30m_pivot" and market_risk_overlay != "none":
+                raise ValueError("Market risk overlay is available only for Martin Bar Retest replay.")
+            normalized["market_risk_overlay"] = market_risk_overlay
             normalized["auto_freeze_missing"] = str(options.get("auto_freeze_missing") or "").strip().lower() in {"1", "true", "yes", "on"}
             if action.action_id == "replay_martin_bar_retest_range" and version == "v1" and normalized["auto_freeze_missing"]:
                 raise ValueError("Auto-freeze-missing requires a Martin Bar Retest execution version above v1.")

@@ -111,7 +111,7 @@ def sizing_skip_reasons(candidate: dict[str, Any], budget: dict[str, Any]) -> li
         reasons.append("insufficient_available_cash")
     if float(budget.get("available_risk") or 0) < risk_per_share:
         reasons.append("insufficient_available_risk")
-    if RISK_PER_TRADE < risk_per_share:
+    if float(budget.get("risk_per_trade") or RISK_PER_TRADE) < risk_per_share:
         reasons.append("per_trade_risk_limit")
     if MAX_NAME_VALUE < limit:
         reasons.append("max_name_value_limit")
@@ -211,6 +211,42 @@ class MartinBarRetestExecutionService:
         tickers = sorted({str(x["ticker"]).upper() for x in pending + positions + ordered})
         frames = self.bar_loader(tickers, day, 320, database_url=self.database_url) if tickers else {}
         earnings_policy = getattr(self, "earnings_policy", "baseline")
+        risk_overlay_state = getattr(self, "risk_overlay_state", None)
+        risk_per_trade = float(getattr(self, "risk_per_trade", RISK_PER_TRADE))
+        # Re-size existing reservations before evaluating today's fills. Risk limits
+        # apply to the session that can fill, not the session that created the order.
+        if risk_overlay_state and risk_overlay_state.get("status") in {"active", "unassessable"}:
+            retained_pending = []
+            for item in pending:
+                payload = item.get("payload_json") or {}
+                if risk_overlay_state.get("status") == "unassessable":
+                    self.repository.apply_event(run_id=run_id, position_id=None, ticker=item["ticker"],
+                        event_type="order_cancelled_risk_overlay", event_date=day,
+                        payload={"reason": "qqq_market_risk_unassessable", "risk_overlay": risk_overlay_state,
+                                 "status": "cancelled"}, candidate_id=item["id"], candidate_status="cancelled", strategy_id=book)
+                    continue
+                try:
+                    entry, stop = float(payload.get("limit_price") or payload["max_entry"]), float(payload["stop"])
+                    shares = min(int(payload.get("shares") or 0), int(risk_per_trade / (entry - stop)))
+                except (KeyError, TypeError, ValueError, ZeroDivisionError, OverflowError):
+                    shares = 0
+                    entry = stop = 0.0
+                if shares <= 0:
+                    self.repository.apply_event(run_id=run_id, position_id=None, ticker=item["ticker"],
+                        event_type="order_cancelled_risk_overlay", event_date=day,
+                        payload={"reason": "risk_overlay_order_unresizable", "risk_overlay": risk_overlay_state,
+                                 "status": "cancelled"}, candidate_id=item["id"], candidate_status="cancelled", strategy_id=book)
+                    continue
+                if shares < int(payload.get("shares") or 0):
+                    item["payload_json"] = {**payload, "shares": shares,
+                        "status": "pending",
+                        "risk_dollars": shares * (entry - stop), "reserved_value": shares * entry,
+                        "risk_overlay_resize": {"risk_per_trade": risk_per_trade, "date": day.isoformat(),
+                                                 "state": risk_overlay_state}}
+                    from src.webapp.services.earnings_risk import json_safe
+                    self.repository.update_candidate(item["run_id"], item["ticker"], json_safe(item["payload_json"]))
+                retained_pending.append(item)
+            pending = retained_pending
         earnings_events = {}
         if earnings_policy in {"retrospective_v1", "retrospective_holdings_v2"}:
             from src.webapp.services.earnings_risk import load_earnings
@@ -542,6 +578,12 @@ class MartinBarRetestExecutionService:
                     or (original_source_retrospective and not backdated)
                     or ticker in held_names or run_id is None):
                 continue
+            if risk_overlay_state and risk_overlay_state.get("status") == "unassessable":
+                candidate.update(status="blocked_market_risk", reasons=[*(candidate.get("reasons") or []), "qqq_market_risk_unassessable"],
+                                 risk_overlay=risk_overlay_state)
+                from src.webapp.services.earnings_risk import json_safe
+                self.repository.update_candidate(run_id, ticker, json_safe(candidate))
+                continue
             try:
                 limit, stop = float(candidate["max_entry"]), float(candidate["stop"])
             except (TypeError, ValueError):
@@ -554,7 +596,8 @@ class MartinBarRetestExecutionService:
                 self.repository.update_candidate(run_id, ticker, candidate)
                 continue
             budget = self.repository.account_state(book)
-            shares = size_order({**candidate, "limit_price": limit}, budget)
+            budget["risk_per_trade"] = risk_per_trade
+            shares = size_order({**candidate, "limit_price": limit}, budget, risk_budget=risk_per_trade)
             if not shares:
                 skip_reasons = sizing_skip_reasons(candidate, budget)
                 candidate.update({
@@ -564,9 +607,14 @@ class MartinBarRetestExecutionService:
                 continue
             payload = schedule_payload({**candidate, **({"backdated_simulation": True,
                 "source_reconstructed_later": True,
-                "fill_basis": "hypothetical_backdated_simulation"} if backdated else {})}, day=day, shares=shares)
+                "fill_basis": "hypothetical_backdated_simulation"} if backdated else {}),
+                **({"risk_overlay": risk_overlay_state, "planned_risk_budget": risk_per_trade}
+                   if risk_overlay_state else {})}, day=day, shares=shares)
             if management_version in {MANAGEMENT_V2, MANAGEMENT_V3}:
                 payload.update(management_version=management_version, trim_fraction="1/3", trim_share_rounding="floor")
+            if risk_overlay_state:
+                from src.webapp.services.earnings_risk import json_safe
+                payload = json_safe(payload)
             self.repository.update_candidate(run_id, ticker, payload)
             held_names.add(ticker)
             orders_now.append({"ticker": ticker, "payload_json": payload})
