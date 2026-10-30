@@ -204,6 +204,10 @@ class MartinBarRetestRangeTests(unittest.TestCase):
         self.assertEqual(mark["realized_pnl"], 2)
         self.assertEqual(mark["mark_coverage"], {"open_positions": 2, "marked_positions": 1,
                          "missing_tickers": ["MISS"], "status": "partial"})
+        with patch("src.market_data_access.load_many_ticker_windows", side_effect=AssertionError("frames should be reused")):
+            reused = replay.continuation_mark(MarkRepo(), "martin_range_bar_retest_test",
+                dt.date(2026, 10, 26), "test", frames={"ABC": frame})
+        self.assertEqual(reused["mark_coverage"], mark["mark_coverage"])
 
     def test_continuation_uses_next_session_and_missing_source_settles_without_new_candidates(self):
         day = dt.date(2026, 10, 23)
@@ -461,7 +465,7 @@ class MartinBarRetestRangeTests(unittest.TestCase):
                 source = sources.get(day)
                 return ([{"run_date": day.isoformat(), "id": source["source_run_id"]}] if source else [])
         with patch("scripts.run_martin_bar_retest._load_source", lambda _history, day: sources.get(day)), \
-                patch.object(replay, "publication_timing", side_effect=lambda day, _published:
+                patch.object(replay, "publication_timing", side_effect=lambda day, _published, _calendar=None:
                              (day != dates[-1], "published_after_next_open" if day != dates[-1] else "saved_before_next_open")):
             result = replay.load_range_sources(History(), dates)
             self.assertEqual(list(result), dates)

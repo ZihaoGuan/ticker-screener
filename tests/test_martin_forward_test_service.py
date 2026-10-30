@@ -14,6 +14,57 @@ from src.webapp.repositories.martin_forward_test_repository import MartinForward
 
 
 class MartinRepositorySchemaTests(unittest.TestCase):
+    def test_batched_daily_bar_provenance_uses_one_query_and_preserves_symbol_rows(self):
+        rows = [
+            {"ticker": "AAA", "source": "tradingview", "split_factor": 1, "trade_date": dt.date(2025, 1, 2),
+             "rows": 1, "first_date": dt.date(2025, 1, 2), "last_date": dt.date(2025, 1, 2),
+             "latest_split_date": None, "history_first_date": dt.date(2024, 1, 1),
+             "unknown_split_rows": 0, "unknown_source_rows": 3},
+            {"ticker": "BBB", "source": None, "split_factor": None, "trade_date": dt.date(2025, 1, 2),
+             "rows": 1, "first_date": dt.date(2025, 1, 2), "last_date": dt.date(2025, 1, 2),
+             "latest_split_date": dt.date(2024, 4, 1), "history_first_date": dt.date(2023, 1, 1),
+             "unknown_split_rows": 1, "unknown_source_rows": 1},
+        ]
+        repository = MartinForwardTestRepository(database_url="")
+        with patch.object(repository, "_rows", return_value=rows) as query:
+            result = repository.daily_bar_replay_provenance_many(["bbb", "AAA", "AAA"], dt.date(2024, 1, 1), dt.date(2025, 1, 2))
+        self.assertEqual(query.call_count, 1)
+        self.assertEqual(query.call_args.args[1], (["AAA", "BBB"], dt.date(2025, 1, 2), ["AAA", "BBB"],
+                                                   dt.date(2024, 1, 1), dt.date(2025, 1, 2)))
+        self.assertEqual(result["AAA"][0]["unknown_source_rows"], 3)
+        self.assertEqual(result["BBB"][0]["unknown_split_rows"], 1)
+
+    def test_daily_provenance_operation_count_benchmark(self):
+        symbols = [f"TICKER{index}" for index in range(200)]
+        repository = MartinForwardTestRepository(database_url="")
+        with patch.object(repository, "_rows", return_value=[]) as query:
+            for ticker in symbols:
+                repository.daily_bar_replay_provenance(ticker, dt.date(2025, 1, 1), dt.date(2025, 12, 31))
+            scalar_queries = query.call_count
+            query.reset_mock()
+            repository.daily_bar_replay_provenance_many(symbols, dt.date(2025, 1, 1), dt.date(2025, 12, 31))
+            batch_queries = query.call_count
+        self.assertEqual(scalar_queries, 200)
+        self.assertEqual(batch_queries, 1)
+
+    def test_batched_candidate_updates_skip_unchanged_rows(self):
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def executemany(self, sql, values): self.sql, self.values = sql, values
+        class Connection:
+            def __init__(self): self.cursor_instance = Cursor()
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def cursor(self): return self.cursor_instance
+        connection = Connection()
+        repository = MartinForwardTestRepository(database_url="")
+        with patch.object(repository, "_connect", return_value=connection):
+            repository.update_candidates([(17, "AAA", {"status": "pending", "reasons": [], "shares": 3})])
+        self.assertIn("IS DISTINCT FROM", connection.cursor_instance.sql)
+        self.assertEqual(len(connection.cursor_instance.values), 1)
+        self.assertEqual(connection.cursor_instance.values[0][3:5], (17, "AAA"))
+
     class FakeConnection:
         def __init__(self, rows=()): self.rows, self.executions = rows, []
         def __enter__(self): return self

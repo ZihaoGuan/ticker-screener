@@ -5,10 +5,18 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from src.webapp.services.earnings_risk import entry_decision, holdings_decision, weak_cushion_trim
+from src.webapp.services.earnings_risk import cached_sessions_to_event, entry_decision, holdings_decision, weak_cushion_trim
 
 
 class EarningsRiskTests(unittest.TestCase):
+    def test_run_local_session_distance_cache_reuses_same_date_pair(self):
+        day, event = dt.date(2026, 10, 29), dt.date(2026, 11, 3)
+        cache = {}
+        with patch("src.webapp.services.earnings_risk.sessions_to_event", return_value=2) as distance:
+            self.assertEqual(cached_sessions_to_event(day, event, cache), 2)
+            self.assertEqual(cached_sessions_to_event(day, event, cache), 2)
+        self.assertEqual(distance.call_count, 1)
+
     def test_holdings_policy_exits_below_fifteen_or_adr_and_allows_loss_exit_without_adr(self):
         day = dt.date(2026, 10, 28)
         event = {"date": dt.date(2026, 10, 30), "timing": "before_market"}

@@ -210,6 +210,7 @@ class MartinBarRetestExecutionService:
         ordered = sorted(candidates, key=lambda x: (int(x.get("rank") or 10**9), x["ticker"]))
         tickers = sorted({str(x["ticker"]).upper() for x in pending + positions + ordered})
         frames = self.bar_loader(tickers, day, 320, database_url=self.database_url) if tickers else {}
+        self.last_daily_frames = frames
         earnings_policy = getattr(self, "earnings_policy", "baseline")
         risk_overlay_state = getattr(self, "risk_overlay_state", None)
         risk_per_trade = float(getattr(self, "risk_per_trade", RISK_PER_TRADE))
@@ -217,6 +218,7 @@ class MartinBarRetestExecutionService:
         # apply to the session that can fill, not the session that created the order.
         if risk_overlay_state and risk_overlay_state.get("status") in {"active", "unassessable"}:
             retained_pending = []
+            resized_candidates = []
             for item in pending:
                 payload = item.get("payload_json") or {}
                 if risk_overlay_state.get("status") == "unassessable":
@@ -244,9 +246,15 @@ class MartinBarRetestExecutionService:
                         "risk_overlay_resize": {"risk_per_trade": risk_per_trade, "date": day.isoformat(),
                                                  "state": risk_overlay_state}}
                     from src.webapp.services.earnings_risk import json_safe
-                    self.repository.update_candidate(item["run_id"], item["ticker"], json_safe(item["payload_json"]))
+                    resized_candidates.append((item["run_id"], item["ticker"], json_safe(item["payload_json"])))
                 retained_pending.append(item)
             pending = retained_pending
+            if resized_candidates:
+                if hasattr(self.repository, "update_candidates"):
+                    self.repository.update_candidates(resized_candidates)
+                else:
+                    for run_id, ticker, payload in resized_candidates:
+                        self.repository.update_candidate(run_id, ticker, payload)
         earnings_events = {}
         if earnings_policy in {"retrospective_v1", "retrospective_holdings_v2"}:
             from src.webapp.services.earnings_risk import load_earnings
@@ -265,12 +273,14 @@ class MartinBarRetestExecutionService:
                                   "martin_bar_retest_execution_v4"}
                               else MANAGEMENT_V1)
         closed_today: set[str] = set()
+        session_distance_cache: dict[tuple[dt.date, dt.date], int | None] = {}
         for order in pending:
             ticker = str(order["ticker"]).upper()
             if earnings_policy in {"retrospective_v1", "retrospective_holdings_v2"}:
                 from src.webapp.services.earnings_risk import entry_decision, HOLDINGS_POLICY, POLICY
                 decision = entry_decision(earnings_events.get(ticker), day,
-                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY)
+                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY,
+                    distance_cache=session_distance_cache)
                 if not decision["allowed"]:
                     self.repository.apply_event(run_id=run_id, position_id=None, ticker=ticker,
                         event_type="order_blocked_earnings", event_date=day,
@@ -399,11 +409,11 @@ class MartinBarRetestExecutionService:
             position = row.get("payload_json") or {}
             original_position = position
             if earnings_policy == "retrospective_v1" and position.get("earnings_half_trim_scheduled"):
-                from src.webapp.services.earnings_risk import sessions_to_event
+                from src.webapp.services.earnings_risk import cached_sessions_to_event
                 scheduled = position["earnings_half_trim_scheduled"]
                 earnings_date = dt.date.fromisoformat(scheduled["earnings_date"])
                 expected_distance = 1 if scheduled.get("session_timing") not in {"after_market", "amc", "after-market"} else 0
-                if sessions_to_event(day, earnings_date) == expected_distance and float(bar["open"]) > float(position.get("stop") or position.get("initial_stop") or 0):
+                if cached_sessions_to_event(day, earnings_date, session_distance_cache) == expected_distance and float(bar["open"]) > float(position.get("stop") or position.get("initial_stop") or 0):
                     shares = int(position.get("remaining_shares") or 0)
                     trim = shares // 2
                     if trim:
@@ -422,17 +432,17 @@ class MartinBarRetestExecutionService:
                             payload={**scheduled, "price": price, "shares": trim, "realized_pnl": pnl,
                                 "fill_basis": "next_session_open"},
                             position_payload=position, strategy_id=book)
-                elif sessions_to_event(day, earnings_date) < expected_distance:
+                elif cached_sessions_to_event(day, earnings_date, session_distance_cache) < expected_distance:
                     position = {**position, "earnings_half_trim_scheduled": None}
             elif earnings_policy == "retrospective_v1" and earnings_events.get(ticker) is None:
                 position = {**position, "earnings_risk": {"status": "unknown", "evidence_mode": "earnings_risk_retrospective_v1", "retrospective_lookup": True}}
             earnings_open_due = False
             if earnings_policy == "retrospective_holdings_v2" and position.get("earnings_holdings_scheduled"):
-                from src.webapp.services.earnings_risk import sessions_to_event
+                from src.webapp.services.earnings_risk import cached_sessions_to_event
                 scheduled = position["earnings_holdings_scheduled"]
                 earnings_date = dt.date.fromisoformat(scheduled["earnings_date"])
                 expected_distance = 0 if str(scheduled.get("session_timing") or "").lower() in {"after_market", "amc", "after-market"} else 1
-                earnings_open_due = sessions_to_event(day, earnings_date) == expected_distance
+                earnings_open_due = cached_sessions_to_event(day, earnings_date, session_distance_cache) == expected_distance
             outcome = manage_position(position, bar, day, frames.get(ticker), management_version=management_version)
             if (earnings_policy == "retrospective_holdings_v2" and outcome and outcome[0] == "ema9_exit"
                     and float(bar["open"]) <= float(position.get("stop") or position.get("initial_stop") or 0)):
@@ -467,14 +477,14 @@ class MartinBarRetestExecutionService:
                     float(bar["open"]) > float(position.get("stop") or position.get("initial_stop") or 0)):
                 outcome = None
             if outcome is None and earnings_policy == "retrospective_holdings_v2":
-                from src.webapp.services.earnings_risk import adr14_pct, holdings_decision, sessions_to_event
+                from src.webapp.services.earnings_risk import adr14_pct, holdings_decision, cached_sessions_to_event
                 event = earnings_events.get(ticker)
                 scheduled = position.get("earnings_holdings_scheduled")
                 decision = scheduled
                 if scheduled:
                     earnings_date = dt.date.fromisoformat(scheduled["earnings_date"])
                     expected_distance = 0 if str(scheduled.get("session_timing") or "").lower() in {"after_market", "amc", "after-market"} else 1
-                    if sessions_to_event(day, earnings_date) == expected_distance:
+                    if cached_sessions_to_event(day, earnings_date, session_distance_cache) == expected_distance:
                         shares = int(position.get("remaining_shares") or 0)
                         sell_shares = shares
                         if sell_shares:
@@ -501,11 +511,11 @@ class MartinBarRetestExecutionService:
                             else:
                                 counts["trimmed"] += 1
                             continue
-                    elif sessions_to_event(day, earnings_date) < expected_distance:
+                    elif cached_sessions_to_event(day, earnings_date, session_distance_cache) < expected_distance:
                         position = {**position, "earnings_holdings_scheduled": None}
                 if not position.get("earnings_holdings_scheduled"):
                     decision = holdings_decision(event, day, float(position.get("entry_price") or 0),
-                        float(bar["close"]), adr14_pct(frames.get(ticker), day))
+                        float(bar["close"]), adr14_pct(frames.get(ticker), day), session_distance_cache)
                     if decision:
                         position = {**position, "earnings_holdings_decision": decision}
                         if decision.get("action") == "exit_all":
@@ -520,7 +530,8 @@ class MartinBarRetestExecutionService:
                 from src.webapp.services.earnings_risk import adr14_pct, weak_cushion_trim
                 event = earnings_events.get(ticker)
                 risk = weak_cushion_trim(event, day,
-                    float(position.get("entry_price") or 0), float(bar["close"]), adr14_pct(frames.get(ticker), day))
+                    float(position.get("entry_price") or 0), float(bar["close"]), adr14_pct(frames.get(ticker), day),
+                    session_distance_cache)
                 if outcome is None and risk:
                     position = {**position, "earnings_risk": risk}
                     if risk["weak"] and not position.get("earnings_half_trim_scheduled"):
@@ -557,19 +568,21 @@ class MartinBarRetestExecutionService:
         open_now = self.repository.open_positions(strategy_id=book)
         orders_now = self.repository.pending_orders(strategy_id=book)
         held_names = {str(x["ticker"]).upper() for x in open_now + orders_now}
+        candidate_updates = []
         for candidate in ordered:
             ticker = str(candidate["ticker"]).upper()
             if earnings_policy in {"retrospective_v1", "retrospective_holdings_v2"}:
                 from src.webapp.services.earnings_risk import entry_decision, HOLDINGS_POLICY, POLICY
                 decision = entry_decision(earnings_events.get(ticker), day,
-                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY)
+                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY,
+                    distance_cache=session_distance_cache)
                 candidate["earnings_risk"] = decision
                 if candidate.get("status") == "confirmed" and not decision["allowed"]:
                     candidate.update(status="blocked_earnings", reasons=[*(candidate.get("reasons") or []), decision["reason"]])
-                if run_id is not None:
-                    from src.webapp.services.earnings_risk import json_safe
-                    self.repository.update_candidate(run_id, ticker, json_safe(candidate))
                 if candidate.get("status") == "blocked_earnings":
+                    if run_id is not None:
+                        from src.webapp.services.earnings_risk import json_safe
+                        candidate_updates.append((run_id, ticker, json_safe(candidate)))
                     continue
             backdated = simulate_backdated_buys and (candidate.get("retrospective_source_scan") is True
                 or candidate.get("original_source_retrospective") is True)
@@ -577,12 +590,15 @@ class MartinBarRetestExecutionService:
             if (candidate.get("status") != "confirmed" or not (source_on_time or backdated)
                     or (original_source_retrospective and not backdated)
                     or ticker in held_names or run_id is None):
+                if earnings_policy in {"retrospective_v1", "retrospective_holdings_v2"} and run_id is not None:
+                    from src.webapp.services.earnings_risk import json_safe
+                    candidate_updates.append((run_id, ticker, json_safe(candidate)))
                 continue
             if risk_overlay_state and risk_overlay_state.get("status") == "unassessable":
                 candidate.update(status="blocked_market_risk", reasons=[*(candidate.get("reasons") or []), "qqq_market_risk_unassessable"],
                                  risk_overlay=risk_overlay_state)
                 from src.webapp.services.earnings_risk import json_safe
-                self.repository.update_candidate(run_id, ticker, json_safe(candidate))
+                candidate_updates.append((run_id, ticker, json_safe(candidate)))
                 continue
             try:
                 limit, stop = float(candidate["max_entry"]), float(candidate["stop"])
@@ -593,7 +609,7 @@ class MartinBarRetestExecutionService:
                 candidate.update({
                     "status": "blocked_capacity", "reasons": [*(candidate.get("reasons") or []), skip_reason],
                     "capacity_skip_reason": skip_reason, "capacity_skip_reasons": [skip_reason]})
-                self.repository.update_candidate(run_id, ticker, candidate)
+                candidate_updates.append((run_id, ticker, candidate))
                 continue
             budget = self.repository.account_state(book)
             budget["risk_per_trade"] = risk_per_trade
@@ -603,7 +619,7 @@ class MartinBarRetestExecutionService:
                 candidate.update({
                     "status": "blocked_capacity", "reasons": [*(candidate.get("reasons") or []), *skip_reasons],
                     "capacity_skip_reason": skip_reasons[0], "capacity_skip_reasons": skip_reasons})
-                self.repository.update_candidate(run_id, ticker, candidate)
+                candidate_updates.append((run_id, ticker, candidate))
                 continue
             payload = schedule_payload({**candidate, **({"backdated_simulation": True,
                 "source_reconstructed_later": True,
@@ -615,10 +631,21 @@ class MartinBarRetestExecutionService:
             if risk_overlay_state:
                 from src.webapp.services.earnings_risk import json_safe
                 payload = json_safe(payload)
+            # account_state() sizes the next candidate from persisted reservations.
             self.repository.update_candidate(run_id, ticker, payload)
             held_names.add(ticker)
             orders_now.append({"ticker": ticker, "payload_json": payload})
             counts["scheduled"] += 1
+        if candidate_updates:
+            if hasattr(self.repository, "update_candidates"):
+                self.repository.update_candidates(candidate_updates)
+            else:
+                for update_run_id, update_ticker, payload in candidate_updates:
+                    self.repository.update_candidate(update_run_id, update_ticker, payload)
+        self.last_profile_counters = {"daily_window_load_calls": int(bool(tickers)),
+            "daily_window_tickers": len(tickers), "session_distance_calculations": len(session_distance_cache),
+            "candidate_update_batch_rows": len(candidate_updates),
+            "immediate_reservation_updates": counts["scheduled"]}
         counts["intraday_fallback_reasons"] = fallback_reasons
         counts["intraday_fallback_details"] = fallback_details
         return counts

@@ -486,6 +486,50 @@ class MartinBarRetestExecutionTests(unittest.TestCase):
                             candidates=[candidate], source_on_time=True)
         self.assertNotEqual(repo.updated[0][2].get("status"), "blocked_capacity")
 
+    def test_competing_candidates_keep_persisted_reservation_sizing_order(self):
+        class ReservationRepo(Repo):
+            def __init__(self):
+                super().__init__(); self.reservations = []
+            def pending_orders(self, **_kwargs): return list(self.reservations)
+            def account_state(self, _book):
+                reserved_cash = sum(float(item["payload_json"].get("reserved_value") or 0) for item in self.reservations)
+                reserved_risk = sum(float(item["payload_json"].get("risk_dollars") or 0) for item in self.reservations)
+                return {"available_cash": 10000 - reserved_cash, "available_risk": max(0, 500 - reserved_risk)}
+            def update_candidate(self, run_id, ticker, payload):
+                super().update_candidate(run_id, ticker, payload)
+                if payload.get("status") == "pending":
+                    self.reservations.append({"run_id": run_id, "ticker": ticker, "payload_json": payload})
+
+        repo = ReservationRepo()
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
+        service.book_id = "martin_range_bar_retest_competing"
+        candidates = [{"ticker": ticker, "rank": rank, "status": "confirmed", "stop": 9.0,
+                       "max_entry": 10.0, "reasons": []} for rank, ticker in enumerate(("AAA", "BBB"), 1)]
+        result = service.run_session(day=dt.date(2026, 10, 19), run_id=42,
+            candidates=candidates, source_on_time=True)
+        self.assertEqual(result["scheduled"], 1)
+        self.assertEqual([item["ticker"] for item in repo.reservations], ["AAA"])
+        self.assertEqual(repo.reservations[0]["payload_json"]["shares"], 500)
+        self.assertEqual(candidates[1]["capacity_skip_reasons"], ["insufficient_available_risk"])
+
+    def test_earnings_metadata_batch_does_not_overwrite_new_pending_reservation(self):
+        class BatchRepo(Repo):
+            def __init__(self): super().__init__(); self.batch_updates = []
+            def _connect(self): return None
+            def update_candidates(self, updates): self.batch_updates.extend(updates)
+        repo = BatchRepo()
+        service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_a, **_k: {})
+        service.book_id = "martin_range_bar_retest_earnings_batch"
+        service.earnings_policy = "retrospective_v1"
+        candidate = {"ticker": "ABC", "rank": 1, "status": "confirmed", "stop": 9.0,
+                     "max_entry": 10.0, "reasons": []}
+        with patch("src.webapp.services.earnings_risk.load_earnings", return_value={}), \
+             patch("src.webapp.services.earnings_risk.entry_decision", return_value={"allowed": True, "status": "known"}):
+            service.run_session(day=dt.date(2026, 10, 19), run_id=42,
+                candidates=[candidate], source_on_time=True)
+        self.assertEqual(repo.updated[0][2]["status"], "pending")
+        self.assertEqual(repo.batch_updates, [])
+
     def test_capacity_skip_is_saved_with_explicit_reason(self):
         positions = [{"ticker": f"T{i}", "payload_json": {"entry_price": 10, "stop": 9,
                       "remaining_shares": 100}} for i in range(10)]

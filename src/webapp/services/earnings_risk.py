@@ -46,17 +46,28 @@ def sessions_to_event(day: dt.date, event_date: dt.date) -> int | None:
     sessions = [stamp.date() for stamp in calendar.sessions]
     start_index = next((index for index, session in enumerate(sessions) if session >= day), None)
     event_session = next((session for session in sessions if session >= event_date), None)
-    if start_index is None or event_session is None or event_session < day:
-        return None
-    return sessions.index(event_session) - start_index
+    result = (None if start_index is None or event_session is None or event_session < day else
+              sessions.index(event_session) - start_index)
+    return result
 
 
-def entry_decision(event: dict[str, Any] | None, day: dt.date, *, evidence_mode: str = POLICY) -> dict[str, Any]:
+def cached_sessions_to_event(day: dt.date, event_date: dt.date,
+                             cache: dict[tuple[dt.date, dt.date], int | None]) -> int | None:
+    key = (day, event_date)
+    if key not in cache:
+        if len(cache) >= 512:
+            cache.clear()
+        cache[key] = sessions_to_event(day, event_date)
+    return cache[key]
+
+
+def entry_decision(event: dict[str, Any] | None, day: dt.date, *, evidence_mode: str = POLICY,
+                   distance_cache: dict[tuple[dt.date, dt.date], int | None] | None = None) -> dict[str, Any]:
     if not event:
         return {"allowed": True, "status": "unknown", "reason": "earnings_date_unknown",
                 "evidence_mode": evidence_mode, "retrospective_lookup": True}
     event_date = event["date"] if isinstance(event["date"], dt.date) else dt.date.fromisoformat(str(event["date"])[:10])
-    distance = sessions_to_event(day, event_date)
+    distance = cached_sessions_to_event(day, event_date, distance_cache) if distance_cache is not None else sessions_to_event(day, event_date)
     if distance is None:
         return {"allowed": True, "status": "unassessable", "reason": "earnings_session_unavailable",
                 "earnings_date": event_date.isoformat(), "session_timing": event.get("timing"),
@@ -69,14 +80,15 @@ def entry_decision(event: dict[str, Any] | None, day: dt.date, *, evidence_mode:
 
 
 def weak_cushion_trim(event: dict[str, Any] | None, day: dt.date, entry_price: float,
-                      close: float, adr14_pct: float | None) -> dict[str, Any] | None:
+                      close: float, adr14_pct: float | None,
+                      distance_cache: dict[tuple[dt.date, dt.date], int | None] | None = None) -> dict[str, Any] | None:
     if not event:
         return None
     event_date = event["date"] if isinstance(event["date"], dt.date) else dt.date.fromisoformat(str(event["date"])[:10])
     timing = str(event.get("timing") or "").lower()
     # A next-open order must be placed early enough to fill before a BMO/AMC release.
     lead = 1 if timing in {"after_market", "amc", "after-market"} else 2
-    distance = sessions_to_event(day, event_date)
+    distance = cached_sessions_to_event(day, event_date, distance_cache) if distance_cache is not None else sessions_to_event(day, event_date)
     if distance is None:
         return {"weak": False, "status": "unassessable_earnings_session", "reason": "earnings_session_unavailable",
                 "earnings_date": event_date.isoformat(), "session_timing": event.get("timing"),
@@ -98,7 +110,8 @@ def weak_cushion_trim(event: dict[str, Any] | None, day: dt.date, entry_price: f
 
 
 def holdings_decision(event: dict[str, Any] | None, day: dt.date, entry_price: float,
-                      close: float, adr14: float | None) -> dict[str, Any] | None:
+                      close: float, adr14: float | None,
+                      distance_cache: dict[tuple[dt.date, dt.date], int | None] | None = None) -> dict[str, Any] | None:
     """Choose next-open earnings exposure action from completed close data."""
     base = {"evidence_mode": HOLDINGS_POLICY, "retrospective_lookup": True,
             "decision_date": day.isoformat(), "execution": "next_session_open"}
@@ -108,7 +121,7 @@ def holdings_decision(event: dict[str, Any] | None, day: dt.date, entry_price: f
     event_date = event["date"] if isinstance(event["date"], dt.date) else dt.date.fromisoformat(str(event["date"])[:10])
     timing = str(event.get("timing") or "").lower()
     lead = 1 if timing in {"after_market", "amc", "after-market"} else 2
-    distance = sessions_to_event(day, event_date)
+    distance = cached_sessions_to_event(day, event_date, distance_cache) if distance_cache is not None else sessions_to_event(day, event_date)
     if distance is None:
         return {**base, "status": "unassessable_earnings_session", "earnings_known": True,
                 "adr14_known": adr14 is not None, "action": "normal_exits",

@@ -338,7 +338,27 @@ class MartinForwardTestRepository:
         with connection:
             with connection.cursor() as cursor:
                 cursor.execute("""UPDATE martin_forward_candidates SET status=%s,reasons_json=%s::jsonb,payload_json=%s::jsonb
-                    WHERE run_id=%s AND ticker=%s""", (payload["status"], json.dumps(payload.get("reasons") or []), json.dumps(payload), run_id, ticker))
+                    WHERE run_id=%s AND ticker=%s
+                    AND (status IS DISTINCT FROM %s OR reasons_json IS DISTINCT FROM %s::jsonb OR payload_json IS DISTINCT FROM %s::jsonb)""",
+                    (payload["status"], json.dumps(payload.get("reasons") or []), json.dumps(payload), run_id, ticker,
+                     payload["status"], json.dumps(payload.get("reasons") or []), json.dumps(payload)))
+
+    def update_candidates(self, updates: list[tuple[int, str, dict[str, Any]]]) -> None:
+        """Apply changed candidate payloads in the caller's transaction."""
+        if not updates:
+            return
+        connection = self._connect()
+        if connection is None:
+            return
+        values = [(payload["status"], json.dumps(payload.get("reasons") or []), json.dumps(payload), run_id, ticker)
+                  for run_id, ticker, payload in updates]
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.executemany("""UPDATE martin_forward_candidates
+                    SET status=%s,reasons_json=%s::jsonb,payload_json=%s::jsonb
+                    WHERE run_id=%s AND ticker=%s
+                    AND (status IS DISTINCT FROM %s OR reasons_json IS DISTINCT FROM %s::jsonb OR payload_json IS DISTINCT FROM %s::jsonb)""",
+                    [(*row, row[0], row[1], row[2]) for row in values])
 
     def fill_order(self, *, candidate_id: int, run_id: int, ticker: str, event_date: Any,
                    position_payload: dict[str, Any], event_payload: dict[str, Any], strategy_id: str = "martin_daily_v1") -> int | None:
@@ -543,6 +563,30 @@ class MartinForwardTestRepository:
             FROM daily_bars WHERE ticker=%s AND trade_date BETWEEN %s AND %s
             ORDER BY trade_date""", (ticker.upper(), end_date, ticker.upper(), end_date, ticker.upper(), end_date,
                                       ticker.upper(), end_date, ticker.upper(), start_date, end_date))
+
+    def daily_bar_replay_provenance_many(self, tickers: list[str], start_date: Any,
+                                         end_date: Any) -> dict[str, list[dict[str, Any]]]:
+        """Fetch replay provenance for a ticker set with one statement."""
+        symbols = sorted({str(ticker).upper() for ticker in tickers if ticker})
+        if not symbols:
+            return {}
+        rows = self._rows("""WITH bounds AS (
+                SELECT ticker,MAX(trade_date) FILTER (WHERE split_factor IS NOT NULL AND split_factor<>1) AS latest_split_date,
+                    MIN(trade_date) AS history_first_date,
+                    COUNT(*) FILTER (WHERE split_factor IS NULL OR split_factor<=0) AS unknown_split_rows,
+                    COUNT(*) FILTER (WHERE source IS NULL OR source NOT IN ('tradingview','tradingview_screener','massive','massive_api',
+                        'yahoo','yahoo_finance','yfinance','yfinance+nasdaq','yfinance_historical_repair')) AS unknown_source_rows
+                FROM daily_bars WHERE ticker=ANY(%s) AND trade_date<=%s GROUP BY ticker
+            )
+            SELECT d.ticker,d.source,d.split_factor,d.trade_date,1 AS rows,d.trade_date AS first_date,d.trade_date AS last_date,
+                b.latest_split_date,b.history_first_date,b.unknown_split_rows,b.unknown_source_rows
+            FROM daily_bars d JOIN bounds b USING (ticker)
+            WHERE d.ticker=ANY(%s) AND d.trade_date BETWEEN %s AND %s
+            ORDER BY d.ticker,d.trade_date""", (symbols, end_date, symbols, start_date, end_date))
+        result: dict[str, list[dict[str, Any]]] = {ticker: [] for ticker in symbols}
+        for row in rows:
+            result[str(row.pop("ticker")).upper()].append(row)
+        return result
 
     def _rows(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         connection = self._connect()

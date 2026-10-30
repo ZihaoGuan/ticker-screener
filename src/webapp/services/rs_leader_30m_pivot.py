@@ -335,6 +335,7 @@ def auto_freeze_missing_pivot(*, artifacts_dir: str | Path, book_id: str,
     from pathlib import Path
     from scripts.audit_martin_intraday_execution import (digest, fetch_safely,
         fetch_with_exchange_fallback, load_ticker_exchange, normalize_exchange)
+    from src.webapp.services.martin_intraday_raw_cache import RawIntradayCache
 
     ticker = str(order.get("ticker") or "").upper()
     payload = order.get("payload_json") or {}
@@ -366,7 +367,18 @@ def auto_freeze_missing_pivot(*, artifacts_dir: str | Path, book_id: str,
         exchange = load_ticker_exchange(lookup, ticker)
     requested = f"{normalize_exchange(exchange)}:{ticker}"
     client_dir = __import__("os").environ.get("TRADINGVIEW_CLIENT_DIR") or "/opt/tradingview/node_modules/@mathieuc/tradingview"
-    data = fetch_with_exchange_fallback(client_dir, ticker, exchange, day_text, "30", fetcher=fetch_safely)
+    raw_cache = RawIntradayCache(Path(artifacts_dir) / "martin_intraday_raw_cache")
+    identity = raw_cache.identity(provider="TradingView", requested_symbol=requested, date=day_text,
+        timeframe="30", session="regular", adjustment="splits", symbol_resolution_mode="exchange_fallback")
+    def validate_raw(payload: dict[str, Any]) -> bool:
+        try:
+            frozen_intraday_bars(payload, day, 30)
+            return True
+        except (ValueError, KeyError, TypeError, OverflowError):
+            return False
+    data = raw_cache.get_or_fetch(identity,
+        lambda: fetch_with_exchange_fallback(client_dir, ticker, exchange, day_text, "30", fetcher=fetch_safely),
+        validator=validate_raw)
     if not data or data.get("error_code"):
         return None
     metadata = data.get("metadata") or {}
@@ -392,6 +404,7 @@ def auto_freeze_missing_pivot(*, artifacts_dir: str | Path, book_id: str,
     document = {"schema": "rs_leader_30m_pivot_audit_v1", "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "read_only": True, "book_id": book_id, "from_date": day_text, "to_date": day_text,
         "provider": "TradingView", "timeframe": "30m", "session": "regular", "adjustment": "splits",
+        "raw_intraday_cache": dict(raw_cache.stats),
         "simulate_backdated_buys": simulate_backdated_buys,
         "backdated_buy_basis": "hypothetical_backdated_simulation" if simulate_backdated_buys else "forward_safe",
         "auto_freeze_overlay": True, "records": [record]}
@@ -547,6 +560,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
         source = sources.get(day)
         if source is None:
             raise ValueError(f"Missing persisted source run for {day}; replay is all-or-nothing.")
+        session_distance_cache: dict[tuple[dt.date, dt.date], int | None] = {}
         active_orders = repo.pending_candidates(before=day, strategy_id=book_id)
         positions = repo.open_positions(strategy_id=book_id)
         candidate_tickers = [str(x.get("ticker") or "").upper() for x in source.get("hits", [])]
@@ -567,14 +581,21 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             from src.webapp.services.earnings_risk import entry_decision, HOLDINGS_POLICY, POLICY
             for candidate in new_candidates:
                 decision = entry_decision(earnings_events.get(candidate["ticker"]), day,
-                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY)
+                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY,
+                    distance_cache=session_distance_cache)
                 candidate["earnings_risk"] = decision
                 if candidate.get("status") == "pending" and not decision["allowed"]:
                     candidate.update(status="blocked_earnings", reasons=[*(candidate.get("reasons") or []), decision["reason"]])
+        if hasattr(repo, "daily_bar_replay_provenance_many"):
+            provenance_by_ticker = repo.daily_bar_replay_provenance_many(
+                [candidate["ticker"] for candidate in new_candidates], sessions[0], day)
+        else:
+            provenance_by_ticker = {candidate["ticker"]: repo.daily_bar_replay_provenance(
+                candidate["ticker"], sessions[0], day) for candidate in new_candidates}
         for rank, candidate in enumerate(new_candidates, 1):
             candidate["rank"] = rank
-            candidate["setup"]["daily_bar_provenance"] = _json_safe(repo.daily_bar_replay_provenance(
-                candidate["ticker"], sessions[0], day))
+            candidate["setup"]["daily_bar_provenance"] = _json_safe(
+                provenance_by_ticker.get(candidate["ticker"], []))
         finish_phase("candidate_logic_and_provenance")
         fingerprint = hashlib.sha256(json.dumps({"source": source.get("source_fingerprint"), "date": day.isoformat(),
             "policy": POLICY_ID, "candidates": new_candidates}, sort_keys=True, default=str).encode()).hexdigest()
@@ -613,18 +634,27 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                 frozen, frozen_error = {}, str(exc)
         finish_phase("intraday_cache_load_and_validation")
         phase_started = time.perf_counter()
+        freeze_overlays = {}
+        prefetch_pair_count = 0
         if auto_freeze_missing and artifacts_dir is not None and frozen_error is None:
-            for order in active_orders:
+            missing_orders = [order for order in active_orders
+                if str(order.get("ticker") or "").upper() not in frozen or
+                   frozen[str(order.get("ticker") or "").upper()].get("freeze_error")]
+            prefetch_pair_count = len(missing_orders)
+            def freeze_one(order):
                 ticker = str(order.get("ticker") or "").upper()
-                if ticker not in frozen or frozen[ticker].get("freeze_error"):
-                    try:
-                        overlay = auto_freeze_missing_pivot(artifacts_dir=artifacts_dir,
-                            book_id=book_id, day=day, order=order, daily=daily_bars.get(ticker),
-                            database_url=database_url, simulate_backdated_buys=simulate_backdated_buys)
-                    except Exception:
-                        overlay = None
-                    if overlay is not None:
-                        frozen[ticker] = overlay
+                try:
+                    overlay = auto_freeze_missing_pivot(artifacts_dir=artifacts_dir,
+                        book_id=book_id, day=day, order=order, daily=daily_bars.get(ticker),
+                        database_url=database_url, simulate_backdated_buys=simulate_backdated_buys)
+                except Exception:
+                    overlay = None
+                return order.get("id"), overlay
+            if missing_orders:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=min(4, len(missing_orders))) as executor:
+                    freeze_overlays = {order_id: overlay for order_id, overlay in executor.map(freeze_one, missing_orders)
+                                       if overlay is not None}
         finish_phase("intraday_auto_freeze")
         phase_started = time.perf_counter()
         def evaluate_pending_order(order: dict[str, Any]) -> dict[str, Any]:
@@ -632,13 +662,16 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             if earnings_policy in {"retrospective_v1", "retrospective_holdings_v2"}:
                 from src.webapp.services.earnings_risk import entry_decision, HOLDINGS_POLICY, POLICY
                 decision = entry_decision(earnings_events.get(ticker), day,
-                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY)
+                    evidence_mode=HOLDINGS_POLICY if earnings_policy == "retrospective_holdings_v2" else POLICY,
+                    distance_cache=session_distance_cache)
                 if not decision["allowed"]:
                     return {**decision, "status": "cancelled", "reason": decision["reason"]}
             payload = order.get("payload_json") or {}
             if is_leveraged_or_inverse_ticker(ticker):
                 return {"status": "cancelled", "reason": "leveraged_or_inverse_fund"}
             bundle = frozen.get(ticker)
+            if bundle is None:
+                bundle = freeze_overlays.get(order.get("id"))
             try:
                 if bundle is None:
                     raise ValueError(frozen_error or "frozen_30m_bundle_missing")
@@ -745,11 +778,11 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                 continue
             position = position_row.get("payload_json") or {}
             if earnings_policy == "retrospective_v1" and position.get("earnings_half_trim_scheduled"):
-                from src.webapp.services.earnings_risk import sessions_to_event
+                from src.webapp.services.earnings_risk import cached_sessions_to_event
                 scheduled = position["earnings_half_trim_scheduled"]
                 earnings_date = dt.date.fromisoformat(scheduled["earnings_date"])
                 expected_distance = 1 if scheduled.get("session_timing") not in {"after_market", "amc", "after-market"} else 0
-                if sessions_to_event(day, earnings_date) == expected_distance and float(bar["open"]) > float(position.get("stop") or position.get("initial_stop") or 0):
+                if cached_sessions_to_event(day, earnings_date, session_distance_cache) == expected_distance and float(bar["open"]) > float(position.get("stop") or position.get("initial_stop") or 0):
                     shares = int(position.get("remaining_shares") or 0)
                     trim = shares // 2
                     if trim:
@@ -768,7 +801,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                             payload={**scheduled, "price": price, "shares": trim, "realized_pnl": pnl,
                                 "fill_basis": "next_session_open"},
                             position_payload=position, strategy_id=book_id)
-                elif sessions_to_event(day, earnings_date) < expected_distance:
+                elif cached_sessions_to_event(day, earnings_date, session_distance_cache) < expected_distance:
                     position = {**position, "earnings_half_trim_scheduled": None}
             elif earnings_policy == "retrospective_v1" and earnings_events.get(ticker) is None:
                 position = {**position, "earnings_risk": {"status": "unknown",
@@ -779,7 +812,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                 scheduled = position["earnings_holdings_scheduled"]
                 earnings_date = dt.date.fromisoformat(scheduled["earnings_date"])
                 expected_distance = 0 if str(scheduled.get("session_timing") or "").lower() in {"after_market", "amc", "after-market"} else 1
-                earnings_open_due = sessions_to_event(day, earnings_date) == expected_distance
+                earnings_open_due = cached_sessions_to_event(day, earnings_date, session_distance_cache) == expected_distance
             outcome = manage_position(position, bar, day,
                 frames.get(ticker), management_version=management_version)
             if (earnings_policy == "retrospective_holdings_v2" and outcome and outcome[0] == "ema9_exit"
@@ -810,12 +843,12 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                     float(bar["open"]) > float(position.get("stop") or position.get("initial_stop") or 0)):
                 outcome = None
             if outcome is None and earnings_policy == "retrospective_holdings_v2":
-                from src.webapp.services.earnings_risk import adr14_pct, holdings_decision, sessions_to_event
+                from src.webapp.services.earnings_risk import adr14_pct, holdings_decision, cached_sessions_to_event
                 scheduled = position.get("earnings_holdings_scheduled")
                 if scheduled:
                     earnings_date = dt.date.fromisoformat(scheduled["earnings_date"])
                     expected_distance = 0 if str(scheduled.get("session_timing") or "").lower() in {"after_market", "amc", "after-market"} else 1
-                    if sessions_to_event(day, earnings_date) == expected_distance:
+                    if cached_sessions_to_event(day, earnings_date, session_distance_cache) == expected_distance:
                         shares = int(position.get("remaining_shares") or 0)
                         sell_shares = shares
                         if sell_shares:
@@ -838,12 +871,12 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                                 position_payload=updated, close_position=closing, strategy_id=book_id)
                             actions["exited" if closing else "trimmed"] += 1
                             continue
-                    elif sessions_to_event(day, earnings_date) < expected_distance:
+                    elif cached_sessions_to_event(day, earnings_date, session_distance_cache) < expected_distance:
                         position = {**position, "earnings_holdings_scheduled": None}
                 if not position.get("earnings_holdings_scheduled"):
                     decision = holdings_decision(earnings_events.get(ticker), day,
                         float(position.get("entry_price") or 0), float(bar["close"]),
-                        adr14_pct(frames.get(ticker), day))
+                        adr14_pct(frames.get(ticker), day), session_distance_cache)
                     if decision:
                         position = {**position, "earnings_holdings_decision": decision}
                         if decision.get("action") == "exit_all":
@@ -858,7 +891,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                 earnings_event = earnings_events.get(ticker)
                 risk = weak_cushion_trim(earnings_event, day,
                     float(position.get("entry_price") or 0), float(bar["close"]),
-                    adr14_pct(frames.get(ticker), day))
+                    adr14_pct(frames.get(ticker), day), session_distance_cache)
                 if risk:
                     position = {**position, "earnings_risk": risk}
                     if risk["weak"] and not position.get("earnings_half_trim_scheduled"):
@@ -873,7 +906,7 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
                     event_type=event_type, event_date=day, payload={**event, **management_metadata(pivot_management_version)},
                     position_payload=updated, close_position=closed, strategy_id=book_id)
                 actions["trimmed" if event_type == "trim_3r" else "exited"] += int(closed or event_type == "trim_3r")
-        marks = continuation_mark(repo, book_id, day, database_url)
+        marks = continuation_mark(repo, book_id, day, database_url, frames=frames)
         finish_phase("daily_history_load_and_mark")
         phase_started = time.perf_counter()
         repo.set_run_metadata(run_id, {**summary, "execution_actions": actions,
@@ -886,6 +919,11 @@ def execute_pivot_range(connection: Any, *, sessions: list[Any], sources: dict[A
             "source_hit_count": len(source.get("hits") or []), "candidate_count": len(new_candidates),
             "candidate_status_counts": {state: sum(x["status"] == state for x in new_candidates)
                 for state in sorted({x["status"] for x in new_candidates})}, "execution_actions": actions,
+            "profile_counters": {"daily_window_load_calls": int(bool(tickers)), "daily_window_tickers": len(tickers),
+                "daily_provenance_queries": int(bool(new_candidates)),
+                "daily_provenance_rows": sum(len(rows) for rows in provenance_by_ticker.values()),
+                "intraday_prefetch_pairs": prefetch_pair_count,
+                "session_distance_calculations": len(session_distance_cache)},
             "timings_seconds": {key: round(value, 3) for key, value in timings.items()}})
         if progress_callback:
             progress_callback("session_complete", day, {"candidate_count": len(new_candidates),

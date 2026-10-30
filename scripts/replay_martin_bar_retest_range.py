@@ -111,10 +111,10 @@ def qqq_risk_state(frame: Any, day: dt.date) -> dict[str, Any]:
                 separators=(",", ":")).encode()).hexdigest()}
 
 
-def publication_timing(day: dt.date, published_at: Any) -> tuple[bool, str]:
+def publication_timing(day: dt.date, published_at: Any, calendar: Any = None) -> tuple[bool, str]:
     import exchange_calendars as xcals
     import pandas as pd
-    calendar = xcals.get_calendar("XNYS", start=day - dt.timedelta(days=5), end=day + dt.timedelta(days=20))
+    calendar = calendar or xcals.get_calendar("XNYS", start=day - dt.timedelta(days=5), end=day + dt.timedelta(days=20))
     following = calendar.next_session(day.isoformat()).date()
     published = pd.Timestamp(published_at)
     if published.tzinfo is None:
@@ -127,6 +127,14 @@ def load_range_sources(history: Any, sessions: list[dt.date], timing_callback=No
     from scripts.run_martin_bar_retest import _load_source
 
     sources = {}
+    calendar = None
+    if sessions:
+        try:
+            import exchange_calendars as xcals
+            calendar = xcals.get_calendar("XNYS", start=sessions[0] - dt.timedelta(days=5),
+                                           end=sessions[-1] + dt.timedelta(days=20))
+        except ImportError:
+            pass
     for day in sessions:
         started = time.perf_counter()
         runs = history.list_runs(strategy_id=SOURCE_ID, start_date=day, end_date=day, limit=100)
@@ -146,7 +154,8 @@ def load_range_sources(history: Any, sessions: list[dt.date], timing_callback=No
             raise ValueError(f"Source run {source.get('source_run_id')} hit count does not match loaded hits.")
         if not source.get("created_at") or not source.get("source_fingerprint"):
             raise ValueError(f"Source run {source.get('source_run_id')} is missing publication or fingerprint provenance.")
-        retrospective, timing = publication_timing(day, source["created_at"])
+        retrospective, timing = (publication_timing(day, source["created_at"], calendar) if calendar is not None
+                                 else publication_timing(day, source["created_at"]))
         source["replay_provenance"] = {
             "origin": "historical_replay",
             "source_mode": timing,
@@ -220,6 +229,26 @@ def frozen_intraday_for(directory: str | Path | None, day: dt.date) -> dict[str,
     return result
 
 
+def _raw_candle_valid(candle: dict[str, Any]) -> bool:
+    from src.webapp.services.rs_leader_30m_pivot import _valid_bar
+    try:
+        return int(candle.get("time")) > 0 and _valid_bar(candle)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _raw_candles_complete(data: dict[str, Any], day: dt.date, timeframe: str) -> bool:
+    from scripts.audit_martin_intraday_execution import session_starts
+    candles = data.get("candles") or []
+    try:
+        timestamps = [int(candle["time"]) for candle in candles]
+        expected = session_starts(day.isoformat(), 1 if timeframe == "1" else 15)
+        return bool(expected) and len(timestamps) == len(expected) and set(timestamps) == set(expected) and all(
+            isinstance(candle, dict) and _raw_candle_valid(candle) for candle in candles)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
 def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: list[dict[str, Any]],
                               database_url: str, artifacts_dir: str | Path,
                               client_dir: str | Path | None = None, daily_loader=None, fetcher=None,
@@ -227,6 +256,7 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
     """Freeze the next session's pending-order inputs before opening the write transaction."""
     from scripts.audit_martin_intraday_execution import (classify, digest, fetch_safely, load_daily,
         load_ticker_exchange, normalize_exchange, fetch_with_exchange_fallback)
+    from src.webapp.services.martin_intraday_raw_cache import RawIntradayCache
     tickers: dict[str, list[dict[str, Any]]] = {}
     for row in pending_orders:
         ticker = str(row.get("ticker") or "").upper()
@@ -247,6 +277,7 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
                      "/opt/tradingview/node_modules/@mathieuc/tradingview")
     fetch_data = fetcher or fetch_safely
     resolve_symbols = execution_version in {"martin_bar_retest_execution_v3", "martin_bar_retest_execution_v4", "martin_bar_retest_execution_v5"}
+    raw_cache = RawIntradayCache(Path(artifacts_dir) / "martin_intraday_raw_cache")
     connection = None
     if daily_loader is None:
         try:
@@ -257,20 +288,54 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
             connection = None
     records = []
     try:
+        prepared = {}
         for ticker, orders in sorted(tickers.items()):
             try:
                 exchange = load_ticker_exchange(connection, ticker) if connection is not None else None
             except Exception:
                 exchange = None
             requested = f"{normalize_exchange(exchange)}:{ticker}"
-            injected_fetcher = (lambda _client, symbol, date, timeframe, **_kwargs:
-                fetcher(client_dir, symbol, date, timeframe)) if fetcher else None
-            data = fetch_with_exchange_fallback(client_dir, ticker, exchange, day.isoformat(), "15",
-                fetcher=injected_fetcher or fetch_data, resolve_symbols=resolve_symbols)
             try:
                 daily = load_daily(connection, ticker, day) if connection is not None else (daily_loader(ticker, day) if daily_loader else None)
             except Exception:
                 daily = None
+            prepared[ticker] = {"orders": orders, "exchange": exchange, "requested": requested, "daily": daily}
+
+        def fetch_primary(item):
+            ticker, context = item
+            exchange, requested = context["exchange"], context["requested"]
+            injected_fetcher = (lambda _client, symbol, date, timeframe, **_kwargs:
+                fetcher(client_dir, symbol, date, timeframe)) if fetcher else None
+            identity = raw_cache.identity(provider="TradingView", requested_symbol=requested, date=day.isoformat(),
+                timeframe="15", session="regular", adjustment="splits",
+                symbol_resolution_mode="resolve_symbols" if resolve_symbols else "exchange_fallback")
+            data = raw_cache.get_or_fetch(identity,
+                lambda: fetch_with_exchange_fallback(client_dir, ticker, exchange, day.isoformat(), "15",
+                    fetcher=injected_fetcher or fetch_data, resolve_symbols=resolve_symbols),
+                validator=lambda value: _raw_candles_complete(value, day, "15"))
+            return ticker, data
+
+        from concurrent.futures import ThreadPoolExecutor
+        prefetched = {}
+        if prepared:
+            with ThreadPoolExecutor(max_workers=min(4, len(prepared))) as executor:
+                for ticker, data in executor.map(fetch_primary, sorted(prepared.items())):
+                    prefetched[ticker] = data
+
+        for ticker, context in sorted(prepared.items()):
+            orders, exchange = context["orders"], context["exchange"]
+            requested, daily = context["requested"], context["daily"]
+            data = prefetched.get(ticker)
+            injected_fetcher = (lambda _client, symbol, date, timeframe, **_kwargs:
+                fetcher(client_dir, symbol, date, timeframe)) if fetcher else None
+            def fetch_cached(timeframe: str, symbol: str = requested, fetch_exchange: str | None = exchange):
+                identity = raw_cache.identity(provider="TradingView", requested_symbol=symbol, date=day.isoformat(),
+                    timeframe=timeframe, session="regular", adjustment="splits",
+                    symbol_resolution_mode="resolve_symbols" if resolve_symbols else "exchange_fallback")
+                return raw_cache.get_or_fetch(identity,
+                    lambda: fetch_with_exchange_fallback(client_dir, ticker, fetch_exchange, day.isoformat(), timeframe,
+                        fetcher=injected_fetcher or fetch_data, resolve_symbols=resolve_symbols),
+                    validator=lambda value: _raw_candles_complete(value, day, timeframe))
             if data is None or data.get("error_code"):
                 resolution = (data or {}).get("symbol_resolution") or {"requested_symbol": requested,
                     "resolved_symbol": (data or {}).get("resolved_symbol"),
@@ -292,10 +357,11 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
                 evaluations = [{"classification": "provider_data_invalid"}]
             needs_one_minute = any(item.get("classification") == "same_bar_ambiguous" for item in evaluations)
             if needs_one_minute:
-                fine = fetch_with_exchange_fallback(client_dir, ticker,
-                    (data.get("exchange_lookup") or {}).get("selected_symbol", requested).split(":", 1)[0],
-                    day.isoformat(), "1", fetcher=injected_fetcher or fetch_data,
-                    resolve_symbols=resolve_symbols)
+                fine_symbol = (data.get("exchange_lookup") or {}).get("selected_symbol", requested)
+                if ":" not in str(fine_symbol):
+                    fine_symbol = f"{normalize_exchange(fine_symbol)}:{ticker}"
+                fine_exchange = str(fine_symbol).split(":", 1)[0]
+                fine = fetch_cached("1", str(fine_symbol), fine_exchange)
                 if fine is not None:
                     data["one_minute"] = fine
                 else:
@@ -326,7 +392,8 @@ def auto_freeze_book_intraday(*, book_id: str, day: dt.date, pending_orders: lis
             connection.close()
     manifest = {"schema": "martin_intraday_execution_audit_v2", "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "read_only": True, "book_id": book_id, "from_date": day.isoformat(), "to_date": day.isoformat(),
-        "provider": "TradingView", "execution_version": execution_version, "records": records}
+        "provider": "TradingView", "execution_version": execution_version,
+        "raw_intraday_cache": dict(raw_cache.stats), "records": records}
     manifest["fingerprint"] = digest(manifest)
     (output / "audit.json").write_text(json.dumps(manifest, sort_keys=True, indent=2, default=str) + "\n")
     return output, frozen_intraday_for(output, day)
@@ -475,7 +542,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
             timed("execution_logic", phase_started)
             if actions["missing_bars"]:
                 raise ValueError(f"Execution replay is missing required bars on {day}; the full range was rolled back.")
-            phase_started = time.perf_counter(); marks = continuation_mark(repository, book_id, day, database_url); timed("daily_history_load_and_mark", phase_started)
+            phase_started = time.perf_counter(); marks = continuation_mark(repository, book_id, day, database_url,
+                frames=getattr(execution, "last_daily_frames", None)); timed("daily_history_load_and_mark", phase_started)
             final_mark = marks
             phase_started = time.perf_counter(); repository.set_run_metadata(run_id, {"execution_book_version": execution_version,
                 "earnings_policy": earnings_policy,
@@ -498,6 +566,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                 "execution_actions": actions, **({"market_risk_overlay": risk_state} if risk_state else {}),
                 "category_cohorts": {}, "candidate_status_counts": {},
                 "reason_counts": {}, "candidate_count": 0, "status": "execution_only",
+                "profile_counters": getattr(execution, "last_profile_counters", {}),
                 "timings_seconds": {key: round(value, 3) for key, value in timings.items()}})
             if progress:
                 progress.completed += 1
@@ -527,7 +596,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
         cohorts = {category: sum(item.get("event_category") == category for item in result.get("candidates", []))
                    for category in sorted({str(item.get("event_category") or "unknown") for item in result.get("candidates", [])})}
         if result.get("run_id") is not None:
-            phase_started = time.perf_counter(); marks = continuation_mark(repository, book_id, day, database_url); timed("daily_history_load_and_mark", phase_started)
+            phase_started = time.perf_counter(); marks = continuation_mark(repository, book_id, day, database_url,
+                frames=getattr(execution, "last_daily_frames", None)); timed("daily_history_load_and_mark", phase_started)
             final_mark = marks
             phase_started = time.perf_counter(); repository.set_run_metadata(result["run_id"], {"execution_book_version": execution_version,
                 "earnings_policy": earnings_policy,
@@ -565,6 +635,7 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
                         **({"market_risk_overlay": risk_state} if risk_state else {}),
                         "category_cohorts": cohorts,
                         "candidate_count": len(result.get("candidates", [])),
+                        "profile_counters": getattr(execution, "last_profile_counters", {}),
                         "timings_seconds": {key: round(value, 3) for key, value in timings.items()},
                         "status": "complete"})
         if progress:
@@ -576,7 +647,8 @@ def run_range(connection: Any, *, sessions: list[dt.date], sources: dict[dt.date
     return results
 
 
-def continuation_mark(repository: Any, book_id: str, day: dt.date, database_url: str) -> dict[str, Any]:
+def continuation_mark(repository: Any, book_id: str, day: dt.date, database_url: str,
+                      frames: dict[str, Any] | None = None) -> dict[str, Any]:
     """Mark only positions actually open on this session, using that session's Close."""
     from src.market_data_access import load_many_ticker_windows
     from src.webapp.services.martin_bar_retest_execution import bar_for
@@ -585,7 +657,7 @@ def continuation_mark(repository: Any, book_id: str, day: dt.date, database_url:
     previous_rows = repository._rows("SELECT summary_json FROM martin_forward_runs WHERE strategy_id=%s AND session_date<%s AND summary_json->>'account_equity' IS NOT NULL AND summary_json->>'cumulative_r' IS NOT NULL ORDER BY session_date DESC,id DESC LIMIT 1", (book_id, day))
     opened = [row for row in rows if row[0] == "open"]
     tickers = sorted({str(row[1]).upper() for row in opened})
-    frames = load_many_ticker_windows(tickers, day, 320, database_url=database_url) if tickers else {}
+    frames = frames if frames is not None else (load_many_ticker_windows(tickers, day, 320, database_url=database_url) if tickers else {})
     realized_pnl = sum(float((row[2] or {}).get("realized_pnl") or 0) for row in rows)
     realized_r = sum(float((row[2] or {}).get("realized_r") or 0) for row in rows)
     unrealized_pnl = unrealized_r = 0.0
