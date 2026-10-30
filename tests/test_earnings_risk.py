@@ -29,12 +29,24 @@ class EarningsRiskTests(unittest.TestCase):
     def test_weekend_report_date_counts_to_next_xnys_session(self):
         import pandas as pd
         class Calendar:
-            def sessions_in_range(self, start, end):
-                return pd.date_range(start, end, freq="B", tz="UTC")
+            sessions = pd.date_range("2026-10-20", "2026-11-10", freq="B", tz="UTC")
         fake = SimpleNamespace(get_calendar=lambda *_args, **_kwargs: Calendar())
         with patch.dict(sys.modules, {"exchange_calendars": fake}):
             from src.webapp.services.earnings_risk import sessions_to_event
             self.assertEqual(sessions_to_event(dt.date(2026, 10, 29), dt.date(2026, 10, 31)), 2)
+
+    def test_holiday_endpoint_uses_available_sessions_and_marks_out_of_range_unknown(self):
+        import pandas as pd
+        from src.webapp.services.earnings_risk import entry_decision
+        class Calendar:
+            sessions = pd.date_range("2026-01-16", "2026-02-13", freq="B", tz="UTC")
+        fake = SimpleNamespace(get_calendar=lambda *_args, **_kwargs: Calendar())
+        with patch.dict(sys.modules, {"exchange_calendars": fake}):
+            from src.webapp.services.earnings_risk import sessions_to_event
+            self.assertGreater(sessions_to_event(dt.date(2026, 1, 23), dt.date(2026, 2, 9)), 3)
+            decision = entry_decision({"date": dt.date(2026, 3, 2)}, dt.date(2026, 1, 23))
+        self.assertTrue(decision["allowed"])
+        self.assertEqual(decision["status"], "unassessable")
 
     def test_weak_trim_is_scheduled_early_enough_for_release_timing(self):
         day = dt.date(2026, 10, 28)

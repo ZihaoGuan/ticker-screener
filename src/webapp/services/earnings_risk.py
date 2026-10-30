@@ -40,9 +40,14 @@ def load_earnings(connection: Any, tickers: set[str], day: dt.date) -> dict[str,
 def sessions_to_event(day: dt.date, event_date: dt.date) -> int | None:
     import exchange_calendars as xcals
     calendar = xcals.get_calendar("XNYS", start=day - dt.timedelta(days=7), end=event_date + dt.timedelta(days=7))
-    sessions = [stamp.date() for stamp in calendar.sessions_in_range(day.isoformat(), (event_date + dt.timedelta(days=7)).isoformat())]
+    # Use the calendar's bounded session index directly. `sessions_in_range` rejects a
+    # holiday endpoint when the calendar's last available session is the prior day.
+    sessions = [stamp.date() for stamp in calendar.sessions]
+    start_index = next((index for index, session in enumerate(sessions) if session >= day), None)
     event_session = next((session for session in sessions if session >= event_date), None)
-    return sessions.index(event_session) if event_session is not None else None
+    if start_index is None or event_session is None or event_session < day:
+        return None
+    return sessions.index(event_session) - start_index
 
 
 def entry_decision(event: dict[str, Any] | None, day: dt.date) -> dict[str, Any]:
@@ -51,7 +56,11 @@ def entry_decision(event: dict[str, Any] | None, day: dt.date) -> dict[str, Any]
                 "evidence_mode": POLICY, "retrospective_lookup": True}
     event_date = event["date"] if isinstance(event["date"], dt.date) else dt.date.fromisoformat(str(event["date"])[:10])
     distance = sessions_to_event(day, event_date)
-    blocked = distance is None or distance <= 3
+    if distance is None:
+        return {"allowed": True, "status": "unassessable", "reason": "earnings_session_unavailable",
+                "earnings_date": event_date.isoformat(), "session_timing": event.get("timing"),
+                "evidence_mode": POLICY, "retrospective_lookup": True}
+    blocked = distance <= 3
     return {"allowed": not blocked, "status": "known", "earnings_date": event_date.isoformat(),
             "session_timing": event.get("timing"), "trading_sessions_to_earnings": distance,
             "reason": "within_three_sessions_of_earnings" if blocked else None,
@@ -66,7 +75,12 @@ def weak_cushion_trim(event: dict[str, Any] | None, day: dt.date, entry_price: f
     timing = str(event.get("timing") or "").lower()
     # A next-open order must be placed early enough to fill before a BMO/AMC release.
     lead = 1 if timing in {"after_market", "amc", "after-market"} else 2
-    if sessions_to_event(day, event_date) != lead or entry_price <= 0:
+    distance = sessions_to_event(day, event_date)
+    if distance is None:
+        return {"weak": False, "status": "unassessable_earnings_session", "reason": "earnings_session_unavailable",
+                "earnings_date": event_date.isoformat(), "session_timing": event.get("timing"),
+                "evidence_mode": POLICY, "retrospective_lookup": True}
+    if distance != lead or entry_price <= 0:
         return None
     if adr14_pct is None:
         return {"weak": False, "status": "unassessable_adr14", "reason": "current_adr14_missing",
