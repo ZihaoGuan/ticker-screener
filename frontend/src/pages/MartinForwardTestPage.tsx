@@ -121,7 +121,7 @@ export function BarRetestExecutionPage() { return <MartinForwardPage executionOn
 function Overview({ book, executionBook, pivotBook }: { book: MartinForwardBook; executionBook: boolean; pivotBook: boolean }) {
   const metrics = book.metrics;
   const primary = [["Cumulative R", metrics.cumulative_r == null ? null : `${format(metrics.cumulative_r)} R`], ["Realized P&L", metrics.realized_pnl == null ? null : formatCurrency(metrics.realized_pnl)], ["Closed trades", metrics.closed_count], ["Win rate", metrics.win_rate_pct == null ? null : `${format(metrics.win_rate_pct)}%`]];
-  const groupedEvents = groupMartinActivity(book.positions, book.events);
+  const groupedEvents = groupMartinActivity(book.positions, book.activity_events ?? book.events);
   const activity = book.positions.map((position, index) => ({ position, row: unpack(position), events: groupedEvents[index], key: String(position.id ?? `${position.ticker ?? "unknown"}-${index}`), ticker: String(position.ticker ?? "—").toUpperCase(), status: position.status }));
   const executionUnavailable = executionBook && book.history_source !== "stored_session_marks";
   const hasBenchmark = book.benchmark_comparison?.status === "available";

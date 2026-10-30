@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 from src.webapp.services.martin_forward_test_service import DAILY_TOP5_STRATEGY_ID, MartinForwardTestService, SECTOR_STRATEGY_ID, classify_candidate, order_outcome, position_exit, select_sector_candidates
-from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository, _REQUIRED_FORWARD_SCHEMA_COLUMNS, _benchmark_comparison, _closed_trade_metrics, _performance_context, _provisional_fallback_dates
+from src.webapp.repositories.martin_forward_test_repository import MartinForwardTestRepository, _REQUIRED_FORWARD_SCHEMA_COLUMNS, _attach_trim_history, _benchmark_comparison, _closed_trade_metrics, _performance_context, _provisional_fallback_dates
 
 
 class MartinRepositorySchemaTests(unittest.TestCase):
@@ -42,6 +42,68 @@ class MartinRepositorySchemaTests(unittest.TestCase):
         self.assertEqual(connect.call_count, 2)
         self.assertEqual(len(ddl_connection.executions), 1)
         self.assertIn("CREATE TABLE IF NOT EXISTS martin_forward_runs", ddl_connection.executions[0])
+
+
+class MartinExecutionActivityTests(unittest.TestCase):
+    def test_trim_history_is_derived_from_position_linked_trim_events(self):
+        positions = [
+            {"id": 10, "payload_json": {"entry_price": 20}},
+            {"id": 11, "payload_json": {"trim_history": [{"date": "legacy"}]}},
+        ]
+        events = [
+            {"position_id": 10, "event_type": "trim_3r", "event_date": dt.date(2026, 10, 20),
+             "payload_json": {"price": 23, "shares": 30}},
+            {"position_id": 11, "event_type": "trim_3r", "event_date": dt.date(2026, 10, 21),
+             "payload_json": {"price": 24, "shares": 20}},
+            {"position_id": None, "event_type": "trim_3r", "event_date": dt.date(2026, 10, 22),
+             "payload_json": {"price": 25, "shares": 10}},
+        ]
+
+        _attach_trim_history(positions, events)
+
+        self.assertEqual(positions[0]["payload_json"]["trim_history"], [
+            {"date": dt.date(2026, 10, 20), "price": 23, "shares": 30},
+        ])
+        self.assertEqual(positions[1]["payload_json"]["trim_history"], [{"date": "legacy"}])
+
+    def test_execution_book_activity_is_loaded_beyond_recent_event_window(self):
+        repository = MartinForwardTestRepository(database_url="postgresql://unused")
+        strategy_id = "martin_range_bar_retest_example"
+        position = {"id": 10, "strategy_id": strategy_id, "ticker": "AESI", "status": "closed",
+                    "opened_on": dt.date(2026, 3, 25), "closed_on": dt.date(2026, 3, 27),
+                    "payload_json": {"trimmed": True}}
+        old_trim = {"id": 1, "strategy_id": strategy_id, "position_id": 10, "ticker": "AESI",
+                    "event_type": "trim_3r", "event_date": dt.date(2026, 3, 26),
+                    "payload_json": {"price": 30, "shares": 20}}
+        statements = []
+
+        def fetch(_cursor, sql, params=()):
+            statements.append(sql)
+            if "SELECT DISTINCT strategy_id" in sql:
+                return [{"strategy_id": strategy_id}]
+            if "FROM martin_forward_runs" in sql and "ORDER BY session_date DESC" in sql:
+                return [{"id": 1, "strategy_id": strategy_id, "session_date": dt.date(2026, 3, 27),
+                         "summary_json": {"execution_book_version": "martin_bar_retest_execution_v5"}}]
+            if "FROM martin_forward_positions" in sql:
+                return [position]
+            if "position_id=ANY(%s)" in sql:
+                return [old_trim]
+            return []
+
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = connection
+        with patch.object(repository, "_connect", return_value=connection), \
+             patch.object(repository, "_fetch", side_effect=fetch):
+            book = repository.context()["books"][strategy_id]
+
+        self.assertEqual(book["events"], [])  # recent-events list remains independently capped
+        self.assertEqual(book["activity_events"], [old_trim])
+        self.assertEqual(book["positions"][0]["payload_json"]["trim_history"], [
+            {"date": dt.date(2026, 3, 26), "price": 30, "shares": 20},
+        ])
+        activity_query = next(sql for sql in statements if "position_id=ANY(%s)" in sql)
+        self.assertIn("event_type=ANY(%s)", activity_query)
 
 
 class MartinBenchmarkComparisonTests(unittest.TestCase):

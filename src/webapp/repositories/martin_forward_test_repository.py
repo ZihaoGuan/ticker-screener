@@ -29,6 +29,27 @@ _REQUIRED_FORWARD_SCHEMA_COLUMNS = {
     "martin_forward_events": {"id", "strategy_id", "run_id", "position_id", "ticker", "event_type", "event_date", "payload_json"},
 }
 
+_EXECUTION_ACTIVITY_EVENT_TYPES = ("order_filled", "trim_3r", "earnings_half_trim", "stop", "gap_stop", "ema9_exit", "rotation_exit")
+
+
+def _attach_trim_history(positions: list[dict[str, Any]], events: list[dict[str, Any]]) -> None:
+    trims_by_position: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        if event.get("event_type") not in {"trim_3r", "earnings_half_trim"} or event.get("position_id") is None:
+            continue
+        payload = event.get("payload_json") or {}
+        trims_by_position.setdefault(str(event["position_id"]), []).append({
+            "date": event.get("event_date"),
+            "price": payload.get("price"),
+            "shares": payload.get("shares"),
+        })
+    for position in positions:
+        payload = dict(position.get("payload_json") or {})
+        trims = trims_by_position.get(str(position.get("id")), [])
+        if not isinstance(payload.get("trim_history"), list) or (trims and not payload["trim_history"]):
+            payload["trim_history"] = trims
+        position["payload_json"] = payload
+
 
 def _json_default(value: Any) -> str:
     if isinstance(value, (dt.date, dt.datetime)):
@@ -449,6 +470,13 @@ class MartinForwardTestRepository:
                     positions = self._fetch(cursor, "SELECT * FROM martin_forward_positions WHERE strategy_id=%s ORDER BY opened_on DESC,id DESC", (strategy_id,))
                     events = self._fetch(cursor, "SELECT * FROM martin_forward_events WHERE strategy_id=%s ORDER BY event_date DESC,id DESC LIMIT 200", (strategy_id,))
                     book = _performance_context(strategy_id, runs, candidates, positions, events)
+                    position_ids = [position["id"] for position in positions]
+                    activity_events = self._fetch(cursor, """SELECT * FROM martin_forward_events
+                        WHERE strategy_id=%s AND position_id=ANY(%s) AND event_type=ANY(%s)
+                        ORDER BY event_date,id""", (strategy_id, position_ids, list(_EXECUTION_ACTIVITY_EVENT_TYPES))) if position_ids else []
+                    _attach_trim_history(positions, activity_events)
+                    book["activity_events"] = activity_events
+                    book["positions"] = positions
                     book["outstanding_orders"] = outstanding_orders
                     book["execution_book_version"] = ((runs[0].get("summary_json") or {}).get("execution_book_version")
                         if runs else "martin_bar_retest_execution_v1")
