@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import sys
 from types import SimpleNamespace
 import unittest
@@ -77,16 +78,19 @@ class EarningsRiskTests(unittest.TestCase):
             def pending_candidates(self, **_kwargs): return []
             def open_positions(self, **_kwargs): return []
             def pending_orders(self, **_kwargs): return []
-            def update_candidate(self, _run_id, _ticker, candidate): self.updated.append(candidate.copy())
+            def update_candidate(self, _run_id, _ticker, candidate):
+                self.updated.append(json.loads(json.dumps(candidate)))
 
         repo = Repo()
         service = MartinBarRetestExecutionService(repo, bar_loader=lambda *_args, **_kwargs: {})
         service.earnings_policy = "retrospective_v1"
         with patch("src.webapp.services.earnings_risk.load_earnings", return_value={}):
             service.run_session(day=dt.date(2026, 10, 26), run_id=1,
-                candidates=[{"ticker": "ABC", "status": "confirmed", "rank": 1}], source_on_time=False)
+                candidates=[{"ticker": "ABC", "status": "confirmed", "rank": 1,
+                    "source_date": dt.date(2026, 10, 25)}], source_on_time=False)
         self.assertEqual(repo.updated[0]["status"], "confirmed")
         self.assertEqual(repo.updated[0]["earnings_risk"]["status"], "unknown")
+        self.assertEqual(repo.updated[0]["source_date"], "2026-10-25")
 
     def test_bar_retest_decides_on_completed_bar_and_fills_half_at_next_open(self):
         from src.webapp.services.martin_bar_retest_execution import MartinBarRetestExecutionService

@@ -435,7 +435,8 @@ class MartinBarRetestExecutionService:
                 if candidate.get("status") == "confirmed" and not decision["allowed"]:
                     candidate.update(status="blocked_earnings", reasons=[*(candidate.get("reasons") or []), decision["reason"]])
                 if run_id is not None:
-                    self.repository.update_candidate(run_id, ticker, candidate)
+                    from src.webapp.services.earnings_risk import json_safe
+                    self.repository.update_candidate(run_id, ticker, json_safe(candidate))
                 if candidate.get("status") == "blocked_earnings":
                     continue
             backdated = simulate_backdated_buys and (candidate.get("retrospective_source_scan") is True

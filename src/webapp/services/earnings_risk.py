@@ -2,9 +2,27 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 from typing import Any
 
 POLICY = "earnings_risk_retrospective_v1"
+
+
+def json_safe(value: Any) -> Any:
+    if isinstance(value, (dt.date, dt.datetime)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    if hasattr(value, "item"):
+        try:
+            return json_safe(value.item())
+        except (TypeError, ValueError):
+            pass
+    return value
 
 
 def load_earnings(connection: Any, tickers: set[str], day: dt.date) -> dict[str, dict[str, Any]]:
