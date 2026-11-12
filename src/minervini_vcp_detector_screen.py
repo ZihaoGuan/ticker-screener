@@ -14,7 +14,7 @@ from .market_data_access import (
     resolve_database_url,
 )
 from .ratings.repository import RatingsRepository
-from .trend_template_screen import TrendTemplateSnapshot, evaluate_trend_template
+from .trend_template_screen import TrendTemplateSnapshot, evaluate_trend_template_with_benchmark
 from .universe import UniverseTicker
 
 
@@ -138,17 +138,27 @@ def _build_price_frame(financials: object) -> pd.DataFrame:
     ).dropna(subset=["Date", "High", "Low", "Close", "Volume"]).set_index("Date").sort_index()
 
 
+def _build_close_frame_from_rows(rows) -> pd.DataFrame:
+    rows = [row for row in rows if isinstance(row, dict)]
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(
+        {"Date": pd.to_datetime([row.get("formatted_date") for row in rows]), "Close": [row.get("close") for row in rows]}
+    ).dropna(subset=["Date", "Close"]).set_index("Date").sort_index()
+
+
 def evaluate_minervini_vcp_detector(
     frame: pd.DataFrame,
     *,
     market_cap: float | None,
+    benchmark_frame: pd.DataFrame | None = None,
 ) -> MinerviniVcpDetectorSnapshot | None:
     bars = _normalize_price_frame(frame)
     required_daily_bars = DAILY_RANGE_DAYS + DAILY_RESISTANCE_STABILITY_OFFSET + 1
     if bars.empty or len(bars) < max(MINERVINI_VCP_HISTORY_DAYS, required_daily_bars):
         return None
 
-    trend_template = evaluate_trend_template(bars)
+    trend_template = evaluate_trend_template_with_benchmark(bars, benchmark_frame)
     if trend_template is None:
         return None
 
@@ -226,8 +236,9 @@ def find_minervini_vcp_detector_hit(
     ticker: UniverseTicker,
     market_cap: float | None,
     signal_date: dt.date,
+    benchmark_frame: pd.DataFrame | None = None,
 ) -> MinerviniVcpDetectorHit | None:
-    snapshot = evaluate_minervini_vcp_detector(frame, market_cap=market_cap)
+    snapshot = evaluate_minervini_vcp_detector(frame, market_cap=market_cap, benchmark_frame=benchmark_frame)
     if snapshot is None or not snapshot.matched or snapshot.market_cap is None:
         return None
     return MinerviniVcpDetectorHit(
@@ -259,7 +270,8 @@ def run_minervini_vcp_detector_screen(
 ) -> MinerviniVcpDetectorScreenResult:
     run_date = as_of_date or dt.date.today()
     resolved_database_url = resolve_database_url(database_url)
-    symbols = [item.symbol.upper() for item in tickers]
+    benchmark_ticker = config.benchmark_ticker.strip().upper()
+    symbols = [item.symbol.upper() for item in tickers] + [benchmark_ticker]
     frames = load_many_ticker_windows(
         symbols,
         run_date,
@@ -274,6 +286,7 @@ def run_minervini_vcp_detector_screen(
     hits: list[MinerviniVcpDetectorHit] = []
     failures: list[dict[str, str]] = []
     fallback: list[UniverseTicker] = []
+    benchmark_frame = frames.get(benchmark_ticker)
 
     def screen(ticker: UniverseTicker, frame: pd.DataFrame) -> None:
         symbol = ticker.symbol.upper()
@@ -290,12 +303,16 @@ def run_minervini_vcp_detector_screen(
             ticker=runtime_ticker,
             market_cap=market_cap,
             signal_date=run_date,
+            benchmark_frame=benchmark_frame,
         )
         if hit is not None:
             hits.append(hit)
 
     for ticker in tickers:
         frame = frames.get(ticker.symbol.upper())
+        if benchmark_frame is None or len(benchmark_frame) < 253 or not db_frame_has_recent_coverage(benchmark_frame, run_date):
+            failures.append({"ticker": ticker.symbol, "error": f"benchmark_history_unavailable:{benchmark_ticker}"})
+            continue
         if frame is None or not db_frame_has_recent_coverage(frame, run_date) or len(frame) < MINERVINI_VCP_HISTORY_DAYS:
             fallback.append(ticker)
             continue
@@ -312,9 +329,18 @@ def run_minervini_vcp_detector_screen(
                     financials = cookstock.cookFinancials(
                         ticker.symbol,
                         benchmarkTicker=config.benchmark_ticker,
-                        historyLookbackDays=MINERVINI_VCP_HISTORY_DAYS,
+                        historyLookbackDays=900,
                     )
-                    screen(ticker, _build_price_frame(financials))
+                    internet_benchmark = _build_close_frame_from_rows(financials._get_benchmark_price_data(config.benchmark_ticker))
+                    hit = find_minervini_vcp_detector_hit(
+                        _build_price_frame(financials),
+                        ticker=ticker,
+                        market_cap=_safe_float(fundamentals.get(ticker.symbol.upper(), {}).get("market_cap")),
+                        signal_date=run_date,
+                        benchmark_frame=internet_benchmark,
+                    )
+                    if hit is not None:
+                        hits.append(hit)
                 except Exception as exc:
                     failures.append({"ticker": ticker.symbol, "error": str(exc)})
 

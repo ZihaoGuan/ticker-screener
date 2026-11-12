@@ -34,9 +34,15 @@ def _qualified_frame() -> pd.DataFrame:
     return pd.DataFrame({"High": high, "Low": low, "Close": close, "Volume": volume}, index=dates)
 
 
+def _benchmark_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    return pd.DataFrame({"Close": np.linspace(100.0, 110.0, len(frame))}, index=frame.index)
+
+
 class MinerviniVcpDetectorTests(unittest.TestCase):
     def test_matches_trend_template_near_pivot_with_rising_lows_and_contracting_volume(self) -> None:
-        snapshot = evaluate_minervini_vcp_detector(_qualified_frame(), market_cap=3_000_000_000.0)
+        frame = _qualified_frame()
+        self.assertIsNone(evaluate_minervini_vcp_detector(frame, market_cap=3_000_000_000.0))
+        snapshot = evaluate_minervini_vcp_detector(frame, market_cap=3_000_000_000.0, benchmark_frame=_benchmark_frame(frame))
 
         self.assertIsNotNone(snapshot)
         assert snapshot is not None
@@ -50,7 +56,7 @@ class MinerviniVcpDetectorTests(unittest.TestCase):
         frame = _qualified_frame()
         with (
             patch("src.minervini_vcp_detector_screen.resolve_database_url", return_value="postgres://example"),
-            patch("src.minervini_vcp_detector_screen.load_many_ticker_windows", return_value={"TEST": frame}),
+            patch("src.minervini_vcp_detector_screen.load_many_ticker_windows", return_value={"TEST": frame, "SPY": _benchmark_frame(frame)}),
             patch("src.minervini_vcp_detector_screen.load_ticker_metadata_map", return_value={"TEST": {"sector": "Technology"}}),
             patch(
                 "src.minervini_vcp_detector_screen.RatingsRepository.load_latest_fundamentals_snapshots_for_tickers",

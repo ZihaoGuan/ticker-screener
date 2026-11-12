@@ -4,11 +4,13 @@ from .rs_screen import ScreenHit
 
 
 def _format_note(hit: ScreenHit) -> str:
+    rs_rating = f"{hit.rs_rating:.1f}" if hit.rs_rating is not None else "unavailable"
+    rs_score = f"{hit.rs_score:.2f}" if hit.rs_score is not None else "unavailable"
     return (
         f"{' | '.join(hit.reasons)}. "
         f"RS line {hit.current_rs_line:.6f} vs {hit.benchmark_ticker}. "
-        f"RS rating {hit.rs_rating:.1f}, "
-        f"RS score {hit.rs_score:.2f}. "
+        f"RS rating {rs_rating}, "
+        f"RS score {rs_score}. "
         f"Daily lookback {hit.daily_lookback_days} sessions, "
         f"weekly lookback {hit.weekly_lookback_weeks} weeks."
     )
@@ -27,6 +29,7 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
     watchlist: list[dict[str, object]] = []
     for hit in hits:
         weekly_status = "True" if hit.weekly_rs_new_high_before_price else "False"
+        rs_rating_text = f"{hit.rs_rating:.1f}" if hit.rs_rating is not None else "unavailable"
         signal_tags = _signal_tags(hit)
         if signal_profile == "weekly":
             recency_text = (
@@ -41,7 +44,7 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
                 f"Recent weekly RS NH: {hit.weekly_rs_new_high_recent}. "
                 f"Last weekly signal: {recency_text}. "
                 f"Weekly RS NH before price: {weekly_status}. "
-                f"RS rating: {hit.rs_rating:.1f}. "
+                f"RS rating: {rs_rating_text}. "
                 f"Recent golden cross ({hit.recent_golden_cross_days}D): {hit.recent_golden_cross}. "
                 f"Recent inside day ({hit.recent_inside_day_days}D): {hit.recent_inside_day}. "
                 f"Distance from year high: {hit.distance_from_year_high_pct:.1f}%."
@@ -53,7 +56,7 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
                 f"Daily RS NH: {hit.daily_rs_new_high}. "
                 f"Daily RS NH before price: {hit.daily_rs_new_high_before_price}. "
                 f"Weekly RS NH before price: {weekly_status}. "
-                f"RS rating: {hit.rs_rating:.1f}. "
+                f"RS rating: {rs_rating_text}. "
                 f"Recent golden cross ({hit.recent_golden_cross_days}D): {hit.recent_golden_cross}. "
                 f"Recent inside day ({hit.recent_inside_day_days}D): {hit.recent_inside_day}. "
                 f"Distance from year high: {hit.distance_from_year_high_pct:.1f}%."
@@ -72,8 +75,8 @@ def build_watchlist(hits: list[ScreenHit], *, signal_profile: str = "daily") -> 
                 "entry_price": round(hit.current_price, 4),
                 "entry_label": "Signal close",
                 "entry_timeframe": "daily",
-                "signal_rs_rating": round(hit.rs_rating, 2),
-                "signal_rs_score": round(hit.rs_score, 4),
+                "signal_rs_rating": round(hit.rs_rating, 2) if hit.rs_rating is not None else None,
+                "signal_rs_score": round(hit.rs_score, 4) if hit.rs_score is not None else None,
             }
         )
     return watchlist

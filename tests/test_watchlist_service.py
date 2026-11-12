@@ -3189,18 +3189,25 @@ class WatchlistServiceTests(unittest.TestCase):
             frame.loc[frame.index[start:end], "High"] += delta
             frame.loc[frame.index[start:end], "Low"] += delta
 
+        future_dates = pd.bdate_range(start=frame.index[-1] + pd.Timedelta(days=1), periods=3)
+        future_benchmark_rows = pd.DataFrame([frame.iloc[-1].to_dict()] * len(future_dates), index=future_dates)
+        benchmark_frame = pd.concat([frame.copy(), future_benchmark_rows])
+
         def fake_download(*, tickers: str, **_: object):
-            if tickers in {"NVDA", "SPY"}:
+            if tickers == "NVDA":
                 return frame.copy()
+            if tickers == "SPY":
+                return benchmark_frame.copy()
             return pd.DataFrame()
 
         with patch("src.webapp.services.watchlist_service.yf.download", side_effect=fake_download):
-            payload = self.service.get_chart_overlays_payload("NVDA", as_of_date=dt.date(2026, 3, 25))
+            payload = self.service.get_chart_overlays_payload("NVDA", as_of_date=frame.index[-1].date())
 
         self.assertIn("trend_template", payload)
         self.assertIsNotNone(payload["trend_template"])
         snapshot = payload["trend_template"]
         assert snapshot is not None
+        self.assertEqual(payload["resolved_as_of_date"], frame.index[-1].date().isoformat())
         self.assertTrue(snapshot["matched"])
         self.assertEqual(snapshot["criteria_passed"], snapshot["criteria_total"])
         self.assertGreater(snapshot["rs_rating"], 70.0)

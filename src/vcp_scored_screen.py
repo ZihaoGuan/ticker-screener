@@ -8,7 +8,7 @@ import pandas as pd
 from .config import AppConfig
 from .market_data_access import load_many_ticker_windows, resolve_database_url
 from .rs_rating_screen import approximate_rs_rating, compute_latest_weighted_rs_score
-from .trend_template_screen import evaluate_trend_template
+from .trend_template_screen import evaluate_trend_template_price_structure
 from .universe import UniverseTicker
 from .vcp_screen import VcpHit, run_vcp_screen
 
@@ -172,11 +172,10 @@ def _classify_pattern(hit: VcpHit, execution_state: str, composite_score: float)
 
 
 def _compute_trend_score(bars: pd.DataFrame) -> tuple[float, int, int]:
-    snapshot = evaluate_trend_template(bars)
+    snapshot = evaluate_trend_template_price_structure(bars)
     if snapshot is None:
         return 0.0, 0, 7
     criteria = dict(snapshot.criteria)
-    criteria.pop("rs_rating_above_70", None)
     criteria_passed = sum(1 for passed in criteria.values() if passed)
     criteria_total = len(criteria)
     return round((criteria_passed / criteria_total) * 100.0, 1), criteria_passed, criteria_total

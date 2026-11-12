@@ -12,7 +12,7 @@ from src.bollinger_band_screen import compute_latest_bollinger_snapshot
 from src.ratings.repository import RatingsRepository
 from src.ticker_filters import normalize_ticker_symbol
 from src.trend_template_screen import PRICE_HISTORY_DAYS as TREND_TEMPLATE_PRICE_HISTORY_DAYS
-from src.trend_template_screen import evaluate_trend_template
+from src.trend_template_screen import evaluate_trend_template_with_benchmark
 from src.trendline_snapshots import load_latest_trendline_snapshot_map
 from src.webapp.config import load_webapp_config
 from src.webapp.repositories.position_decision_repository import PositionDecisionRepository
@@ -87,6 +87,7 @@ class MyPicksService:
     def __init__(self, *, repository: MyPicksRepository | None = None, database_url: str = "") -> None:
         self.repository = repository or MyPicksRepository(database_url=database_url)
         self.database_url = self.repository.database_url
+        self.benchmark_ticker = "SPY"
         self.ratings_repository = RatingsRepository(self.database_url)
         self.watchlist_repository = WatchlistRepository(artifacts_dir=load_webapp_config().artifacts_dir, database_url=self.database_url)
         self.position_decision_repository = PositionDecisionRepository(database_url=self.database_url)
@@ -318,7 +319,7 @@ class MyPicksService:
         if not baseline_dates:
             return {}
         return load_many_ticker_windows_for_range(
-            tickers,
+            [*tickers, self.benchmark_ticker],
             start_date=min(baseline_dates),
             end_date=today,
             trading_days_needed=max(_SMA50_LOOKBACK_DAYS, _FIFTY_TWO_WEEK_LOOKBACK_DAYS, TREND_TEMPLATE_PRICE_HISTORY_DAYS),
@@ -376,7 +377,7 @@ class MyPicksService:
             frame = frames.get(str(row.get("ticker") or "").upper())
             if frame is None or frame.empty:
                 continue
-            snapshot = evaluate_trend_template(frame)
+            snapshot = evaluate_trend_template_with_benchmark(frame, frames.get(self.benchmark_ticker))
             if snapshot is None:
                 continue
             row["trend_template_match"] = bool(snapshot.matched)

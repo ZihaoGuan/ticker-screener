@@ -167,7 +167,7 @@ class MyPicksServiceTests(unittest.TestCase):
             "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
             return_value=_build_trendline_snapshot_map("MSFT"),
         ), patch(
-            "src.webapp.services.my_picks_service.evaluate_trend_template",
+            "src.webapp.services.my_picks_service.evaluate_trend_template_with_benchmark",
             return_value=SimpleNamespace(matched=True, criteria_passed=8, criteria_total=8),
         ):
             row = self.service.create_pick(ticker="msft", notes="leader", actor_user_id=7)
@@ -204,7 +204,7 @@ class MyPicksServiceTests(unittest.TestCase):
             "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
             return_value=_build_trendline_snapshot_map("MSFT"),
         ), patch(
-            "src.webapp.services.my_picks_service.evaluate_trend_template",
+            "src.webapp.services.my_picks_service.evaluate_trend_template_with_benchmark",
             return_value=SimpleNamespace(matched=True, criteria_passed=8, criteria_total=8),
         ), patch.object(
             self.service.position_decision_repository,
@@ -236,7 +236,7 @@ class MyPicksServiceTests(unittest.TestCase):
             "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
             return_value=_build_trendline_snapshot_map("AAPL", "NVDA"),
         ), patch(
-            "src.webapp.services.my_picks_service.evaluate_trend_template",
+            "src.webapp.services.my_picks_service.evaluate_trend_template_with_benchmark",
             return_value=SimpleNamespace(matched=False, criteria_passed=6, criteria_total=8),
         ):
             payload = self.service.get_context()
@@ -267,7 +267,7 @@ class MyPicksServiceTests(unittest.TestCase):
             "src.webapp.services.my_picks_service.load_latest_trendline_snapshot_map",
             return_value=_build_trendline_snapshot_map("AAPL"),
         ), patch(
-            "src.webapp.services.my_picks_service.evaluate_trend_template",
+            "src.webapp.services.my_picks_service.evaluate_trend_template_with_benchmark",
             return_value=SimpleNamespace(matched=True, criteria_passed=8, criteria_total=8),
         ):
             self.service.get_context()

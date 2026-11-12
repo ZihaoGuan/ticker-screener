@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.config import AppConfig
-from src.trend_template_screen import evaluate_trend_template, run_trend_template_screen
+from src.trend_template_screen import evaluate_trend_template_price_structure, evaluate_trend_template_with_benchmark, run_trend_template_screen
 from src.universe import UniverseTicker
 
 
@@ -40,7 +40,7 @@ class TrendTemplateScreenTests(unittest.TestCase):
 
         with patch("src.trend_template_screen.resolve_database_url", return_value="postgres://example"), patch(
             "src.trend_template_screen.load_many_ticker_windows",
-            return_value={"NVDA": frame},
+            return_value={"NVDA": frame, "SPY": frame.copy()},
         ), patch("src.trend_template_screen.load_configured_cookstock") as load_cookstock:
             result = run_trend_template_screen(AppConfig(), [ticker], as_of_date=as_of_date)
 
@@ -84,13 +84,14 @@ class TrendTemplateScreenTests(unittest.TestCase):
             index=index,
         )
 
-        snapshot = evaluate_trend_template(frame)
+        snapshot = evaluate_trend_template_price_structure(frame)
 
         assert snapshot is not None
         self.assertGreaterEqual(snapshot.distance_from_52wk_low_pct, 30.0)
         self.assertLess(snapshot.distance_from_52wk_low_pct, 35.0)
         self.assertTrue(snapshot.criteria["price_30pct_above_52w_low"])
-        self.assertFalse(snapshot.criteria["rs_rating_above_70"])
+        self.assertIsNone(snapshot.rs_rating)
+        self.assertNotIn("rs_rating_above_70", snapshot.criteria)
 
     def test_run_trend_template_screen_requires_rs_above_70(self) -> None:
         ticker = UniverseTicker(symbol="CRWD", sector="Technology", industry="Software", exchange="NASDAQ")
@@ -100,7 +101,9 @@ class TrendTemplateScreenTests(unittest.TestCase):
         frame.loc[frame.index[275:], "High"] = 225.25
         frame.loc[frame.index[275:], "Low"] = 222.25
 
-        snapshot = evaluate_trend_template(frame)
+        benchmark_frame = frame.copy()
+        benchmark_frame["Close"] = [100.0 + idx * 1.2 for idx in range(len(frame))]
+        snapshot = evaluate_trend_template_with_benchmark(frame, benchmark_frame)
         assert snapshot is not None
         self.assertFalse(snapshot.matched)
         self.assertFalse(snapshot.criteria["rs_rating_above_70"])
@@ -108,11 +111,42 @@ class TrendTemplateScreenTests(unittest.TestCase):
 
         with patch("src.trend_template_screen.resolve_database_url", return_value="postgres://example"), patch(
             "src.trend_template_screen.load_many_ticker_windows",
-            return_value={"CRWD": frame},
+            return_value={
+                "CRWD": frame,
+                "SPY": benchmark_frame,
+            },
         ):
             result = run_trend_template_screen(AppConfig(), [ticker], as_of_date=as_of_date)
 
         self.assertEqual(result.passed_tickers, 0)
+
+    def test_benchmark_relative_rs_matches_chart_series_and_requires_full_history(self) -> None:
+        stock = _trend_template_frame()
+        benchmark = stock.copy()
+        benchmark["Close"] = [100.0 + idx * 0.08 for idx in range(len(benchmark))]
+        snapshot = evaluate_trend_template_with_benchmark(stock, benchmark)
+        assert snapshot is not None
+        from src.webapp.services.watchlist_service import _compute_rs_rating_series
+        from src.rs_screen import _compute_latest_rs_rating
+
+        chart_rating = _compute_rs_rating_series(stock["Close"], benchmark["Close"]).iloc[-1]
+        rows = [
+            {"formatted_date": index.isoformat(), "close": float(value)}
+            for index, value in stock["Close"].items()
+        ]
+        benchmark_rows = [
+            {"formatted_date": index.isoformat(), "close": float(value)}
+            for index, value in benchmark["Close"].items()
+        ]
+        scanner_metrics = _compute_latest_rs_rating(rows, benchmark_rows)
+        self.assertIsNotNone(scanner_metrics)
+        self.assertAlmostEqual(snapshot.rs_rating, float(chart_rating), places=8)
+        assert scanner_metrics is not None
+        self.assertAlmostEqual(snapshot.rs_rating, scanner_metrics[1], places=8)
+        self.assertIsNone(_compute_latest_rs_rating(rows[-252:], benchmark_rows[-252:]))
+        self.assertIsNone(_compute_latest_rs_rating(rows, benchmark_rows[:-1]))
+        self.assertIsNone(evaluate_trend_template_with_benchmark(stock.iloc[-252:], benchmark.iloc[-252:]))
+        self.assertIsNone(evaluate_trend_template_with_benchmark(stock, benchmark.iloc[:-1]))
 
 
 

@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.config import AppConfig
 from src.rs_screen import _compute_rs_new_high_flags, run_rs_screen
+from src.watchlist_builder import build_watchlist
 from src.universe import UniverseTicker
 
 
@@ -143,6 +144,35 @@ class RsScreenTests(unittest.TestCase):
         self.assertEqual(len(result.hits), 1)
         self.assertGreaterEqual(result.hits[0].rs_rating, 0.0)
         self.assertLessEqual(result.hits[0].rs_rating, 99.0)
+
+    def test_rs_new_high_hit_is_retained_when_full_history_rating_is_unavailable(self) -> None:
+        stock_rows = _rows_from_close_series([100.0 + idx for idx in range(120)])
+        benchmark_rows = _rows_from_close_series([100.0 + idx * 0.2 for idx in range(120)])
+        fake_module = _FakeCookstockModule(stock_rows, benchmark_rows)
+
+        with patch("src.rs_screen.load_configured_cookstock", return_value=fake_module), patch(
+            "src.rs_screen.freeze_cookstock_today",
+            side_effect=lambda _module, _as_of_date: contextlib.nullcontext(),
+        ), patch(
+            "src.rs_screen.iter_prefetched_cookstock_batches",
+            return_value=[[UniverseTicker(symbol="AAPL", sector="Technology", exchange="NASDAQ")]],
+        ):
+            result = run_rs_screen(
+                AppConfig(),
+                [UniverseTicker(symbol="AAPL", sector="Technology", exchange="NASDAQ")],
+                as_of_date=dt.date.fromisoformat(stock_rows[-1]["formatted_date"]),
+            )
+
+        self.assertEqual(result.passed_tickers, 1)
+        self.assertTrue(result.hits[0].daily_rs_new_high_before_price)
+        self.assertIsNone(result.hits[0].rs_score)
+        self.assertIsNone(result.hits[0].rs_rating)
+        self.assertIn("RS rating unavailable", " ".join(result.hits[0].reasons))
+        watchlist_row = build_watchlist(result.hits)[0]
+        self.assertIsNone(watchlist_row["signal_rs_rating"])
+        self.assertIsNone(watchlist_row["signal_rs_score"])
+        self.assertIn("RS rating: unavailable", watchlist_row["summary"])
+        self.assertIn("RS score unavailable", watchlist_row["master_note"])
 
 
 if __name__ == "__main__":

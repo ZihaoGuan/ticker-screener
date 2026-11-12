@@ -25,6 +25,26 @@ from src.universe import UniverseTicker, load_universe
 from src.universe_filters import add_universe_filter_args, build_filter_criteria_from_args, filter_universe_by_criteria
 
 
+def _latest_completed_xnys_session(now: dt.datetime | None = None) -> dt.date:
+    import exchange_calendars as xcals
+    now = now or dt.datetime.now(dt.timezone.utc)
+    today_utc = now.astimezone(dt.timezone.utc).date()
+    start = today_utc - dt.timedelta(days=14)
+    calendar = xcals.get_calendar("XNYS", start=start.isoformat(), end=today_utc.isoformat())
+    completed = [
+        session.date()
+        for session in calendar.sessions
+        if calendar.session_close(session).to_pydatetime() <= now
+    ]
+    if not completed:
+        raise ValueError("no_completed_xnys_session")
+    return max(completed)
+
+
+def _resolve_as_of_date(value: str | None, now: dt.datetime | None = None) -> dt.date:
+    return dt.date.fromisoformat(value) if value else _latest_completed_xnys_session(now)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Minervini trend-template screener.")
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config" / "market_config.json"))
@@ -52,7 +72,7 @@ def main() -> int:
 
     config = load_app_config(args.config)
     excluded = load_excluded_tickers(config)
-    as_of_date = dt.date.fromisoformat(args.as_of_date) if args.as_of_date else None
+    as_of_date = _resolve_as_of_date(args.as_of_date)
     date_label = args.date_label or today_label(as_of_date)
     filter_criteria = build_filter_criteria_from_args(args)
     tickers = _manual_tickers(args.tickers, excluded) if args.tickers else load_universe(config)
@@ -60,7 +80,7 @@ def main() -> int:
         tickers = filter_universe_by_criteria(tickers, filter_criteria)
         selection = select_candidates(
             "trend_template",
-            as_of_date or dt.date.today(),
+            as_of_date,
             [item.symbol for item in tickers],
             limit=args.limit,
         )

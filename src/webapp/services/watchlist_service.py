@@ -51,7 +51,7 @@ from ...relative_trend_strength import build_leadership_health
 from ...rs_phase_screen import classify_rs_phase_lifecycle
 from ...sepa_vcp_screen import build_sepa_dashboard_snapshot
 from ...ticker_filters import is_excluded_ticker, load_excluded_tickers, normalize_ticker_symbol
-from ...trend_template_screen import evaluate_trend_template
+from ...trend_template_screen import evaluate_trend_template_with_benchmark
 from ...universe import UniverseTicker, load_universe
 from ...vcs_indicator import latest_vcs_snapshot
 from ...wyckoff_analysis import compute_wyckoff_markers
@@ -2401,7 +2401,6 @@ class WatchlistService:
             _compute_fearzone_panel(frame),
             visible_dates=visible_dates,
         )
-        trend_template_snapshot = evaluate_trend_template(frame)
         vcs_snapshot = latest_vcs_snapshot(frame)
         setup_markers: list[dict[str, Any]] = []
         if include_setup_markers:
@@ -2424,6 +2423,7 @@ class WatchlistService:
             daily_rs_rating = _compute_rs_rating_series(frame["Close"], benchmark_frame["Close"])
             if daily_rs_rating is not None and not daily_rs_rating.empty:
                 weekly_rs_rating = daily_rs_rating.resample("W-FRI").last().dropna()
+        trend_template_snapshot = evaluate_trend_template_with_benchmark(frame, benchmark_frame)
         sepa_dashboard = (
             build_sepa_dashboard_snapshot(
                 frame,

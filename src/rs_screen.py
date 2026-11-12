@@ -8,7 +8,7 @@ import pandas as pd
 
 from .config import AppConfig, override_config
 from .cookstock_bridge import freeze_cookstock_today, iter_prefetched_cookstock_batches, load_configured_cookstock
-from .rs_rating_screen import approximate_rs_rating, compute_latest_weighted_rs_score
+from .rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
 from .rs_new_high import compute_rs_new_high_flags
 from .universe import UniverseTicker
 
@@ -52,8 +52,8 @@ class ScreenHit:
     sector_etf_distance_from_year_high_pct: float | str
     sector_etf_return_vs_rs_window_pct: float | str
     sector_benchmark_return_vs_rs_window_pct: float | str
-    rs_score: float
-    rs_rating: float
+    rs_score: float | None
+    rs_rating: float | None
     min_rs_rating: float
     reasons: list[str]
 
@@ -160,8 +160,8 @@ def _to_hit(ticker: UniverseTicker, summary: dict[str, object]) -> ScreenHit:
         sector_etf_distance_from_year_high_pct=summary["sector_etf_distance_from_year_high_pct"],
         sector_etf_return_vs_rs_window_pct=summary["sector_etf_return_vs_rs_window_pct"],
         sector_benchmark_return_vs_rs_window_pct=summary["sector_benchmark_return_vs_rs_window_pct"],
-        rs_score=float(summary["rs_score"]),
-        rs_rating=float(summary["rs_rating"]),
+        rs_score=float(summary["rs_score"]) if summary.get("rs_score") is not None else None,
+        rs_rating=float(summary["rs_rating"]) if summary.get("rs_rating") is not None else None,
         min_rs_rating=float(summary["min_rs_rating"]),
         reasons=list(summary.get("reasons", [])),
     )
@@ -201,12 +201,16 @@ def _compute_latest_rs_rating(
     if stock_frame.empty or benchmark_frame.empty:
         return None
     aligned = stock_frame.join(benchmark_frame.rename(columns={"Close": "benchmark_close"}), how="inner").dropna()
-    if len(aligned) < 2:
+    if aligned.empty or aligned.index[-1] != stock_frame.index[-1] or aligned.index[-1] != benchmark_frame.index[-1]:
         return None
-    latest_score = compute_latest_weighted_rs_score(aligned["Close"], aligned["benchmark_close"])
-    if latest_score is None:
+    # Match Vela's rolling score: a 252-session return needs 253 aligned closes.
+    if len(aligned) < 253:
         return None
-    latest_rating = approximate_rs_rating(float(latest_score)) if pd.notna(latest_score) else None
+    score_series = compute_weighted_rs_score(aligned["Close"], aligned["benchmark_close"]).dropna()
+    if score_series.empty:
+        return None
+    latest_score = float(score_series.iloc[-1])
+    latest_rating = approximate_rs_rating(latest_score) if pd.notna(latest_score) else None
     if latest_rating is None:
         return None
     return float(latest_score), float(latest_rating)
@@ -369,8 +373,6 @@ def run_rs_screen(
                             summary["weekly_signal_weeks_ago"] = weekly_context["weekly_signal_weeks_ago"]
                             if weekly_context["weekly_signal_date"]:
                                 summary["signal_date"] = str(weekly_context["weekly_signal_date"])
-                        if latest_rs_score is None or latest_rs_rating is None:
-                            continue
                         reasons = list(summary.get("reasons", []))
                         if str(signal_profile).strip().lower() == "weekly":
                             weeks_ago = summary.get("weekly_signal_weeks_ago")
@@ -382,7 +384,10 @@ def run_rs_screen(
                                 reasons.append(f"weekly RS new high before price {int(weeks_ago)} week(s) ago")
                             else:
                                 reasons.append(f"weekly RS new high {int(weeks_ago)} week(s) ago")
-                        reasons.append(f"RS rating {latest_rs_rating:.1f}")
+                        if latest_rs_rating is None:
+                            reasons.append("RS rating unavailable: fewer than 253 aligned sessions or latest session mismatch")
+                        else:
+                            reasons.append(f"RS rating {latest_rs_rating:.1f}")
                         summary["reasons"] = reasons
                         summary["rs_score"] = latest_rs_score
                         summary["rs_rating"] = latest_rs_rating

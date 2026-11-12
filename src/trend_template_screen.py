@@ -8,6 +8,7 @@ import pandas as pd
 from .config import AppConfig
 from .cookstock_bridge import freeze_cookstock_today, load_configured_cookstock
 from .market_data_access import db_frame_has_recent_coverage, load_many_ticker_windows, resolve_database_url
+from .rs_rating_screen import approximate_rs_rating, compute_weighted_rs_score
 from .universe import UniverseTicker
 
 
@@ -17,14 +18,11 @@ MA200_LENGTH = 200
 HIGH_LOW_LOOKBACK_DAYS = 260
 MA200_UPTREND_LOOKBACK_DAYS = 22
 PRICE_HISTORY_DAYS = 320
+PRICE_HISTORY_FALLBACK_CALENDAR_DAYS = 450
 VOLUME_LOOKBACK_DAYS = 20
 MIN_DISTANCE_FROM_52W_LOW_PCT = 30.0
 MAX_DISTANCE_FROM_52W_HIGH_PCT = 25.0
 MIN_RS_RATING = 70.0
-RS_LOOKBACK_3M_DAYS = 13
-RS_LOOKBACK_6M_DAYS = 26
-RS_LOOKBACK_9M_DAYS = 39
-RS_LOOKBACK_12M_DAYS = 52
 
 
 @dataclass(frozen=True)
@@ -37,7 +35,7 @@ class TrendTemplateSnapshot:
     ma200_lookback: float
     high_52wk: float
     low_52wk: float
-    rs_rating: float
+    rs_rating: float | None
     avg_volume_20: float
     avg_dollar_volume_20: float
     distance_to_ma50_pct: float
@@ -132,30 +130,40 @@ def _build_price_frame(financials) -> pd.DataFrame:
     return frame.dropna(subset=["Date", "High", "Low", "Close", "Volume"]).set_index("Date").sort_index()
 
 
+def _build_price_frame_from_rows(rows) -> pd.DataFrame:
+    rows = [row for row in rows if isinstance(row, dict)]
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame({
+        "Date": pd.to_datetime([row.get("formatted_date") for row in rows]),
+        "Close": [row.get("close") for row in rows],
+    })
+    return frame.dropna(subset=["Date", "Close"]).set_index("Date").sort_index()
+
+
 def _pct_from_level(current_price: float, level: float) -> float:
     if level <= 0:
         return 0.0
     return ((current_price / level) - 1.0) * 100.0
 
 
-def _compute_attached_rs_rating(close: pd.Series) -> float | None:
-    latest_index = close.index[-1]
-    current_close = float(close.loc[latest_index])
-    close_3m = float(close.shift(RS_LOOKBACK_3M_DAYS).loc[latest_index])
-    close_6m = float(close.shift(RS_LOOKBACK_6M_DAYS).loc[latest_index])
-    close_9m = float(close.shift(RS_LOOKBACK_9M_DAYS).loc[latest_index])
-    close_12m = float(close.shift(RS_LOOKBACK_12M_DAYS).loc[latest_index])
-    if min(current_close, close_3m, close_6m, close_9m, close_12m) <= 0:
+def _compute_attached_rs_rating(close: pd.Series, benchmark_close: pd.Series | None) -> float | None:
+    if benchmark_close is None or close.empty or benchmark_close.empty:
         return None
-    return (
-        (0.4 * (current_close / close_3m))
-        + (0.2 * (current_close / (close_6m * 2.0)))
-        + (0.2 * (current_close / (close_9m * 3.0)))
-        + (0.2 * (current_close / (close_12m * 4.0)))
-    ) * 100.0
+    if pd.Timestamp(close.index[-1]) != pd.Timestamp(benchmark_close.index[-1]):
+        return None
+    score = compute_weighted_rs_score(close.astype(float), benchmark_close.astype(float)).dropna()
+    if score.empty or pd.Timestamp(score.index[-1]) != pd.Timestamp(close.index[-1]):
+        return None
+    return approximate_rs_rating(float(score.iloc[-1]))
 
 
-def evaluate_trend_template(frame: pd.DataFrame) -> TrendTemplateSnapshot | None:
+def _evaluate_trend_template(
+    frame: pd.DataFrame,
+    benchmark_frame: pd.DataFrame | None,
+    *,
+    require_rs: bool = True,
+) -> TrendTemplateSnapshot | None:
     bars = _normalize_price_frame(frame)
     min_required = max(HIGH_LOW_LOOKBACK_DAYS, MA200_LENGTH + MA200_UPTREND_LOOKBACK_DAYS)
     if bars.empty or len(bars) < min_required:
@@ -180,9 +188,12 @@ def evaluate_trend_template(frame: pd.DataFrame) -> TrendTemplateSnapshot | None
     ma200_lookback = float(ma200_series.shift(MA200_UPTREND_LOOKBACK_DAYS).loc[latest_index])
     high_52wk = float(high_52wk_series.loc[latest_index])
     low_52wk = float(low_52wk_series.loc[latest_index])
-    rs_rating = _compute_attached_rs_rating(close)
+    benchmark_close = None
+    if benchmark_frame is not None and "Close" in benchmark_frame.columns:
+        benchmark_close = benchmark_frame["Close"].astype(float)
+    rs_rating = _compute_attached_rs_rating(close, benchmark_close)
 
-    if rs_rating is None or any(pd.isna(value) for value in (ma50, ma150, ma200, ma200_lookback, high_52wk, low_52wk)):
+    if (require_rs and rs_rating is None) or any(pd.isna(value) for value in (ma50, ma150, ma200, ma200_lookback, high_52wk, low_52wk)):
         return None
 
     distance_to_ma50_pct = _pct_from_level(current_price, ma50)
@@ -201,8 +212,9 @@ def evaluate_trend_template(frame: pd.DataFrame) -> TrendTemplateSnapshot | None
         "price_above_ma50": current_price > ma50,
         "price_30pct_above_52w_low": distance_from_52wk_low_pct >= MIN_DISTANCE_FROM_52W_LOW_PCT,
         "price_within_25pct_of_52w_high": distance_from_52wk_high_pct <= MAX_DISTANCE_FROM_52W_HIGH_PCT,
-        "rs_rating_above_70": rs_rating > MIN_RS_RATING,
     }
+    if rs_rating is not None:
+        criteria["rs_rating_above_70"] = rs_rating > MIN_RS_RATING
     criteria_passed = sum(1 for passed in criteria.values() if passed)
     criteria_total = len(criteria)
     reasons = [
@@ -212,8 +224,11 @@ def evaluate_trend_template(frame: pd.DataFrame) -> TrendTemplateSnapshot | None
         f"200D MA {ma200:.2f} vs 22-day lookback {ma200_lookback:.2f}",
         f"{distance_from_52wk_high_pct:.1f}% below 52-week high {high_52wk:.2f}",
         f"{distance_from_52wk_low_pct:.1f}% above 52-week low {low_52wk:.2f}",
-        f"RS rating {rs_rating:.2f} vs minimum {MIN_RS_RATING:.0f}",
     ]
+    if rs_rating is None:
+        reasons.append("benchmark-relative RS unavailable")
+    else:
+        reasons.append(f"RS rating {rs_rating:.2f} vs minimum {MIN_RS_RATING:.0f}")
     return TrendTemplateSnapshot(
         matched=criteria_passed == criteria_total,
         current_price=current_price,
@@ -238,8 +253,31 @@ def evaluate_trend_template(frame: pd.DataFrame) -> TrendTemplateSnapshot | None
     )
 
 
-def _build_hit(ticker: UniverseTicker, frame: pd.DataFrame, *, signal_date: dt.date) -> TrendTemplateHit | None:
-    snapshot = evaluate_trend_template(frame)
+def evaluate_trend_template_price_structure(frame: pd.DataFrame) -> TrendTemplateSnapshot | None:
+    """Evaluate price and moving-average structure without representing RS as available."""
+    return _evaluate_trend_template(frame, None, require_rs=False)
+
+
+def evaluate_trend_template_with_benchmark(
+    frame: pd.DataFrame,
+    benchmark_frame: pd.DataFrame | None,
+) -> TrendTemplateSnapshot | None:
+    """Evaluate using Vela's benchmark-relative daily RS rating; no stock-only fallback."""
+    return _evaluate_trend_template(frame, benchmark_frame)
+
+
+def _build_hit(
+    ticker: UniverseTicker,
+    frame: pd.DataFrame,
+    *,
+    signal_date: dt.date,
+    benchmark_frame: pd.DataFrame | None = None,
+) -> TrendTemplateHit | None:
+    if frame.empty or benchmark_frame is None or benchmark_frame.empty:
+        return None
+    if pd.Timestamp(frame.index[-1]).date() != signal_date or pd.Timestamp(benchmark_frame.index[-1]).date() != signal_date:
+        return None
+    snapshot = evaluate_trend_template_with_benchmark(frame, benchmark_frame)
     if snapshot is None or not snapshot.matched:
         return None
     return TrendTemplateHit(
@@ -287,8 +325,10 @@ def run_trend_template_screen(
     )
 
     database_url = resolve_database_url("")
+    benchmark_ticker = config.benchmark_ticker.strip().upper()
+    symbols_for_load = [item.symbol for item in tickers] + [benchmark_ticker]
     frame_map = load_many_ticker_windows(
-        [item.symbol for item in tickers],
+        symbols_for_load,
         run_date,
         PRICE_HISTORY_DAYS,
         database_url=database_url,
@@ -297,15 +337,25 @@ def run_trend_template_screen(
     hits: list[TrendTemplateHit] = []
     failures: list[dict[str, str]] = []
     fallback_tickers: list[tuple[int, UniverseTicker]] = []
+    benchmark_frame = frame_map.get(benchmark_ticker)
 
     for position, ticker in enumerate(tickers, start=1):
         frame = frame_map.get(ticker.symbol.upper())
+        if benchmark_frame is None or len(benchmark_frame) < 253 or not db_frame_has_recent_coverage(benchmark_frame, run_date):
+            failures.append({"ticker": ticker.symbol, "error": f"benchmark_history_unavailable:{benchmark_ticker}"})
+            continue
         if frame is None or not db_frame_has_recent_coverage(frame, run_date) or len(frame) < HIGH_LOW_LOOKBACK_DAYS:
             fallback_tickers.append((position, ticker))
             continue
         print(f"[{position}/{total_tickers}] screening {ticker.symbol} from DB | passed={len(hits)}")
         try:
-            hit = _build_hit(ticker, frame, signal_date=run_date)
+            if pd.Timestamp(frame.index[-1]).date() != run_date or pd.Timestamp(benchmark_frame.index[-1]).date() != run_date:
+                failures.append({"ticker": ticker.symbol, "error": f"price_session_mismatch:expected={run_date.isoformat()}"})
+                continue
+            if "Close" not in frame or "Close" not in benchmark_frame or _compute_attached_rs_rating(frame["Close"], benchmark_frame["Close"]) is None:
+                failures.append({"ticker": ticker.symbol, "error": f"benchmark_relative_rs_unavailable:{benchmark_ticker}"})
+                continue
+            hit = _build_hit(ticker, frame, signal_date=run_date, benchmark_frame=benchmark_frame)
             if hit is None:
                 print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: trend template failed | passed={len(hits)}")
                 continue
@@ -327,10 +377,17 @@ def run_trend_template_screen(
                     financials = cookstock.cookFinancials(
                         ticker.symbol,
                         benchmarkTicker=config.benchmark_ticker,
-                        historyLookbackDays=PRICE_HISTORY_DAYS,
+                        historyLookbackDays=PRICE_HISTORY_FALLBACK_CALENDAR_DAYS,
                     )
                     frame = _build_price_frame(financials)
-                    hit = _build_hit(ticker, frame, signal_date=run_date)
+                    benchmark_frame = _build_price_frame_from_rows(financials._get_benchmark_price_data(config.benchmark_ticker))
+                    if frame.empty or benchmark_frame.empty or pd.Timestamp(frame.index[-1]).date() != run_date or pd.Timestamp(benchmark_frame.index[-1]).date() != run_date:
+                        failures.append({"ticker": ticker.symbol, "error": f"price_session_mismatch:expected={run_date.isoformat()}"})
+                        continue
+                    if "Close" not in frame or "Close" not in benchmark_frame or _compute_attached_rs_rating(frame["Close"], benchmark_frame["Close"]) is None:
+                        failures.append({"ticker": ticker.symbol, "error": f"benchmark_relative_rs_unavailable:{benchmark_ticker}"})
+                        continue
+                    hit = _build_hit(ticker, frame, signal_date=run_date, benchmark_frame=benchmark_frame)
                     if hit is None:
                         print(f"[{position}/{total_tickers}] {ticker.symbol} filtered: trend template failed | passed={len(hits)}")
                         continue
