@@ -149,9 +149,10 @@ const MARTIN_FOCUS_TOP_HITS_FILTERS: TopHitsFilterPreset = {
   sizePriceFloorOnly: true,
   leaderRsOnly: true,
   leaderRsMin: "90",
-  scannerGroups: [[
-    "weekly_candidate_pool", "best_winners", "qullamaggie", "one_year_winners", "trend_template", "daily_rs_new_high", "rs",
-  ]],
+  scannerGroups: [
+    ["weekly_candidate_pool", "best_winners", "qullamaggie", "one_year_winners", "daily_rs_new_high", "rs"],
+    ["trend_template"],
+  ],
   viewMode: "readiness",
 };
 const ENTRY_CONFLUENCE_TOP_HITS_FILTERS: TopHitsFilterPreset = {
