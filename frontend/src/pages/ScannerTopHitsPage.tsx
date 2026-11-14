@@ -795,6 +795,7 @@ export function ScannerTopHitsPage() {
       <div className="top-hits-filter-toolbar">
         <span>{filteredRows.length} of {rows.length} tickers · {selectedScannerIds.length} scanner{selectedScannerIds.length === 1 ? "" : "s"} selected</span>
         <div className="top-hits-preset-controls">
+          {!isColumnView ? <button className="ghost-button" type="button" onClick={() => downloadTickerCsv(filteredRows.map((row) => row.ticker), payload?.target_trading_date || payload?.latest_signal_date || "", viewMode)} disabled={isLoading || !payload || filteredRows.length === 0}>Export CSV</button> : null}
           <select aria-label="Saved filter preset" value={selectedPresetName} onChange={(event) => {
             const name = event.target.value;
             setSelectedPresetName(name);
@@ -1164,6 +1165,7 @@ export function ScannerTopHitsPage() {
               onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
               onSelectTicker={selectBoardTicker}
               onRetry={() => setEtfPayload(null)}
+              snapshotDate={payload?.target_trading_date || payload?.latest_signal_date || etfPayload?.holdings_generated_at || ""}
             />
           </BoardChartWorkspace>
         ) : ((viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position") ? Boolean(guruBoard) : filteredRows.length > 0) ? (
@@ -1184,11 +1186,12 @@ export function ScannerTopHitsPage() {
                   onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
                   onSelectTicker={selectBoardTicker}
                   onToggleMyPick={handleToggleMyPick}
+                  snapshotDate={guruPayload?.target_trading_date || payload?.target_trading_date || payload?.latest_signal_date || ""}
                 />
               </BoardChartWorkspace>
             ) : viewMode === "readiness" ? (
               <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
-                <TradeReadinessBoard rows={visibleGuruRows} targetDate={guruPayload?.target_trading_date ?? ""} myPickTickers={myPickTickers} savingMyPickTickers={savingMyPickTickers} canManageMyPicks={canManageMyPicks} selectedTicker={selectedBoardTicker} onSelectTicker={selectBoardTicker} onToggleMyPick={handleToggleMyPick} />
+                <TradeReadinessBoard rows={visibleGuruRows} targetDate={guruPayload?.target_trading_date ?? ""} snapshotDate={guruPayload?.target_trading_date || payload?.target_trading_date || payload?.latest_signal_date || ""} myPickTickers={myPickTickers} savingMyPickTickers={savingMyPickTickers} canManageMyPicks={canManageMyPicks} selectedTicker={selectedBoardTicker} onSelectTicker={selectBoardTicker} onToggleMyPick={handleToggleMyPick} />
               </BoardChartWorkspace>
             ) : viewMode === "sectors" ? (
               <BoardChartWorkspace selection={selectedBoardSelection} chartPayload={chartPayloads[selectedBoardTicker]} chartError={chartErrors[selectedBoardTicker]} isChartLoading={Boolean(chartLoadingTickers[selectedBoardTicker])} workspace={chartWorkspace} onWorkspaceChange={updateChartWorkspace}>
@@ -1203,6 +1206,7 @@ export function ScannerTopHitsPage() {
                   onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
                   onSelectTicker={selectBoardTicker}
                   onToggleMyPick={handleToggleMyPick}
+                  snapshotDate={guruPayload?.target_trading_date || payload?.target_trading_date || payload?.latest_signal_date || ""}
                 />
               </BoardChartWorkspace>
             ) : viewMode === "position" ? (
@@ -1218,6 +1222,7 @@ export function ScannerTopHitsPage() {
                   onScannerGroupsOnlyChange={setGuruScannerGroupsOnly}
                   onSelectTicker={selectBoardTicker}
                   onToggleMyPick={handleToggleMyPick}
+                  snapshotDate={guruPayload?.target_trading_date || payload?.target_trading_date || payload?.latest_signal_date || ""}
                 />
               </BoardChartWorkspace>
             ) : <>
@@ -1611,6 +1616,21 @@ function BoardChartWorkspace({
   );
 }
 
+function downloadTickerCsv(tickers: string[], date: string, view: string) {
+  if (tickers.length === 0) return;
+  const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
+  const csv = ["Ticker", ...tickers.map(csvCell)].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `top-hits-${view}-${(date || "snapshot").slice(0, 10)}.csv`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function GuruBoard({
   rows,
   definitions,
@@ -1625,6 +1645,7 @@ function GuruBoard({
   onScannerGroupsOnlyChange,
   onSelectTicker,
   onToggleMyPick,
+  snapshotDate,
 }: {
   rows: ScannerTopHitRow[];
   definitions: NonNullable<ScannerTopHitsResponse["guru_board"]>["definitions"];
@@ -1639,6 +1660,7 @@ function GuruBoard({
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
   onSelectTicker: (ticker: string) => void;
   onToggleMyPick: (ticker: string) => Promise<void>;
+  snapshotDate: string;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const [strikeFilter, setStrikeFilter] = useState<"all" | "active" | "ready" | "context" | "avoid">("all");
@@ -1657,6 +1679,7 @@ function GuruBoard({
         <span><strong>{formatCount(totalScannerMatches)}</strong> scanner matches</span>
         <span><strong>{formatCount(confluenceTickerCount)}</strong> confluence names</span>
       </div>
+      <button className="ghost-button" type="button" disabled={!visibleRows.length} onClick={() => downloadTickerCsv(visibleRows.map((row) => row.ticker), snapshotDate, "guru")}>Export CSV ({formatCount(visibleRows.length)})</button>
       <div className="guru-board-filters">
         <div className="guru-strike-filters" role="group" aria-label="Strike Zone status">
           {(["all", "active", "ready", "context", "avoid"] as const).map((state) => (
@@ -1746,6 +1769,7 @@ function SectorBoard({
   onScannerGroupsOnlyChange,
   onSelectTicker,
   onToggleMyPick,
+  snapshotDate,
 }: {
   rows: ScannerTopHitRow[];
   scannerGroupsOnly: boolean;
@@ -1757,6 +1781,7 @@ function SectorBoard({
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
   onSelectTicker: (ticker: string) => void;
   onToggleMyPick: (ticker: string) => Promise<void>;
+  snapshotDate: string;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const [strikeFilter, setStrikeFilter] = useState<"all" | "active" | "ready" | "context" | "avoid">("all");
@@ -1784,6 +1809,7 @@ function SectorBoard({
         <span><strong>{formatCount(visibleRows.length)}</strong> Guru names across <strong>{formatCount(sectors.length)}</strong> sectors</span>
         <span>Each ticker appears once in its latest sector.</span>
       </div>
+      <button className="ghost-button" type="button" disabled={!visibleRows.length} onClick={() => downloadTickerCsv(visibleRows.map((row) => row.ticker), snapshotDate, "sectors")}>Export CSV ({formatCount(visibleRows.length)})</button>
       <div className="guru-board-filters">
         <div className="guru-strike-filters" role="group" aria-label="Strike Zone status">
           {(["all", "active", "ready", "context", "avoid"] as const).map((state) => (
@@ -1875,7 +1901,7 @@ function getEntryEligibility(row: ScannerTopHitRow, resolved: ResolvedTradeReadi
   return confirmedDailyTrigger ? "within_max" : "waiting_trigger";
 }
 
-function TradeReadinessBoard({ rows, targetDate, myPickTickers, savingMyPickTickers, canManageMyPicks, selectedTicker, onSelectTicker, onToggleMyPick }: { rows: ScannerTopHitRow[]; targetDate: string; myPickTickers: Set<string>; savingMyPickTickers: Record<string, boolean>; canManageMyPicks: boolean; selectedTicker: string; onSelectTicker: (ticker: string) => void; onToggleMyPick: (ticker: string) => Promise<void> }) {
+function TradeReadinessBoard({ rows, targetDate, snapshotDate, myPickTickers, savingMyPickTickers, canManageMyPicks, selectedTicker, onSelectTicker, onToggleMyPick }: { rows: ScannerTopHitRow[]; targetDate: string; snapshotDate: string; myPickTickers: Set<string>; savingMyPickTickers: Record<string, boolean>; canManageMyPicks: boolean; selectedTicker: string; onSelectTicker: (ticker: string) => void; onToggleMyPick: (ticker: string) => Promise<void> }) {
   const [showAvoided, setShowAvoided] = useState(false);
   const [pickFilter, setPickFilter] = useState<"all" | "mine">("all");
   const [groupBy, setGroupBy] = useState<ReadinessGroupBy>("stage");
@@ -2001,6 +2027,9 @@ function TradeReadinessBoard({ rows, targetDate, myPickTickers, savingMyPickTick
   }, new Map<string, ResolvedRow[]>()).entries()]
     .map(([sector, sectorRows]) => ({ sector, rows: sectorRows }))
     .sort((a, b) => a.sector === "Unknown sector" ? b.sector === "Unknown sector" ? 0 : 1 : b.sector === "Unknown sector" ? -1 : b.rows.length - a.rows.length || a.sector.localeCompare(b.sector));
+  const exportReadinessRows = groupBy === "stage"
+    ? [...columns.flatMap(({ state }) => sorted.filter(({ resolved }) => resolved.readiness === state && !resolved.isAvoided)), ...unknown, ...(showAvoided ? avoided : [])]
+    : sectorGroups.flatMap(({ rows: sectorRows }) => sectorRows);
   const renderSectorGroup = ({ sector, rows: sectorRows }: { sector: string; rows: ResolvedRow[] }) => {
     const key = `sector:${sector}`;
     const visible = visibleCounts[key] ?? 8;
@@ -2013,6 +2042,7 @@ function TradeReadinessBoard({ rows, targetDate, myPickTickers, savingMyPickTick
     </section>;
   };
   return <section className="trade-readiness-board" aria-label="Trade Readiness">
+    <button className="ghost-button" type="button" disabled={!exportReadinessRows.length} onClick={() => downloadTickerCsv(exportReadinessRows.map(({ row }) => row.ticker), snapshotDate, "readiness")}>Export CSV ({formatCount(exportReadinessRows.length)})</button>
     <p className="panel-copy trade-readiness-safety">Plan Ready means daily levels define risk within 5%; it is not a buy recommendation. A stop at or below half ADR is preferred, while a wider stop needs caution. ADR14 below 3% ranks lower. Check actual fill, position size, and next-session price against Max Entry before placing an order.</p>
     <div className="trade-readiness-controls"><div role="group" aria-label="Candidate filter"><button type="button" aria-pressed={pickFilter === "all"} onClick={() => { setPickFilter("all"); setVisibleCounts({}); }}>Show All</button><button type="button" aria-pressed={pickFilter === "mine"} onClick={() => { setPickFilter("mine"); setVisibleCounts({}); }}>My Picks</button></div><label>Stop policy <select aria-label="Stop policy" value={stopPolicy} onChange={(event) => setStopPolicy(event.target.value as StopPolicy)}><option value="current_v1">Current</option><option value="martin_daily_structural_v1">Martin-inspired daily structural</option></select></label><label>Group by <select aria-label="Group readiness candidates" value={groupBy} onChange={(event) => setGroupBy(event.target.value as ReadinessGroupBy)}><option value="stage">Readiness stage</option><option value="sector">Sector</option></select></label><label>Readiness <select aria-label="Filter by readiness stage" value={stageFilter} onChange={(event) => setStageFilter(event.target.value as ReadinessStageFilter)}><option value="all">All</option><option value="leader">Leader / Waiting</option><option value="pullback_zone">Support Zone</option><option value="reclaim_trigger">Daily Trigger</option><option value="defined_risk">Plan Ready</option><option value="needs-data">Needs Data</option></select></label><label>Entry status <select aria-label="Filter by entry status" value={entryFilter} onChange={(event) => setEntryFilter(event.target.value as "all" | EntryEligibility)}><option value="all">All</option><option value="within_max">Within max entry · plan valid</option><option value="waiting_trigger">Waiting for daily trigger</option><option value="extended">Extended · do not chase</option><option value="unavailable">Plan unavailable</option></select></label><label>Sort <select aria-label="Sort readiness candidates" value={sortBy} onChange={(event) => { setSortBy(event.target.value as typeof sortBy); setVisibleCounts({}); }}><option value="readiness">Readiness ranking</option><option value="entryEligibility">Entry eligibility</option><option value="risk">Lowest risk</option><option value="rs">Highest RS</option><option value="adr">High ADR</option></select></label><label>Management style <select aria-label="Management style" value={managementPreset} onChange={(event) => setManagementPreset(event.target.value as TradeManagementPreset)}><option value="martin">Martin-like (default)</option><option value="balanced_daily">Balanced Daily</option></select></label></div>
     {groupBy === "stage" ? <><div className="trade-readiness-lanes">{columns.map(({ state, label, tone, empty }) => renderLane(state, label, tone, sorted.filter(({ resolved }) => resolved.readiness === state && !resolved.isAvoided), empty))}</div>{renderLane("needs-data", "Needs Data", "needs-data", unknown, "Every candidate has a recognized readiness stage.")}</> : sectorGroups.length ? <div className="trade-readiness-sector-groups">{sectorGroups.map(renderSectorGroup)}</div> : <p className="trade-readiness-empty">No candidates match these filters.</p>}
@@ -2250,6 +2280,7 @@ function MomentumEtfPortfolioBoard({
   onScannerGroupsOnlyChange,
   onSelectTicker,
   onRetry,
+  snapshotDate,
 }: {
   payload: MomentumEtfPortfoliosResponse | null;
   loading: boolean;
@@ -2272,6 +2303,7 @@ function MomentumEtfPortfolioBoard({
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
   onSelectTicker: (ticker: string) => void;
   onRetry: () => void;
+  snapshotDate: string;
 }) {
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const rows = useMemo(() => (payload?.rows ?? []).filter((row) => {
@@ -2312,6 +2344,7 @@ function MomentumEtfPortfolioBoard({
       <div className="guru-board-summary">
         {payload.funds.map((fund) => <span key={fund.ticker}><a href={fund.source_url} target="_blank" rel="noreferrer"><strong>{fund.ticker}</strong></a> {fund.holding_count}{fund.is_complete ? "" : ` of ${fund.reported_holding_count}`} holdings · {fund.top_hits_count} Top Hits · {fund.as_of_date || "date TBD"}{fund.source_kind === "fallback" ? " · source fallback" : ""}</span>)}
       </div>
+      <button className="ghost-button" type="button" disabled={!rows.length} onClick={() => downloadTickerCsv(Array.from(new Set(rows.map((row) => row.ticker))), snapshotDate, "etf-portfolios")}>Export CSV ({formatCount(new Set(rows.map((row) => row.ticker)).size)})</button>
       {Object.keys(payload.errors).length > 0 ? <p className="panel-copy earnings-console-note">Using the last successful cache where available. Refresh issue: {Object.keys(payload.errors).join(", ")}.</p> : null}
       {rows.length === 0 ? <p className="panel-copy">No holdings match these ETF filters.</p> : <div className="guru-board-scroll">
         {funds.map((fund) => {
@@ -2389,6 +2422,7 @@ function PositionMap({
   onScannerGroupsOnlyChange,
   onSelectTicker,
   onToggleMyPick,
+  snapshotDate,
 }: {
   rows: ScannerTopHitRow[];
   scannerGroupsOnly: boolean;
@@ -2400,6 +2434,7 @@ function PositionMap({
   onScannerGroupsOnlyChange: (enabled: boolean) => void;
   onSelectTicker: (ticker: string) => void;
   onToggleMyPick: (ticker: string) => Promise<void>;
+  snapshotDate: string;
 }) {
   return (
     <section className="guru-board" aria-label="Market position map">
@@ -2407,6 +2442,7 @@ function PositionMap({
         <span>Each Guru ticker appears once, based on its latest moving-average position.</span>
         <span><strong>{formatCount(rows.length)}</strong> names shown</span>
       </div>
+      <button className="ghost-button" type="button" disabled={!rows.length} onClick={() => downloadTickerCsv(rows.map((row) => row.ticker), snapshotDate, "position")}>Export CSV ({formatCount(rows.length)})</button>
       <div className="guru-board-filters">
         <ScannerGroupsOnlyFilter checked={scannerGroupsOnly} groupCount={selectedScannerGroupCount} onChange={onScannerGroupsOnlyChange} />
       </div>
