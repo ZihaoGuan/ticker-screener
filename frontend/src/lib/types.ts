@@ -531,6 +531,7 @@ export type ScannerTopHitsResponse = ScannerBoardResponse & {
   rows: ScannerTopHitRow[];
   guru_board?: GuruBoardSnapshot;
   snapshot?: SnapshotMetadata;
+  reconstruction?: { note: string; enrichment: Record<string, number>; sources: Array<{ id: string; label: string; run_id: number | null; count: number; created_at: string; included: boolean }> } | null;
 };
 
 export type MomentumEtfPortfolioFund = {

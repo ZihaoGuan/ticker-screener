@@ -186,6 +186,7 @@ export function ScannerTopHitsPage() {
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [payload, setPayload] = useState<ScannerTopHitsResponse | null>(null);
+  const [selectedDate, setSelectedDate] = useState("");
   const [guruPayload, setGuruPayload] = useState<ScannerTopHitsResponse | null>(null);
   const guruSnapshotVersion = useRef<string | null>(null);
   const [guruLoading, setGuruLoading] = useState(false);
@@ -281,7 +282,7 @@ export function ScannerTopHitsPage() {
     setActiveScannerGroupIndex(0);
     setSortBy(preset.sortBy);
     setSortDirection(preset.sortDirection);
-    setViewMode(preset.viewMode);
+    setViewMode(selectedDate ? "list" : preset.viewMode);
     setSearch("");
     setScannerSearch("");
   };
@@ -335,7 +336,7 @@ export function ScannerTopHitsPage() {
     const controller = new AbortController();
     setIsLoading(true);
     setNotice("");
-    void fetchJson<ScannerTopHitsResponse>("/api/scanner-board/top-hits?section=list", { signal: controller.signal })
+    void fetchJson<ScannerTopHitsResponse>(`/api/scanner-board/top-hits?section=list${selectedDate ? `&snapshot_date=${selectedDate}` : ""}`, { signal: controller.signal })
       .then(setPayload)
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -345,11 +346,11 @@ export function ScannerTopHitsPage() {
         if (!controller.signal.aborted) setIsLoading(false);
       });
     return () => controller.abort();
-  }, [reloadKey]);
+  }, [reloadKey, selectedDate]);
 
   const snapshotVersion = payload ? `${payload.snapshot?.snapshot_run_id ?? ""}:${payload.snapshot?.snapshot_generated_at ?? payload.generated_at ?? ""}` : null;
   useEffect(() => {
-    if (snapshotVersion === null) return;
+    if (snapshotVersion === null || selectedDate) return;
     const controller = new AbortController();
     let inFlight = false;
     const refresh = async () => {
@@ -378,7 +379,7 @@ export function ScannerTopHitsPage() {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [snapshotVersion]);
+  }, [snapshotVersion, selectedDate]);
 
   useEffect(() => {
     if (snapshotVersion === null || !(viewMode === "guru" || viewMode === "readiness" || viewMode === "sectors" || viewMode === "position") || (guruPayload && guruSnapshotVersion.current === snapshotVersion) || guruNotice) return;
@@ -1059,15 +1060,20 @@ export function ScannerTopHitsPage() {
         <div className="top-hits-snapshot-row">
           <div className="scanner-result-filter panel scanner-result-filter-actions">
             <span>Board Snapshot</span>
+            <label>Snapshot date <input type="date" value={selectedDate} onChange={(event) => { setSelectedDate(event.target.value); setPayload(null); setGuruPayload(null); setGuruNotice(""); applyFilterPreset(EMPTY_TOP_HITS_FILTERS); setViewMode("list"); }} /></label>
+            {selectedDate ? <button className="ghost-button" type="button" onClick={() => { setSelectedDate(""); setPayload(null); }}>Return to latest</button> : null}
             <div className="scanner-result-view-actions">
               <Link className="ghost-button" to="/scanner">
                 Back to board
               </Link>
             </div>
             <span className="panel-copy">Updated {formatLocalDateTime(payload?.latest_update_at)}.</span>
-            <span className="panel-copy">Checks for updates every 5 minutes while visible and when you return to this tab.</span>
+            {!selectedDate ? <span className="panel-copy">Checks for updates every 5 minutes while visible and when you return to this tab.</span> : null}
+            {payload?.reconstruction ? <><span className="panel-copy earnings-console-note">Reconstructed snapshot: {payload.reconstruction.note}</span><details><summary>Scanner source coverage</summary><ul>{payload.reconstruction.sources.map((source) => <li key={source.id}>{source.label}: {source.run_id ? `run ${source.run_id}, ${source.count} hits, saved ${source.created_at || "date unavailable"}${source.included ? ", included" : ", not used"}` : "missing"}</li>)}</ul></details></> : null}
+            {payload?.reconstruction ? <span className="panel-copy">Dated data coverage: close {payload.reconstruction.enrichment.day_close ?? 0}, market cap {payload.reconstruction.enrichment.market_cap ?? 0}, daily RS {payload.reconstruction.enrichment.daily_rs_rating ?? 0} of {payload.overlapping_ticker_count} names.</span> : null}
+            {selectedDate ? <span className="panel-copy">Historical selection shows the saved list. Charts and trade plans are unavailable for this view.</span> : null}
             {snapshot?.freshness === "stale" ? <span className="panel-copy earnings-console-note">Showing the latest completed snapshot while a newer market day is pending.</span> : null}
-            {snapshot?.freshness === "missing" ? <span className="panel-copy earnings-console-note">No completed Top Hits snapshot is available yet. Run “Build Top Hits Snapshot” after the scanner batch.</span> : null}
+            {snapshot?.freshness === "missing" ? <span className="panel-copy earnings-console-note">{selectedDate ? "No saved Top Hits snapshot exists for this date." : "No completed Top Hits snapshot is available yet. Run “Build Top Hits Snapshot” after the scanner batch."}</span> : null}
             {snapshot?.refresh_status && snapshot.refresh_status !== "idle" ? <span className="panel-copy earnings-console-note">Refresh {snapshot.refresh_status}: {snapshot.refresh_message || "checking scanner inputs"}</span> : null}
           </div>
           <div className="scanner-result-filter panel scanner-result-filter-actions">
@@ -1083,6 +1089,7 @@ export function ScannerTopHitsPage() {
             <button
               className={`scanner-result-view-chip${viewMode === "charts" ? " is-active" : ""}`}
               type="button"
+              disabled={Boolean(selectedDate)}
               onClick={() => setViewMode("charts")}
             >
               Charts
@@ -1090,14 +1097,16 @@ export function ScannerTopHitsPage() {
             <button
               className={`scanner-result-view-chip${viewMode === "guru" ? " is-active" : ""}`}
               type="button"
+              disabled={Boolean(selectedDate)}
               onClick={() => setViewMode("guru")}
             >
               Guru Board
             </button>
-            <button className={`scanner-result-view-chip${viewMode === "readiness" ? " is-active" : ""}`} type="button" onClick={() => setViewMode("readiness")}>Trade Readiness</button>
+            <button className={`scanner-result-view-chip${viewMode === "readiness" ? " is-active" : ""}`} type="button" disabled={Boolean(selectedDate)} onClick={() => setViewMode("readiness")}>Trade Readiness</button>
             <button
               className={`scanner-result-view-chip${viewMode === "sectors" ? " is-active" : ""}`}
               type="button"
+              disabled={Boolean(selectedDate)}
               onClick={() => setViewMode("sectors")}
             >
               Sectors
@@ -1105,6 +1114,7 @@ export function ScannerTopHitsPage() {
             <button
               className={`scanner-result-view-chip${viewMode === "position" ? " is-active" : ""}`}
               type="button"
+              disabled={Boolean(selectedDate)}
               onClick={() => setViewMode("position")}
             >
               Position Map
@@ -1112,6 +1122,7 @@ export function ScannerTopHitsPage() {
             <button
               className={`scanner-result-view-chip${viewMode === "etf-portfolios" ? " is-active" : ""}`}
               type="button"
+              disabled={Boolean(selectedDate)}
               onClick={() => setViewMode("etf-portfolios")}
             >
               ETF Portfolios
@@ -1324,12 +1335,10 @@ export function ScannerTopHitsPage() {
                       ) : null}
                       <td className="pinned-ticker" data-label="Ticker">
                         <div className="scanner-result-company">
-                          <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>
-                            {row.ticker}
-                          </Link>
+                          {selectedDate ? <strong className="scanner-result-symbol">{row.ticker}</strong> : <Link className="scanner-result-symbol" to={buildChartHref(row.ticker)} onMouseEnter={preloadChartsPage} onFocus={preloadChartsPage}>{row.ticker}</Link>}
                           <span>{row.company || row.industry || "-"}</span>
-                          {row.power_gap_volume_context ? <PowerGapEventSummary row={row} /> : null}
-                          {row.gap_retest_context ? <GapRetestPreview row={row} /> : null}
+                          {row.power_gap_volume_context ? <PowerGapEventSummary row={row} historical={Boolean(selectedDate)} /> : null}
+                          {!selectedDate && row.gap_retest_context ? <GapRetestPreview row={row} /> : null}
                         </div>
                       </td>
                       <td data-label="Hits">
@@ -2801,13 +2810,13 @@ function comparePowerGapRows(left: ScannerTopHitRow, right: ScannerTopHitRow) {
     || left.ticker.localeCompare(right.ticker);
 }
 
-function PowerGapEventSummary({ row }: { row: ScannerTopHitRow }) {
+function PowerGapEventSummary({ row, historical = false }: { row: ScannerTopHitRow; historical?: boolean }) {
   const context = row.power_gap_volume_context;
   if (!context) return <span>Power Gap context unavailable</span>;
   const gap = context.active_signals?.includes("gap") ? context.gap_event : null;
   const events = context.volume_events;
   const earningsStatus = context.earnings_context?.status;
-  const earningsLabel = earningsStatus === "earnings_confirmed" ? "Earnings confirmed"
+  const earningsLabel = historical && !context.earnings_context ? "Earnings unavailable" : earningsStatus === "earnings_confirmed" ? "Earnings confirmed"
     : earningsStatus?.startsWith("earnings_nearby") ? "Earnings nearby, unconfirmed"
       : earningsStatus === "lookup_failed" ? "Earnings lookup failed"
         : "Catalyst unknown";

@@ -1045,6 +1045,7 @@ def scanner_board_refresh_data(
 @router.get("/scanner-board/top-hits", response_class=JSONResponse)
 def scanner_top_hits_data(
     section: str = Query(default="all", pattern="^(all|list|guru)$"),
+    snapshot_date: dt.date | None = None,
     scanner_group: list[str] | None = Query(
         default=None,
         description="Repeat for AND groups; comma-separated scanner IDs within each group use OR.",
@@ -1058,12 +1059,14 @@ def scanner_top_hits_data(
         [scanner_id.strip() for scanner_id in group.split(",") if scanner_id.strip()]
         for group in scanner_group or []
     ]
+    date_options = {"snapshot_date": snapshot_date} if snapshot_date else {}
     return JSONResponse(
         service.get_scanner_top_hits_snapshot_payload(
             scanner_groups=scanner_groups,
             daily_rs_min=daily_rs_min,
             daily_rs_max=daily_rs_max,
             section=section,
+            **date_options,
         )
     )
 

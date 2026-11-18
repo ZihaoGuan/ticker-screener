@@ -32,6 +32,52 @@ from src.webapp.services.watchlist_service import (
 
 
 class WatchlistServiceTests(unittest.TestCase):
+    def test_reconstruction_preserves_dated_power_gap_without_earnings_or_plan(self) -> None:
+        target = dt.date(2026, 11, 17)
+        config = {"id": "power_gap_volume_watch", "strategy_id": "power_gap_volume_watch", "label": "Power Gap", "timeframe": "Daily"}
+        context = {"as_of_date": target.isoformat(), "active_signals": ["gap"], "gap_event": {"date": "2026-11-16", "age_trading_sessions": 1}, "earnings_context": {"status": "earnings_confirmed"}, "trade_plan": {"trigger_price": 10}}
+        history = self.service.screener_history_service
+        saved_run = {"hit_count": 1, "hits": [{"ticker": "GAP", "passed": True, "hit_payload_json": {"power_gap_volume_context": context}}]}
+        with patch("src.webapp.services.watchlist_service._SCANNER_BOARD_CONFIG", [config]), patch.object(history, "is_configured", return_value=True), patch.object(history, "list_runs", return_value=[{"id": 4}]), patch.object(history, "get_run", return_value=saved_run), patch.object(history, "persist_snapshot_run") as persist, patch.object(self.service, "_filter_excluded_entries", side_effect=lambda entries: entries):
+            self.service.reconstruct_scanner_top_hits_snapshot(target)
+        saved = persist.call_args.kwargs["hit_rows"][0]["hit_payload_json"]["power_gap_volume_context"]
+        self.assertEqual(saved["active_signals"], ["gap"])
+        self.assertEqual(saved["gap_event"]["age_trading_sessions"], 1)
+        self.assertNotIn("earnings_context", saved)
+        self.assertNotIn("trade_plan", saved)
+
+    def test_reconstruction_uses_saved_hits_and_separate_strategy(self) -> None:
+        target = dt.date(2026, 11, 17)
+        configs = [
+            {"id": "one", "strategy_id": "one", "label": "One", "timeframe": "Daily"},
+            {"id": "two", "strategy_id": "two", "label": "Two", "timeframe": "Daily"},
+            {"id": "missing", "strategy_id": "missing", "label": "Missing", "timeframe": "Daily"},
+        ]
+        history = self.service.screener_history_service
+        def runs(**kwargs):
+            self.assertEqual(kwargs["start_date"], target)
+            return [{"id": {"one": 1, "two": 2}[kwargs["strategy_id"]]}] if kwargs["strategy_id"] != "missing" else []
+        def get_run(run_id, **kwargs):
+            if run_id == 1 and not kwargs.get("hit_offset"):
+                return {"created_at": "2026-11-18", "hit_count": 1, "hits": [{"ticker": f"FAIL{index}", "passed": False} for index in range(5000)]}
+            if run_id == 1:
+                self.assertEqual(kwargs.get("hit_offset"), 5000)
+            return {"created_at": "2026-11-18", "hit_count": 1, "hits": [{"ticker": "ABC", "passed": True, "hit_payload_json": {"trade_plan": {"trigger_price": 99}}}]}
+        frame = pd.DataFrame({"Close": [12.0]}, index=pd.to_datetime(["2026-11-17"]))
+        with patch("src.webapp.services.watchlist_service._SCANNER_BOARD_CONFIG", configs), patch.object(history, "is_configured", return_value=True), patch.object(history, "list_runs", side_effect=runs), patch.object(history, "get_run", side_effect=get_run), patch.object(history, "persist_snapshot_run") as persist, patch.object(self.service, "_filter_excluded_entries", side_effect=lambda entries: entries), patch.object(self.service, "database_url", "postgres://test"), patch("src.webapp.services.watchlist_service.load_latest_market_caps", return_value={"ABC": 2e9}) as caps, patch("src.webapp.services.watchlist_service.RatingsRepository") as ratings, patch("src.webapp.services.watchlist_service.load_many_ticker_windows", return_value={"ABC": frame}) as bars:
+            ratings.return_value.load_latest_technical_rating_snapshots_for_tickers.return_value = {"ABC": {"daily_rs_rating": 95}}
+            result = self.service.reconstruct_scanner_top_hits_snapshot(target)
+        self.assertEqual(result["overlapping_ticker_count"], 1)
+        self.assertIsNone(result["reconstruction"]["sources"][2]["run_id"])
+        self.assertEqual(persist.call_args.kwargs["strategy_id"], "scanner_top_hits_reconstructed")
+        row = persist.call_args.kwargs["hit_rows"][0]["hit_payload_json"]
+        self.assertEqual(row["ticker"], "ABC")
+        self.assertEqual((row["market_cap"], row["daily_rs_rating"], row["day_close"]), (2e9, 95, 12.0))
+        self.assertEqual(caps.call_args.kwargs["as_of_date"], target)
+        self.assertEqual(ratings.return_value.load_latest_technical_rating_snapshots_for_tickers.call_args.kwargs["as_of_date"], target)
+        self.assertEqual(bars.call_args.args[1], target)
+        self.assertNotIn("trade_plan", row)
+
     def test_qullamaggie_ep_board_family_is_earnings_and_gaps(self) -> None:
         self.assertEqual(_scanner_family("qullamaggie_ep"), "Earnings & gaps")
 

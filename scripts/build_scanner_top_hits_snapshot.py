@@ -24,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-if-current", action="store_true", default=None, help="Do not rebuild when today's completed snapshot already exists.")
     parser.add_argument("--allow-incremental-refresh", action="store_true", default=None, help="Compatibility flag; all configured prerequisites must still be ready.")
     parser.add_argument("--debounce-seconds", type=int, default=None, help="Wait after the newest source run before rebuilding (default: 300).")
+    parser.add_argument("--reconstruct-date", type=dt.date.fromisoformat, help="Reconstruct membership from saved scanner runs for this date; does not publish the live snapshot.")
     args = parser.parse_args(argv)
     config = load_webapp_config()
     service = WatchlistService(
@@ -31,6 +32,10 @@ def main(argv: list[str] | None = None) -> int:
         database_url=config.database_url,
         market_data_source=config.market_data_source,
     )
+    if args.reconstruct_date:
+        payload = service.reconstruct_scanner_top_hits_snapshot(args.reconstruct_date)
+        print(f"RECONSTRUCTED: {args.reconstruct_date}: {payload['overlapping_ticker_count']} tickers; inspect source coverage in Top Hits.")
+        return 0
     now = dt.datetime.now(dt.timezone.utc)
     options = {key: value for key, value in {
         "required_job_ids": args.required_job_id, "required_job_groups": args.required_job_group,

@@ -124,6 +124,7 @@ _sector_momentum_cache_lock = threading.Lock()
 _top_ratings_cache: dict[tuple[str, str, str, int, str, str], tuple[float, dict[str, Any]]] = {}
 _top_ratings_cache_lock = threading.Lock()
 _SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID = "scanner_top_hits_snapshot"
+_RECONSTRUCTED_TOP_HITS_STRATEGY_ID = "scanner_top_hits_reconstructed"
 _RS_EVIDENCE_LOOKBACK_DAYS = 21
 _RS_EVIDENCE_RS_DAYS_THRESHOLD_PCT = 60.0
 _RS_EVIDENCE_UP_ON_DOWN_DAYS_THRESHOLD = 3
@@ -1117,6 +1118,7 @@ class WatchlistService:
         daily_rs_min: float | None = None,
         daily_rs_max: float | None = None,
         section: str = "all",
+        snapshot_date: dt.date | None = None,
     ) -> dict[str, Any]:
         """Read the latest completed Top Hits snapshot without doing enrichment.
 
@@ -1125,14 +1127,15 @@ class WatchlistService:
         """
         reference_now = _normalize_scanner_now(now)
         target_date = _latest_completed_trading_day(reference_now)
-        board_payload = self.get_scanner_board(now=reference_now)
-        persisted = self._load_latest_persisted_scanner_top_hits_payload()
+        board_payload = self.get_scanner_board(now=reference_now) if snapshot_date is None else {}
+        persisted = (self._load_latest_persisted_scanner_top_hits_payload(snapshot_date=snapshot_date)
+                     if snapshot_date else self._load_latest_persisted_scanner_top_hits_payload())
         refresh_state = _load_scanner_top_hits_refresh_state(self.repository.artifacts_dir / "status")
         if persisted is None:
             persisted = {
                 "generated_at": reference_now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
                 "reference_now_new_york": reference_now.astimezone(_NEW_YORK_TZ).isoformat(),
-                "target_trading_date": target_date.isoformat(),
+                "target_trading_date": (snapshot_date or target_date).isoformat(),
                 "cutoff_time_label": "20:30 America/New_York",
                 "latest_update_at": "",
                 "latest_signal_date": "",
@@ -1152,6 +1155,14 @@ class WatchlistService:
                     "freshness": "missing",
                     **refresh_state,
                 },
+            }
+        elif snapshot_date is not None:
+            persisted["snapshot"] = {
+                "snapshot_run_id": persisted.pop("_snapshot_run_id", None),
+                "snapshot_generated_at": persisted.pop("_snapshot_generated_at", None),
+                "source_data_as_of": persisted.get("target_trading_date"),
+                "freshness": "historical",
+                "reconstructed": bool(persisted.get("reconstruction")),
             }
         else:
             _exclude_stale_power_gap_source(persisted, board_payload)
@@ -1213,6 +1224,101 @@ class WatchlistService:
             "persisted_gap_retest_decision_fingerprint": str(persisted.get("gap_retest_decision_fingerprint") or ""),
             "gap_retest_decision_changed": gap_fingerprint != str(persisted.get("gap_retest_decision_fingerprint") or ""),
         }
+
+    def reconstruct_scanner_top_hits_snapshot(self, target_date: dt.date) -> dict[str, Any]:
+        """Save historical membership from dated database hits, without current enrichment."""
+        if not self.screener_history_service.is_configured():
+            raise RuntimeError("A configured scanner history database is required")
+        cards = []
+        entries_by_id: dict[str, list[dict[str, Any]]] = {}
+        for config in _SCANNER_BOARD_CONFIG:
+            runs = self.screener_history_service.list_runs(strategy_id=config["strategy_id"], start_date=target_date, end_date=target_date, limit=1)
+            run_id = int(runs[0].get("id") or 0) if runs else 0
+            run = self.screener_history_service.get_run(run_id, include_hits=True, hit_limit=5000) if run_id else None
+            if run_id and not isinstance(run, dict):
+                raise RuntimeError(f"Cannot read scanner run {run_id}")
+            hits = run.get("hits") if run else []
+            if not isinstance(hits, list):
+                raise RuntimeError(f"Cannot read hits for scanner run {run_id}")
+            offset = len(hits)
+            while run and offset and offset % 5000 == 0:
+                page = self.screener_history_service.get_run(run_id, include_hits=True, hit_limit=5000, hit_offset=offset)
+                if not isinstance(page, dict) or not isinstance(page.get("hits"), list):
+                    raise RuntimeError(f"Cannot read hits for scanner run {run_id} at offset {offset}")
+                page_hits = page["hits"]
+                hits.extend(page_hits)
+                offset += len(page_hits)
+                if len(page_hits) < 5000:
+                    break
+            passed_count = sum(1 for hit in hits if isinstance(hit, dict) and hit.get("passed"))
+            if run and int(run.get("hit_count") or 0) > passed_count:
+                raise RuntimeError(f"Scanner run {run_id} is missing saved hits")
+            entries = []
+            for hit in hits:
+                if not isinstance(hit, dict) or not hit.get("passed", True):
+                    continue
+                entry = {"ticker": str(hit.get("ticker") or "")}
+                raw = hit.get("hit_payload_json")
+                context = raw.get("power_gap_volume_context") if isinstance(raw, dict) else None
+                if config["id"] == "power_gap_volume_watch" and isinstance(context, dict) and str(context.get("as_of_date") or "") == target_date.isoformat():
+                    entry["power_gap_volume_context"] = {key: copy.deepcopy(context.get(key)) for key in ("rules_version", "as_of_date", "active_signals", "coverage", "gap_event", "volume_events", "current_context")}
+                entries.append(entry)
+            entries = self._filter_excluded_entries(entries)
+            card = {**config, "run_id": run_id or None, "has_run": bool(run_id), "has_results": bool(entries),
+                    "available": bool(entries), "stem": f"screen-run-{run_id}" if run_id else "",
+                    "sort_date": target_date.isoformat() if run_id else "", "captured_at": str(run.get("created_at") or "") if run else "",
+                    "entry_count": len(entries), "freshness": "current" if run_id else "missing"}
+            cards.append(card)
+            entries_by_id[str(config["id"])] = entries
+        if not any(card["has_run"] for card in cards):
+            raise RuntimeError(f"No saved scanner runs found for {target_date}")
+        board = {"target_trading_date": target_date.isoformat(), "cards": cards}
+        selected = self._select_scanner_top_hit_live_cards(board)
+        aggregated: dict[str, dict[str, Any]] = {}
+        for card in selected:
+            for entry in entries_by_id[str(card["id"])]:
+                ticker = normalize_ticker_symbol(entry["ticker"])
+                if not ticker:
+                    continue
+                row = aggregated.setdefault(ticker, self._new_scanner_top_hit_bucket(ticker))
+                if entry.get("power_gap_volume_context"):
+                    row["power_gap_volume_context"] = entry["power_gap_volume_context"]
+                if not any(scanner["id"] == card["id"] for scanner in row["scanners"]):
+                    row["scanners"].append({key: card.get(key, "") for key in ("id", "strategy_id", "label", "timeframe", "stem", "sort_date")})
+        rows = []
+        for row in aggregated.values():
+            row["scanner_count"] = len(row["scanners"])
+            row["scanner_labels"] = [item["label"] for item in row["scanners"]]
+            if row["scanner_count"] >= 2 or any(item["id"] == "power_gap_volume_watch" for item in row["scanners"]):
+                rows.append(row)
+        rows.sort(key=lambda row: (-row["scanner_count"], row["ticker"]))
+        if self.database_url and rows:
+            tickers = [row["ticker"] for row in rows]
+            caps = load_latest_market_caps(tickers, as_of_date=target_date, database_url=self.database_url)
+            ratings = RatingsRepository(self.database_url).load_latest_technical_rating_snapshots_for_tickers(tickers, as_of_date=target_date)
+            frames = load_many_ticker_windows(tickers, target_date, 10, database_url=self.database_url)
+            for row in rows:
+                ticker = row["ticker"]
+                row["market_cap"] = caps.get(ticker)
+                row["daily_rs_rating"] = (ratings.get(ticker) or {}).get("daily_rs_rating")
+                frame = frames.get(ticker)
+                if frame is not None and not frame.empty and pd.Timestamp(frame.index[-1]).date() == target_date:
+                    row["day_close"] = _coerce_optional_float(frame.iloc[-1].get("Close"))
+        generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        selected_ids = {card["id"] for card in selected}
+        coverage = {"sources": [{"id": card["id"], "label": card["label"], "run_id": card["run_id"], "count": card["entry_count"], "created_at": card["captured_at"], "included": card["id"] in selected_ids} for card in cards],
+                    "enrichment": {key: sum(row.get(key) is not None for row in rows) for key in ("day_close", "market_cap", "daily_rs_rating")},
+                    "note": "Reconstructed from saved same-date scanner runs. Runs and dated market data or ratings may have been created or revised later. Missing values are unavailable; trade plans are not reconstructed."}
+        summary = {**board, "generated_at": generated_at, "latest_signal_date": target_date.isoformat(), "latest_update_at": generated_at,
+                   "total_live_scanners": len(selected), "total_unique_tickers": len(aggregated), "overlapping_ticker_count": len(rows), "reconstruction": coverage}
+        hit_rows = [{"strategy_id": _RECONSTRUCTED_TOP_HITS_STRATEGY_ID, "signal_date": target_date, "ticker": row["ticker"], "passed": True,
+                     "rank": index, "hit_payload_json": row} for index, row in enumerate(rows, 1)]
+        saved_id = self.screener_history_service.persist_snapshot_run(strategy_id=_RECONSTRUCTED_TOP_HITS_STRATEGY_ID, run_date=target_date,
+            summary_payload=summary, hit_rows=hit_rows, config_json={"kind": "reconstructed_top_hits"}, scope_json={"target_trading_date": target_date.isoformat()},
+            source_kind="reconstructed-scanner-top-hits", notes="Reconstructed from saved scanner runs")
+        if not saved_id:
+            raise RuntimeError("Reconstructed snapshot could not be saved")
+        return summary
 
     def persist_scanner_top_hits_snapshot(
         self,
@@ -1307,14 +1413,16 @@ class WatchlistService:
         )
         return payload
 
-    def _load_latest_persisted_scanner_top_hits_payload(self) -> dict[str, Any] | None:
+    def _load_latest_persisted_scanner_top_hits_payload(self, *, snapshot_date: dt.date | None = None) -> dict[str, Any] | None:
         """Load a full, immutable snapshot for the API response path."""
         if not self.screener_history_service.is_configured():
             return None
         rows = self.screener_history_service.list_runs(
-            strategy_id=_SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID,
-            limit=1,
+            strategy_id=_RECONSTRUCTED_TOP_HITS_STRATEGY_ID if snapshot_date else _SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID,
+            start_date=snapshot_date, end_date=snapshot_date, limit=1,
         )
+        if snapshot_date and not rows:
+            rows = self.screener_history_service.list_runs(strategy_id=_SCANNER_TOP_HITS_SNAPSHOT_STRATEGY_ID, start_date=snapshot_date, end_date=snapshot_date, limit=1)
         if not rows:
             return None
         run_id = int(rows[0].get("id") or 0)
@@ -1327,6 +1435,17 @@ class WatchlistService:
         if not isinstance(summary, dict):
             return None
         hit_rows = payload.get("hits") if isinstance(payload.get("hits"), list) else []
+        if snapshot_date:
+            offset = len(hit_rows)
+            while offset and offset % 5000 == 0:
+                page = self.screener_history_service.get_run(run_id, include_hits=True, hit_limit=5000, hit_offset=offset)
+                if not isinstance(page, dict) or not isinstance(page.get("hits"), list):
+                    raise RuntimeError(f"Cannot read snapshot {run_id} at offset {offset}")
+                page_hits = page["hits"]
+                hit_rows.extend(page_hits)
+                offset += len(page_hits)
+                if len(page_hits) < 5000:
+                    break
         snapshot_rows = [
             copy.deepcopy(item.get("hit_payload_json"))
             for item in hit_rows
@@ -1353,6 +1472,7 @@ class WatchlistService:
             "guru_board": copy.deepcopy(summary.get("guru_board") or {}),
             "source_fingerprint": str(summary.get("source_fingerprint") or ""),
             "gap_retest_decision_fingerprint": str(summary.get("gap_retest_decision_fingerprint") or ""),
+            "reconstruction": copy.deepcopy(summary.get("reconstruction")),
             "_snapshot_run_id": run_id,
             "_snapshot_generated_at": generated_at,
         }
