@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import datetime as dt
 import json
 import os
 from pathlib import Path
 import re
 import selectors
+import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from typing import Any
 
@@ -20,6 +23,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.webapp.config import load_webapp_config
 from src.webapp.services.run_service import RunService
+
+FINVIZ_OUTPUT_IDLE_TIMEOUT_SECONDS = 6 * 60 * 60
+FINVIZ_TERMINATION_GRACE_SECONDS = 30
 
 
 def parse_args() -> argparse.Namespace:
@@ -295,9 +301,36 @@ def _run_claimed_job(
     artifact_state: dict[str, Any] = {"summary_file": "", "watchlist_file": "", "raw_results_file": "", "backtest_run_id": None}
     last_heartbeat = time.monotonic()
     cancel_requested = False
+    idle_timeout_seconds = FINVIZ_OUTPUT_IDLE_TIMEOUT_SECONDS
+    last_output_at = time.monotonic()
+    watchdog_stop = threading.Event()
+    output_timed_out = threading.Event()
+    watchdog_done = threading.Event()
+
+    def watch_finviz_output() -> None:
+        try:
+            while not watchdog_stop.wait(min(60.0, idle_timeout_seconds)):
+                if time.monotonic() - last_output_at >= idle_timeout_seconds:
+                    output_timed_out.set()
+                    if process.poll() is None:
+                        run_service._terminate_process(process)
+                        if not watchdog_stop.wait(FINVIZ_TERMINATION_GRACE_SECONDS):
+                            try:
+                                os.killpg(process.pid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                    return
+        finally:
+            watchdog_done.set()
+
+    watchdog = None
+    if action_id == "run_finviz_ratings_pipeline":
+        watchdog = threading.Thread(target=watch_finviz_output, daemon=True)
+        watchdog.start()
 
     def record_output_line(line: str, log_handle: Any, *, publish: bool) -> None:
-        nonlocal log_lines
+        nonlocal log_lines, last_output_at
+        last_output_at = time.monotonic()
         log_handle.write(line)
         log_handle.flush()
         normalized_line = line.rstrip()
@@ -337,6 +370,13 @@ def _run_claimed_job(
         if publish:
             _publish_state(run_service, job_run_id=job_run_id, state=state)
 
+    finviz_output = action_id == "run_finviz_ratings_pipeline"
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace") if finviz_output else None
+    pending_output = ""
+    output_closed = False
+    if finviz_output:
+        os.set_blocking(process.stdout.fileno(), False)
+
     try:
         with log_path.open("a", encoding="utf-8") as log_handle:
             while True:
@@ -346,8 +386,19 @@ def _run_claimed_job(
                     state["message"] = f"Cancellation requested on worker {worker_name}."
                     run_service._terminate_process(process)
 
-                events = selector.select(timeout=1.0)
-                if events:
+                events = selector.select(timeout=0.05 if output_closed else 1.0)
+                if events and finviz_output:
+                    chunk = os.read(process.stdout.fileno(), 65536)
+                    if chunk:
+                        assert decoder is not None
+                        pending_output += decoder.decode(chunk)
+                        while "\n" in pending_output:
+                            line, pending_output = pending_output.split("\n", 1)
+                            record_output_line(line + "\n", log_handle, publish=True)
+                    else:
+                        output_closed = True
+                        selector.unregister(process.stdout)
+                elif events:
                     line = process.stdout.readline()
                     if line:
                         record_output_line(line, log_handle, publish=True)
@@ -369,11 +420,23 @@ def _run_claimed_job(
                     )
                     last_heartbeat = now
                 if return_code is not None:
-                    for remaining_line in process.stdout:
-                        record_output_line(remaining_line, log_handle, publish=False)
+                    if finviz_output:
+                        if not output_closed and not (output_timed_out.is_set() and watchdog_done.is_set()):
+                            continue
+                        assert decoder is not None
+                        pending_output += decoder.decode(b"", final=True)
+                        if pending_output:
+                            record_output_line(pending_output, log_handle, publish=False)
+                    else:
+                        for remaining_line in process.stdout:
+                            record_output_line(remaining_line, log_handle, publish=False)
                     break
     finally:
-        selector.unregister(process.stdout)
+        watchdog_stop.set()
+        if watchdog is not None:
+            watchdog.join()
+        if not output_closed:
+            selector.unregister(process.stdout)
         selector.close()
         process.stdout.close()
 
@@ -382,13 +445,16 @@ def _run_claimed_job(
         replay_result = _read_replay_result(log_path)
         if replay_result is not None:
             state["replay_result"] = replay_result
-    final_status = "cancelled" if cancel_requested else ("success" if process.returncode == 0 else "failed")
+    final_status = "cancelled" if cancel_requested else ("success" if process.returncode == 0 and not output_timed_out.is_set() else "failed")
     if final_status == "success":
         state["progress_percent"] = 100
         state["progress_label"] = "Completed"
         state["message"] = f"Completed on worker {worker_name}."
     elif final_status == "cancelled":
         state["progress_label"] = "Cancelled"
+    elif output_timed_out.is_set():
+        state["progress_label"] = "Failed: output idle timeout"
+        state["message"] = "Finviz Ratings Pipeline stopped after six hours without output."
     else:
         state["message"] = f"Failed on worker {worker_name}."
     state["return_code"] = process.returncode
@@ -433,7 +499,7 @@ def _run_claimed_job(
             "worker_pools": list(worker_pools),
         },
     )
-    return int(process.returncode or 0)
+    return int(process.returncode or (1 if output_timed_out.is_set() else 0))
 
 
 def main() -> int:

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -203,6 +206,66 @@ class RunRemoteWorkerTests(unittest.TestCase):
         self.assertIn("FINAL_EXCEPTION", log_text)
         self.assertIn("FINAL_EXCEPTION", str(service.completed_job["log_tail"]))
         self.assertEqual(service.history_repository.heartbeats[-1]["metadata"]["worker_pools"], ["finviz"])
+
+    def test_finviz_idle_watchdog_stops_silent_process_and_records_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = _FailingJobRunService(Path(temp_dir))
+            service.build_command = lambda *_args, **_kwargs: [sys.executable, "-u", "-c", "import time; print('started'); time.sleep(10)"]
+            service._terminate_process = lambda process: os.killpg(process.pid, signal.SIGTERM)
+            with patch.object(module, "FINVIZ_OUTPUT_IDLE_TIMEOUT_SECONDS", 0.2):
+                code = module._run_claimed_job(service, {"id": 11, "request_payload": {"action_id": "run_finviz_ratings_pipeline"}}, worker_name="test", heartbeat_seconds=1)
+            self.assertNotEqual(code, 0)
+            self.assertEqual(service.completed_job["status"], "failed")
+            self.assertIn("six hours without output", service.completed_job["message"])
+            self.assertIn("started", Path(str(service.completed_job["log_file"])).read_text())
+
+    def test_finviz_watchdog_stops_process_with_incomplete_output_line(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = _FailingJobRunService(Path(temp_dir))
+            service.build_command = lambda *_args, **_kwargs: [sys.executable, "-u", "-c", "import time; print('partial', end='', flush=True); time.sleep(10)"]
+            service._terminate_process = lambda process: os.killpg(process.pid, signal.SIGTERM)
+            with patch.object(module, "FINVIZ_OUTPUT_IDLE_TIMEOUT_SECONDS", 0.2):
+                code = module._run_claimed_job(service, {"id": 13, "request_payload": {"action_id": "run_finviz_ratings_pipeline"}}, worker_name="test", heartbeat_seconds=1)
+            self.assertNotEqual(code, 0)
+            self.assertEqual(service.completed_job["status"], "failed")
+
+    def test_finviz_watchdog_kills_process_ignoring_termination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = _FailingJobRunService(Path(temp_dir))
+            service.build_command = lambda *_args, **_kwargs: [
+                sys.executable, "-u", "-c",
+                "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(10)",
+            ]
+            service._terminate_process = lambda process: os.killpg(process.pid, signal.SIGTERM)
+            with patch.object(module, "FINVIZ_OUTPUT_IDLE_TIMEOUT_SECONDS", 0.2), patch.object(module, "FINVIZ_TERMINATION_GRACE_SECONDS", 0.2):
+                code = module._run_claimed_job(service, {"id": 14, "request_payload": {"action_id": "run_finviz_ratings_pipeline"}}, worker_name="test", heartbeat_seconds=1)
+            self.assertEqual(code, -signal.SIGKILL)
+            self.assertEqual(service.completed_job["status"], "failed")
+
+    def test_finviz_leader_exit_does_not_hang_on_inherited_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = _FailingJobRunService(Path(temp_dir))
+            service.build_command = lambda *_args, **_kwargs: [
+                sys.executable, "-u", "-c",
+                "import subprocess,sys; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(4)']); print('leader exited', flush=True)",
+            ]
+            service._terminate_process = lambda process: os.killpg(process.pid, signal.SIGTERM)
+            started = time.monotonic()
+            with patch.object(module, "FINVIZ_OUTPUT_IDLE_TIMEOUT_SECONDS", 0.2):
+                code = module._run_claimed_job(service, {"id": 15, "request_payload": {"action_id": "run_finviz_ratings_pipeline"}}, worker_name="test", heartbeat_seconds=1)
+            self.assertLess(time.monotonic() - started, 3)
+            self.assertNotEqual(code, 0)
+            self.assertEqual(service.completed_job["status"], "failed")
+
+    def test_finviz_watchdog_allows_continuing_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = _FailingJobRunService(Path(temp_dir))
+            service.build_command = lambda *_args, **_kwargs: [sys.executable, "-u", "-c", "import time; [(print(i, flush=True), time.sleep(.07)) for i in range(5)]"]
+            service._terminate_process = lambda process: os.killpg(process.pid, signal.SIGTERM)
+            with patch.object(module, "FINVIZ_OUTPUT_IDLE_TIMEOUT_SECONDS", 0.25):
+                code = module._run_claimed_job(service, {"id": 12, "request_payload": {"action_id": "run_finviz_ratings_pipeline"}}, worker_name="test", heartbeat_seconds=1)
+            self.assertEqual(code, 0)
+            self.assertEqual(service.completed_job["status"], "success")
 
     def test_write_scheduled_status_keeps_worker_log_and_persisted_screen_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
