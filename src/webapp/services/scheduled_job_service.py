@@ -342,6 +342,8 @@ class ScheduledJobService:
             raise ValueError(f"Unknown action_id: {action_id}")
         resolved_options = _resolve_template_value(job.get("options") or {}, local_now=local_now)
         queue_options = dict(resolved_options) if isinstance(resolved_options, dict) else {}
+        if action_id == "build_relative_trend_strength":
+            queue_options.setdefault("as_of_date", local_now.astimezone(ZoneInfo("America/New_York")).date().isoformat())
         artifact_path = _artifact_path_for_job(self.artifacts_dir, job, local_now=local_now)
         queue_options.setdefault("execution_mode", "remote")
         queue_options.update(

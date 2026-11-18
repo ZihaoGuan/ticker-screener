@@ -304,6 +304,21 @@ class ScheduledJobServiceTests(unittest.TestCase):
                 depends_on_job_ids=["reload_prices"],
             )
 
+    def test_relative_trend_strength_uses_scheduled_new_york_date_unless_set(self) -> None:
+        self.run_service.launch = MagicMock(return_value="remote-123")  # type: ignore[method-assign]
+        job = {
+            "job_id": "relative_trend", "job_label": "Relative Trend",
+            "action_id": "build_relative_trend_strength", "cron_expr": "0 20 * * 1-5",
+            "cron_tz": "America/New_York", "enabled": True, "options": {},
+        }
+        scheduled = dt.datetime(2026, 11, 18, 1, 0, tzinfo=dt.timezone.utc)
+        self.service.enqueue_job(job=job, local_now=scheduled)
+        self.assertEqual(self.run_service.launch.call_args.kwargs["options"]["as_of_date"], "2026-11-17")
+
+        job["options"] = {"as_of_date": "2026-11-16"}
+        self.service.enqueue_job(job=job, local_now=scheduled)
+        self.assertEqual(self.run_service.launch.call_args.kwargs["options"]["as_of_date"], "2026-11-16")
+
     def test_run_now_preserves_schedule_dependency_identity(self) -> None:
         self.service.upsert_job(
             job_id="reload_prices",
