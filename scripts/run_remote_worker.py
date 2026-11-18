@@ -135,9 +135,11 @@ def _publish_state(
     finished_at: str | None = None,
 ) -> None:
     artifact_path = str(state.get("summary_file") or state.get("watchlist_file") or "")
+    # Cancellation is owned by the requester; a stale worker snapshot must not clear it.
+    result_patch = {key: value for key, value in state.items() if key != "cancel_requested"}
     run_service.history_repository.patch_job_run_result(
         job_run_id,
-        result_payload_patch=state,
+        result_payload_patch=result_patch,
         status=status,
         artifact_path=artifact_path or None,
         finished_at=finished_at,

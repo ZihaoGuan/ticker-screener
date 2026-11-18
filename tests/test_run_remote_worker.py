@@ -71,6 +71,20 @@ class _UnknownActionRunService(_FailingJobRunService):
 
 
 class RunRemoteWorkerTests(unittest.TestCase):
+    def test_progress_publishing_preserves_external_cancellation_request(self) -> None:
+        class Repository:
+            result = {"cancel_requested": True, "progress_current": 1}
+
+            def patch_job_run_result(self, _job_run_id: int, **kwargs: object) -> None:
+                self.result.update(kwargs["result_payload_patch"])
+
+        repository = Repository()
+        service = SimpleNamespace(history_repository=repository)
+        state = {"cancel_requested": False, "progress_current": 2}
+        module._publish_state(service, job_run_id=1, state=state)
+        self.assertEqual(repository.result, {"cancel_requested": True, "progress_current": 2})
+        self.assertFalse(state["cancel_requested"])
+
     def test_replay_jsonl_progress_is_exposed_as_job_progress(self) -> None:
         fields = module._replay_progress_fields(json.dumps({
             "event": "session_complete", "session_index": 4, "session_total": 10, "date": "2026-10-23",
